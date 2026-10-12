@@ -250,7 +250,7 @@
     "runtime": "browser",
     "created": "2026-10-09",
     "lastReviewed": "2026-10-12",
-    "reason": "Click Timeline opening/trigger behavior, Edit/Preview mode retaining the playhead, Space advancing one click or playing Slide-start-only motion, Motion/Effect timing inspectors, block context actions, authoritative easing and Slide-start relocation clearing delayed Effect offsets"
+    "reason": "Click Timeline opening/trigger behavior, Edit/Playback retaining the playhead, hidden one-shot playback returning to Edit, Play staying within one click interval, Space advancing one click, Motion/Effect timing inspectors, block context actions, authoritative easing and Slide-start relocation clearing delayed Effect offsets"
   },
   {
     "id": "effects-instances",
