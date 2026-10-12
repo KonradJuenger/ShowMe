@@ -829,6 +829,20 @@ export function Editor({
     setPanning(false);
   };
 
+  const togglePreviewSlide = useCallback(() => {
+    const next = !previewSlide;
+    setSettingsOpen(false);
+    setPreviewSlide(next);
+    if (next) {
+      void textEditing.exit();
+      setFrameEditing(null);
+      setCropping(null);
+      setMediaOpen(false);
+    } else {
+      setTrimVideoId(null);
+    }
+  }, [previewSlide, textEditing]);
+
   useEffect(() => {
     const sequenceSpace = (event: KeyboardEvent) => {
       if (
@@ -888,6 +902,14 @@ export function Editor({
       } else if (modifier && event.key === "1") {
         event.preventDefault();
         setActualSize();
+      } else if (
+        !modifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        key === "w"
+      ) {
+        event.preventDefault();
+        togglePreviewSlide();
       } else if (!modifier && key === "r") {
         event.preventDefault();
         setShowRulers((value) => !value);
@@ -934,6 +956,7 @@ export function Editor({
     reportError,
     selectSlide,
     setActualSize,
+    togglePreviewSlide,
     zoom,
     zoomAt,
   ]);
@@ -1699,19 +1722,7 @@ export function Editor({
             showFrameBorders={showFrameBorders}
             onToggleFrameBorders={() => setShowFrameBorders((value) => !value)}
             previewSlide={previewSlide}
-            onTogglePreviewSlide={() => {
-              const next = !previewSlide;
-              setSettingsOpen(false);
-              setPreviewSlide(next);
-              if (next) {
-                void textEditing.exit();
-                setFrameEditing(null);
-                setCropping(null);
-                setMediaOpen(false);
-              } else {
-                setTrimVideoId(null);
-              }
-            }}
+            onTogglePreviewSlide={togglePreviewSlide}
             onEditLayoutGuides={() => {
               setSettingsOpen(false);
               setLayoutGuidesOpen(true);
