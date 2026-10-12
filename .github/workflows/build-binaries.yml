@@ -40,7 +40,7 @@ jobs:
         run: npx electron-builder --win --${{ matrix.arch }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ShowMe-${{ matrix.platform }}-${{ matrix.arch }}
           path: |

@@ -26,7 +26,7 @@ jobs:
       - run: npm run test:audit
       # test:release includes full; do not run it twice.
       - run: npm run test:release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: desktop-failure-${{ matrix.os }}
