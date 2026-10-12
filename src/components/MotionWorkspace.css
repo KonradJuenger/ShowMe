@@ -120,7 +120,6 @@
 .motion-timeline-content {
   position: relative;
   min-height: 100%;
-  overflow-x: clip;
 }
 .motion-stage-headings,
 .motion-row {
