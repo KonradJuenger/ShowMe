@@ -1342,7 +1342,7 @@ export function Editor({
             selectionMode={selectionMode}
             previewMedia={play}
             showFrameBorders={showFrameBorders}
-            motionState={motionWorkspace.preview}
+            motionState={motionWorkspace.motionState}
             trimMedia={Boolean(trimVideoId)}
             scale={scale}
             snapping={{
