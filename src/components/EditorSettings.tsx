@@ -143,12 +143,12 @@ export function EditorSettings(props: EditorSettingsProps) {
       </PropertySection>
       <PropertySection title="Preview">
         {toggle(
-          "Preview slide",
+          "Preview mode",
           props.previewSlide,
           props.onTogglePreviewSlide,
         )}
         <p className="element-wide">
-          Hides editor overlays and enables media playback.
+          Audience view without editor overlays. Shortcut W.
         </p>
       </PropertySection>
     </div>
