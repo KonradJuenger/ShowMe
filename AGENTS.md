@@ -53,6 +53,17 @@ These rules apply to ChatGPT sessions that implement changes in this repository:
 - After authorization, integrate the approved work into the latest `main`, run the relevant tests, and prefer one clean squash commit on `main` unless the developer requests otherwise.
 - If integration exposes non-trivial conflicts, unexpected behavior, or new test failures, stop before modifying `main` and report the problem.
 - Only after the change is successfully integrated into `main`, the relevant tests pass, and the resulting `main` has been pushed successfully, delete the temporary ChatGPT branch locally and remotely.
+- If branch deletion is unavailable or fails after a successful integration, add that branch to the cleanup queue below.
+- On every explicitly authorized integration/pull into `main`, first retry deletion of every branch in the cleanup queue, remove entries that were deleted successfully or no longer exist, and keep only branches that still need deletion.
+- After integrating the current task, update the cleanup queue again before finishing.
+
+#### Branch cleanup queue
+
+Branches listed here have already been integrated into `main` and are safe to delete:
+
+- `chatgpt/agent-git-workflow`
+
+Keep this list accurate. Do not delete a branch merely because it appears stale; only branches known to be successfully integrated into `main` belong here.
 
 ### Codex and developer working tree
 
