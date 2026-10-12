@@ -23,8 +23,8 @@ export interface EditorSettingsProps {
   onEditLayoutGuides(): void;
   onGenerateGrid(): void;
   onDeleteGuides(): void;
-  previewMedia: boolean;
-  onTogglePreviewMedia(): void;
+  previewSlide: boolean;
+  onTogglePreviewSlide(): void;
 }
 
 export function EditorSettings(props: EditorSettingsProps) {
@@ -125,18 +125,13 @@ export function EditorSettings(props: EditorSettingsProps) {
           </button>
         </div>
       </PropertySection>
-      <PropertySection title="View & playback">
+      <PropertySection title="View">
         {toggle("Rulers", props.showRulers, props.onToggleRulers)}
         {toggle("Guides", props.showGuides, props.onToggleGuides)}
         {toggle(
-          "Frame & text box borders",
+          "Element bounds",
           props.showFrameBorders,
           props.onToggleFrameBorders,
-        )}
-        {toggle(
-          "Preview media",
-          props.previewMedia,
-          props.onTogglePreviewMedia,
         )}
         <button
           type="button"
@@ -145,6 +140,16 @@ export function EditorSettings(props: EditorSettingsProps) {
         >
           Edit Layout Guides…
         </button>
+      </PropertySection>
+      <PropertySection title="Preview">
+        {toggle(
+          "Preview mode",
+          props.previewSlide,
+          props.onTogglePreviewSlide,
+        )}
+        <p className="element-wide">
+          Audience view without editor overlays. Shortcut W.
+        </p>
       </PropertySection>
     </div>
   );

@@ -121,7 +121,7 @@ export interface EditorCanvasSurfaceProps {
   selectionMode?: SelectionMode;
   motionSourceSlide?: import("../core/document").Slide;
   motionState?: import("../core/motionPlayback").MotionPreviewState | null;
-  previewMedia?: boolean;
+  previewSlide?: boolean;
   showFrameBorders?: boolean;
   trimMedia?: boolean;
   cropFrameId?: string | null;
@@ -259,7 +259,7 @@ export function EditorCanvasSurface({
   selectionMode = "simple",
   motionState,
   motionSourceSlide,
-  previewMedia = false,
+  previewSlide = false,
   showFrameBorders = false,
   trimMedia = false,
   cropFrameId = null,
@@ -333,7 +333,7 @@ export function EditorCanvasSurface({
     pendingMoveIntent: pendingMoveIntent.current,
     marqueeActive: !!marqueeCancel.current,
     frameEditingId,
-    previewMedia,
+    previewSlide,
     layers: snapshotRef.current?.deck.layers,
     frames:
       renderedSnapshot &&
@@ -997,7 +997,7 @@ export function EditorCanvasSurface({
 
   useEffect(() => {
     const workspace = stage.current?.closest<HTMLElement>(".stage");
-    if (!workspace || previewMedia) return;
+    if (!workspace || previewSlide) return;
     const startOutsideSlide = (event: PointerEvent) => {
       const target = event.target;
       if (
@@ -1012,7 +1012,7 @@ export function EditorCanvasSurface({
     workspace.addEventListener("pointerdown", startOutsideSlide);
     return () =>
       workspace.removeEventListener("pointerdown", startOutsideSlide);
-  }, [canvasPointerDown, previewMedia]);
+  }, [canvasPointerDown, previewSlide]);
 
   const canvasDoubleClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -1586,7 +1586,7 @@ export function EditorCanvasSurface({
   ]);
 
   useEffect(() => {
-    if (!keyboardHistory || previewMedia) return;
+    if (!keyboardHistory || previewSlide) return;
     const keyDown = (event: KeyboardEvent) => {
       if (isContextMenuOpen()) return;
       // An open native popover owns Escape before canvas selection or scope navigation.
@@ -1656,7 +1656,7 @@ export function EditorCanvasSurface({
     frameEditingId,
     keyboardHistory,
     onScopeEnter,
-    previewMedia,
+    previewSlide,
     onFrameEditRequest,
     setSelection,
     snapshotRef,
@@ -1664,11 +1664,11 @@ export function EditorCanvasSurface({
   ]);
 
   useEffect(() => {
-    if (!previewMedia) return;
+    if (!previewSlide) return;
     activeGesture.current?.cancel();
     marqueeCancel.current?.();
     setMarquee(null);
-  }, [previewMedia]);
+  }, [previewSlide]);
 
   useEffect(
     () => () => {
@@ -1703,7 +1703,7 @@ export function EditorCanvasSurface({
       ? textEditingLocation.element
       : null;
   const geometry =
-    previewMedia || frameEditingId || textEditing?.editingId
+    previewSlide || frameEditingId || textEditing?.editingId
       ? null
       : selectionGeometry;
   const isCropping =
@@ -1751,7 +1751,7 @@ export function EditorCanvasSurface({
       data-editor-canvas="true"
       tabIndex={-1}
       onPointerDownCapture={
-        previewMedia
+        previewSlide
           ? undefined
           : (event) => {
               if (event.button !== 0 || !(event.target instanceof HTMLElement))
@@ -1766,9 +1766,9 @@ export function EditorCanvasSurface({
             }
       }
       data-editor-canvas-status={status}
-      data-preview-media={previewMedia ? "true" : "false"}
+      data-preview-slide={previewSlide ? "true" : "false"}
       data-show-frame-borders={
-        showFrameBorders && !previewMedia ? "true" : undefined
+        showFrameBorders && !previewSlide ? "true" : undefined
       }
       data-editor-scope={selection.scopeId ?? ""}
       data-selection-count={selection.elementIds.length}
@@ -1776,7 +1776,7 @@ export function EditorCanvasSurface({
         position: "relative",
         width: deck.width * canvasScale,
         height: deck.height * canvasScale,
-        overflow: previewMedia ? "hidden" : "visible",
+        overflow: "visible",
         ["--frame-border-width" as string]: `${1 / canvasScale}px`,
         ...style,
       }}
@@ -1784,8 +1784,8 @@ export function EditorCanvasSurface({
       <div
         ref={stage}
         data-editor-stage="true"
-        onPointerDown={previewMedia ? undefined : canvasPointerDown}
-        onDoubleClick={previewMedia ? undefined : canvasDoubleClick}
+        onPointerDown={previewSlide ? undefined : canvasPointerDown}
+        onDoubleClick={previewSlide ? undefined : canvasDoubleClick}
         onDragStart={(event) => event.preventDefault()}
         style={{
           position: "relative",
@@ -1807,25 +1807,23 @@ export function EditorCanvasSurface({
           deferImageUpdates={deferImageUpdates}
           editingTextId={textEditing?.editingId}
           editingMediaId={frameEditingId}
-          editorOverflow={!previewMedia}
+          editorOverflow={!previewSlide}
           motionState={motionState}
           editorPlayback={
-            trimMedia ? "trim" : previewMedia ? "preview" : "inactive"
+            trimMedia ? "trim" : previewSlide ? "preview" : "inactive"
           }
         />
-        {!previewMedia && (
-          <div
-            data-canvas-outside-overlay="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              boxShadow: "0 0 0 100000px rgba(221, 221, 218, 0.6)",
-              zIndex: 800,
-            }}
-          />
-        )}
-        {!previewMedia &&
+        <div
+          data-canvas-outside-overlay="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            boxShadow: "0 0 0 100000px rgba(221, 221, 218, 0.6)",
+            zIndex: 800,
+          }}
+        />
+        {!previewSlide &&
           (guides.length > 0 || guidePreview) &&
           onPreviewGuideMove &&
           onCommitGuideMove &&
@@ -1843,7 +1841,7 @@ export function EditorCanvasSurface({
               onSnapGuide={onSnapGuide}
             />
           )}
-        {!previewMedia &&
+        {!previewSlide &&
           textEditing &&
           textEditingElement &&
           textEditingLocation && (
@@ -1854,7 +1852,7 @@ export function EditorCanvasSurface({
               controller={textEditing}
             />
           )}
-        {!previewMedia && editingElement && editingLocation && (
+        {!previewSlide && editingElement && editingLocation && (
           <FrameEditorOverlay
             element={editingElement}
             world={editingLocation.world}
@@ -1872,7 +1870,7 @@ export function EditorCanvasSurface({
             onExit={() => onFrameEditRequest?.(null)}
           />
         )}
-        {!previewMedia &&
+        {!previewSlide &&
           remoteSelections.map((peer) => {
             if (!peer.selectionScopeId) return null;
             let remoteGeometry;
@@ -1923,7 +1921,7 @@ export function EditorCanvasSurface({
               </div>
             );
           })}
-        {!previewMedia && marquee && (
+        {!previewSlide && marquee && (
           <div
             className={`marquee${marquee.crossing ? " crossing" : ""}`}
             data-selection-mode={marquee.touching ? "touching" : "contained"}
