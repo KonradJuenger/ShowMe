@@ -73,10 +73,11 @@ The **Build binaries** GitHub Actions workflow packages Mac Intel (`x64`),
 Mac Apple Silicon (`arm64`), and Windows (`x64`) apps on native runners.
 Push the workflow to GitHub, then open **Actions → Build binaries → Run workflow**
 and select the branch to build. After it finishes, download the matching artifact
-from the workflow run's **Artifacts** section and extract it.
+from the workflow run's **Artifacts** section. Each file is a separate download,
+without an extra ZIP wrapper, and its filename includes the version and architecture.
 
-- Mac artifacts contain a DMG and ZIP. Open the DMG and drag ShowMe into Applications.
-- Windows artifacts contain an installer EXE and a portable EXE.
+- Each Mac architecture has a separate DMG and ZIP. Open the DMG and drag ShowMe into Applications.
+- Windows has a separate installer EXE and portable EXE.
 
 These builds use the version in `package.json` (currently `0.1.0`); all platforms
 share that version. To set a new version, run

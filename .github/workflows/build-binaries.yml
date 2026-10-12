@@ -34,18 +34,41 @@ jobs:
       # Personal distribution: ad-hoc signed, without Apple notarization.
       - name: Package macOS
         if: matrix.platform == 'mac'
-        run: npx electron-builder --mac --${{ matrix.arch }} --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
+        run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false '-c.mac.artifactName=ShowMe-${version}-mac-${arch}.${ext}'
       - name: Package Windows
         if: matrix.platform == 'win'
-        run: npx electron-builder --win --${{ matrix.arch }} --publish never
+        run: npx electron-builder --win nsis portable --${{ matrix.arch }} --publish never '-c.nsis.artifactName=ShowMe-${version}-windows-${arch}-setup.${ext}' '-c.portable.artifactName=ShowMe-${version}-windows-${arch}-portable.${ext}'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      - uses: actions/upload-artifact@v7
+      - name: Upload macOS DMG
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v7
         with:
-          name: ShowMe-${{ matrix.platform }}-${{ matrix.arch }}
-          path: |
-            release/*.dmg
-            release/*.zip
-            release/*.exe
+          path: release/ShowMe-*-mac-${{ matrix.arch }}.dmg
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload macOS ZIP
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/ShowMe-*-mac-${{ matrix.arch }}.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows installer
+        if: matrix.platform == 'win'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/ShowMe-*-windows-${{ matrix.arch }}-setup.exe
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows portable app
+        if: matrix.platform == 'win'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/ShowMe-*-windows-${{ matrix.arch }}-portable.exe
+          archive: false
           if-no-files-found: error
           retention-days: 30
