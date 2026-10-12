@@ -379,7 +379,7 @@ function MissingMediaPlaceholder() {
       aria-label="Missing asset"
       width="100%"
       height="100%"
-      style={{ display: "block", borderRadius: "inherit" }}
+      style={{ display: "block", borderRadius: "inherit", overflow: "hidden" }}
     >
       <defs>
         <pattern
@@ -572,10 +572,7 @@ function MediaSurface({
       ? { width: prepared.sourceWidth, height: prepared.sourceHeight }
       : intrinsic,
   );
-  if (
-    !checking &&
-    (failed || (url === null && (content.type !== "video" || !previewUrl)))
-  )
+  if (!checking && (failed || url === null))
     return <MissingMediaPlaceholder />;
   if (!frame)
     return (
