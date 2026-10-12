@@ -59,6 +59,7 @@ export function useMotionWorkspace(
   onSelectElement: (elementId: string, parentId: string) => void,
 ) {
   const [editingStates, setEditingStates] = useState(false);
+  const [canvasMode, setCanvasMode] = useState<"edit" | "view">("edit");
   const [open, setOpen] = useState(false),
     [active, setActive] = useState(0),
     [selected, setSelected] = useState<string | null>(null);
@@ -94,12 +95,14 @@ export function useMotionWorkspace(
     setCursor({ stageIndex: 0, time: 0 });
     setSelected(null);
     setEditingStates(false);
+    setCanvasMode("edit");
   }, [slideId, setPreview]);
   useEffect(() => {
     if (!open) {
       setPreview(null);
       setDraft(null);
       setEditingStates(false);
+      setCanvasMode("edit");
     }
   }, [open, setPreview]);
   function change(fn: (motion: SlideMotion | undefined) => SlideMotion) {
@@ -136,6 +139,8 @@ export function useMotionWorkspace(
   }
   function previewBlock(input: SlideMotion, index: number, blockId: string) {
     const range = blockRange(input, index, blockId);
+    setEditingStates(false);
+    setCanvasMode("view");
     setActive(index);
     setCursor({ stageIndex: index, time: range.start });
     setPreview(
@@ -247,7 +252,7 @@ export function useMotionWorkspace(
           {
             type: "command",
             commandId: COMMAND_IDS.motionPreviewBlock,
-            label: "Preview",
+            label: "Play animation",
             enabled: true,
           },
           {
@@ -381,6 +386,8 @@ export function useMotionWorkspace(
     const index = only ? stage : 0;
     const entry = enterMotion(timings, Date.now());
     if (entry) {
+      setEditingStates(false);
+      setCanvasMode("view");
       setPreview({
         ...entry,
         stageIndex: index,
@@ -397,6 +404,7 @@ export function useMotionWorkspace(
   };
   function seek(stageIndex: number, time: number) {
     time = timelineSeekTime(motion!, stageIndex, time);
+    setCanvasMode("view");
     setCursor({ stageIndex, time });
     setActive(stageIndex);
     if (timings[stageIndex])
@@ -417,6 +425,25 @@ export function useMotionWorkspace(
       : { waits: false, duration: 0 };
   const previewWaits = interval.waits;
   const previewDuration = interval.duration;
+  const showEdit = () => {
+    if (preview) {
+      const time = !preview.running
+        ? preview.time
+        : previewWaits
+          ? previewTime(preview, Date.now())
+          : motionTime(preview, previewDuration, Date.now());
+      setCursor({ stageIndex: preview.stageIndex, time });
+      setActive(preview.stageIndex);
+    }
+    setEditingStates(false);
+    setCanvasMode("edit");
+    setPreview(null);
+  };
+  const showView = () => {
+    setEditingStates(false);
+    if (!timings[cursor.stageIndex]) return;
+    seek(cursor.stageIndex, cursor.time);
+  };
   useEffect(() => {
     if (!preview?.running) return;
     const update = () => {
@@ -439,6 +466,8 @@ export function useMotionWorkspace(
   const next = () => {
     const index = Math.min(cursor.stageIndex, timings.length - 1);
     if (!timings[index]) return;
+    setEditingStates(false);
+    setCanvasMode("view");
     const current = preview ?? {
       stageIndex: index,
       stageId: timings[index].id,
@@ -447,33 +476,10 @@ export function useMotionWorkspace(
       running: false,
     };
     const value = navigateMotion(current, timings, "next", Date.now());
-    if (value) {
-      setPreview({ ...value, running: true });
-      setCursor({ stageIndex: value.stageIndex, time: value.time });
-      setActive(Math.max(0, value.stageIndex));
-    } else if (!current.running) {
-      const interval = previewInterval(motion!, current, Date.now());
-      if (current.time < interval.duration || interval.waits) {
-        setEditingStates(false);
-        setPreview({ ...current, startedAt: Date.now(), running: true });
-      }
-    }
-  };
-  const togglePreview = () => {
-    if (!preview) {
-      setEditingStates(false);
-      seek(cursor.stageIndex, cursor.time);
-      return;
-    }
-    const time = !preview.running
-      ? preview.time
-      : previewWaits
-        ? previewTime(preview, Date.now())
-        : motionTime(preview, previewDuration, Date.now());
-    setCursor({ stageIndex: preview.stageIndex, time });
-    setActive(preview.stageIndex);
-    setEditingStates(false);
-    setPreview(null);
+    if (!value) return;
+    setPreview({ ...value, running: true });
+    setCursor({ stageIndex: value.stageIndex, time: value.time });
+    setActive(Math.max(0, value.stageIndex));
   };
   const pause = () => {
     if (preview) {
@@ -495,17 +501,16 @@ export function useMotionWorkspace(
       pause();
       return;
     }
-    let index = Math.min(
+    setEditingStates(false);
+    setCanvasMode("view");
+    const index = Math.min(
       preview?.stageIndex ?? cursor.stageIndex,
       timings.length - 1,
     );
     let time = previewWaits
       ? (preview?.time ?? cursor.time)
       : Math.min(preview?.time ?? cursor.time, timings[index].duration);
-    if (time >= timings[index].duration && preview && !previewWaits) {
-      index = (index + 1) % timings.length;
-      time = 0;
-    }
+    if (time >= timings[index].duration && !previewWaits) time = 0;
     setActive(index);
     setCursor({ stageIndex: index, time });
     setPreview({
@@ -513,12 +518,12 @@ export function useMotionWorkspace(
       stageId: timings[index].id,
       time,
       startedAt: Date.now(),
-      // Even an empty click must pass through completion once when played.
       running: true,
     });
   };
   const add = (preset: MotionPreset | "Presence") => {
     setEditingStates(false);
+    setCanvasMode("view");
     const index = open ? stage : 0;
     const ids = [...selection.elementIds];
     change((input) => {
@@ -662,6 +667,16 @@ export function useMotionWorkspace(
         },
       }
     : controller;
+  const motionState =
+    canvasMode === "view" && timings[cursor.stageIndex]
+      ? (preview ?? {
+          stageIndex: cursor.stageIndex,
+          stageId: timings[cursor.stageIndex].id,
+          time: cursor.time,
+          startedAt: 0,
+          running: false,
+        })
+      : null;
   return {
     editingController,
     moveBlockToClick,
@@ -669,6 +684,9 @@ export function useMotionWorkspace(
     openBlockMenu,
     editingStates,
     setEditingStates,
+    canvasMode,
+    showEdit,
+    showView,
     selectBlock(index: number, id: string, navigate = true) {
       const current = controller.snapshotRef.current;
       if (!current?.slide.motion) return;
@@ -696,6 +714,7 @@ export function useMotionWorkspace(
     selected,
     setSelected,
     preview,
+    motionState,
     cursor,
     setCursor,
     seek,
@@ -710,7 +729,6 @@ export function useMotionWorkspace(
     next,
     pause,
     play,
-    togglePreview,
     add,
   };
 }
@@ -1174,18 +1192,6 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
       <div
         className="motion-control-group"
         role="group"
-        aria-label="Click playback"
-      >
-        <MotionTool
-          label="Next click"
-          icon="skip-next"
-          onClick={w.next}
-          disabled={!w.motion}
-        />
-      </div>
-      <div
-        className="motion-control-group"
-        role="group"
         aria-label="Click controls"
       >
         <MotionTool
@@ -1221,7 +1227,7 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
     <section
       className="motion-dock"
       aria-label="Click Timeline"
-      data-preview={Boolean(w.preview)}
+      data-mode={w.canvasMode}
       style={{ height }}
     >
       <div
@@ -1269,14 +1275,33 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
           <div
             className="motion-control-group motion-view"
             role="group"
-            aria-label="Timeline view"
+            aria-label="Canvas mode"
           >
             <strong>Click Timeline</strong>
+            <div className="motion-view-switch">
+              <button
+                type="button"
+                className="motion-mode-toggle"
+                aria-pressed={w.canvasMode === "edit"}
+                onClick={w.showEdit}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="motion-mode-toggle"
+                aria-pressed={w.canvasMode === "view"}
+                onClick={w.showView}
+                disabled={!w.motion}
+              >
+                View
+              </button>
+            </div>
           </div>
           <div
             className="motion-control-group"
             role="group"
-            aria-label="Preview controls"
+            aria-label="Playback controls"
           >
             <MotionTool
               label={w.preview?.running ? "Pause playback" : "Play"}
@@ -1284,15 +1309,12 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
               onClick={w.play}
               disabled={!w.motion}
             />
-            <button
-              type="button"
-              className="motion-mode-toggle"
-              aria-pressed={Boolean(w.preview)}
-              onClick={w.togglePreview}
+            <MotionTool
+              label="Advance to next click (Space)"
+              icon="skip-next"
+              onClick={w.next}
               disabled={!w.motion}
-            >
-              {w.preview ? "Preview" : "Edit mode"}
-            </button>
+            />
           </div>
           {viewport < 650 ? (
             <>
