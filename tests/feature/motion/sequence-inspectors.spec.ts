@@ -631,6 +631,13 @@ test("Free playhead scrubbing uses displayed local spans across empty clicks in 
   await slider.focus();
   await slider.press("End");
   await expect(slider).toHaveAttribute("aria-valuenow", "1000");
+  await expect
+    .poll(() =>
+      dock(page)
+        .locator(".motion-timeline")
+        .evaluate((node) => node.scrollWidth - node.clientWidth),
+    )
+    .toBeLessThanOrEqual(1);
   await expect(headers.nth(0)).toHaveText("Slide start");
   await expect(headers.nth(1)).toHaveText("Click 1");
   const lane = (await dock(page)
