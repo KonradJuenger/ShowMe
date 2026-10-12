@@ -380,7 +380,7 @@ export function Editor({
     axis: GuideAxis;
     position: number;
   } | null>(null);
-  const [play, setPlay] = useState(false);
+  const [previewSlide, setPreviewSlide] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [mediaRefresh, setMediaRefresh] = useState(0);
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -560,7 +560,7 @@ export function Editor({
     setCropping(null);
     setTrimVideoId(null);
     setMediaOpen(false);
-    setPlay(false);
+    setPreviewSlide(false);
   }, [snapshot?.slide.id, defaultScopeId]);
 
   useEffect(() => {
@@ -1293,7 +1293,7 @@ export function Editor({
             );
           }}
         >
-          {!play && showRulers && (
+          {!previewSlide && showRulers && (
             <Rulers
               scale={scale}
               pan={pan}
@@ -1340,7 +1340,7 @@ export function Editor({
             onSelectionChange={setSelection}
             onScopeEnter={setInsertionScopeId}
             selectionMode={selectionMode}
-            previewMedia={play}
+            previewSlide={previewSlide}
             showFrameBorders={showFrameBorders}
             motionState={motionWorkspace.preview}
             trimMedia={Boolean(trimVideoId)}
@@ -1422,7 +1422,7 @@ export function Editor({
               }}
               onDone={() => {
                 setTrimVideoId(null);
-                setPlay(false);
+                setPreviewSlide(false);
               }}
               onSeek={(time) => {
                 const element = stage.current?.querySelector<HTMLElement>(
@@ -1457,7 +1457,7 @@ export function Editor({
               }}
             />
           )}
-          {selectedMedia && !frameEditing && !play && (
+          {selectedMedia && !frameEditing && !previewSlide && (
             <div
               className="mode-bar frame-mode-bar"
               role="toolbar"
@@ -1698,11 +1698,11 @@ export function Editor({
             onToggleGuides={() => setShowGuides((value) => !value)}
             showFrameBorders={showFrameBorders}
             onToggleFrameBorders={() => setShowFrameBorders((value) => !value)}
-            previewMedia={play}
-            onTogglePreviewMedia={() => {
-              const next = !play;
+            previewSlide={previewSlide}
+            onTogglePreviewSlide={() => {
+              const next = !previewSlide;
               setSettingsOpen(false);
-              setPlay(next);
+              setPreviewSlide(next);
               if (next) {
                 void textEditing.exit();
                 setFrameEditing(null);
@@ -1826,14 +1826,14 @@ export function Editor({
           setCropping(null);
           void textEditing.exit();
           setTrimVideoId(id);
-          setPlay(true);
+          setPreviewSlide(true);
         }}
         onPreviewVideo={(id, command) => {
           const current = stage.current?.querySelector<HTMLVideoElement>(
             `[data-element-id="${CSS.escape(id)}"] video`,
           );
-          const shouldPlay = !play || !current || current.paused;
-          setPlay(true);
+          const shouldPlay = !previewSlide || !current || current.paused;
+          setPreviewSlide(true);
           requestAnimationFrame(() => {
             const root = stage.current;
             const element = root?.querySelector<HTMLElement>(
