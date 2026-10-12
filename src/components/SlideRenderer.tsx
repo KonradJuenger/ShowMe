@@ -688,12 +688,6 @@ const ElementView = memo(function ElementView({
     }),
     [element, scene],
   );
-  const contentShaders = effects.filter(
-    (e) =>
-      resources[e.resourceId].kind === "fragment-glsl" &&
-      resources[e.resourceId].input === "content" &&
-      element.id !== editingTextId,
-  );
   const surface = (
     instance: (typeof effects)[number],
     children?: ReactNode,
@@ -749,11 +743,12 @@ const ElementView = memo(function ElementView({
       ))}
     </>
   );
-  // Earlier stages form the input of later stages, as in the shader pipeline.
+  // JS stages transform strings before layout; CSS/shaders then transform pixels.
+  // Keep string evaluation upstream even when a JS stage follows a pixel filter.
   for (const effect of effects.filter(
     (e) =>
       effectPlacement(resources[e.resourceId], e) === "content" &&
-      resources[e.resourceId].input !== "content" &&
+      resources[e.resourceId].kind === "text-js" &&
       element.id !== editingTextId,
   ))
     content = surface(effect, content);
@@ -770,7 +765,7 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
-  let visual = (
+  const baseVisual = (content: ReactNode) => (
     <>
       <div
         style={{
@@ -809,7 +804,21 @@ const ElementView = memo(function ElementView({
       )}
     </>
   );
-  for (const shader of contentShaders) visual = surface(shader, visual);
+  let visual = baseVisual(content);
+  let filtered = false;
+  for (const effect of effects.filter(
+    (e) =>
+      effectPlacement(resources[e.resourceId], e) === "content" &&
+      resources[e.resourceId].kind !== "text-js" &&
+      element.id !== editingTextId,
+  )) {
+    if (resources[effect.resourceId].input === "content") filtered = true;
+    if (filtered) visual = surface(effect, visual);
+    else {
+      content = surface(effect, content);
+      visual = baseVisual(content);
+    }
+  }
 
   return (
     <div
@@ -1043,4 +1052,3 @@ export const SlideRenderer = memo(function SlideRenderer({
     </EffectRenderContext.Provider>
   );
 });
-

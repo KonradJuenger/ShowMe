@@ -538,7 +538,7 @@ function createRasterSource(
 
 /** Complete lower subtrees plus unfinished ancestors. Never visits the target,
  * its descendants, or higher peers. Both sources share the primitive painter. */
-function backdropPrefix(slide: Slide, deck: Deck, targetId: string) {
+export function backdropPrefix(slide: Slide, deck: Deck, targetId: string) {
   const partial = new Set<string>();
   let reached = false;
   const visit = (children: readonly Element[]): Element[] => {

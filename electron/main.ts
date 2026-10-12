@@ -104,6 +104,9 @@ import {
 } from "./windowing";
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+// Experimental mixed CSS/JS/shader compositing on this branch. Feature-detected
+// in the renderer. SVG snapshots are retained only as a benchmark baseline.
+app.commandLine.appendSwitch("enable-blink-features", "CanvasDrawElement");
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "studio",
