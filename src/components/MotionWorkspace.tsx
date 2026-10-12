@@ -59,13 +59,18 @@ export function useMotionWorkspace(
   onSelectElement: (elementId: string, parentId: string) => void,
 ) {
   const [editingStates, setEditingStates] = useState(false);
-  const [canvasMode, setCanvasMode] = useState<"edit" | "view">("edit");
+  const [canvasMode, setCanvasMode] = useState<"edit" | "playback">("edit");
   const [open, setOpen] = useState(false),
     [active, setActive] = useState(0),
     [selected, setSelected] = useState<string | null>(null);
   const [preview, commitPreview] = useState<MotionPreviewState | null>(null),
     [draft, setDraft] = useState<SlideMotion | null>(null);
   const [cursor, setCursor] = useState({ stageIndex: 0, time: 0 });
+  const hiddenPlaybackEnd = useRef<{ stageIndex: number; time: number } | null>(
+    null,
+  );
+  const openRef = useRef(open);
+  openRef.current = open;
   const slide = controller.snapshot?.slide;
   const motion = draft ?? slide?.motion;
   const previewStages = useRef<{ id: string; duration: number }[]>([]);
@@ -95,9 +100,13 @@ export function useMotionWorkspace(
     setCursor({ stageIndex: 0, time: 0 });
     setSelected(null);
     setEditingStates(false);
+    hiddenPlaybackEnd.current = null;
     setCanvasMode("edit");
   }, [slideId, setPreview]);
   useEffect(() => {
+    // A hidden one-shot is only valid while the timeline remains closed.
+    // Opening the timeline exposes Playback normally; closing it returns to Edit.
+    hiddenPlaybackEnd.current = null;
     if (!open) {
       setPreview(null);
       setDraft(null);
@@ -140,7 +149,10 @@ export function useMotionWorkspace(
   function previewBlock(input: SlideMotion, index: number, blockId: string) {
     const range = blockRange(input, index, blockId);
     setEditingStates(false);
-    setCanvasMode("view");
+    hiddenPlaybackEnd.current = openRef.current
+      ? null
+      : { stageIndex: index, time: range.end };
+    setCanvasMode("playback");
     setActive(index);
     setCursor({ stageIndex: index, time: range.start });
     setPreview(
@@ -387,7 +399,8 @@ export function useMotionWorkspace(
     const entry = enterMotion(timings, Date.now());
     if (entry) {
       setEditingStates(false);
-      setCanvasMode("view");
+      hiddenPlaybackEnd.current = null;
+      setCanvasMode("playback");
       setPreview({
         ...entry,
         stageIndex: index,
@@ -404,7 +417,8 @@ export function useMotionWorkspace(
   };
   function seek(stageIndex: number, time: number) {
     time = timelineSeekTime(motion!, stageIndex, time);
-    setCanvasMode("view");
+    hiddenPlaybackEnd.current = null;
+    setCanvasMode("playback");
     setCursor({ stageIndex, time });
     setActive(stageIndex);
     if (timings[stageIndex])
@@ -436,11 +450,13 @@ export function useMotionWorkspace(
       setActive(preview.stageIndex);
     }
     setEditingStates(false);
+    hiddenPlaybackEnd.current = null;
     setCanvasMode("edit");
     setPreview(null);
   };
-  const showView = () => {
+  const showPlayback = () => {
     setEditingStates(false);
+    hiddenPlaybackEnd.current = null;
     if (!timings[cursor.stageIndex]) return;
     seek(cursor.stageIndex, cursor.time);
   };
@@ -453,6 +469,19 @@ export function useMotionWorkspace(
       const time = current.waits
         ? previewTime(preview, Date.now())
         : motionTime(preview, current.duration, Date.now());
+      const hiddenEnd = hiddenPlaybackEnd.current;
+      if (
+        hiddenEnd &&
+        !openRef.current &&
+        hiddenEnd.stageIndex === preview.stageIndex &&
+        time >= hiddenEnd.time
+      ) {
+        hiddenPlaybackEnd.current = null;
+        setCursor(hiddenEnd);
+        setCanvasMode("edit");
+        setPreview(null);
+        return;
+      }
       setCursor({ stageIndex: preview.stageIndex, time });
       if (time >= current.duration && !current.waits) {
         setPreview({ ...preview, time, running: false });
@@ -467,7 +496,8 @@ export function useMotionWorkspace(
     const index = Math.min(cursor.stageIndex, timings.length - 1);
     if (!timings[index]) return;
     setEditingStates(false);
-    setCanvasMode("view");
+    hiddenPlaybackEnd.current = null;
+    setCanvasMode("playback");
     const current = preview ?? {
       stageIndex: index,
       stageId: timings[index].id,
@@ -502,7 +532,8 @@ export function useMotionWorkspace(
       return;
     }
     setEditingStates(false);
-    setCanvasMode("view");
+    hiddenPlaybackEnd.current = null;
+    setCanvasMode("playback");
     const index = Math.min(
       preview?.stageIndex ?? cursor.stageIndex,
       timings.length - 1,
@@ -523,7 +554,6 @@ export function useMotionWorkspace(
   };
   const add = (preset: MotionPreset | "Presence") => {
     setEditingStates(false);
-    setCanvasMode("view");
     const index = open ? stage : 0;
     const ids = [...selection.elementIds];
     change((input) => {
@@ -538,20 +568,21 @@ export function useMotionWorkspace(
           ? addPresence(input, index, ids)
           : addMotionPreset(input, index, ids, preset);
       const created = next.stages[index].blocks!.at(-1)!;
+      const range = blockRange(next, index, created.id);
+      hiddenPlaybackEnd.current = openRef.current
+        ? null
+        : { stageIndex: index, time: range.end };
+      setCanvasMode("playback");
       setActive(index);
       setSelected(created.id);
       setPreview({
         stageIndex: index,
         stageId: next.stages[index].id,
-        time: blockRange(next, index, created.id).start,
+        time: range.start,
         startedAt: Date.now(),
         running: true,
       });
-      setCursor({
-        stageIndex: index,
-        time: blockRange(next, index, next.stages[index].blocks!.at(-1)!.id)
-          .start,
-      });
+      setCursor({ stageIndex: index, time: range.start });
       return next;
     });
   };
@@ -668,7 +699,7 @@ export function useMotionWorkspace(
       }
     : controller;
   const motionState =
-    canvasMode === "view" && timings[cursor.stageIndex]
+    canvasMode === "playback" && timings[cursor.stageIndex]
       ? (preview ?? {
           stageIndex: cursor.stageIndex,
           stageId: timings[cursor.stageIndex].id,
@@ -686,7 +717,7 @@ export function useMotionWorkspace(
     setEditingStates,
     canvasMode,
     showEdit,
-    showView,
+    showPlayback,
     selectBlock(index: number, id: string, navigate = true) {
       const current = controller.snapshotRef.current;
       if (!current?.slide.motion) return;
@@ -1297,11 +1328,11 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
               <button
                 type="button"
                 className="motion-mode-toggle"
-                aria-pressed={w.canvasMode === "view"}
-                onClick={w.showView}
+                aria-pressed={w.canvasMode === "playback"}
+                onClick={w.showPlayback}
                 disabled={!w.motion}
               >
-                View
+                Playback
               </button>
             </div>
           </div>
