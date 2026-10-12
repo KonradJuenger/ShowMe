@@ -87,9 +87,6 @@
   border-color: #145ed7;
   box-shadow: inset 0 2px 3px rgb(0 0 0 / 22%);
 }
-.motion-dock[data-preview="false"] .motion-playhead {
-  opacity: 0.35;
-}
 .motion-dock button:disabled,
 .motion-sidebar button:disabled,
 .effects-panel > button:disabled {
