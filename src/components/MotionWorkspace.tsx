@@ -818,11 +818,18 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
   ];
   const durations = motionTimelineSpans(motion);
   const emptyWidth = 192;
+  // The handle is 24 px wide and sits 11 px left of the playhead, so it
+  // extends 13 px past the exact interval end. Reserve that space instead of
+  // letting it enlarge the timeline's scrollable overflow at the final frame.
+  const playheadEndGutter = 13;
   const totalDuration = durations.reduce((sum, duration) => sum + duration, 0);
   const pixelsPerMs =
     Math.max(
       0.04,
-      (viewport - 120 - durations.filter((d) => !d).length * emptyWidth) /
+      (viewport -
+        120 -
+        playheadEndGutter -
+        durations.filter((d) => !d).length * emptyWidth) /
         Math.max(1, totalDuration),
     ) * zoom;
   const widths =
@@ -1359,7 +1366,10 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
           if (gesture.current) finish(true);
         }}
       >
-        <div className="motion-timeline-content" style={{ width: totalWidth }}>
+        <div
+          className="motion-timeline-content"
+          style={{ width: totalWidth + playheadEndGutter }}
+        >
           {drop && (
             <div
               className={`motion-drop-target ${drop.valid ? "" : "invalid"}`}
