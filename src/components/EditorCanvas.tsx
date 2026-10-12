@@ -1776,7 +1776,7 @@ export function EditorCanvasSurface({
         position: "relative",
         width: deck.width * canvasScale,
         height: deck.height * canvasScale,
-        overflow: previewSlide ? "hidden" : "visible",
+        overflow: "visible",
         ["--frame-border-width" as string]: `${1 / canvasScale}px`,
         ...style,
       }}
@@ -1813,18 +1813,16 @@ export function EditorCanvasSurface({
             trimMedia ? "trim" : previewSlide ? "preview" : "inactive"
           }
         />
-        {!previewSlide && (
-          <div
-            data-canvas-outside-overlay="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              boxShadow: "0 0 0 100000px rgba(221, 221, 218, 0.6)",
-              zIndex: 800,
-            }}
-          />
-        )}
+        <div
+          data-canvas-outside-overlay="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            boxShadow: "0 0 0 100000px rgba(221, 221, 218, 0.6)",
+            zIndex: 800,
+          }}
+        />
         {!previewSlide &&
           (guides.length > 0 || guidePreview) &&
           onPreviewGuideMove &&
