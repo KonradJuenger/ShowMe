@@ -1,0 +1,51 @@
+name: Build binaries
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            platform: mac
+            arch: x64
+          - runner: macos-15
+            platform: mac
+            arch: arm64
+          - runner: windows-2025
+            platform: win
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run verify:build
+      # Personal distribution: ad-hoc signed, without Apple notarization.
+      - name: Package macOS
+        if: matrix.platform == 'mac'
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
+      - name: Package Windows
+        if: matrix.platform == 'win'
+        run: npx electron-builder --win --${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShowMe-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+          if-no-files-found: error
+          retention-days: 30

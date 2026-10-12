@@ -67,6 +67,26 @@ To build the renderer and Electron application without launching:
 npm run build
 ```
 
+## Build downloadable apps
+
+The **Build binaries** GitHub Actions workflow packages Mac Intel (`x64`),
+Mac Apple Silicon (`arm64`), and Windows (`x64`) apps on native runners.
+Push the workflow to GitHub, then open **Actions → Build binaries → Run workflow**
+and select the branch to build. After it finishes, download the matching artifact
+from the workflow run's **Artifacts** section and extract it.
+
+- Mac artifacts contain a DMG and ZIP. Open the DMG and drag ShowMe into Applications.
+- Windows artifacts contain an installer EXE and a portable EXE.
+
+These builds use the version in `package.json` (currently `0.1.0`); all platforms
+share that version. To set a new version, run
+`npm version 0.1.1 --no-git-tag-version` and commit both package files before building.
+
+Mac builds are ad-hoc signed and not notarized. On first launch, macOS may require
+**System Settings → Privacy & Security → Open Anyway**. Windows builds are unsigned.
+The workflow retains downloads for 30 days and does not publish a GitHub Release.
+The separate **Desktop verification** workflow runs the full release checks.
+
 ## Files
 
 `.sme` uses ShowMe's managed asset library. `.smp` is a portable presentation package.
