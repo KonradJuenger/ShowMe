@@ -216,7 +216,7 @@ export function MotionSidebar({
           <button
             onClick={() => w.previewBlock(motion!, w.active, range.block.id)}
           >
-            Preview
+            Play animation
           </button>
         </>
       ) : picking ? (
