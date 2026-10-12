@@ -1,0 +1,34 @@
+name: Desktop verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:audit
+      # test:release includes full; do not run it twice.
+      - run: npm run test:release
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: desktop-failure-${{ matrix.os }}
+          path: test-results-*/
+          retention-days: 3

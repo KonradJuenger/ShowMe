@@ -1,0 +1,24 @@
+.audience-output, .audience-output * { cursor: none !important; }
+.audience-output { pointer-events: none; }
+.presenter-console { height: 100vh; overflow: auto; padding: 28px 36px; background: #1d2025; color: #f5f5f3; }
+.console-header { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 28px; }
+.console-header h1 { margin: 6px 0 0; font-size: 25px; font-weight: 500; }
+.console-header .eyebrow { color: #adb4bf; }
+.console-timing { display: flex; align-items: baseline; gap: 28px; font-variant-numeric: tabular-nums; }
+.console-timing strong, .console-timing .presenter-timer { font-size: 30px; }
+.console-timing time { color: #adb4bf; }
+.console-previews { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; align-items: start; }
+.presenter-console h2 { font-size: 13px; font-weight: 500; color: #b8bec8; margin: 0 0 10px; }
+.console-slide { aspect-ratio: 16 / 9; width: 100%; background: #101215; position: relative; overflow: hidden; display: grid; place-items: center; border-radius: 4px; }
+.console-slide-content { position: absolute; left: 0; top: 0; transform-origin: top left; pointer-events: none; }
+.console-output-status { color: #e6bf78; margin: 10px 0; }
+.console-notes { margin: 28px 0; padding: 20px 24px; background: #272b32; border-radius: 8px; min-height: 140px; }
+.console-notes .presenter-notes { white-space: pre-wrap; font-size: 21px; line-height: 1.5; margin: 0; max-height: none; color: #f5f5f3; }
+.presentation-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: end; }
+.presentation-controls label { display: grid; gap: 5px; font-size: 12px; }
+.presentation-controls .presenter-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.presenter-console button, .presenter-console select { color: #f5f5f3; background: #353b45; border-color: #4b5360; }
+.presenter-console button:hover { background: #49515e; }
+.presenter-console button:disabled { opacity: .4; }
+.presenter-console button[aria-pressed="true"] { background: #ab772b; }
+@media (max-width: 850px) { .presenter-console { padding: 20px; } .console-header { align-items: start; } .console-timing { gap: 12px; } .console-timing strong, .console-timing .presenter-timer { font-size: 22px; } .console-timing time { display: none; } }

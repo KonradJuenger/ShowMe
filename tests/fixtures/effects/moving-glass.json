@@ -1,0 +1,26 @@
+{
+  "apiVersion": 1,
+  "name": "Moving Glass",
+  "category": "effect",
+  "kind": "fragment-glsl",
+  "target": "content",
+  "input": "content",
+  "speed": 1,
+  "parameters": [
+    {
+      "key": "strength",
+      "label": "Strength",
+      "default": 0.01,
+      "min": 0,
+      "max": 0.08,
+      "type": "number"
+    }
+  ],
+  "source": "#version 300 es\nprecision highp float;\nuniform sampler2D u_input;\nuniform float u_t;\nuniform float strength;\nin vec2 v_uv;\nout vec4 outColor;\n\nvoid main() {\n  vec2 uv = clamp(v_uv + vec2(sin(v_uv.y * 32.0 + u_t * 2.0) * strength, 0.0), 0.0, 1.0);\n  outColor = texture(u_input, uv);\n}",
+  "timeControl": {
+    "start": "slide",
+    "stop": {
+      "mode": "none"
+    }
+  }
+}

@@ -1,0 +1,234 @@
+.effect-editor-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #0005;
+  display: grid;
+  place-items: center;
+}
+.effect-editor {
+  width: 94vw;
+  height: 90vh;
+  background: var(--km-bg-surface, #fff);
+  color: var(--km-text-primary, #17202a);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 60px #0004;
+  font-size: 13px;
+  position: relative;
+}
+.effect-editor header {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--km-border-subtle, #ddd);
+}
+.effect-editor header span {
+  flex: 1;
+}
+.effect-editor-columns {
+  display: grid;
+  grid-template-columns: 23fr 44fr 33fr;
+  flex: 1;
+  min-height: 0;
+}
+.effect-editor section {
+  min-width: 0;
+  overflow: auto;
+  padding: 20px;
+}
+.effect-editor h3 {
+  margin: 0 0 20px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.effect-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.effect-editor input,
+.effect-editor select {
+  width: 100%;
+  box-sizing: border-box;
+}
+.effect-editor-code {
+  display: flex;
+  flex-direction: column;
+  background: var(--km-bg-subtle, #f6f7f8);
+}
+.effect-editor .effect-error-copy {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: copy;
+}
+.effect-editor .effect-error-copy:hover {
+  text-decoration: underline;
+}
+.effect-editor .effect-error-copy-status {
+  display: block;
+  font-size: 12px;
+}
+.effect-editor textarea {
+  width: 100%;
+  flex: 1;
+  min-height: 250px;
+  resize: none;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 0;
+  font:
+    13px/1.6 Consolas,
+    monospace;
+  white-space: pre;
+  tab-size: 2;
+}
+.effect-editor .effect-code-preview {
+  width: 100%;
+  height: clamp(180px, 30vh, 320px);
+  max-width: 100%;
+  margin: 16px auto;
+}
+.effect-editor footer {
+  padding: 10px 20px;
+  border-top: 1px solid var(--km-border-subtle, #ddd);
+  max-height: 100px;
+  overflow: auto;
+}
+.effect-editor-discard-shade {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #0004;
+}
+.effect-editor-discard {
+  box-sizing: border-box;
+  width: min(460px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  background: var(--km-bg-surface, #fff);
+  border: 1px solid var(--km-border-subtle, #ddd);
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 16px 48px #0003;
+}
+.effect-editor-discard h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+}
+.effect-editor-discard p {
+  margin: 0;
+  color: var(--km-text-secondary, #555550);
+  line-height: 1.5;
+}
+.effect-editor-discard-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+@media (max-width: 1000px) {
+  .effect-editor-columns {
+    grid-template-columns: 22fr 43fr 35fr;
+  }
+  .effect-editor section {
+    padding: 12px;
+  }
+}
+
+.effect-technical-key {
+  font-size: 11px;
+  color: var(--km-text-secondary, #64748b);
+}
+.effect-code-heading,
+.effect-parameter-range {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.effect-code-heading {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.effect-code-heading h3 {
+  margin: 0;
+}
+.effect-parameter-range label {
+  min-width: 0;
+  flex: 1;
+}
+.effect-parameter-range input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.effect-parameter-definition {
+  margin-bottom: 20px;
+}
+.effect-preview-context {
+  display: block;
+  margin-top: 4px;
+  color: var(--km-text-secondary, #64748b);
+}
+.effect-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.effect-speed input {
+  min-width: 0;
+  flex: 1;
+}
+.effect-editor section > h3:not(:first-child),
+.effect-parameters > h3 {
+  margin-top: 24px;
+}
+
+.effect-editor .effect-parameter-definition {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 0;
+}
+.effect-editor .effect-parameter-definition label {
+  min-width: 0;
+  margin: 0;
+  gap: 3px;
+  font-size: 11px;
+}
+.effect-parameter-heading {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+.effect-parameter-heading label {
+  flex: 1;
+}
+.effect-parameter-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.effect-editor .effect-parameter-definition input {
+  min-width: 0;
+  height: 28px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.effect-editor .effect-parameter-heading button {
+  min-height: 28px;
+}

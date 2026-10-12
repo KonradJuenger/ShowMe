@@ -1,0 +1,130 @@
+.effects-panel fieldset {
+  font-size: 12px;
+  min-width: 0;
+  border: 1px solid var(--km-border-subtle, #e2e8f0);
+  border-radius: 6px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+.effects-panel button {
+  min-height: 28px;
+  text-align: left;
+}
+.effects-panel > button {
+  text-align: center;
+}
+.effect-panel-navigation {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.effect-panel-navigation button {
+  flex: 1;
+  text-align: center;
+}
+.effect-panel-navigation button[aria-pressed="true"] {
+  background: var(--km-bg-subtle);
+  color: var(--km-accent);
+}
+.effects-panel label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.effects-panel input,
+.effects-panel select {
+  min-width: 0;
+  max-width: 160px;
+}
+.effect-code-preview {
+  position: relative;
+  height: 140px;
+  overflow: hidden;
+  border: 1px solid var(--km-border-subtle, #e2e8f0);
+  border-radius: 6px;
+  background: var(--km-bg-subtle, #f1f5f9);
+  color: var(--km-text-primary, #0f172a);
+}
+.effect-code-preview span {
+  padding: 30px;
+  display: block;
+  font-size: 24px;
+}
+.effect-parameter-definition {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--km-border-subtle, #e2e8f0);
+}
+
+.effect-instance-parameter {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+}
+.effect-instance-parameter input {
+  width: 72px;
+}
+.effect-picker-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.effects-panel summary {
+  cursor: pointer;
+}
+.effects-panel small {
+  color: var(--km-text-secondary, #64748b);
+}
+
+.effect-instance-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.effect-instance-parameter-values {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.effect-instance-parameter-values input[type="number"] {
+  flex: 0 0 72px;
+  box-sizing: border-box;
+}
+.effects-panel legend[draggable="true"] {
+  cursor: grab;
+}
+
+.effect-instance-parameter input[type="range"] {
+  width: 100%;
+  flex: 1;
+  max-width: none;
+}
+
+.effect-instance-section {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.effect-instance-section > strong {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.effect-time-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.effect-instance-actions button {
+  min-width: 0;
+  min-height: 28px;
+  white-space: normal;
+}

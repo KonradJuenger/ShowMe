@@ -1,0 +1,152 @@
+.effect-library-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  min-width: 0;
+  color: var(--km-text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.effect-library-panel h3 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.effect-library-panel p {
+  margin: 0;
+  color: var(--km-text-secondary);
+}
+
+.effect-library-entry {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--km-border-subtle);
+  border-radius: var(--km-radius-md);
+}
+
+.effect-library-entry > strong {
+  overflow-wrap: anywhere;
+}
+
+.effect-library-entry > small {
+  color: var(--km-text-secondary);
+}
+
+.effect-library-entry > .effect-library-actions {
+  padding: 0;
+}
+
+.effects-panel .effect-library-panel label {
+  display: grid;
+  align-items: stretch;
+}
+
+.effects-panel .effect-library-panel :is(input, select) {
+  max-width: 100%;
+}
+
+.effect-library-panel label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  color: var(--km-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.effect-library-panel :is(input, select, button) {
+  min-width: 0;
+  min-height: 28px;
+  max-width: 100%;
+  border: 1px solid var(--km-border-subtle);
+  border-radius: var(--km-radius-sm);
+  background: var(--km-bg-surface);
+  color: var(--km-text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.effect-library-panel :is(input, select) {
+  width: 100%;
+  padding: 5px 8px;
+}
+
+.effect-library-panel button {
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.effect-library-panel button:hover:not(:disabled) {
+  background: var(--km-bg-subtle);
+}
+
+.effect-library-panel input[type="file"] {
+  font-size: 11px;
+  padding: 4px;
+}
+
+.effect-library-panel input::file-selector-button {
+  margin-right: 8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--km-bg-subtle);
+  color: var(--km-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.effect-library-panel details {
+  min-width: 0;
+  border: 1px solid var(--km-border-subtle);
+  border-radius: var(--km-radius-md);
+  overflow: hidden;
+}
+
+.effect-library-panel summary {
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.effect-library-panel summary:hover {
+  background: var(--km-bg-subtle);
+}
+
+.effect-library-panel details[open] > summary {
+  border-bottom: 1px solid var(--km-border-subtle);
+  background: var(--km-bg-subtle);
+}
+
+.effect-library-panel details > label {
+  margin: 10px;
+}
+
+.effect-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px;
+}
+
+.effect-library-panel .effect-library-delete {
+  color: #b91c1c;
+}
+
+.effect-library-panel summary:focus-visible {
+  outline: 2px solid var(--km-accent);
+  outline-offset: -2px;
+}
+
+.effect-library-panel [role="alert"] {
+  margin: 0;
+  color: #b91c1c;
+  overflow-wrap: anywhere;
+}

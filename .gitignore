@@ -1,0 +1,28 @@
+# Dependencies and generated outputs are excluded from the public source release.
+node_modules/
+dist/
+dist-electron/
+/release/
+coverage/
+test-results*/
+playwright-report*/
+*.log
+/.agenttmp/
+/.scratch/
+/.cache/
+/.vite/
+/NVIDIA Corporation/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.local
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.sme
+*.smp
+*.showme-slide-transfer

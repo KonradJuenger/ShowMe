@@ -1,0 +1,42 @@
+{
+  "apiVersion": 1,
+  "name": "Multi-state Scramble",
+  "category": "effect",
+  "kind": "text-js",
+  "target": "text",
+  "timeControl": {
+    "start": "slide",
+    "stop": {
+      "mode": "none"
+    }
+  },
+  "parameters": [
+    {
+      "type": "string",
+      "key": "textB",
+      "label": "Text B",
+      "default": "Beta"
+    },
+    {
+      "type": "string",
+      "key": "textC",
+      "label": "Text C",
+      "default": "Gamma"
+    },
+    {
+      "type": "number",
+      "key": "transitionDuration",
+      "label": "Duration",
+      "default": 0.5,
+      "min": 0.05,
+      "max": 5
+    },
+    {
+      "type": "boolean",
+      "key": "uppercase",
+      "label": "Uppercase",
+      "default": false
+    }
+  ],
+  "source": "function render({ text, parameters, stepIndex, stepTime, random }) {\n  const states = [text, parameters.textB, parameters.textC].map(value => parameters.uppercase ? value.toUpperCase() : value);\n  const step = Math.max(0, Math.floor(stepIndex));\n  if (step === 0) return states[0];\n  if (step >= states.length) return states[states.length - 1];\n  const from = Array.from(states[step - 1]);\n  const to = Array.from(states[step]);\n  const q = Math.max(0, Math.min(1, stepTime / Math.max(0.05, parameters.transitionDuration)));\n  if (q >= 1) return states[step];\n  const glyphs = \"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-?\";\n  const count = Math.max(from.length, to.length);\n  const frame = Math.floor(stepTime * 24);\n  let result = \"\";\n  for (let i = 0; i < count; i++) {\n    const revealAt = 0.25 + random(step * 1009 + i * 17) * 0.7;\n    if (q >= revealAt) result += to[i] || \"\";\n    else if (q === 0) result += from[i] || \"\";\n    else result += glyphs[Math.floor(random(step * 65537 + frame * 257 + i) * glyphs.length)];\n  }\n  return result;\n}"
+}

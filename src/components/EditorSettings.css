@@ -1,0 +1,47 @@
+.editor-selection-options {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.editor-selection-options legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.editor-selection-option {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.right-sidebar .editor-selection-option input {
+  width: 14px;
+  height: 14px;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: #2478ff;
+}
+.editor-selection-copy {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+.editor-selection-description {
+  color: var(--inspector-label);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.editor-guide-actions {
+  display: grid;
+  gap: 6px;
+}
+.editor-guide-actions button.danger {
+  color: #9d2929;
+}

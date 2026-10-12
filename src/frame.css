@@ -1,0 +1,247 @@
+@import "./measurement-feedback.css";
+
+.frame-surface {
+  background: transparent;
+}
+.empty-frame-content {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border: 2px dashed rgba(85, 85, 80, 0.45);
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(70, 70, 66, 0.7);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.element-hit.frame-content-editing {
+  outline: 3px solid #2b78c8;
+  outline-offset: -1px;
+  cursor: grab;
+}
+.element-hit.frame-content-editing:active {
+  cursor: grabbing;
+}
+.element-hit.frame-drop-target {
+  outline: 4px solid #2b78c8;
+  outline-offset: -2px;
+}
+.frame-content-interaction-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 83;
+  cursor: grab;
+  touch-action: none;
+}
+.frame-content-interaction-surface:active {
+  cursor: grabbing;
+}
+.frame-content-snap-guide {
+  position: absolute;
+  z-index: 85;
+  pointer-events: none;
+  background: #d03b9f;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.32);
+}
+.frame-content-snap-guide.vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.frame-content-snap-guide.horizontal {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.frame-content-bounds {
+  position: absolute;
+  z-index: 84;
+  border: 1px dashed rgba(43, 120, 200, 0.9);
+  pointer-events: auto;
+}
+.frame-content-handle {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid #2b78c8;
+  border-radius: calc(3px * var(--feedback-inverse-scale, 1));
+  background: #fff;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+.frame-content-handle::after {
+  content: "";
+  position: absolute;
+  inset: -70%;
+}
+.frame-content-handle:hover {
+  border-color: #1f5fbe;
+  background: #f7fbff;
+  box-shadow: 0 0 0 2px rgba(43, 120, 200, 0.12);
+}
+.frame-content-handle-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.frame-content-handle-n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.frame-content-handle-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.frame-content-handle-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.frame-content-handle-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.frame-content-handle-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.frame-content-handle-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.frame-content-handle-w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.frame-content-rotate {
+  left: 50%;
+  top: -30px;
+  border-radius: 50%;
+  cursor: grab;
+}
+.frame-content-rotate:active {
+  cursor: grabbing;
+}
+.frame-mode-bar {
+  min-width: 0;
+  width: max-content;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 7px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.frame-mode-bar button {
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 11px;
+}
+
+.frame-mode-bar button[aria-pressed="true"] {
+  background: var(--km-accent-light, #eff6ff);
+  border-color: var(--km-accent, #2563eb);
+  color: var(--km-accent, #2563eb);
+}
+
+/* Crop controls describe the clipping boundary, not the selected media. */
+.element-hit.frame-cropping {
+  outline: none;
+}
+.slide-scale .selection-bounds.crop-selection {
+  border: calc(2px * var(--feedback-inverse-scale, 1)) solid #111;
+}
+.slide-scale .crop-selection .handle.resize,
+.slide-scale .crop-selection .handle.resize:hover,
+.slide-scale .crop-selection .handle.resize:active {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #111;
+  box-shadow: none;
+}
+.slide-scale .crop-selection .handle-nw,
+.slide-scale .crop-selection .handle-ne,
+.slide-scale .crop-selection .handle-se,
+.slide-scale .crop-selection .handle-sw {
+  background: transparent !important;
+}
+.crop-selection .handle-nw,
+.crop-selection .handle-w,
+.crop-selection .handle-sw { left: calc(-2px * var(--feedback-inverse-scale, 1)); }
+.crop-selection .handle-ne,
+.crop-selection .handle-e,
+.crop-selection .handle-se { left: calc(100% + 2px * var(--feedback-inverse-scale, 1)); }
+.crop-selection .handle-nw,
+.crop-selection .handle-n,
+.crop-selection .handle-ne { top: calc(-2px * var(--feedback-inverse-scale, 1)); }
+.crop-selection .handle-sw,
+.crop-selection .handle-s,
+.crop-selection .handle-se { top: calc(100% + 2px * var(--feedback-inverse-scale, 1)); }
+/* Corner crop handles are 16px L-shapes whose visible stroke is 25% of
+   the handle box. Offset only by that stroke thickness so the L sits flush
+   outside the crop border instead of floating a full handle-width away. */
+.crop-selection .handle-nw { transform: translate(-25%, -25%) !important; }
+.crop-selection .handle-n { transform: translate(-50%, -100%) !important; }
+.crop-selection .handle-ne { transform: translate(-75%, -25%) !important; }
+.crop-selection .handle-e { transform: translate(0, -50%) !important; }
+.crop-selection .handle-se { transform: translate(-75%, -75%) !important; }
+.crop-selection .handle-s { transform: translate(-50%, 0) !important; }
+.crop-selection .handle-sw { transform: translate(-25%, -75%) !important; }
+.crop-selection .handle-w { transform: translate(-100%, -50%) !important; }
+.crop-selection .handle-nw::before,
+.crop-selection .handle-ne::before,
+.crop-selection .handle-se::before,
+.crop-selection .handle-sw::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #111;
+}
+.crop-selection .handle-nw::before {
+  clip-path: polygon(0 0, 100% 0, 100% 25%, 25% 25%, 25% 100%, 0 100%);
+}
+.crop-selection .handle-ne::before {
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 75% 100%, 75% 25%, 0 25%);
+}
+.crop-selection .handle-se::before {
+  clip-path: polygon(75% 0, 100% 0, 100% 100%, 0 100%, 0 75%, 75% 75%);
+}
+.crop-selection .handle-sw::before {
+  clip-path: polygon(0 0, 25% 0, 25% 75%, 100% 75%, 100% 100%, 0 100%);
+}
+.frame-layout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.frame-layout button {
+  min-height: 30px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.frame-layout button.active {
+  background: #dce8f7;
+  border-color: #6e97c8;
+  color: #173e70;
+}
+.frame-content-kind,
+.frame-empty-copy {
+  margin: 8px 0 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #666661;
+}

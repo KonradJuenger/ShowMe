@@ -1,0 +1,61 @@
+/* Keynote-style slide hierarchy: parent slides own disclosure and descendants indent. */
+.slide-nav-row {
+  --slide-depth: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  padding-left: calc(var(--slide-depth) * 14px);
+}
+
+.slide-nav-row > .slide-thumb {
+  flex: 1;
+  min-width: 0;
+}
+
+.slide-disclosure {
+  flex: 0 0 20px;
+  width: 20px;
+  min-width: 20px;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--km-text-secondary, #666);
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+.slide-disclosure:hover:not(:disabled),
+.slide-disclosure:focus-visible {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  outline: none;
+}
+
+.slide-disclosure.placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.slide-thumb.drop-section,
+.overview-thumb.drop-section {
+  outline: 2px solid #1688ef;
+  outline-offset: -2px;
+  background: #ddecff;
+}
+
+.drop-section::after {
+  content: "Move into section";
+}
+
+.slide-rail .virtual-list.slide-append-drop {
+  position: relative;
+  background: color-mix(in srgb, #1688ef 5%, transparent);
+  box-shadow: inset 0 -3px #1688ef;
+}

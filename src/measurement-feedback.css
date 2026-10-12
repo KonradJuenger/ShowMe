@@ -1,0 +1,55 @@
+.dimension-badge,
+.persistent-guide.preview em,
+.guide-coordinate {
+  box-sizing: border-box;
+  min-height: 20px;
+  padding: 4px 7px;
+  border: 1px solid var(--km-border-default, #cbd5e1);
+  border-radius: 4px;
+  background: var(--km-bg-surface, #fff);
+  color: var(--km-text-primary, #0f172a);
+  box-shadow: var(--km-shadow-sm);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.dimension-badge {
+  transform: scale(var(--feedback-inverse-scale, 1));
+  transform-origin: top left;
+}
+
+.persistent-guide.preview em {
+  font-style: normal;
+  transform: scale(var(--feedback-inverse-scale, 1));
+  transform-origin: top left;
+}
+
+.persistent-guide.preview.vertical em {
+  top: calc(1500px + 8px * var(--feedback-inverse-scale, 1));
+  left: calc(6px * var(--feedback-inverse-scale, 1));
+}
+
+.persistent-guide.preview.horizontal em {
+  left: calc(1500px + 8px * var(--feedback-inverse-scale, 1));
+  top: calc(6px * var(--feedback-inverse-scale, 1));
+}
+
+.guide-coordinate.vertical {
+  top: calc(8px * var(--feedback-inverse-scale, 1));
+  transform: translateX(calc(6px * var(--feedback-inverse-scale, 1)))
+    scale(var(--feedback-inverse-scale, 1));
+  transform-origin: top left;
+}
+
+.guide-coordinate.horizontal {
+  left: calc(8px * var(--feedback-inverse-scale, 1));
+  transform: translateY(calc(6px * var(--feedback-inverse-scale, 1)))
+    scale(var(--feedback-inverse-scale, 1));
+  transform-origin: top left;
+}

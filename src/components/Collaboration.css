@@ -1,0 +1,119 @@
+.colab-panel {
+  position: fixed;
+  z-index: 1001;
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(600px, calc(100vh - 90px));
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--km-border-subtle);
+  border-radius: var(--km-radius-lg);
+  background: var(--km-bg-surface);
+  color: var(--km-text-primary);
+  box-shadow: var(--km-shadow-lg);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.colab-panel h2 {
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--km-border-subtle);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.colab-panel h3 {
+  margin: 20px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.colab-panel p {
+  margin: 5px 0 10px;
+  color: var(--km-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.colab-panel button,
+.colab-panel input,
+.colab-panel select {
+  font: inherit;
+  font-size: 12px;
+  border-radius: var(--km-radius-sm);
+  border-color: var(--km-border-default);
+}
+
+.colab-panel button {
+  min-height: 30px;
+  padding: 5px 10px;
+  background: var(--km-bg-surface);
+  color: var(--km-text-primary);
+}
+
+.colab-panel button:hover:not(:disabled) {
+  background: var(--km-bg-subtle);
+}
+
+.colab-panel button.primary {
+  background: var(--km-accent);
+  border-color: var(--km-accent);
+  color: white;
+  font-weight: 500;
+}
+
+.colab-panel button.primary:hover:not(:disabled) {
+  background: var(--km-accent-hover);
+}
+
+.colab-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  color: var(--km-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.colab-panel input,
+.colab-panel select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  background: var(--km-bg-surface);
+  color: var(--km-text-primary);
+  font-weight: 400;
+}
+
+.colab-panel details {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--km-border-subtle);
+}
+
+.colab-panel summary {
+  color: var(--km-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.colab-panel summary:focus-visible {
+  outline: 2px solid var(--km-accent);
+  outline-offset: 2px;
+  border-radius: var(--km-radius-sm);
+}
+
+.colab-panel details > input {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.colab-panel [role="alert"] {
+  padding: 8px 10px;
+  border: 1px solid #fecaca;
+  border-radius: var(--km-radius-sm);
+  background: #fef2f2;
+  color: #b91c1c;
+}
