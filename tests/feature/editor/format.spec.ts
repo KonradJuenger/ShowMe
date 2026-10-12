@@ -71,6 +71,41 @@ test("slide format recognizes imported dimensions and commits custom ratio draft
   expect(after.deck.height).toBe(960);
   expect(after.revision).toBe(before.revision + 1);
   expect(after.slide).toEqual(before.slide);
+  await expect
+    .poll(() =>
+      page.getByRole("tree", { name: "Slides", exact: true }).evaluate((tree) =>
+        Array.from(
+          tree.querySelectorAll<HTMLButtonElement>("button[data-slide-id]"),
+        ).every((button) => {
+          const thumbnail = button.querySelector(".empty-thumb")!;
+          const frame = thumbnail.getBoundingClientRect();
+          const bounds = button.getBoundingClientRect();
+          return frame.top >= bounds.top && frame.bottom <= bounds.bottom;
+        }),
+      ),
+    )
+    .toBe(true);
+  await page
+    .getByRole("button", { name: "Slide overview", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page
+        .getByRole("dialog", { name: "Slide overview dialog" })
+        .evaluate((dialog) =>
+          Array.from(
+            dialog.querySelectorAll<HTMLButtonElement>("button[data-slide-id]"),
+          ).every((button) => {
+            const frame = button
+              .querySelector(".empty-thumb")!
+              .getBoundingClientRect();
+            const bounds = button.getBoundingClientRect();
+            return frame.top >= bounds.top && frame.bottom <= bounds.bottom;
+          }),
+        ),
+    )
+    .toBe(true);
+  await page.getByRole("button", { name: "Close slide overview" }).click();
   await width.fill("1");
   await width.press("Escape");
   await format.focus();

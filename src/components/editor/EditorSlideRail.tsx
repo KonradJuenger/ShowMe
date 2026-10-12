@@ -37,6 +37,7 @@ export function EditorSlideRail({
   rows,
   slideMeta,
   contentWidth,
+  slideAspectRatio,
   renderSlide,
   collapsedSections,
   setCollapsedSections,
@@ -50,6 +51,7 @@ export function EditorSlideRail({
   rows: SlideRailRow[];
   slideMeta: Deck["slideMeta"];
   contentWidth: number;
+  slideAspectRatio: number;
   renderSlide: (id: string) => ReactNode;
   collapsedSections: Set<string>;
   setCollapsedSections: Dispatch<SetStateAction<Set<string>>>;
@@ -76,6 +78,7 @@ export function EditorSlideRail({
       </header>
       <VirtualList
         label="Slides"
+        slideAspectRatio={slideAspectRatio}
         footer={
           <div className="slide-rail-add-row">
             <button
@@ -97,7 +100,7 @@ export function EditorSlideRail({
             ? 32
             : slideMeta[row.id]?.hidden
               ? 18
-              : ((contentWidth - 34) * 9) / 16 + 20;
+              : (contentWidth - 34) / slideAspectRatio + 20;
         }}
         render={(index) => {
           const row = rows[index];
@@ -173,11 +176,13 @@ export function EditorSlideRail({
 export function EditorSlideOverview({
   open,
   slides,
+  slideAspectRatio,
   renderSlide,
   onClose,
 }: {
   open: boolean;
   slides: string[];
+  slideAspectRatio: number;
   renderSlide: (id: string) => ReactNode;
   onClose: () => void;
 }) {
@@ -202,7 +207,7 @@ export function EditorSlideOverview({
   const columns =
     gridWidth >= 1000 ? 4 : gridWidth >= 700 ? 3 : gridWidth >= 420 ? 2 : 1;
   const thumbnailWidth = (gridWidth - 12 - (columns - 1) * 14) / columns - 12;
-  const rowHeight = Math.ceil((thumbnailWidth * 9) / 16) + 56;
+  const rowHeight = Math.ceil(thumbnailWidth / slideAspectRatio) + 56;
 
   if (!open) return null;
 

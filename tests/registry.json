@@ -579,8 +579,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-11",
-    "reason": "Slide-format UI recognizes imported ratios, retains same-ratio dimensions/history and atomically commits or cancels custom drafts through authority"
+    "lastReviewed": "2026-10-12",
+    "reason": "Slide-format UI recognizes imported ratios, retains same-ratio dimensions/history, atomically commits or cancels custom drafts through authority and keeps portrait thumbnails within sidebar and overview rows"
   },
   {
     "id": "persistence-pdf-rendering",

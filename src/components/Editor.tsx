@@ -1251,6 +1251,7 @@ export function Editor({
         rows={railRows}
         slideMeta={deck.slideMeta}
         contentWidth={railContentWidth}
+        slideAspectRatio={deck.width / deck.height}
         renderSlide={(id) => slideButton(id)}
         collapsedSections={collapsedSections}
         setCollapsedSections={setCollapsedSections}
@@ -1891,6 +1892,7 @@ export function Editor({
       <EditorSlideOverview
         open={overview}
         slides={orderedSlideIds}
+        slideAspectRatio={deck.width / deck.height}
         renderSlide={(id) => slideButton(id, true)}
         onClose={() => setOverview(false)}
       />

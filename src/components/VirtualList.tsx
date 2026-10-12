@@ -32,6 +32,7 @@ interface VirtualListProps {
   render: (index: number) => ReactNode;
   label: string;
   footer?: ReactNode;
+  slideAspectRatio?: number;
 }
 
 type SlideButtonElement = ReactElement<{
@@ -54,7 +55,8 @@ function HierarchicalSlideList({
   render,
   label,
   footer,
-}: Pick<VirtualListProps, "count" | "render" | "label" | "footer">) {
+  slideAspectRatio = 16 / 9,
+}: Pick<VirtualListProps, "count" | "render" | "label" | "footer" | "slideAspectRatio">) {
   const ref = useRef<HTMLDivElement>(null),
     [top, setTop] = useState(0),
     [height, setHeight] = useState(600),
@@ -93,7 +95,7 @@ function HierarchicalSlideList({
   const rowHeights = rows.map((row) => {
       if (deck.slideMeta[row.id]?.hidden) return 18;
       const available = Math.max(72, width - 38 - row.depth * 14);
-      return (available * 9) / 16 + 20;
+      return available / slideAspectRatio + 20;
     }),
     offsets = [0];
   for (const value of rowHeights) offsets.push(offsets.at(-1)! + value);
