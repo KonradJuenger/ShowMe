@@ -646,7 +646,7 @@
     "runtime": "unit",
     "created": "2026-10-11",
     "lastReviewed": "2026-10-12",
-    "reason": "Metadata-only startup, lazy byte verification, targeted inventory events, watcher disposal, idle scans and single-pass imports"
+    "reason": "Metadata-only startup, lazy byte verification, targeted inventory events including referenced missing assets arriving later, watcher disposal, idle scans and single-pass imports"
   },
   {
     "id": "media-derived-work",
