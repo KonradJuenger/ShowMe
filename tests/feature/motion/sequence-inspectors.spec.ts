@@ -119,7 +119,7 @@ async function authoredEasing(page: Page, eases: MotionEase[]) {
   }, eases);
 }
 
-test("Edit and View retain the playhead, scrubbing enters View, and Space advances one click without repeating or wrapping", async ({
+test("Edit and Playback retain the playhead, scrubbing enters Playback, and Space advances one click without repeating or wrapping", async ({
   page,
 }) => {
   await start(page);
@@ -130,7 +130,7 @@ test("Edit and View retain the playhead, scrubbing enters View, and Space advanc
     name: "Click Timeline playhead",
   });
   const edit = timeline.getByRole("button", { name: "Edit", exact: true });
-  const view = timeline.getByRole("button", { name: "View", exact: true });
+  const playback = timeline.getByRole("button", { name: "Playback", exact: true });
   const before = await current(page);
   const id = before.slide.nodes[0].children[0].id;
   const element = page.locator(`[data-editor-stage] [data-element-id="${id}"]`);
@@ -139,8 +139,8 @@ test("Edit and View retain the playhead, scrubbing enters View, and Space advanc
       (node) => new DOMMatrixReadOnly(getComputedStyle(node).transform).m41,
     );
 
-  // Adding Motion plays it in View. Edit always returns to the authored state.
-  await expect(view).toHaveAttribute("aria-pressed", "true");
+  // Adding Motion plays it in Playback. Edit always returns to the authored state.
+  await expect(playback).toHaveAttribute("aria-pressed", "true");
   await edit.click();
   await expect(edit).toHaveAttribute("aria-pressed", "true");
   await expect.poll(translateX).toBeCloseTo(0, 0);
@@ -149,14 +149,14 @@ test("Edit and View retain the playhead, scrubbing enters View, and Space advanc
   await slider.press("End");
   await slider.press("Shift+ArrowLeft");
   await expect(slider).toHaveAttribute("aria-valuenow", "900");
-  await expect(view).toHaveAttribute("aria-pressed", "true");
+  await expect(playback).toHaveAttribute("aria-pressed", "true");
   await expect.poll(translateX).toBeCloseTo(120, 0);
 
   // Switching modes preserves the playhead while changing only canvas rendering.
   await edit.click();
   await expect(slider).toHaveAttribute("aria-valuenow", "900");
   await expect.poll(translateX).toBeCloseTo(0, 0);
-  await view.click();
+  await playback.click();
   await expect(slider).toHaveAttribute("aria-valuenow", "900");
   await expect.poll(translateX).toBeCloseTo(120, 0);
 
@@ -173,7 +173,7 @@ test("Edit and View retain the playhead, scrubbing enters View, and Space advanc
   await expect(
     timeline.getByRole("button", { name: "Click 1", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await expect(view).toHaveAttribute("aria-pressed", "true");
+  await expect(playback).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.down("Space");
   await expect(
     timeline.getByRole("button", { name: "Click 1", exact: true }),
@@ -189,7 +189,7 @@ test("Edit and View retain the playhead, scrubbing enters View, and Space advanc
   ).toHaveAttribute("aria-pressed", "true");
 });
 
-test("Play enters View, runs only the current interval, and never crosses a click gate", async ({
+test("Play enters Playback, runs only the current interval, and never crosses a click gate", async ({
   page,
 }) => {
   await start(page);
@@ -200,7 +200,7 @@ test("Play enters View, runs only the current interval, and never crosses a clic
     .getByRole("button", { name: "Add Click", exact: true })
     .click();
   const edit = timeline.getByRole("button", { name: "Edit", exact: true });
-  const view = timeline.getByRole("button", { name: "View", exact: true });
+  const playback = timeline.getByRole("button", { name: "Playback", exact: true });
   const slideStart = timeline.getByRole("button", {
     name: "Slide start",
     exact: true,
@@ -220,7 +220,7 @@ test("Play enters View, runs only the current interval, and never crosses a clic
   await edit.click();
   await expect.poll(translateX).toBeCloseTo(0, 0);
   await timeline.getByRole("button", { name: "Play", exact: true }).click();
-  await expect(view).toHaveAttribute("aria-pressed", "true");
+  await expect(playback).toHaveAttribute("aria-pressed", "true");
   await expect(slideStart).toHaveAttribute("aria-pressed", "true");
   await expect(clickOne).toHaveAttribute("aria-pressed", "false");
   await expect.poll(translateX).toBeCloseTo(120, 0);
@@ -246,12 +246,23 @@ test("Play enters View, runs only the current interval, and never crosses a clic
   expect((await current(page)).slide.motion).toEqual(before.slide.motion);
 });
 
-test("ordinary Motion keeps Click Timeline closed and uses Slide start, while open additions use the selected Click", async ({
+test("ordinary Motion keeps Click Timeline closed, returns hidden playback to Edit, and uses Slide start, while open additions use the selected Click", async ({
   page,
 }) => {
   await start(page);
   await motion(page, "Move");
   await expect(dock(page)).not.toBeVisible();
+  const first = await current(page);
+  const firstId = first.slide.nodes[0].children[0].id;
+  const firstElement = page.locator(
+    `[data-editor-stage] [data-element-id="${firstId}"]`,
+  );
+  const firstTranslateX = () =>
+    firstElement.evaluate(
+      (node) => new DOMMatrixReadOnly(getComputedStyle(node).transform).m41,
+    );
+  await expect.poll(firstTranslateX).toBeGreaterThan(20);
+  await expect.poll(firstTranslateX).toBeCloseTo(0, 0);
   await expect(
     page.getByRole("region", { name: "Motion panel", exact: true }),
   ).toBeVisible();
