@@ -21,6 +21,7 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
+  useId,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -372,6 +373,7 @@ function VideoView({
 }
 
 function MissingMediaPlaceholder() {
+  const patternId = useId().replace(/:/g, "");
   return (
     <svg
       data-missing-media="true"
@@ -383,7 +385,7 @@ function MissingMediaPlaceholder() {
     >
       <defs>
         <pattern
-          id="missing-media-diagonal-lines"
+          id={patternId}
           width="16"
           height="16"
           patternUnits="userSpaceOnUse"
@@ -403,7 +405,7 @@ function MissingMediaPlaceholder() {
       <rect
         width="100%"
         height="100%"
-        fill="url(#missing-media-diagonal-lines)"
+        fill={`url(#${patternId})`}
       />
       <rect
         x="50%"
