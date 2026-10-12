@@ -35,9 +35,33 @@ Preserve established UI behavior during unrelated refactors. In particular, do n
 
 UI redesign and architecture cleanup are separate tasks unless the request explicitly combines them.
 
+## Git workflow
+
+The repository is public. Keep experimental agent work isolated from `main`, while preserving the developer's fast local Codex workflow.
+
+### ChatGPT
+
+These rules apply to ChatGPT sessions that implement changes in this repository:
+
+- Never implement changes directly on `main`.
+- Before editing, inspect the current `main` HEAD and create or reuse a dedicated branch named `chatgpt/<task>` from the current `main`.
+- Make all implementation commits on that branch. Intermediate commits may be frequent; they are working history.
+- Pushing the ChatGPT task branch is allowed when needed for the workflow.
+- When the requested work is complete, run the relevant verification, report the result and final branch commit, then stop.
+- Do not merge, squash, cherry-pick, rebase into, push to, reset, or otherwise modify `main` unless the developer explicitly authorizes integration after reviewing or testing the change.
+- Explicit integration authorization includes instructions such as `merge it`, `pull it in`, `put it on main`, `ship it`, `looks good, merge`, `ok pull`, or equivalent unambiguous wording.
+- After authorization, integrate the approved work into the latest `main`, run the relevant tests, and prefer one clean squash commit on `main` unless the developer requests otherwise.
+- If integration exposes non-trivial conflicts, unexpected behavior, or new test failures, stop before modifying `main` and report the problem.
+- Only after the change is successfully integrated into `main`, the relevant tests pass, and the resulting `main` has been pushed successfully, delete the temporary ChatGPT branch locally and remotely.
+
+### Codex and developer working tree
+
+- Codex may work directly on the currently checked-out branch, including `main`, unless the developer instructs it to use a branch.
+- Do not force the ChatGPT branch workflow onto Codex sessions running in the developer's working tree.
+- Human contributors follow the branch or contribution workflow they explicitly choose.
+
 ## Implementation discipline
 
-- Work on the branch the user requested. Do not create a branch, worktree, PR, or temporary implementation branch unless explicitly asked.
 - Inspect the current branch and HEAD before editing. Preserve valid newer work.
 - Prefer small, focused commits with one clear responsibility.
 - Keep `Editor.tsx` focused on composition and orchestration. Retain adapters and view models when they have a clear current responsibility.
