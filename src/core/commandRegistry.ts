@@ -112,7 +112,7 @@ const frameContext = (context: CommandContext) =>
   context.kind === "frame" || context.kind === "frame-content";
 
 export const commandRegistry: Record<CommandId, RegisteredCommand> = {
-  [COMMAND_IDS.motionPreviewBlock]: { label: "Preview" },
+  [COMMAND_IDS.motionPreviewBlock]: { label: "Play animation" },
   [COMMAND_IDS.motionSetTrigger]: { label: "Trigger" },
   [COMMAND_IDS.motionMoveNextClick]: { label: "Move to next click" },
   [COMMAND_IDS.motionMovePreviousClick]: { label: "Move to previous click" },
