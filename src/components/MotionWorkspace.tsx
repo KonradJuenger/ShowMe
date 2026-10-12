@@ -1311,12 +1311,12 @@ export function MotionDock({ workspace: w }: { workspace: Workspace }) {
       >
         <div className="motion-controls">
           <div
-            className="motion-control-group motion-view"
+            className="motion-control-group motion-mode"
             role="group"
             aria-label="Canvas mode"
           >
             <strong>Click Timeline</strong>
-            <div className="motion-view-switch">
+            <div className="motion-mode-switch">
               <button
                 type="button"
                 className="motion-mode-toggle"
