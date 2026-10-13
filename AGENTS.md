@@ -39,6 +39,9 @@ UI redesign and architecture cleanup are separate tasks unless the request expli
 
 The repository is public. Keep experimental agent work isolated from `main`, while preserving the developer's fast local Codex workflow.
 
+Every contributor and agent must satisfy the required audience-navigation gate below
+before any commit or integration into `main`, including direct Codex commits.
+
 ### ChatGPT
 
 These rules apply to ChatGPT sessions that implement changes in this repository:
@@ -84,6 +87,31 @@ Keep this list accurate. Do not delete a branch merely because it appears stale;
 
 Local verification is authoritative. Run the smallest test set that provides meaningful confidence.
 Do not run the complete ShowMe suite by default.
+
+### Required audience-navigation gate for `main`
+
+`tests/feature/presenter/audience-navigation.spec.ts` is the highest-priority
+regression test and a required blocker for every commit to `main`.
+
+- Before creating any commit on `main` or integrating work by merge, squash,
+  cherry-pick, rebase or pull, run this test against the exact proposed result
+  based on the latest `main`. Verify integration candidates on an isolated branch
+  or worktree before modifying `main`.
+- The requirement applies to every change, including unrelated features,
+  documentation and urgent fixes. A passing result from an earlier revision is
+  insufficient if the proposed result has changed.
+- Run `npm run test:feature -- presenter` and confirm that the audience-navigation
+  test actually executed and passed. A focused invocation selecting this file is
+  also valid. A failing, missing, skipped or unexecuted test blocks the commit,
+  integration and push to `main`.
+- While this test is failing, continue investigation and working commits on a
+  task branch. Do not integrate that branch into `main` until the gate passes.
+- Preserve the contract: upcoming audience images must prepare and decode before
+  navigation, so later slides introducing new assets do not stall on cold image
+  work while early slides and warm revisits appear fast. Do not weaken, skip,
+  quarantine, deprecate or delete this test to bypass the gate unless the
+  developer explicitly changes this requirement.
+- Report the exact verification command and result before proceeding into `main`.
 
 For a normal task:
 
