@@ -8,6 +8,85 @@ import { createBasicShape } from "../../../src/core/elementFactory";
 import { createMediaElement } from "../../../src/core/media";
 import { ImagePreparationCoordinator } from "../../../src/core/imagePreparationCoordinator";
 import { DocumentRuntime } from "../../../src/core/documentRuntime";
+import { ImageWorkQueue } from "../../../src/core/imageWorkQueue";
+
+it("visible image demand overtakes queued background work without exceeding the memory budget", async () => {
+  const queue = new ImageWorkQueue();
+  const order: string[] = [];
+  let finishFirst!: () => void;
+  let finishVisible!: () => void;
+  const first = queue.run(
+    512 * 1024 * 1024,
+    () =>
+      new Promise<void>((resolve) => {
+        order.push("first");
+        finishFirst = resolve;
+      }),
+  );
+  await vi.waitFor(() => expect(order).toEqual(["first"]));
+  const background = queue.run(1, async () => {
+    order.push("background");
+  });
+  const visible = queue.run(
+    512 * 1024 * 1024,
+    () =>
+      new Promise<void>((resolve) => {
+        order.push("visible");
+        finishVisible = resolve;
+      }),
+    { priority: 2, key: "visible" },
+  );
+  finishFirst();
+  await vi.waitFor(() => expect(order).toEqual(["first", "visible"]));
+  finishVisible();
+  await Promise.all([first, background, visible]);
+  expect(order).toEqual(["first", "visible", "background"]);
+});
+
+it("foreground requests promote an already queued image and preserve FIFO among equal priorities", async () => {
+  const queue = new ImageWorkQueue();
+  const order: string[] = [];
+  let finish!: () => void;
+  const active = queue.run(
+    512 * 1024 * 1024,
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  const older = queue.run(1, async () => {
+    order.push("older");
+  });
+  const promoted = queue.run(
+    1,
+    async () => {
+      order.push("promoted");
+    },
+    { priority: 0, key: "image" },
+  );
+  const newer = queue.run(1, async () => {
+    order.push("newer");
+  });
+  queue.setPriorities(new Map([["image", 2]]));
+  finish();
+  await Promise.all([active, older, promoted, newer]);
+  expect(order).toEqual(["promoted", "older", "newer"]);
+});
+
+it("leaving a slide demotes its queued images so later slides cannot accumulate a foreground backlog", async () => {
+  const queue = new ImageWorkQueue();
+  const order: string[] = [];
+  let finish!: () => void;
+  const active = queue.run(512 * 1024 * 1024, () => new Promise<void>((resolve) => { finish = resolve; }));
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  const old = queue.run(1, async () => { order.push("old slide"); }, { priority: 2, key: "old" });
+  const current = queue.run(1, async () => { order.push("current slide"); }, { priority: 2, key: "current" });
+  queue.setPriorities(new Map([["old", 0], ["current", 2]]));
+  finish();
+  await Promise.all([active, old, current]);
+  expect(order).toEqual(["current slide", "old slide"]);
+});
 
 it("plain rectangle movement omits media and dependencies while unknown operations invalidate broadly", () => {
   const document = newPresentationDocument("Impact");

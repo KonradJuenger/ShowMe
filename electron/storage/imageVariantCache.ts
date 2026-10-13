@@ -3,7 +3,7 @@ import { validPng } from "../../src/core/pngValidation";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { Worker } from "node:worker_threads";
+import { ImageProcessorPool } from "../imageProcessorPool";
 import sharp from "sharp";
 import { hashSchema } from "../../src/core/assets";
 import {
@@ -27,6 +27,7 @@ export class ImageVariantCache {
   /** Cancel publication and remove visibility with constant-size metadata work. */
   async releaseOnQuit(includeRetained = true) {
     this.closing = true;
+    this.processors.close();
     this.generation++;
     this.verified.clear();
     const quarantine = async (root: string, expectedParent: string) => {
@@ -50,6 +51,23 @@ export class ImageVariantCache {
     if (retained) await quarantine(retained, path.dirname(retained));
   }
   private pending = new Map<string, Promise<PreparedImage | null>>();
+  private demands = new Map<string, { priority: number; canvas?: string }>();
+  private activeCanvas: string | undefined;
+  prioritizeCanvas(documentId: string, slideId: string) {
+    this.activeCanvas = `${documentId}:${slideId}`;
+    this.work.setPriorities(
+      new Map(
+        [...this.demands].map(([key, demand]) => [key, this.priority(demand)]),
+      ),
+    );
+  }
+  private priority(demand: { priority: number; canvas?: string }) {
+    return demand.canvas &&
+      this.activeCanvas &&
+      demand.canvas !== this.activeCanvas
+      ? 0
+      : demand.priority;
+  }
   private generation = 0;
   private clearing: Promise<void> | null = null;
   private verified = new Map<
@@ -59,6 +77,7 @@ export class ImageVariantCache {
   private unsupportedSources = new Set<string>();
   private metadata = new Map<string, ReturnType<typeof this.readMetadata>>();
   private work = new ImageWorkQueue();
+  private processors: ImageProcessorPool;
 
   private readMetadata(source: string) {
     return sharp(source, {
@@ -87,16 +106,19 @@ export class ImageVariantCache {
   }
   constructor(
     private readonly cacheRoot: () => string,
-    private readonly workerFile: string,
+    workerFile: string,
     private readonly retainedRoot?: () => string | null,
     private readonly retentionEnabled: () => boolean = () => true,
-  ) {}
+  ) {
+    this.processors = new ImageProcessorPool(workerFile);
+  }
   get root() {
     return path.join(this.cacheRoot(), "images");
   }
   diagnostics() {
     return {
       jobs: this.jobs,
+      workerStarts: this.processors.starts,
       cacheHits: this.cacheHits,
       pending: this.pending.size,
       rssBytes: process.memoryUsage().rss,
@@ -139,9 +161,11 @@ export class ImageVariantCache {
     size: number,
     targetWidth?: number,
     targetHeight?: number,
+    priority = 0,
+    canvas?: string,
   ): Promise<PreparedImage | null> {
     hashSchema.parse(assetId);
-    if (this.clearing) return Promise.resolve(null);
+    if (this.clearing || this.closing) return Promise.resolve(null);
     if (!Number.isSafeInteger(size) || size < 1 || size > 100000)
       throw new Error("Invalid image size");
     const root = this.root,
@@ -159,7 +183,16 @@ export class ImageVariantCache {
       ":" +
       targetHeight;
     const prior = this.pending.get(key);
-    if (prior) return prior;
+    const existing = this.demands.get(key);
+    const demand =
+      existing && existing.priority > priority
+        ? existing
+        : { priority, canvas };
+    this.demands.set(key, demand);
+    if (prior) {
+      this.work.setPriorities(new Map([[key, this.priority(demand)]]));
+      return prior;
+    }
     const job = this.generate(
       root,
       source,
@@ -168,7 +201,11 @@ export class ImageVariantCache {
       generation,
       targetWidth,
       targetHeight,
-    ).finally(() => this.pending.delete(key));
+      key,
+    ).finally(() => {
+      this.pending.delete(key);
+      this.demands.delete(key);
+    });
     this.pending.set(key, job);
     return job;
   }
@@ -180,6 +217,7 @@ export class ImageVariantCache {
     generation: number,
     targetWidth?: number,
     targetHeight?: number,
+    key = "",
   ) {
     if (this.unsupportedSources.has(source)) return null;
     const metadata = await this.sourceMetadata(source);
@@ -231,30 +269,21 @@ export class ImageVariantCache {
     try {
       const result = await this.work.run(
         sourceWidth * sourceHeight * 24,
-        () =>
-          new Promise<Omit<PreparedImage, "url"> | null>((resolve, reject) => {
-            this.jobs++;
-            const worker = new Worker(this.workerFile, {
-              workerData: { source, assetId, size, output, width, height },
-            });
-            let replied = false;
-            worker.once(
-              "message",
-              (message: {
-                result: Omit<PreparedImage, "url"> | null;
-                error?: string;
-              }) => {
-                replied = true;
-                if (message.error) reject(new Error(message.error));
-                else resolve(message.result);
-              },
-            );
-            worker.once("error", reject);
-            worker.once("exit", (code) => {
-              if (!replied)
-                reject(new Error("Image worker exited (" + code + ")"));
-            });
-          }),
+        () => {
+          this.jobs++;
+          return this.processors.run({
+            source,
+            assetId,
+            size,
+            output,
+            width,
+            height,
+          });
+        },
+        {
+          key,
+          priority: this.priority(this.demands.get(key) ?? { priority: 0 }),
+        },
       );
       if (!result) {
         this.unsupportedSources.add(source);

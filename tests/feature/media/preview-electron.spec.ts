@@ -1,10 +1,41 @@
 import { expect, test, _electron as electron } from "@playwright/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { createBasicShape } from "../../../src/core/elementFactory";
 import { readyEditor } from "../../helpers/startup";
+import { imageIdentity, planPresentationImages } from "../../../src/core/presentationImages";
+
+test("native image thumbnails prepare their small derivative instead of falling back to full originals", async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "showme-image-preview-"));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined)) as Record<string, string>;
+  const app = await electron.launch({ args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`], env });
+  try {
+    const page = await app.firstWindow();
+    await readyEditor(page);
+    const buffer = await sharp({ create: { width: 4096, height: 2160, channels: 4, background: "#00ff00" } }).png().toBuffer();
+    await page.getByTestId("import-files").setInputFiles({ name: "Large.png", mimeType: "image/png", buffer });
+    await expect(page.locator("[data-editor-stage] img").first()).toHaveAttribute("data-source-width", "4096");
+    const projection = await page.evaluate(() => window.desktop!.documentProjection!(document.querySelector("[data-editor]")!.getAttribute("data-document-id")!));
+    const profile = { width: 321, height: 181 };
+    const requirement = planPresentationImages(projection.deck, [projection.slide], profile)[0];
+    const hash = createHash("sha256").update(imageIdentity(requirement.assetId, Math.min(4096, requirement.width), Math.min(2160, requirement.height))).digest("hex");
+    const data = await page.evaluate(({ projection, profile }) => window.desktop!.capturePreview!(projection, profile.width, profile.height), { projection, profile });
+    expect(data).toMatch(/^data:image\/png;base64,/);
+    const files = await readdir(path.join(folder, "user", "image-cache"), { recursive: true });
+    expect(files.some((file) => path.basename(file) === hash + ".png")).toBe(true);
+    const result = await sharp(Buffer.from(data!.split(",")[1], "base64")).raw().toBuffer({ resolveWithObject: true });
+    expect(result.info).toMatchObject(profile);
+    const center = (90 * 321 + 160) * result.info.channels;
+    expect([...result.data.subarray(center, center + 3)]).toEqual([0, 255, 0]);
+  } finally {
+    await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await app.close().catch(() => {});
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 test("native rail composition captures canonical custom CSS pixels, excludes editor overlays and releases the surface", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-preview-"));

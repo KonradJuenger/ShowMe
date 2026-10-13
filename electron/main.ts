@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import {
   planPresentationImages,
   MAX_PREPARED_IMAGE_PIXELS,
+  type ImageRequestProfile,
 } from "../src/core/presentationImages";
 import { ImagePreparationCoordinator } from "../src/core/imagePreparationCoordinator";
 import {
@@ -1185,6 +1186,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     if (slideId) {
       idSchema.parse(slideId);
       await operations.documentProjection(id, slideId);
+      imageCache.prioritizeCanvas(id, slideId);
       imagePreparation.prioritize(id, slideId);
     }
     await imagePreparation.reconcile(id, retry);
@@ -1201,7 +1203,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     idSchema.parse(slideId);
     idSchema.parse(elementId);
     const projection = await operations.documentProjection(id, slideId);
-    const profile =
+    const profile: ImageRequestProfile =
       outputProfile === undefined
         ? imagePreparationProfile()
         : z
@@ -1238,6 +1240,8 @@ const operations: Record<string, (...args: any[]) => any> = {
       requirement.size,
       requirement.width,
       requirement.height,
+      profile.sampling === "canvas" ? 2 : 1,
+      profile.sampling === "canvas" ? `${id}:${slideId}` : undefined,
     );
   },
   async preparedAssetImage(assetId: string, size: number) {

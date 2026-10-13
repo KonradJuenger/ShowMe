@@ -3,6 +3,7 @@ import { resolveTextTypography } from "../core/textTypography";
 import type { EffectClockOrigins } from "../core/effectClocks";
 import { resolveVisualSlide } from "../core/templates";
 import { usePreparedImage } from "./usePreparedImage";
+import { useCanvasImagePrefetch } from "./useCanvasImagePrefetch";
 import {
   planPresentationImages,
   type ImageRequestProfile,
@@ -1012,6 +1013,13 @@ export const SlideRenderer = memo(function SlideRenderer({
     canvasImageSampling,
     deferImageUpdates,
   ]);
+  useCanvasImagePrefetch(
+    root,
+    deck,
+    slide.id,
+    imageContext?.profile,
+    preparedImages && canvasImageSampling && !deferImageUpdates,
+  );
   return (
     <EffectRenderContext.Provider value={effectRender}>
       <EffectResourcesContext.Provider
