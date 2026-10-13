@@ -1,5 +1,10 @@
 import { PropertySection } from "./ElementPanel";
 import type { SelectionMode } from "../core/editorPreferences";
+import {
+  defaultDragSnapSettings,
+  type DragSnapSettings,
+  type DragSnapMode,
+} from "../core/dragSnapping";
 import "./EditorSettings.css";
 
 export interface EditorSettingsProps {
@@ -14,6 +19,8 @@ export interface EditorSettingsProps {
   onToggleSnapToGuides(): void;
   snapToSlide: boolean;
   onToggleSnapToSlide(): void;
+  dragSnapping: DragSnapSettings;
+  onDragSnappingChange(settings: DragSnapSettings): void;
   showRulers: boolean;
   onToggleRulers(): void;
   showGuides: boolean;
@@ -28,6 +35,39 @@ export interface EditorSettingsProps {
 }
 
 export function EditorSettings(props: EditorSettingsProps) {
+  const slider = (
+    label: string,
+    key: Exclude<keyof DragSnapSettings, "mode">,
+    min: number,
+    max: number,
+    step = 1,
+    unit = "px",
+  ) => (
+    <label className="element-wide editor-snap-slider">
+      <span>
+        {label}{" "}
+        <output>
+          {props.dragSnapping[key]} {unit}
+        </output>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        aria-label={label}
+        aria-valuetext={`${props.dragSnapping[key]} ${unit}`}
+        value={props.dragSnapping[key]}
+        disabled={!props.snapping}
+        onChange={(event) =>
+          props.onDragSnappingChange({
+            ...props.dragSnapping,
+            [key]: Number(event.target.value),
+          })
+        }
+      />
+    </label>
+  );
   const toggle = (label: string, checked: boolean, onChange: () => void) => (
     <label className="element-property element-property-checkbox">
       <span>{label}</span>
@@ -109,6 +149,72 @@ export function EditorSettings(props: EditorSettingsProps) {
           props.snapToSlide,
           props.onToggleSnapToSlide,
         )}
+        <label className="element-property element-wide">
+          <span>Drag prototype</span>
+          <select
+            value={props.dragSnapping.mode}
+            onChange={(event) =>
+              props.onDragSnappingChange({
+                ...props.dragSnapping,
+                mode: event.target.value as DragSnapMode,
+              })
+            }
+          >
+            <option value="magnetic">A · Soft magnetic</option>
+            <option value="intent">B · Intent latch</option>
+            <option value="classic">Current snapping (compare)</option>
+          </select>
+        </label>
+        {props.dragSnapping.mode === "magnetic" ? (
+          <>
+            <p className="element-wide editor-selection-description">
+              Gradual attraction with exact alignment near the target. Narrower
+              zones in dense layouts keep target changes smooth.
+            </p>
+            {slider("Attraction distance", "magneticRadius", 6, 24)}
+            {slider("Exact alignment zone", "magneticCore", 0.5, 3, 0.5)}
+          </>
+        ) : props.dragSnapping.mode === "intent" ? (
+          <>
+            <p className="element-wide editor-selection-description">
+              Slow down to capture an alignment. It stays held until you pull
+              away, then eases back to your pointer. Fast passes stay free.
+            </p>
+            {slider("Capture distance", "intentCapture", 1, 8)}
+            {slider("Hold distance", "intentRelease", 10, 24)}
+            {slider(
+              "Capture below speed",
+              "intentSpeed",
+              150,
+              1200,
+              50,
+              "px/s",
+            )}
+          </>
+        ) : (
+          <p className="element-wide editor-selection-description">
+            Original nearest-target snapping and 10-unit movement grid.
+          </p>
+        )}
+        {props.dragSnapping.mode !== "classic" && (
+          <button
+            type="button"
+            className="element-wide"
+            onClick={() =>
+              props.onDragSnappingChange({
+                ...defaultDragSnapSettings,
+                mode: props.dragSnapping.mode,
+              })
+            }
+          >
+            Reset tuning
+          </button>
+        )}
+        <p className="element-wide editor-selection-description">
+          Drag experiments apply to objects and multi-selection. Resize and
+          media-content snapping keep their current behavior. Tuning lasts for
+          this editor session.
+        </p>
         <p className="element-wide">
           Hold Alt while dragging to bypass snapping.
         </p>

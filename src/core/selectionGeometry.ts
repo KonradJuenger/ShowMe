@@ -5,6 +5,7 @@ import type { Deck, Slide } from "./document";
 import {
   IDENTITY,
   inverse,
+  localMatrix,
   multiply,
   transformPoint,
   type Matrix,
@@ -350,7 +351,17 @@ export function scopeSnapTargets(
     if (!children) throw new Error(`Unknown or non-container scope: ${scopeId}`);
     const boxes = children
       .filter(({ id }) => !selected.has(id))
-      .map(({ id }) => elementBoundsInScope(slide, id, scopeId));
+      // Direct children already have frames in this scope. Avoid one full
+      // scene lookup per sibling while preparing a large gesture target set.
+      .map((element) =>
+        boundsFromPoints(
+          rectangleCorners(
+            localMatrix(element.frame),
+            element.frame.width,
+            element.frame.height,
+          ),
+        ),
+      );
     target.x.objects = boxes.flatMap((box) => [
       box.x,
       box.x + box.width / 2,

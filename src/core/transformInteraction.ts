@@ -23,8 +23,15 @@ import {
   selectionWorldGeometry,
   worldPointToScope,
   worldVectorToScope,
+  getSelectionScopeWorldMatrix,
 } from "./selectionGeometry";
 import { resolveResizeSnapAxis, resolveSnapAxis } from "./snapping";
+import {
+  createDragSnapAxis,
+  type DragSnapSettings,
+  type DragAxisResult,
+} from "./dragSnapping";
+import { measurePerformance } from "./performance";
 
 export type TransformSnapshot = EditorSnapshot | EditorChange;
 export type GestureMeasurement = Box & { rotation?: number };
@@ -148,6 +155,97 @@ export function previewMove(
     changed: changed(snapshot, next),
     scopeGuides,
     measurement: measurement(next, ids, scopeId),
+  };
+}
+
+/** Gesture-local move solver; document writes still go through the existing commit path. */
+export function createMoveGesture(
+  snapshot: TransformSnapshot,
+  ids: readonly string[],
+  scopeId: ScopeId,
+  options: TransformSnapOptions,
+  settings: DragSnapSettings,
+  startedAt: number,
+) {
+  requireDirectSelection(snapshot, ids, scopeId);
+  const matrix = getSelectionScopeWorldMatrix(snapshot.slide, scopeId);
+  const toScope = inverse(matrix);
+  const pixelsX = options.scale * Math.hypot(matrix[0], matrix[1]);
+  const pixelsY = options.scale * Math.hypot(matrix[2], matrix[3]);
+  const initialMeasurement = measurement(snapshot, ids, scopeId);
+  const { moving, xAxis, yAxis } = measurePerformance(
+    "interaction.snap.prepare",
+    () => {
+      const moving = selectionBoundsInScope(snapshot.slide, ids, scopeId);
+      const targets = scopeSnapTargets(snapshot.slide, snapshot.deck, scopeId, ids, {
+        objects: options.enabled && options.toObjects,
+        guides: options.enabled && options.toGuides,
+        slide: options.enabled && options.toSlide,
+      });
+      return {
+        moving,
+        xAxis: createDragSnapAxis(moving.width, targets.x, pixelsX, settings),
+        yAxis: createDragSnapAxis(moving.height, targets.y, pixelsY, settings),
+      };
+    },
+  );
+  let previous = { x: 0, y: 0, time: startedAt };
+  let speedX = 0;
+  let speedY = 0;
+
+  return (worldDelta: Point, time: number, bypass = false): TransformPreview => {
+    const raw = {
+      x: toScope[0] * worldDelta.x + toScope[2] * worldDelta.y,
+      y: toScope[1] * worldDelta.x + toScope[3] * worldDelta.y,
+    };
+    const elapsed = time - previous.time;
+    let currentSpeedX = speedX;
+    let currentSpeedY = speedY;
+    if (elapsed > 0) {
+      const instantaneousX =
+        (Math.abs(raw.x - previous.x) * pixelsX * 1000) / elapsed;
+      const instantaneousY =
+        (Math.abs(raw.y - previous.y) * pixelsY * 1000) / elapsed;
+      const blend = 1 - Math.exp(-elapsed / 32);
+      speedX += (instantaneousX - speedX) * blend;
+      speedY += (instantaneousY - speedY) * blend;
+      // React immediately to fast movement; decay smoothly when slowing down.
+      currentSpeedX = Math.max(instantaneousX, speedX);
+      currentSpeedY = Math.max(instantaneousY, speedY);
+      previous = { ...raw, time };
+    }
+    const snapped = measurePerformance(
+      "interaction.snap.query",
+      (): { x: DragAxisResult; y: DragAxisResult } => {
+        if (!options.enabled || bypass) {
+          xAxis.reset();
+          yAxis.reset();
+          return { x: { value: moving.x + raw.x }, y: { value: moving.y + raw.y } };
+        }
+        return {
+          x: xAxis.resolve(moving.x + raw.x, currentSpeedX),
+          y: yAxis.resolve(moving.y + raw.y, currentSpeedY),
+        };
+      },
+    );
+    const dx = snapped.x.value - moving.x;
+    const dy = snapped.y.value - moving.y;
+    const next = translateElements(snapshot, ids, dx, dy, scopeId);
+    const worldX = matrix[0] * dx + matrix[2] * dy;
+    const worldY = matrix[1] * dx + matrix[3] * dy;
+    return {
+      snapshot: next,
+      changed: changed(snapshot, next),
+      scopeGuides: {
+        x: snapped.x.source === "persistent" ? undefined : snapped.x.guide,
+        y: snapped.y.source === "persistent" ? undefined : snapped.y.guide,
+      },
+      measurement: {
+        ...initialMeasurement,
+        x: initialMeasurement.x + worldX,
+        y: initialMeasurement.y + worldY,
+      },
+    };
   };
 }
 

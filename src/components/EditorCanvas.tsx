@@ -26,6 +26,7 @@ import {
 import type { EditorTransport } from "../core/editorSession";
 import {
   createOptimisticLease,
+  createMoveGesture,
   previewMove,
   previewResize,
   previewRotation,
@@ -55,6 +56,10 @@ import {
   type MediaIntrinsic,
 } from "../core/media";
 import { resolveSnapAxis, resolveResizeSnapAxis } from "../core/snapping";
+import {
+  defaultDragSnapSettings,
+  type DragSnapSettings,
+} from "../core/dragSnapping";
 import {
   selectionCssTransform,
   scopeGuidesToWorld,
@@ -93,6 +98,7 @@ export interface EditorCanvasSnapping {
   toObjects: boolean;
   toGuides: boolean;
   toSlide: boolean;
+  drag: DragSnapSettings;
 }
 
 export type EditorController = ReturnType<typeof useEditorSession>;
@@ -164,6 +170,7 @@ const defaultSnapping: EditorCanvasSnapping = {
   toObjects: true,
   toGuides: true,
   toSlide: true,
+  drag: defaultDragSnapSettings,
 };
 
 const resizeHandles: readonly ResizeHandle[] = [
@@ -701,6 +708,17 @@ export function EditorCanvasSurface({
         pointerStart.clientX,
         pointerStart.clientY,
       );
+      const refinedMove =
+        snapConfig.drag.mode === "classic"
+          ? null
+          : createMoveGesture(
+              base.snapshot,
+              base.movingElementIds,
+              scopeId,
+              transformSnapOptions(false),
+              snapConfig.drag,
+              event.timeStamp,
+            );
       let finalPreview: TransformSnapshot = base.snapshot;
       let moveChanged = false;
       const rollback = () => {
@@ -723,13 +741,16 @@ export function EditorCanvasSurface({
         renderPreview,
         applyPreview: (pointer) => {
           const point = pointToSlide(pointer.clientX, pointer.clientY);
-          const preview = previewMove(
-            base.snapshot,
-            base.movingElementIds,
-            scopeId,
-            { x: point.x - startWorld.x, y: point.y - startWorld.y },
-            transformSnapOptions(pointer.altKey),
-          );
+          const delta = { x: point.x - startWorld.x, y: point.y - startWorld.y };
+          const preview = refinedMove
+            ? refinedMove(delta, pointer.timeStamp, pointer.altKey)
+            : previewMove(
+                base.snapshot,
+                base.movingElementIds,
+                scopeId,
+                delta,
+                transformSnapOptions(pointer.altKey),
+              );
           const cropSnapshot = duplicate
             ? preview.snapshot
             : preserveCropSnapshot(
@@ -766,6 +787,7 @@ export function EditorCanvasSurface({
       runCompletedGesture,
       setSelection,
       snapshotRef,
+      snapConfig.drag,
       transformSnapOptions,
     ],
   );

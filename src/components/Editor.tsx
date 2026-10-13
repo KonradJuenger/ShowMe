@@ -19,6 +19,7 @@ import {
 } from "react";
 import { findElement, getChildren, resolveEditableScope } from "../core/scene";
 import { isMediaContent } from "../core/media";
+import { defaultDragSnapSettings } from "../core/dragSnapping";
 import {
   frameCssTransform,
   frameCssOrigin,
@@ -375,6 +376,7 @@ export function Editor({
   const spaceHeld = useRef(false);
   const [selectionMode, setSelectionMode] = useState(readSelectionMode);
   const [snapping, setSnapping] = useState(true);
+  const [dragSnapping, setDragSnapping] = useState(defaultDragSnapSettings);
   const [snapToObjects, setSnapToObjects] = useState(true);
   const [snapToGuides, setSnapToGuides] = useState(true);
   const [snapToSlide, setSnapToSlide] = useState(true);
@@ -1356,6 +1358,7 @@ export function Editor({
               toObjects: snapToObjects,
               toGuides: snapToGuides,
               toSlide: snapToSlide,
+              drag: dragSnapping,
             }}
             className="slide-scale"
             cropFrameId={cropping}
@@ -1698,6 +1701,8 @@ export function Editor({
             onToggleSnapToGuides={() => setSnapToGuides((value) => !value)}
             snapToSlide={snapToSlide}
             onToggleSnapToSlide={() => setSnapToSlide((value) => !value)}
+            dragSnapping={dragSnapping}
+            onDragSnappingChange={setDragSnapping}
             showRulers={showRulers}
             onToggleRulers={() => setShowRulers((value) => !value)}
             showGuides={showGuides}

@@ -1,5 +1,16 @@
 [
   {
+    "id": "editor-drag-snapping",
+    "path": "tests/feature/editor/drag-snapping.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Continuous magnetic attraction through dense target changes, indexed anchor/source ties, screen-space tuning, velocity-gated intent capture and eased release, aggregate selection movement, gesture-local bypass and unchanged classic behavior, transformed scope alignment and preview measurements, rotated/mirrored sibling bounds and one authority move with undo/redo"
+  },
+  {
     "id": "effects-mixed-compositing",
     "path": "tests/feature/effects/mixed-compositing.spec.ts",
     "area": "effects",
