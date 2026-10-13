@@ -4,35 +4,15 @@ type PaintCanvas = HTMLCanvasElement & { requestPaint?: () => void };
 type PaintContext = CanvasRenderingContext2D & {
   drawElementImage?: (element: HTMLElement, x: number, y: number) => DOMMatrix;
 };
-export type DomRasterBackend = "svg" | "native" | "native-naive";
-let experimentBackend: DomRasterBackend = "native";
 let captureId = 0;
-// Electron's decoded callback route regresses decoder drops under many-video
-// load. Poll until that route has matching playback and freshness evidence.
-let videoInvalidation: "decoded" | "poll" = "poll";
 let refreshMode: "batched" | "interleaved" = "batched";
-export function setDomRasterRefreshExperiment(mode: "batched" | "interleaved") {
+/** Pixel-parity reference control. Production batches reads. */
+export function setDomRasterReadBatchingForTests(
+  mode: "batched" | "interleaved",
+) {
   refreshMode = mode;
 }
-/** Runtime-only matched benchmark control; sampled when a source is created. */
-export function setDomRasterVideoExperiment(mode: "decoded" | "poll") {
-  videoInvalidation = mode;
-}
-/** In-memory benchmark control. Production always starts with native capture. */
-export function setDomRasterExperimentBackend(backend: DomRasterBackend) {
-  experimentBackend = backend;
-}
-const metrics = {
-  captures: 0,
-  clones: 0,
-  styleReads: 0,
-  styleMs: 0,
-  paintMs: 0,
-  mediaCopies: 0,
-  mediaCopyBytes: 0,
-  videoSamples: 0,
-  videoSampleAgeMs: 0,
-};
+const metrics = { captures: 0, clones: 0, styleReads: 0 };
 export function domRasterDiagnostics() {
   return { ...metrics };
 }
@@ -51,11 +31,10 @@ export function createDomRasterSource(
   const canvas = document.createElement("canvas") as PaintCanvas;
   const context = canvas.getContext("2d") as PaintContext | null;
   if (!context) throw new Error("Cannot allocate DOM source surface");
-  const backend: DomRasterBackend = experimentBackend;
-  const decodedVideo = refined && videoInvalidation === "decoded";
+  const backend = "native" as const;
   const batchReads = refined && refreshMode === "batched";
   const scope = `capture-${++captureId}`;
-  if (backend !== "svg" && (!context.drawElementImage || !canvas.requestPaint))
+  if (!context.drawElementImage || !canvas.requestPaint)
     throw new Error(
       "Native HTML-in-Canvas capture is unavailable in this Electron runtime.",
     );
@@ -64,10 +43,8 @@ export function createDomRasterSource(
   canvas.setAttribute("inert", "");
   canvas.style.cssText =
     "position:fixed;left:0;top:0;z-index:-2147483648;pointer-events:none;";
-  if (backend !== "svg") {
-    canvas.setAttribute("layoutsubtree", "");
-    document.body.append(canvas);
-  }
+  canvas.setAttribute("layoutsubtree", "");
+  document.body.append(canvas);
   let root: HTMLElement | null = null;
   let pairs: Array<{
     original: HTMLElement;
@@ -91,10 +68,8 @@ export function createDomRasterSource(
   let lastTransform = "";
   let animationFrame = 0;
   let wasDynamic = false;
-  let sampledVideos: number[] = [];
   let bitmapWritten = false;
   let structureRevision = 0;
-  const videoFrames = new Map<HTMLVideoElement, number>();
   const included = (node: HTMLElement) => {
     for (
       let ancestor: HTMLElement | null = node;
@@ -106,31 +81,7 @@ export function createDomRasterSource(
     }
     return false;
   };
-  const syncVideos = () => {
-    if (!decodedVideo) return;
-    const current = new Set(
-      Array.from(
-        originalRoot.querySelectorAll<HTMLVideoElement>("video"),
-      ).filter(included),
-    );
-    for (const [video, id] of videoFrames)
-      if (!current.has(video)) {
-        video.cancelVideoFrameCallback(id);
-        videoFrames.delete(video);
-      }
-    for (const video of current)
-      if (
-        !videoFrames.has(video) &&
-        typeof video.requestVideoFrameCallback === "function"
-      ) {
-        const decoded = () => {
-          if (disposed) return;
-          markDirty();
-          videoFrames.set(video, video.requestVideoFrameCallback(decoded));
-        };
-        videoFrames.set(video, video.requestVideoFrameCallback(decoded));
-      }
-  };
+  // Polling preserves decoder throughput in the native capture route.
   const pollAnimations = () => {
     animationFrame = 0;
     if (disposed) return;
@@ -138,11 +89,7 @@ export function createDomRasterSource(
       .getAnimations({ subtree: true })
       .some((animation) => animation.playState === "running");
     const playing = Array.from(originalRoot.querySelectorAll("video")).some(
-      (video) =>
-        (!refined || included(video)) &&
-        !video.paused &&
-        (!decodedVideo ||
-          typeof video.requestVideoFrameCallback !== "function"),
+      (video) => (!refined || included(video)) && !video.paused,
     );
     if (animated || playing || wasDynamic) {
       dirty = true;
@@ -151,7 +98,6 @@ export function createDomRasterSource(
     wasDynamic = animated || playing;
     if (wasDynamic) animationFrame = requestAnimationFrame(pollAnimations);
   };
-  const images = new Map<string, Promise<string>>();
   const markDirty = () => {
     if (disposed) return;
     dirty = true;
@@ -232,10 +178,8 @@ export function createDomRasterSource(
   const loaded = () => markDirty();
   source().addEventListener("load", loaded, true);
   const originalRoot = source();
-  syncVideos();
   animationFrame = requestAnimationFrame(pollAnimations);
-  // Freeze pseudo-elements too. Copying entire stylesheets into an SVG image
-  // would apply application body/:root rules to the image's own document.
+  // Freeze pseudo-elements without copying global page styles into the mirror.
   const styles = document.createElement("style");
   const viewport = document.createElement("div");
   const build = () => {
@@ -315,11 +259,8 @@ export function createDomRasterSource(
       .join("");
   };
   const refresh = () => {
-    const start = performance.now();
-    sampledVideos = [];
     bitmapWritten = false;
     if (refined) {
-      syncVideos();
       const structural = Array.from(
         originalRoot.querySelectorAll<HTMLElement>("[data-effect-source]"),
       ).map((node) => [node.parentElement?.dataset.effectId, include(node)]);
@@ -329,7 +270,7 @@ export function createDomRasterSource(
         structureDirty = true;
       }
     }
-    if (backend !== "native" || structureDirty || !root) build();
+    if (structureDirty || !root) build();
     const pseudoRules: string[] = [];
     const read = (pair: (typeof pairs)[number]) => {
       const { original, clone } = pair;
@@ -397,7 +338,7 @@ export function createDomRasterSource(
           original instanceof HTMLCanvasElement
             ? `${original.closest<HTMLElement>("[data-effect-id]")?.dataset.effectRevision}:${original.width}:${original.height}`
             : `${original.currentTime}:${original.videoWidth}:${original.videoHeight}`;
-        if (next !== pair.revision || backend === "svg") {
+        if (next !== pair.revision) {
           const output = pair.bitmap!;
           const bitmapWidth =
             original instanceof HTMLCanvasElement
@@ -414,10 +355,6 @@ export function createDomRasterSource(
             bitmapContext.clearRect(0, 0, output.width, output.height);
             bitmapContext.drawImage(original, 0, 0);
             bitmapWritten = true;
-            metrics.mediaCopies++;
-            metrics.mediaCopyBytes += output.width * output.height * 4;
-            if (original instanceof HTMLVideoElement)
-              sampledVideos.push(performance.now());
           }
           pair.revision = next;
         }
@@ -454,68 +391,8 @@ export function createDomRasterSource(
     root!.style.setProperty("position", "relative", "important");
     root!.style.setProperty("left", "0px", "important");
     root!.style.setProperty("top", "0px", "important");
-    metrics.styleMs += performance.now() - start;
   };
   let structureKey = "";
-  const embedImage = (url: string) => {
-    if (!images.has(url))
-      images.set(
-        url,
-        fetch(url)
-          .then((response) => {
-            if (!response.ok)
-              throw new Error("Cannot load DOM shader image input");
-            return response.blob();
-          })
-          .then(
-            (blob) =>
-              new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result));
-                reader.onerror = () =>
-                  reject(new Error("Cannot embed DOM shader image input"));
-                reader.readAsDataURL(blob);
-              }),
-          ),
-      );
-    return images.get(url)!;
-  };
-  const svgPaint = async (
-    width: number,
-    height: number,
-    logicalWidth: number,
-    logicalHeight: number,
-  ) => {
-    const copy = root!.cloneNode(true) as HTMLElement;
-    const originals = Array.from(root!.querySelectorAll("canvas,img"));
-    const copies = Array.from(copy.querySelectorAll("canvas,img"));
-    await Promise.all(
-      originals.map(async (original, index) => {
-        const node = copies[index];
-        if (original instanceof HTMLCanvasElement) {
-          const image = document.createElement("img");
-          image.style.cssText = (node as HTMLElement).style.cssText;
-          image.src = original.toDataURL();
-          node.replaceWith(image);
-        } else if (original instanceof HTMLImageElement && original.src) {
-          (node as HTMLImageElement).src = original.src.startsWith("data:")
-            ? original.src
-            : await embedImage(original.currentSrc || original.src);
-        }
-      }),
-    );
-    const serialized = new XMLSerializer().serializeToString(copy);
-    const css = new XMLSerializer().serializeToString(styles);
-    const matrix = sourceTransform();
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logicalWidth} ${logicalHeight}"><g transform="matrix(${matrix.a} ${matrix.b} ${matrix.c} ${matrix.d} ${matrix.e} ${matrix.f})"><foreignObject width="${root!.style.width}" height="${root!.style.height}">${css}${serialized}</foreignObject></g></svg>`;
-    const image = new Image();
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-    await image.decode();
-    if (disposed) return;
-    context.resetTransform();
-    context.clearRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
-  };
   return {
     canvas,
     backend,
@@ -539,11 +416,7 @@ export function createDomRasterSource(
         .getAnimations({ subtree: true })
         .some((animation) => animation.playState === "running");
       const video = Array.from(originalRoot.querySelectorAll("video")).some(
-        (node) =>
-          (!refined || included(node)) &&
-          !node.paused &&
-          (!decodedVideo ||
-            typeof node.requestVideoFrameCallback !== "function"),
+        (node) => (!refined || included(node)) && !node.paused,
       );
       if (
         !dirty &&
@@ -556,7 +429,6 @@ export function createDomRasterSource(
         !video
       )
         return;
-      const start = performance.now();
       let captured = false;
       const paint = dependencies().then(async () => {
         if (disposed) return;
@@ -580,13 +452,11 @@ export function createDomRasterSource(
         const matrix = sourceTransform();
         canvas.dataset.domRasterTransform = matrix.toString();
         viewport.style.cssText = `position:relative;width:${logicalWidth}px;height:${logicalHeight}px;overflow:hidden;`;
-        if (backend !== "svg") {
-          // Capture a viewport whose descendant carries the world transform.
-          // Native recording omits its root transform and can cull untransformed
-          // content outside the ancestor canvas (notably at fractional Windows DPR).
-          root!.style.setProperty("transform", matrix.toString(), "important");
-          root!.style.setProperty("transform-origin", "0 0", "important");
-        }
+        // Capture a viewport whose descendant carries the world transform.
+        // Native recording omits its root transform and can cull untransformed
+        // content outside the ancestor canvas (notably at fractional Windows DPR).
+        root!.style.setProperty("transform", matrix.toString(), "important");
+        root!.style.setProperty("transform-origin", "0 0", "important");
         // Compare the same paint inputs without concatenating/escaping every
         // node's complete declarations into another large JSON string.
         const snapshot: SnapshotValue[] = [
@@ -612,62 +482,56 @@ export function createDomRasterSource(
           ]),
         ];
         if (
-          backend === "native" &&
           lastSnapshot?.length === snapshot.length &&
           snapshot.every((value, index) => value === lastSnapshot![index])
         )
           return;
         captured = true;
-        return (
-          backend === "svg"
-            ? svgPaint(width, height, logicalWidth, logicalHeight)
-            : new Promise<void>((resolve, reject) => {
-                const finish = () => {
-                  clearTimeout(timer);
-                  canvas.removeEventListener("paint", painted);
-                  canvas.removeEventListener("paint", primed);
-                  cancelPaint = null;
-                };
-                const painted = () => {
-                  finish();
-                  if (disposed) {
-                    resolve();
-                    return;
-                  }
-                  try {
-                    context.resetTransform();
-                    context.clearRect(0, 0, width, height);
-                    // drawElementImage already maps the element's CSS viewport
-                    // into this canvas's bitmap size. Applying sampling density
-                    // again would double both editor zoom and display scaling.
-                    context.drawElementImage!(viewport, 0, 0);
-                    resolve();
-                  } catch (error) {
-                    reject(error);
-                  }
-                };
-                const primed = () => {
-                  if (disposed) return;
-                  canvas.addEventListener("paint", painted, { once: true });
-                  canvas.requestPaint!();
-                };
-                const timer = setTimeout(() => {
-                  finish();
-                  reject(new Error("DOM shader input paint timed out"));
-                }, 1500);
-                cancelPaint = () => {
-                  finish();
-                  resolve();
-                };
-                // A nested canvas's latest bitmap is committed during paint. Waiting
-                // one paint before recording avoids sampling the preceding shader frame.
-                if (bitmapWritten) {
-                  canvas.addEventListener("paint", primed, { once: true });
-                } else
-                  canvas.addEventListener("paint", painted, { once: true });
-                canvas.requestPaint!();
-              })
-        ).then(() => {
+        return new Promise<void>((resolve, reject) => {
+          const finish = () => {
+            clearTimeout(timer);
+            canvas.removeEventListener("paint", painted);
+            canvas.removeEventListener("paint", primed);
+            cancelPaint = null;
+          };
+          const painted = () => {
+            finish();
+            if (disposed) {
+              resolve();
+              return;
+            }
+            try {
+              context.resetTransform();
+              context.clearRect(0, 0, width, height);
+              // drawElementImage already maps the element's CSS viewport
+              // into this canvas's bitmap size. Applying sampling density
+              // again would double both editor zoom and display scaling.
+              context.drawElementImage!(viewport, 0, 0);
+              resolve();
+            } catch (error) {
+              reject(error);
+            }
+          };
+          const primed = () => {
+            if (disposed) return;
+            canvas.addEventListener("paint", painted, { once: true });
+            canvas.requestPaint!();
+          };
+          const timer = setTimeout(() => {
+            finish();
+            reject(new Error("DOM shader input paint timed out"));
+          }, 1500);
+          cancelPaint = () => {
+            finish();
+            resolve();
+          };
+          // A nested canvas's latest bitmap is committed during paint. Waiting
+          // one paint before recording avoids sampling the preceding shader frame.
+          if (bitmapWritten) {
+            canvas.addEventListener("paint", primed, { once: true });
+          } else canvas.addEventListener("paint", painted, { once: true });
+          canvas.requestPaint!();
+        }).then(() => {
           lastSnapshot = snapshot;
           lastLogicalWidth = logicalWidth;
           lastLogicalHeight = logicalHeight;
@@ -677,15 +541,8 @@ export function createDomRasterSource(
       inFlight = paint
         .then(() => {
           if (!disposed && captured) {
-            const completed = performance.now();
-            metrics.videoSamples += sampledVideos.length;
-            metrics.videoSampleAgeMs += sampledVideos.reduce(
-              (sum, sampled) => sum + completed - sampled,
-              0,
-            );
             revision++;
             metrics.captures++;
-            metrics.paintMs += performance.now() - start;
           }
         })
         .catch((error) => {
@@ -701,8 +558,6 @@ export function createDomRasterSource(
       disposed = true;
       cancelPaint?.();
       cancelAnimationFrame(animationFrame);
-      for (const [video, id] of videoFrames) video.cancelVideoFrameCallback(id);
-      videoFrames.clear();
       observer.disconnect();
       document.fonts.removeEventListener("loadingdone", fontChanged);
       originalRoot.removeEventListener("load", loaded, true);
@@ -710,7 +565,6 @@ export function createDomRasterSource(
       canvas.width = canvas.height = 1;
       pairs = [];
       root = null;
-      images.clear();
     },
   };
 }

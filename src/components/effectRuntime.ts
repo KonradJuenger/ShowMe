@@ -75,11 +75,10 @@ type Surface = {
 const surfaces = new WeakMap<HTMLElement, Surface>();
 const scheduled = new Map<HTMLElement, { prepare(): void; draw(): unknown }>();
 const shaderRedraws = new Set<() => void>();
-let diagnosticsEnabled = false;
-let gpuChainingEnabled = false;
 export type EffectExecutionMode = "naive" | "refined";
 let executionMode: EffectExecutionMode = "refined";
-export function setEffectExecutionExperiment(mode: EffectExecutionMode) {
+/** Regression reference control. Production uses the refined renderer. */
+export function setEffectExecutionForTests(mode: EffectExecutionMode) {
   executionMode = mode;
 }
 type Raster =
@@ -132,29 +131,6 @@ export function effectSourceTextureBytes() {
     (sum, coordinator) => sum + coordinator.sources.textureBytes,
     0,
   );
-}
-export function setGpuEffectChainingExperiment(enabled: boolean) {
-  gpuChainingEnabled = enabled;
-}
-const runtimeMetrics = {
-  draws: 0,
-  drawMs: 0,
-  uploads: 0,
-  uploadBytes: 0,
-  uploadMs: 0,
-  copies: 0,
-  copyMs: 0,
-  textJobs: 0,
-  textResults: 0,
-  textWaitMs: 0,
-  sourceCoalesced: 0,
-  gpuSamples: 0,
-};
-export function setEffectRuntimeDiagnostics(enabled: boolean) {
-  diagnosticsEnabled = enabled;
-}
-export function effectRuntimeDiagnostics() {
-  return { ...runtimeMetrics };
 }
 function dependencyOrder(a: HTMLElement, b: HTMLElement) {
   if (a.contains(b)) return 1;
@@ -400,7 +376,7 @@ export function mountEffectSurface(
   },
 ) {
   const refined = executionMode === "refined";
-  const useGpu = refined || gpuChainingEnabled;
+  const useGpu = refined;
   const sceneRoot = samplingRoot(node, initialSampling);
   const coordinator = refined ? coordinatorFor(sceneRoot) : null;
   const dependencies = effectDependencies(definition);
@@ -662,12 +638,7 @@ export function mountEffectSurface(
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const context = resizeRasterCanvas(canvas, source.width, source.height);
     context.clearRect(0, 0, source.width, source.height);
-    const began = diagnosticsEnabled ? performance.now() : 0;
     context.drawImage(source, 0, 0);
-    if (diagnosticsEnabled) {
-      runtimeMetrics.copies++;
-      runtimeMetrics.copyMs += performance.now() - began;
-    }
     domRevision = shaderOutput.revision;
     canvas.style.visibility = "visible";
   };
@@ -820,15 +791,9 @@ export function mountEffectSurface(
         if (signature === lastTextInput) return pending;
         lastTextInput = signature;
         const revision = ++sequence;
-        const textStarted = diagnosticsEnabled ? performance.now() : 0;
-        if (diagnosticsEnabled) runtimeMetrics.textJobs++;
         pending = runner
           .render(input)
           .then((text) => {
-            if (diagnosticsEnabled) {
-              runtimeMetrics.textResults++;
-              runtimeMetrics.textWaitMs += performance.now() - textStarted;
-            }
             if (
               !live ||
               revision !== sequence ||
@@ -942,7 +907,6 @@ export function mountEffectSurface(
           return pending;
         }
         if (rasterPending) {
-          if (diagnosticsEnabled) runtimeMetrics.sourceCoalesced++;
           return pending;
         }
         if (refined && gpuInput && sourceLease) {
@@ -1057,18 +1021,11 @@ export function mountEffectSurface(
           gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
           node.dataset.effectSourceBackend = "gpu";
           node.dataset.effectSourceRevision = String(gpuInput.revision);
-          if (diagnosticsEnabled) runtimeMetrics.gpuSamples++;
         } else if (raster) {
           node.dataset.effectSourceBackend =
             "backend" in raster ? raster.backend : "primitive";
           if (refined && sourceLease) {
-            const began = diagnosticsEnabled ? performance.now() : 0;
-            const upload = sourceLease.upload(gl);
-            if (diagnosticsEnabled && upload.uploaded) {
-              runtimeMetrics.uploads++;
-              runtimeMetrics.uploadBytes += upload.bytes;
-              runtimeMetrics.uploadMs += performance.now() - began;
-            }
+            sourceLease.upload(gl);
             node.dataset.effectSourceRevision = String(raster.revision);
           } else {
             if (!texture || texture.gl !== gl) {
@@ -1095,7 +1052,6 @@ export function mountEffectSurface(
                 gl.TEXTURE_WRAP_T,
                 gl.CLAMP_TO_EDGE,
               );
-              const uploadStarted = diagnosticsEnabled ? performance.now() : 0;
               gl.texImage2D(
                 gl.TEXTURE_2D,
                 0,
@@ -1104,12 +1060,6 @@ export function mountEffectSurface(
                 gl.UNSIGNED_BYTE,
                 raster.canvas,
               );
-              if (diagnosticsEnabled) {
-                runtimeMetrics.uploads++;
-                runtimeMetrics.uploadBytes +=
-                  raster.canvas.width * raster.canvas.height * 4;
-                runtimeMetrics.uploadMs += performance.now() - uploadStarted;
-              }
               if (texture.width !== width || texture.height !== height) {
                 if (gl.getError() !== gl.NO_ERROR)
                   throw new Error(
@@ -1153,7 +1103,6 @@ export function mountEffectSurface(
             gl.uniform1f(gl.getUniformLocation(program, key), value);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
-        const drawStarted = diagnosticsEnabled ? performance.now() : 0;
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         if (useGpu && shaderOutput) {
           shaderOutput.revision++;
@@ -1175,10 +1124,6 @@ export function mountEffectSurface(
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
           }
         }
-        if (diagnosticsEnabled) {
-          runtimeMetrics.draws++;
-          runtimeMetrics.drawMs += performance.now() - drawStarted;
-        }
         if (refined) {
           if (needsDomOutput()) materialize();
           else {
@@ -1187,12 +1132,7 @@ export function mountEffectSurface(
           }
         } else {
           context!.clearRect(0, 0, width, height);
-          const copyStarted = diagnosticsEnabled ? performance.now() : 0;
           context!.drawImage(source, 0, 0);
-          if (diagnosticsEnabled) {
-            runtimeMetrics.copies++;
-            runtimeMetrics.copyMs += performance.now() - copyStarted;
-          }
         }
         canvas.style.visibility = "visible";
         if (sourceContent) sourceContent.style.opacity = "0";

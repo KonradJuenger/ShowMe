@@ -74,10 +74,6 @@ export class EffectSources<Source extends PixelSource> {
           texture.width = canvas.width;
           texture.height = canvas.height;
         }
-        return {
-          uploaded,
-          bytes: uploaded ? canvas.width * canvas.height * 4 : 0,
-        };
       },
       release: () => {
         if (released) return;

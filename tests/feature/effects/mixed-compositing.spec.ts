@@ -195,7 +195,7 @@ test("batched raster reads preserve text, pseudo-element and fitted-media pixels
     const path = "/src/components/domRaster.ts";
     const {
       createDomRasterSource,
-      setDomRasterRefreshExperiment,
+      setDomRasterReadBatchingForTests,
     }: typeof import("../../../src/components/domRaster") = await import(
       /* @vite-ignore */ path
     );
@@ -223,7 +223,7 @@ test("batched raster reads preserve text, pseudo-element and fitted-media pixels
     const images: Uint8ClampedArray[] = [];
     try {
       for (const mode of ["interleaved", "batched"] as const) {
-        setDomRasterRefreshExperiment(mode);
+        setDomRasterReadBatchingForTests(mode);
         const source = createDomRasterSource(
           () => node,
           () => true,
@@ -248,7 +248,7 @@ test("batched raster reads preserve text, pseudo-element and fitted-media pixels
         0,
       );
     } finally {
-      setDomRasterRefreshExperiment("batched");
+      setDomRasterReadBatchingForTests("batched");
       node.remove();
       style.remove();
     }
@@ -533,8 +533,7 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
       /* @vite-ignore */ outputPath
     );
     const run = async (gpu: boolean, gap: boolean, lose: boolean) => {
-      runtime.setEffectExecutionExperiment(gpu ? "refined" : "naive");
-      runtime.setGpuEffectChainingExperiment(gpu);
+      runtime.setEffectExecutionForTests(gpu ? "refined" : "naive");
       const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
         configure(model) {
           const slide = model.slides[model.deck.slideIds[0]],
@@ -603,8 +602,7 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
         remaining: css.remaining,
       };
     } finally {
-      runtime.setGpuEffectChainingExperiment(false);
-      runtime.setEffectExecutionExperiment("refined");
+      runtime.setEffectExecutionForTests("refined");
     }
   });
   expect(result.gpu.surfaces[0].backend).toBe("gpu");
