@@ -1829,7 +1829,7 @@ export function EditorCanvasSurface({
               position: "absolute",
               inset: 0,
               pointerEvents: "none",
-              boxShadow: "0 0 0 100000px rgba(221, 221, 218, 0.6)",
+              boxShadow: "0 0 0 100000px rgba(221, 221, 221, 0.6)",
               zIndex: 800,
             }}
           />
