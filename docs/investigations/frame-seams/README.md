@@ -1,7 +1,8 @@
 # Adjacent frame seams: investigation in progress
 
 Recorded 2026-10-13 against `7640df7c2b4d229a4baa51567b095d9d1901946b`.
-This branch documents the investigation. It does not implement a rendering fix.
+This branch documents the investigation and includes the limited canvas-fringe
+color fix described below. It does not implement an adjacent-frame seam fix.
 
 ## Problem and current conclusion
 
@@ -180,9 +181,9 @@ investigate, not proof that a whole renderer rewrite is required. Merely drawing
 separate antialiased objects onto a normal Canvas2D/SVG surface does not inherently
 correct their coverage.
 
-## Yellow canvas outline
+## Yellow canvas outline: neutral-gray fix
 
-The report remains unresolved. A blank editor at five zoom levels showed a faint
+The initial report was unresolved. A blank editor at five zoom levels showed a faint
 warm-gray fringe, not a distinctly yellow outline. Observed workspace color was
 `rgb(221, 221, 218)`; the outside-canvas mask used
 `rgba(221, 221, 218, 0.6)`. Preview media removed the outside mask. Disabling the
@@ -192,6 +193,40 @@ as the sole cause.
 Selection borders follow layer colors, including an amber palette entry. That is
 another candidate, but it was not verified against the developer's document.
 Do not treat the yellow outline and adjoining-frame seam as one confirmed issue.
+
+The developer subsequently requested a fix specifically for the brown/yellow
+canvas fringe. The warm cast reproduced at the blank canvas edges: both the
+workspace and outside mask used gray with a lower blue channel. The fix changes
+the workspace from `#ddddda` to neutral `#dddddd`, and the mask from
+`rgba(221, 221, 218, 0.6)` to `rgba(221, 221, 221, 0.6)`.
+
+This removes the measured warm cast while preserving the canvas shadow, outside
+content dimming, masking geometry, preview toggling, and frame rendering. It does
+not remove the normal gray canvas shadow or change selection borders. No document
+geometry, saved formats, authority, or persistence behavior changes.
+
+Targeted browser verification covered four device densities (1, 1.25, 1.5, 2) and
+five zoom levels in the actual editor, sampling all visible canvas edges. The
+before run found 175 warm samples; the after run found zero. Both runs had zero
+page errors. Preview media removed the outside mask and restored it on exit at
+each density.
+
+Exact commands and results for this fix:
+
+```text
+npm run dev -- --port 5187 --strictPort
+node .scratch/canvas-fringe-check.mjs before  # 20 cases, 175 warm samples
+node .scratch/canvas-fringe-check.mjs after   # 20 cases, 0 warm samples
+npm run test:feature -- editor               # 64 unit + 17 browser tests passed
+npm test                                    # 15 core tests passed
+git diff --check                            # passed
+```
+
+The fringe-check script and before/after screenshots are local-only investigation
+artifacts under `.scratch/` and `test-results-canvas-fringe/`. The editor browser
+suite logged `Target container is not a DOM element` during a Layers fixture even
+though all 17 tests passed; it was not investigated as part of this color-only
+change. Full/release suites, lint, typecheck, Electron, and exports were not run.
 
 ## Continuing the investigation
 
