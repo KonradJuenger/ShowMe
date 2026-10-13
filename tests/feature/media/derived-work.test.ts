@@ -151,7 +151,7 @@ it("plain rectangle movement omits media and dependencies while unknown operatio
   });
 });
 
-it("100-slide image preparation loads bounded demand and replans only affected demanded slides", async () => {
+it("100-slide image preparation completes the whole deck, deduplicates shared pixels and replans only affected slides", async () => {
   const document = newPresentationDocument("Demand"),
     base = document.slides[document.deck.slideIds[0]];
   const image = createMediaElement("image", {
@@ -211,19 +211,21 @@ it("100-slide image preparation loads bounded demand and replans only affected d
   await vi.waitFor(() =>
     expect(coordinator.status(document.documentId)?.state).toBe("ready"),
   );
-  expect(loads).toEqual([["s0", "s1"]]);
+  expect(loads).toEqual([document.deck.slideIds]);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(coordinator.image(document.documentId, "s99", image.id)).not.toBeNull();
   document.slides.s1.nodes[0].children[0].frame.width += 100;
   revision++;
   await coordinator.reconcile(document.documentId, false, ["s1"]);
   await vi.waitFor(() =>
     expect(coordinator.status(document.documentId)?.state).toBe("ready"),
   );
-  expect(loads).toEqual([["s0", "s1"], ["s1"]]);
+  expect(loads).toEqual([document.deck.slideIds, ["s1"]]);
   const prepared = prepare.mock.calls.length;
   coordinator.prioritize(document.documentId, "s1");
   await vi.waitFor(() => {
     expect(coordinator.status(document.documentId)?.state).toBe("ready");
-    expect(loads).toEqual([["s0", "s1"], ["s1"], ["s2"]]);
+    expect(loads).toEqual([document.deck.slideIds, ["s1"]]);
   });
   // The new slide shares the existing variant. Navigation must retain both
   // ready pixels and accepted requirement plans for overlapping slides.
@@ -234,7 +236,7 @@ it("100-slide image preparation loads bounded demand and replans only affected d
     expect(coordinator.status(document.documentId)?.total).toBe(2),
   );
   expect(prepare).toHaveBeenCalledTimes(prepared);
-  expect(loads).toEqual([["s0", "s1"], ["s1"], ["s2"], []]);
+  expect(loads).toEqual([document.deck.slideIds, ["s1"]]);
   await coordinator.reconcile(document.documentId, true);
   await vi.waitFor(() =>
     expect(coordinator.status(document.documentId)?.state).toBe("ready"),

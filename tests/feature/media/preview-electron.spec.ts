@@ -19,6 +19,17 @@ test("native image thumbnails prepare their small derivative instead of falling 
     await page.getByTestId("import-files").setInputFiles({ name: "Large.png", mimeType: "image/png", buffer });
     await expect(page.locator("[data-editor-stage] img").first()).toHaveAttribute("data-source-width", "4096");
     const projection = await page.evaluate(() => window.desktop!.documentProjection!(document.querySelector("[data-editor]")!.getAttribute("data-document-id")!));
+    await expect(page.locator(".empty-thumb > img").first()).toBeVisible();
+    const thumbnail = await page.locator(".empty-thumb > img").first().elementHandle();
+    await app.evaluate(({ BrowserWindow }, documentId) => {
+      const editor = BrowserWindow.getAllWindows().find(window =>
+        !/[?&](present|slidePreview|export)=/.test(window.webContents.getURL()))!;
+      editor.webContents.send("document-invalidated", { documentId });
+    }, projection.documentId);
+    await page.evaluate(() => new Promise<void>(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await thumbnail!.evaluate(image => image instanceof HTMLImageElement && image.isConnected && image.complete && image.naturalWidth > 0),
+      "The last decoded thumbnail stays visible during resource recapture").toBe(true);
     const profile = { width: 321, height: 181 };
     const requirement = planPresentationImages(projection.deck, [projection.slide], profile)[0];
     const hash = createHash("sha256").update(imageIdentity(requirement.assetId, Math.min(4096, requirement.width), Math.min(2160, requirement.height))).digest("hex");

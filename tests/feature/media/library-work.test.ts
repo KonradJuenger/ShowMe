@@ -136,11 +136,16 @@ it("cold inventory persists metadata but still verifies content at consumption",
     path.join(root, "inventory-cache"),
   );
   await cold.ready();
+  const changed = vi.fn();
+  const unsubscribe = cold.subscribe(changed);
   expect(cold.diagnostics().hashedBytes).toBe(0);
   expect(await cold.verify(id)).toBe(file);
   expect(cold.diagnostics().hashedBytes).toBe(bytes.length);
+  expect(changed).not.toHaveBeenCalled();
   await writeFile(file, Buffer.alloc(1024, 22));
   expect(await cold.verify(id)).toBeNull();
+  expect(changed).toHaveBeenCalled();
+  unsubscribe();
   cold.dispose();
 });
 

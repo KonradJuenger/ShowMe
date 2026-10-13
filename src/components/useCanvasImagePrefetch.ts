@@ -27,6 +27,7 @@ export function useCanvasImagePrefetch(
     )
       return;
     const ids = slideHierarchyRows(deck).map((row) => row.id);
+    void platform.prioritizeCanvasImages!(deck.id, slideId).catch(() => {});
     const nextId = ids[ids.indexOf(slideId) + 1];
     if (!nextId || !ids.includes(slideId)) return;
     const abort = new AbortController();

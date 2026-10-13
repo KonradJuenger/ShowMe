@@ -74,6 +74,10 @@ test("a late slide with a new image is prepared during the preceding slide inste
     contentType: "application/json",
   });
   expect(early.pendingVariants).toBe(0);
+  expect(beforeLateEntry.lateImageDecodes).toBeGreaterThan(0);
+  expect(lateEntry.lateImageDecodes,
+    "The next slide's image must already be decoded before activation",
+  ).toBe(beforeLateEntry.lateImageDecodes);
   expect(warmEntry.pendingVariants).toBe(0);
   expect(warmEntry.coldVariants).toBe(lateEntry.coldVariants);
   expect(

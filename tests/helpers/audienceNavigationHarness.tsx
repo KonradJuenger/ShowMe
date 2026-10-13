@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { installPreparedSlideImagesMock } from "./preparedSlideImagesMock";
 import { AudienceOutput } from "../../src/components/AudienceOutput";
 import { platform } from "../../src/platform";
 import { newPresentationDocument } from "../../src/core/document";
@@ -22,6 +23,7 @@ interface NavigationSnapshot {
   awaitingAudience: boolean;
   pendingVariants: number;
   coldVariants: number;
+  lateImageDecodes: number;
   requests: Array<{
     slide: number;
     assetId: string;
@@ -101,9 +103,17 @@ export function mountAudienceNavigationHarness() {
   platform.onImageReadiness = () => () => {};
 
   const requests: NavigationSnapshot["requests"] = [];
+  installPreparedSlideImagesMock(model.deck, model.slides);
   const variants = new Map<string, Promise<PreparedImage>>();
   const pending = new Map<string, () => void>();
   let coldVariants = 0;
+  let lateImageDecodes = 0;
+  const lateUrls = new Set<string>();
+  const decode = HTMLImageElement.prototype.decode;
+  HTMLImageElement.prototype.decode = function () {
+    if (lateUrls.has(this.src)) lateImageDecodes++;
+    return decode.call(this);
+  };
   platform.preparedImage = async (_documentId, slideId, elementId, profile) => {
     const requirement = planPresentationImages(
       model.deck,
@@ -146,6 +156,7 @@ export function mountAudienceNavigationHarness() {
         url: canvas.toDataURL(),
       };
       if (requirement.assetId === lateAsset) {
+        lateUrls.add(image.url);
         coldVariants++;
         variant = new Promise<PreparedImage>((resolve) => {
           pending.set(hash, () => {
@@ -175,6 +186,7 @@ export function mountAudienceNavigationHarness() {
       awaitingAudience: !!state.awaitingAudience,
       pendingVariants: pending.size,
       coldVariants,
+      lateImageDecodes,
       requests: [...requests],
     }),
   };

@@ -155,7 +155,7 @@ export class ImageVariantCache {
       return null;
     }
   }
-  prepare(
+  async prepare(
     source: string,
     assetId: string,
     size: number,
@@ -168,6 +168,14 @@ export class ImageVariantCache {
     if (this.clearing || this.closing) return Promise.resolve(null);
     if (!Number.isSafeInteger(size) || size < 1 || size > 100000)
       throw new Error("Invalid image size");
+    const metadata = await this.sourceMetadata(source);
+    if (!metadata.width || !metadata.height) throw new Error("Image dimensions unavailable");
+    const swapped = (metadata.orientation ?? 1) >= 5;
+    const sourceWidth = swapped ? metadata.height : metadata.width;
+    const sourceHeight = swapped ? metadata.width : metadata.height;
+    const fallback = imageDimensions(sourceWidth, sourceHeight, size);
+    targetWidth = Math.min(sourceWidth, targetWidth ?? fallback.width);
+    targetHeight = Math.min(sourceHeight, targetHeight ?? fallback.height);
     const root = this.root,
       generation = this.generation;
     const key =
@@ -176,8 +184,6 @@ export class ImageVariantCache {
       generation +
       ":" +
       assetId +
-      ":" +
-      size +
       ":" +
       targetWidth +
       ":" +

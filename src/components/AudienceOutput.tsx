@@ -18,6 +18,10 @@ import { SlideRenderer } from "./SlideRenderer";
 import { slideCacheFor, type CachedSlide } from "./slideCache";
 import { flattenElements } from "../core/scene";
 import { useSlideTransition } from "./useSlideTransition";
+import { flushSync } from "react-dom";
+import { useAudienceImageProfile } from "./useAudienceImageProfile";
+import { audienceImageWindow } from "../core/audienceImageWindow";
+import type { ImageOutputProfile } from "../core/presentationImages";
 
 // Retain the actual players, rather than warming disposable video elements.
 // Bound the number of prepared slides even for very long presentations.
@@ -33,6 +37,8 @@ export function AudienceOutput() {
   const revisionRef = useRef<number | undefined>(undefined);
   const onError = useCallback((cause: unknown) => setError(String(cause)), []);
   const state = usePresentationState(onError);
+  const profile = useAudienceImageProfile(state?.deckId, state?.contentRevision, onError);
+  const [presentedId, setPresentedId] = useState<string>();
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -69,7 +75,8 @@ export function AudienceOutput() {
       revisionRef.current = state?.contentRevision;
       setSlides({});
     }
-    const ids = slideIds.slice(Math.max(0, index - 1), index + 1);
+    if (!profile) return;
+    const ids = [...new Set([...slideIds.slice(Math.max(0, index - 1), index + 3), ...(presentedId ? [presentedId] : [])])];
     const retain = (records: Record<string, CachedSlide>) => Object.fromEntries(Object.entries(records).filter(([id]) => ids.includes(id)));
     const usefulPlayers = new Set<string>();
     for (const record of Object.values(Object.fromEntries(ids.flatMap(id => { const record = cache.get(id); return record ? [[id, record]] : []; })))) if (ids.includes(record.value.id)) for (const element of flattenElements(record.value)) if (element.content?.type === "video") usefulPlayers.add(videoPlayerKey(deckId, record.value.id, element.id));
@@ -81,7 +88,10 @@ export function AudienceOutput() {
       .then((rows) => {
         loaded();
         if (!live) return;
-        setSlides((old) => retain({ ...old, ...Object.fromEntries(rows) }));
+        const records = Object.fromEntries(rows);
+        const selected = new Set(audienceImageWindow(rows[0][1].deck, new Map(rows.map(([id, record]) => [id, record.value])),
+          slideIds, index, profile, presentedId !== slideIds[index] ? presentedId : state?.transition?.fromSlideId));
+        setSlides((old) => Object.fromEntries(Object.entries({ ...old, ...records }).filter(([id]) => selected.has(id))));
         const nextId = slideIds[index + 1];
         const next = nextId ? rows.find(([id]) => id === nextId)?.[1] : null;
         if (next) void cache.warmPreviews(next.value, true);
@@ -118,11 +128,15 @@ export function AudienceOutput() {
       loaded();
       live = false;
     };
-  }, [deckId, index, slideIds, state?.contentRevision]);
+  }, [deckId, index, slideIds, state?.contentRevision, state?.transition?.fromSlideId, profile, presentedId]);
 
   const activeId =
     state && state.index !== null ? state.slideIds[state.index] : undefined;
   const visibleCount = state?.slideIds.length ?? 0;
+  const onPrepared = useCallback((id: string) => {
+    if (state?.index !== null && state?.index !== undefined && state.slideIds[state.index] === id)
+      flushSync(() => setPresentedId(id));
+  }, [state?.index, state?.slideIds]);
   return (
     <main
       className={`presenter audience-output ${
@@ -134,7 +148,7 @@ export function AudienceOutput() {
       data-error={error || undefined}
       aria-label="Audience Output"
     >
-      {!state?.black &&
+      {profile &&
         Object.values(slides).map((record) => {
           const slide = record.value;
           const active = slide.id === activeId;
@@ -150,9 +164,13 @@ export function AudienceOutput() {
               }
               state={state}
               onError={onError}
+              profile={profile}
+              held={slide.id === presentedId && slide.id !== activeId}
+              onPrepared={onPrepared}
             />
           );
         })}
+      {state?.black && <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: "black", zIndex: 100 }} />}
     </main>
   );
 }
@@ -163,15 +181,21 @@ function AudienceSlide({
   prepareVideo,
   state,
   onError,
+  profile,
+  held,
+  onPrepared,
 }: {
   record: CachedSlide;
   active: boolean;
   prepareVideo: boolean;
   state: PresenterState | null;
   onError: (cause: unknown) => void;
+  profile: ImageOutputProfile;
+  held: boolean;
+  onPrepared: (id: string) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(() => Math.min(innerWidth / record.deck.width, innerHeight / record.deck.height));
   useLayoutEffect(() => {
     const resize = () =>
       setScale(
@@ -227,6 +251,8 @@ function AudienceSlide({
             return;
           }
           if (live)
+            onPrepared(record.value.id);
+          if (live)
             void platform
               .presentationCommand({
                 type: "audience-ready",
@@ -242,7 +268,7 @@ function AudienceSlide({
       live = false;
       cancelAnimationFrame(frame);
     };
-  }, [waiting, ready, sessionStartedAt, motionStartedAt, record, onError]);
+  }, [waiting, ready, sessionStartedAt, motionStartedAt, record, onError, onPrepared]);
   return (
     <div
       ref={root}
@@ -257,11 +283,11 @@ function AudienceSlide({
         marginLeft: -record.deck.width / 2,
         marginTop: -record.deck.height / 2,
         transform: `scale(${scale})`,
-        visibility: transition.visible ? "visible" : "hidden",
-        zIndex: active ? 2 : transition.outgoing ? 1 : 0,
+        visibility: held || (transition.visible && ready) ? "visible" : "hidden",
+        zIndex: active && ready ? 2 : held || transition.outgoing ? 1 : 0,
         // Shader/text output can set visibility: visible on descendants. Keep
         // prepared slides mounted, but suppress the entire inactive composition.
-        opacity: transition.visible && !transition.preparing ? 1 : 0,
+        opacity: held || (transition.visible && ready && !transition.preparing) ? 1 : 0,
       }}
     >
       <SlideRenderer
@@ -271,6 +297,7 @@ function AudienceSlide({
         prepareVideo={prepareVideo}
         presentation
         renderScale={scale}
+        imageProfile={profile}
         motionState={playbackState?.motion}
         effectClock={
           playbackState ? presenterEffectClockOrigins(playbackState) : undefined

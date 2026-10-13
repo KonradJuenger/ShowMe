@@ -5,12 +5,13 @@ import { EffectLibraryStorage } from "./effectLibrary";
 import { effectLibraryRequestSchema } from "../src/core/libraryEffects";
 import sharp from "sharp";
 import { ImageWorkQueue } from "../src/core/imageWorkQueue";
-import { resolveSlide, resolveVisualSlide } from "../src/core/templates";
+import { resolveSlide } from "../src/core/templates";
 import { randomUUID } from "node:crypto";
 import {
-  planPresentationImages,
+  audienceImageProfile as outputImageProfile,
   MAX_PREPARED_IMAGE_PIXELS,
   type ImageRequestProfile,
+  type ImageOutputProfile,
 } from "../src/core/presentationImages";
 import { ImagePreparationCoordinator } from "../src/core/imagePreparationCoordinator";
 import {
@@ -398,7 +399,9 @@ const imageCache = new ImageVariantCache(
   () => path.join(imageCacheFolder, "showme", "retained", "images"),
   () => !deleteImageCacheOnClose,
 );
+let measuredAudienceProfile: ImageOutputProfile | null = null;
 function imagePreparationProfile() {
+  if (presentation?.state && measuredAudienceProfile) return measuredAudienceProfile;
   const displays = screen.getAllDisplays();
   const display =
     displays.find(
@@ -406,10 +409,7 @@ function imagePreparationProfile() {
     ) ??
     displays.find((item) => item.id !== screen.getPrimaryDisplay().id) ??
     screen.getPrimaryDisplay();
-  return {
-    width: Math.ceil(display.size.width * display.scaleFactor),
-    height: Math.ceil(display.size.height * display.scaleFactor),
-  };
+  return outputImageProfile(display.size.width, display.size.height, display.scaleFactor);
 }
 const imagePreparation = new ImagePreparationCoordinator({
   slides: (id, slideIds) => {
@@ -423,7 +423,7 @@ const imagePreparation = new ImagePreparationCoordinator({
       ? collaboration.projection(id, slideId)
       : documentRuntime(id).projection(id, slideId),
   profile: imagePreparationProfile,
-  prepare: async (id, requirement) =>
+  prepare: async (id, requirement, priority = 0, canvas) =>
     imageCache.prepare(
       collaboration.isGuest(id)
         ? await requireStorage().verifiedAssetPath(requirement.assetId)
@@ -435,6 +435,8 @@ const imagePreparation = new ImagePreparationCoordinator({
       requirement.size,
       requirement.width,
       requirement.height,
+      priority,
+      canvas,
     ),
 });
 imagePreparation.subscribe((status) => {
@@ -1186,11 +1188,45 @@ const operations: Record<string, (...args: any[]) => any> = {
     if (slideId) {
       idSchema.parse(slideId);
       await operations.documentProjection(id, slideId);
-      imageCache.prioritizeCanvas(id, slideId);
-      imagePreparation.prioritize(id, slideId);
     }
-    await imagePreparation.reconcile(id, retry);
+    if (retry || !imagePreparation.status(id)) await imagePreparation.reconcile(id, retry);
     return imagePreparation.status(id);
+  },
+  audienceImageProfile(documentId: string) {
+    idSchema.parse(documentId);
+    return imagePreparationProfile();
+  },
+  async prepareAudience(documentId: string) {
+    const id = idSchema.parse(documentId);
+    const runtime = requirePresentation();
+    await runtime.outputShown();
+    const window = runtime.audienceWindow;
+    if (runtime.state?.deckId !== id || !window || window.isDestroyed()) throw new Error("Audience session ended");
+    const geometry: { width: number; height: number; pixelRatio: number } = await window.webContents.executeJavaScript(
+      "({ width: innerWidth, height: innerHeight, pixelRatio: devicePixelRatio })",
+    );
+    const profile = outputImageProfile(geometry.width, geometry.height, geometry.pixelRatio);
+    measuredAudienceProfile = profile;
+    imagePreparation.prioritize(id, runtime.state.slideIds[runtime.state.index ?? 0]);
+    await imagePreparation.reconcile(id);
+    if (imageCachingEnabled) await imagePreparation.ready(id, true);
+    if (runtime.state?.deckId !== id) throw new Error("Audience session ended");
+    for (const view of [editor, runtime.presenterConsoleWindow])
+      if (view && !view.isDestroyed()) view.webContents.send("presentation-displays", runtime.displays());
+    return profile;
+  },
+  async preparedSlideImages(documentId: string, slideId: string, outputProfile: unknown) {
+    if (!imageCachingEnabled) return {};
+    const id = idSchema.parse(documentId);
+    idSchema.parse(slideId);
+    const profile = z.object({ width: z.number().positive().max(100000), height: z.number().positive().max(100000),
+      sampling: z.literal("canvas").optional() }).strict().parse(outputProfile);
+    return imagePreparation.prepareSlide(id, slideId, profile, presentation?.state ? 0 : 1);
+  },
+  async prioritizeCanvasImages(documentId: string, slideId: string) {
+    if (idSchema.parse(documentId) !== activeDocumentId) throw new Error("Outside editor document");
+    await operations.renderProjection(documentId, idSchema.parse(slideId));
+    imageCache.prioritizeCanvas(documentId, slideId);
   },
   async preparedImage(
     documentId: string,
@@ -1202,7 +1238,6 @@ const operations: Record<string, (...args: any[]) => any> = {
     const id = idSchema.parse(documentId);
     idSchema.parse(slideId);
     idSchema.parse(elementId);
-    const projection = await operations.documentProjection(id, slideId);
     const profile: ImageRequestProfile =
       outputProfile === undefined
         ? imagePreparationProfile()
@@ -1214,35 +1249,7 @@ const operations: Record<string, (...args: any[]) => any> = {
             })
             .strict()
             .parse(outputProfile);
-    const requirement = planPresentationImages(
-      projection.deck,
-      [
-        resolveVisualSlide(
-          projection.deck,
-          projection.slide,
-          projection.templates ?? {},
-        ).slide,
-      ],
-      profile,
-      true,
-    ).find((item) =>
-      item.instances.some((instance) => instance.elementId === elementId),
-    );
-    if (!requirement) return null;
-    return imageCache.prepare(
-      collaboration.isGuest(id)
-        ? await requireStorage().verifiedAssetPath(requirement.assetId)
-        : await requireStorage().verifiedAssetPathForDocument(
-            id,
-            requirement.assetId,
-          ),
-      requirement.assetId,
-      requirement.size,
-      requirement.width,
-      requirement.height,
-      profile.sampling === "canvas" ? 2 : 1,
-      profile.sampling === "canvas" ? `${id}:${slideId}` : undefined,
-    );
+    return (await operations.preparedSlideImages(id, slideId, profile))[elementId] ?? null;
   },
   async preparedAssetImage(assetId: string, size: number) {
     if (!imageCachingEnabled) return null;
@@ -1949,6 +1956,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       : requireStorage().storeThumbnail(documentId, slideId, data),
   displays: () => requirePresentation().displays(),
   async present(input: PresenterState) {
+    measuredAudienceProfile = null;
     await requirePresentation().present(input);
     const state = requirePresentation().state;
     if (state?.index !== null && state?.index !== undefined) {

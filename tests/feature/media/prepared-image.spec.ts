@@ -61,10 +61,10 @@ test("small production canvas resizes neither request nor replace the displayed 
     const { platform }: typeof import("../../../src/platform") = await import(
       /* @vite-ignore */ path
     );
-    const prepare = platform.preparedImage!;
+    const prepare = platform.preparedSlideImages!;
     window.canvasImageRequests = 0;
-    platform.preparedImage = (...args) => {
-      if (args[3]?.sampling === "canvas") window.canvasImageRequests++;
+    platform.preparedSlideImages = (...args) => {
+      if (args[2]?.sampling === "canvas") window.canvasImageRequests++;
       return prepare(...args);
     };
   });

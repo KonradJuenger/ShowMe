@@ -1,5 +1,16 @@
 [
   {
+    "id": "presenter-audience-images",
+    "path": "tests/feature/presenter/audience-images.test.ts",
+    "area": "presenter",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Canonical fractional output profiles, whole-deck shared image results, read-only readiness, stable navigation generations, explicit original outcomes, closed-waiter settlement and byte-admitted resident lookahead with shared rasters and pinned output"
+  },
+  {
     "id": "presenter-audience-navigation",
     "path": "tests/feature/presenter/audience-navigation.spec.ts",
     "area": "presenter",
@@ -656,8 +667,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-11",
-    "reason": "Native screen inventory and IPC, selected audience cache profile and assignment lock through start/end"
+    "lastReviewed": "2026-10-13",
+    "reason": "Native screen inventory and IPC, selected audience cache profile and assignment lock through start/end, measured audience pixels and audience-only preparation authorization"
   },
   {
     "id": "editor-operation-work",
@@ -678,8 +689,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Metadata-only startup, lazy byte verification, targeted inventory events including referenced missing assets arriving later, watcher disposal, idle scans and single-pass imports"
+    "lastReviewed": "2026-10-13",
+    "reason": "Metadata-only startup, lazy byte verification, targeted inventory events including referenced missing assets arriving later, watcher disposal, idle scans and single-pass imports, unchanged first verification emits no pixel invalidation"
   },
   {
     "id": "media-derived-work",
@@ -690,7 +701,7 @@
     "runtime": "unit",
     "created": "2026-10-11",
     "lastReviewed": "2026-10-13",
-    "reason": "Dependency-aware invalidation, bounded demanded image planning and navigation reuse, visible image priority and abandoned-slide demotion within the memory budget, explicit image retries, immutable metadata and narrow canonical render projections"
+    "reason": "Dependency-aware invalidation, whole-deck deduplicated image planning and read-only navigation reuse, visible image priority and abandoned-slide demotion within the memory budget, explicit image retries, immutable metadata and narrow canonical render projections"
   },
   {
     "id": "persistence-lan-work",
@@ -734,7 +745,7 @@
     "runtime": "electron",
     "created": "2026-10-12",
     "lastReviewed": "2026-10-13",
-    "reason": "Canonical custom visual behavior in bounded native composition, small thumbnail derivatives instead of original raster fallback, overlay isolation, released surfaces and immutable revision"
+    "reason": "Canonical custom visual behavior in bounded native composition, small thumbnail derivatives instead of original raster fallback, overlay isolation, released surfaces and immutable revision; retained decoded sidebar thumbnail during resource invalidation"
   },
   {
     "id": "presenter-image-readiness",

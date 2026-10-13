@@ -2,7 +2,8 @@ import {
   presentationShortcut,
   type PresentationCommand,
 } from "../core/presentationSession";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ImageOutputProfile } from "../core/presentationImages";
 import type { Deck, Slide } from "../core/document";
 import { platform } from "../platform";
 import type {
@@ -24,22 +25,17 @@ export function usePresenterController(keyboard = false) {
   const onError = useCallback((error: unknown) => setError(String(error)), []);
   const state = usePresentationState(onError);
   const [displays, setDisplays] = useState<PresentationDisplay[]>([]);
-  const audienceDisplay = displays.find((display) => display.audience);
-  const audienceWidth = audienceDisplay
-    ? Math.ceil(audienceDisplay.bounds.width * audienceDisplay.scaleFactor)
-    : undefined;
-  const audienceHeight = audienceDisplay
-    ? Math.ceil(audienceDisplay.bounds.height * audienceDisplay.scaleFactor)
-    : undefined;
-  // Reuse audience rasters for small presenter previews; resizing the console
-  // must not occupy image workers with a second set of exact-size derivatives.
-  const audienceProfile = useMemo(
-    () =>
-      audienceWidth && audienceHeight
-        ? { width: audienceWidth, height: audienceHeight }
-        : undefined,
-    [audienceWidth, audienceHeight],
-  );
+  const [audienceProfile, setAudienceProfile] = useState<ImageOutputProfile>();
+  useEffect(() => {
+    if (!state?.deckId) return;
+    let live = true;
+    const update = () => { void platform.audienceImageProfile!(state.deckId).then(profile => {
+      if (live) setAudienceProfile(old => old?.width === profile.width && old.height === profile.height ? old : profile);
+    }).catch(onError); };
+    update();
+    const stop = platform.onImageReadiness?.(status => { if (!status || status.documentId === state.deckId) update(); });
+    return () => { live = false; stop?.(); };
+  }, [state?.deckId, displays, onError]);
   const [loaded, setLoaded] = useState<{
     deckId: string;
     record: CachedSlide;
