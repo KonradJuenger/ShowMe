@@ -1,5 +1,7 @@
 # Refined mixed-effect renderer: implementation and comparison
 
+**Current review:** [REVIEW.md](REVIEW.md) supersedes the blocker status below. Polling fixes the measured decoded-callback video-drop regression; raster cleanup and realistic/source-slide comparisons are complete. Budgets, complete freshness/coherence, fractional text fidelity and release/runtime coverage remain open. No document or application version bump is required. The measurements below are preserved as the earlier implementation baseline.
+
 The refined renderer substantially reduces repeated captures and hidden canvas allocations. Eight consecutive shaders improved from a median 1.58 to 58.15 terminal publications per second. Alternating CSS/shader stages improved from 3.38 to 17.49. Heavy layered scenes remain slow, and the refined path has a reproducible video-drop regression with 16 simultaneous videos. **This is draft work, not ready to merge into main.**
 
 See [HANDOFF.md](HANDOFF.md) for review priorities and proposed next experiments, and the [implementation plan](../mixed-effects-2026-10-12/IMPLEMENTATION-PLAN.md) for structure and scope. The [earlier benchmark](../mixed-effects-2026-10-12/REPORT.md) documents the naive approach and first GPU prototype.
