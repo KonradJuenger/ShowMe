@@ -1,23 +1,15 @@
 import type { SnapTargetSources } from "./snapping";
 
-export type DragSnapMode = "classic" | "magnetic" | "intent";
-
-/** Editor-local experiment settings. Distances and speeds are in screen pixels. */
+/** Editor-local drag settings. Distances and speeds are in screen pixels. */
 export interface DragSnapSettings {
-  mode: DragSnapMode;
-  magneticRadius: number;
-  magneticCore: number;
   intentCapture: number;
   intentRelease: number;
   intentSpeed: number;
 }
 
 export const defaultDragSnapSettings: DragSnapSettings = {
-  mode: "intent",
-  magneticRadius: 12,
-  magneticCore: 2,
-  intentCapture: 6,
-  intentRelease: 12,
+  intentCapture: 5,
+  intentRelease: 8,
   intentSpeed: 600,
 };
 
@@ -36,10 +28,6 @@ export interface DragSnapTarget {
   source: keyof SnapTargetSources;
   kind: "start" | "center" | "end" | "guide";
   span?: { start: number; end: number };
-}
-
-export interface DragSnapTargetSources extends SnapTargetSources {
-  features?: DragSnapTarget[];
 }
 
 export interface DragSnapContext {
@@ -178,109 +166,60 @@ export interface DragAxisResult {
   source?: keyof SnapTargetSources;
 }
 
-const sources = ["persistent", "slide", "objects"] as const;
-
-function lowerBound(values: readonly Alignment[], position: number) {
-  let low = 0;
-  let high = values.length;
-  while (low < high) {
-    const mid = (low + high) >>> 1;
-    if (values[mid].position < position) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
 function smoothstep(value: number) {
   const t = Math.max(0, Math.min(1, value));
   return t * t * (3 - 2 * t);
 }
 
-/**
- * Compile desired selection positions once, rather than scanning every target
- * for each of the three moving anchors on every pointer frame. Duplicate
- * alignments have stable guide > slide > object, then start > center > end ties.
- * Magnetic queries use binary search. Intent queries prune a range tree by
- * distance, object span and target strength without rebuilding scene geometry.
- */
+/** Compile semantic alignments once; queries prune distance, object spans and priority. */
 export function createDragSnapAxis(
   size: number,
-  targets: DragSnapTargetSources,
+  targets: readonly DragSnapTarget[],
   pixelsPerUnit: number,
   settings: DragSnapSettings,
 ) {
   const candidates: Alignment[] = [];
-  if (settings.mode === "intent" && targets.features) {
-    for (const target of targets.features) {
-      // Canvas start/end boundaries accept their matching outer edge; canvas
-      // centers accept the center. Object centers never attract moving edges.
-      const anchors =
-        target.source === "slide"
-          ? [target.kind === "start" ? 0 : target.kind === "end" ? 2 : 1]
-          : target.kind === "guide"
-            ? [0, 1, 2]
-            : target.kind === "center"
-              ? [1]
-              : [0, 2];
-      const priority =
-        target.source === "persistent"
-          ? 0
-          : target.source === "slide" && target.kind !== "center"
-            ? 1
-            : target.kind !== "center"
-              ? 2
-              : target.source === "slide"
-                ? 3
-                : 4;
-      for (const anchor of anchors)
-        candidates.push({
-          position: target.position - (size * anchor) / 2,
-          guide: target.position,
-          source: target.source,
-          priority,
-          anchor,
-          span: target.span,
-        });
-    }
-  } else
-    for (const [priority, source] of sources.entries()) {
-      for (const guide of targets[source] ?? []) {
-        if (!Number.isFinite(guide)) continue;
-        for (let anchor = 0; anchor < 3; anchor++)
-          candidates.push({
-            position: guide - (size * anchor) / 2,
-            guide,
-            source,
-            priority,
-            anchor,
-          });
-      }
-    }
-  candidates.sort(
-    (a, b) =>
-      a.position - b.position || a.priority - b.priority || a.anchor - b.anchor,
+  for (const target of targets) {
+    // Canvas start/end boundaries accept their matching outer edge; canvas
+    // centers accept the center. Object centers never attract moving edges.
+    const anchors =
+      target.source === "slide"
+        ? [target.kind === "start" ? 0 : target.kind === "end" ? 2 : 1]
+        : target.kind === "guide"
+          ? [0, 1, 2]
+          : target.kind === "center"
+            ? [1]
+            : [0, 2];
+    const priority =
+      target.source === "persistent"
+        ? 0
+        : target.source === "slide" && target.kind !== "center"
+          ? 1
+          : target.kind !== "center"
+            ? 2
+            : target.source === "slide"
+              ? 3
+              : 4;
+    for (const anchor of anchors)
+      candidates.push({
+        position: target.position - (size * anchor) / 2,
+        guide: target.position,
+        source: target.source,
+        priority,
+        anchor,
+        span: target.span,
+      });
+  }
+  const intentTree = candidateTree(
+    candidates.sort(
+      (a, b) =>
+        a.position - b.position ||
+        (a.span?.start ?? -Infinity) - (b.span?.start ?? -Infinity) ||
+        a.priority - b.priority ||
+        a.anchor - b.anchor,
+    ),
   );
-  const alignments = candidates.filter(
-    (candidate, index) =>
-      index === 0 || candidate.position !== candidates[index - 1].position,
-  );
-  // Keep distinct spans at equal coordinates: the closest object can differ as
-  // the selection moves along a line. Magnetic uses its original scalar index.
-  const intentTree =
-    settings.mode === "intent"
-      ? candidateTree(
-          candidates
-            .slice()
-            .sort(
-              (a, b) =>
-                a.position - b.position ||
-                (a.span?.start ?? -Infinity) - (b.span?.start ?? -Infinity) ||
-                a.priority - b.priority,
-            ),
-        )
-      : undefined;
   const scale = Math.max(1e-9, pixelsPerUnit);
-  const radius = settings.magneticRadius / scale;
   const capture = settings.intentCapture / scale;
   const release = Math.max(0, settings.intentRelease) / scale;
   let held: Alignment | undefined;
@@ -289,7 +228,6 @@ export function createDragSnapAxis(
   let previousPosition: number | undefined;
 
   return {
-    targetCount: alignments.length,
     reset() {
       held = undefined;
       previousPosition = undefined;
@@ -303,36 +241,34 @@ export function createDragSnapAxis(
     ): DragAxisResult {
       const previous = previousPosition;
       previousPosition = position;
-      if (settings.mode === "intent") {
-        if (
-          blockedPosition !== undefined &&
-          Math.abs(position - blockedPosition) > capture
-        )
-          blockedPosition = undefined;
-        const candidate =
-          speedPixelsPerSecond <= settings.intentSpeed
-            ? intentCandidate(
-                intentTree,
-                position,
-                previous,
-                capture,
-                release,
-                context,
-                held?.priority,
-                blockedPosition,
-              )
-            : undefined;
-        if (candidate) {
-          held = candidate;
-          capturedPosition = position;
-          return {
-            value: held.position,
-            guide: held.guide,
-            source: held.source,
-          };
-        }
+      if (
+        blockedPosition !== undefined &&
+        Math.abs(position - blockedPosition) > capture
+      )
+        blockedPosition = undefined;
+      const candidate =
+        speedPixelsPerSecond <= settings.intentSpeed
+          ? intentCandidate(
+              intentTree,
+              position,
+              previous,
+              capture,
+              release,
+              context,
+              held?.priority,
+              blockedPosition,
+            )
+          : undefined;
+      if (candidate) {
+        held = candidate;
+        capturedPosition = position;
+        return {
+          value: held.position,
+          guide: held.guide,
+          source: held.source,
+        };
       }
-      if (settings.mode === "intent" && held) {
+      if (held) {
         const distance = Math.abs(position - held.position);
         const gap = spanGap(held, context);
         if (
@@ -377,41 +313,7 @@ export function createDragSnapAxis(
         }
       }
 
-      if (settings.mode === "intent") return { value: position };
-
-      const right = lowerBound(alignments, position);
-      const left = right - 1;
-      let index = right;
-      if (
-        left >= 0 &&
-        (right === alignments.length ||
-          Math.abs(position - alignments[left].position) <=
-            Math.abs(position - alignments[right].position))
-      )
-        index = left;
-      const candidate = alignments[index];
-      if (!candidate) return { value: position };
-      const distance = Math.abs(position - candidate.position);
-
-      // Neighbor midpoints bound each attraction basin. At a target switch the
-      // correction is zero on both sides, even in a dense cluster of guides.
-      const neighbor =
-        alignments[index + (position < candidate.position ? -1 : 1)];
-      const reach = neighbor
-        ? Math.min(radius, Math.abs(neighbor.position - candidate.position) / 2)
-        : radius;
-      if (distance >= reach) return { value: position };
-      const core = Math.min(settings.magneticCore / scale, reach * 0.35);
-      if (distance <= core)
-        return {
-          value: candidate.position,
-          guide: candidate.guide,
-          source: candidate.source,
-        };
-      const weight = smoothstep((distance - core) / (reach - core));
-      return {
-        value: candidate.position + (position - candidate.position) * weight,
-      };
+      return { value: position };
     },
   };
 }

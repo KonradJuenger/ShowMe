@@ -3,10 +3,7 @@ import {
   createDragSnapAxis,
   defaultDragSnapSettings,
 } from "../../../src/core/dragSnapping";
-import {
-  createMoveGesture,
-  previewMove,
-} from "../../../src/core/transformInteraction";
+import { createMoveGesture } from "../../../src/core/transformInteraction";
 import { newPresentationDocument } from "../../../src/core/document";
 import { createTextElement } from "../../../src/core/text";
 import { findElement } from "../../../src/core/scene";
@@ -27,11 +24,6 @@ const options = {
   toSlide: false,
   scale: 1,
 };
-const magneticSettings = {
-  ...defaultDragSnapSettings,
-  mode: "magnetic" as const,
-};
-
 function fixture(): EditorSnapshot {
   const document = newPresentationDocument("Snapping");
   const slide = document.slides[document.deck.slideIds[0]];
@@ -45,69 +37,28 @@ function fixture(): EditorSnapshot {
   return { deck: document.deck, slide, templates: document.templates };
 }
 
-it("magnetic movement is continuous and monotone through attraction, exact capture and dense target switches", () => {
-  const axis = createDragSnapAxis(
-    0,
-    { objects: [100, 112, 130] },
-    1,
-    magneticSettings,
-  );
-  let previous = axis.resolve(85).value;
-  for (let x = 85.01; x <= 145; x += 0.01) {
-    const value = axis.resolve(x).value;
-    expect(value).toBeGreaterThanOrEqual(previous - 1e-9);
-    expect(value - previous).toBeLessThan(0.04);
-    previous = value;
-  }
-  expect(axis.resolve(100.5)).toEqual({
-    value: 100,
-    guide: 100,
-    source: "objects",
-  });
-  expect(axis.resolve(106)).toEqual({ value: 106 });
-  expect(axis.resolve(150.25)).toEqual({ value: 150.25 });
-  expect(axis.resolve(94).guide).toBeUndefined();
-});
-
-it("indexed anchors preserve source priority and deterministic nearest alignment in large target sets", () => {
-  const axis = createDragSnapAxis(
-    20,
-    {
-      objects: Array.from({ length: 20000 }, (_, index) => index * 100),
-      slide: [1234500],
-      persistent: [1234500, 1234500],
-    },
-    1,
-    magneticSettings,
-  );
-  expect(axis.targetCount).toBe(60000);
-  expect(axis.resolve(1234490.5)).toEqual({
-    value: 1234490,
-    guide: 1234500,
-    source: "persistent",
-  });
-  expect(axis.resolve(1234480.5)).toEqual({
-    value: 1234480,
-    guide: 1234500,
-    source: "persistent",
-  });
-});
-
-it("magnetic and intent capture distances remain constant in screen pixels at different zoom levels", () => {
-  const normal = createDragSnapAxis(0, { slide: [100] }, 1, magneticSettings);
-  const zoomed = createDragSnapAxis(0, { slide: [200] }, 0.5, magneticSettings);
-  expect(zoomed.resolve(186).value * 0.5).toBeCloseTo(normal.resolve(93).value);
-  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
-  const intent = createDragSnapAxis(0, { slide: [200] }, 0.5, settings);
-  expect(intent.resolve(186).guide).toBeUndefined();
-  expect(intent.resolve(190).guide).toBe(200);
+it("capture distances remain constant in screen pixels at different zoom levels", () => {
+  const target = [
+    { position: 200, source: "slide" as const, kind: "end" as const },
+  ];
+  const axis = createDragSnapAxis(0, target, 0.5, defaultDragSnapSettings);
+  expect(axis.resolve(188).guide).toBeUndefined();
+  expect(axis.resolve(191).guide).toBe(200);
 });
 
 it("intent latch ignores fast passes, holds its target against competitors and releases continuously", () => {
-  const axis = createDragSnapAxis(0, { objects: [100, 105] }, 1, {
-    ...defaultDragSnapSettings,
-    mode: "intent",
-  });
+  const axis = createDragSnapAxis(
+    0,
+    [100, 105].map((position) => ({
+      position,
+      source: "objects" as const,
+      kind: "start" as const,
+    })),
+    1,
+    {
+      ...defaultDragSnapSettings,
+    },
+  );
   expect(axis.resolve(99, 900)).toEqual({ value: 99 });
   expect(axis.resolve(99, 100).guide).toBe(100);
   expect(axis.resolve(105, 100)).toEqual({
@@ -115,11 +66,11 @@ it("intent latch ignores fast passes, holds its target against competitors and r
     guide: 100,
     source: "objects",
   });
-  expect(axis.resolve(112, 900).value).toBe(100);
-  expect(axis.resolve(112.001, 900).value).toBeCloseTo(100, 5);
-  expect(axis.resolve(118, 900).guide).toBeUndefined();
-  expect(axis.resolve(118, 900).value).toBe(109);
-  expect(axis.resolve(124, 900)).toEqual({ value: 124 });
+  expect(axis.resolve(108, 900).value).toBe(100);
+  expect(axis.resolve(108.001, 900).value).toBeCloseTo(100, 5);
+  expect(axis.resolve(112, 900).guide).toBeUndefined();
+  expect(axis.resolve(112, 900).value).toBe(106);
+  expect(axis.resolve(116, 900)).toEqual({ value: 116 });
   expect(axis.resolve(125.25, 100)).toEqual({ value: 125.25 });
   axis.resolve(101, 0);
   axis.reset();
@@ -134,13 +85,13 @@ it("multi-selection snaps its aggregate bounds and keeps relative geometry witho
     ["a", "b"],
     scope,
     options,
-    magneticSettings,
+    defaultDragSnapSettings,
     0,
   );
   const free = move({ x: 13.25, y: 7.75 }, 16);
   expect(findElement(free.snapshot.slide, "a")!.frame.x).toBe(33.25);
   expect(findElement(free.snapshot.slide, "b")!.frame.x).toBe(63.25);
-  const snapped = move({ x: 129, y: 17.25 }, 1000);
+  const snapped = move({ x: 129, y: 180 }, 1000);
   expect(snapped.scopeGuides.x).toBe(200);
   expect(findElement(snapped.snapshot.slide, "a")!.frame.x).toBe(150);
   expect(findElement(snapped.snapshot.slide, "b")!.frame.x).toBe(180);
@@ -155,7 +106,7 @@ it("gesture previews derive from the original snapshot, reset on bypass and comm
     ["a"],
     scope,
     options,
-    { ...defaultDragSnapSettings, mode: "intent" },
+    { ...defaultDragSnapSettings },
     0,
   );
   const captured = move({ x: 158, y: 180 }, 1000);
@@ -182,20 +133,12 @@ it("gesture previews derive from the original snapshot, reset on bypass and comm
     ["a"],
     scope,
     { ...options, enabled: false },
-    magneticSettings,
+    defaultDragSnapSettings,
     0,
   );
   expect(
     findElement(disabled({ x: 158.5, y: 0 }, 100).snapshot.slide, "a")!.frame.x,
   ).toBe(178.5);
-  const classic = previewMove(
-    initial,
-    ["a"],
-    scope,
-    { x: 13.25, y: 7.75 },
-    options,
-  );
-  expect(findElement(classic.snapshot.slide, "a")!.frame.x).toBe(30);
 });
 
 it("transformed scopes preserve local alignments and measure attraction in screen distance", () => {
@@ -219,12 +162,12 @@ it("transformed scopes preserve local alignments and measure attraction in scree
     ["a"],
     group.id,
     options,
-    magneticSettings,
+    defaultDragSnapSettings,
     0,
   );
   const delta = scopeVectorToWorld(initial.slide, group.id, {
     x: 159.5,
-    y: 13,
+    y: 180,
   });
   const result = moving(delta, 1000);
   expect(findElement(result.snapshot.slide, "a")!.frame.x).toBeCloseTo(180);
@@ -253,7 +196,7 @@ it("transformed scopes preserve local alignments and measure attraction in scree
 it("intent speed gating uses elapsed time and axis screen distances instead of event counts", () => {
   const initial = fixture();
   const scope = initial.slide.nodes[0].id;
-  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const settings = { ...defaultDragSnapSettings };
   const fast = createMoveGesture(initial, ["a"], scope, options, settings, 0);
   expect(
     findElement(fast({ x: 158, y: 180 }, 16).snapshot.slide, "a")!.frame.x,
@@ -316,11 +259,11 @@ it("refined previews commit through the existing authority with one undoable fin
     ["a", "b"],
     layerId,
     options,
-    magneticSettings,
+    defaultDragSnapSettings,
     0,
   );
   session.apply(move({ x: 13.25, y: 7.75 }, 16).snapshot, false);
-  session.apply(move({ x: 129, y: 17.25 }, 1000).snapshot, false);
+  session.apply(move({ x: 129, y: 180 }, 1000).snapshot, false);
   expect(runtime.authority.revision).toBe(before);
   session.commitPreview();
   await session.flush();
@@ -339,16 +282,14 @@ it("refined previews commit through the existing authority with one undoable fin
 });
 
 it("intent uses matching canvas boundaries and object centers instead of unrelated cross-anchor midpoints", () => {
-  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const settings = { ...defaultDragSnapSettings };
   const canvas = createDragSnapAxis(
     400,
-    {
-      features: [
-        { position: 0, source: "slide", kind: "start" },
-        { position: 540, source: "slide", kind: "center" },
-        { position: 1080, source: "slide", kind: "end" },
-      ],
-    },
+    [
+      { position: 0, source: "slide", kind: "start" },
+      { position: 540, source: "slide", kind: "center" },
+      { position: 1080, source: "slide", kind: "end" },
+    ],
     1,
     settings,
   );
@@ -363,16 +304,14 @@ it("intent uses matching canvas boundaries and object centers instead of unrelat
   });
   const center = createDragSnapAxis(
     100,
-    {
-      features: [
-        {
-          position: 250,
-          source: "objects",
-          kind: "center",
-          span: { start: 0, end: 100 },
-        },
-      ],
-    },
+    [
+      {
+        position: 250,
+        source: "objects",
+        kind: "center",
+        span: { start: 0, end: 100 },
+      },
+    ],
     1,
     settings,
   );
@@ -385,16 +324,14 @@ it("intent uses matching canvas boundaries and object centers instead of unrelat
 it("intent rejects distant objects and prunes dense equal-coordinate clutter by perpendicular proximity", () => {
   const axis = createDragSnapAxis(
     100,
-    {
-      features: Array.from({ length: 20000 }, (_, index) => ({
-        position: 1000,
-        source: "objects" as const,
-        kind: "start" as const,
-        span: { start: index * 100, end: index * 100 + 30 },
-      })),
-    },
+    Array.from({ length: 20000 }, (_, index) => ({
+      position: 1000,
+      source: "objects" as const,
+      kind: "start" as const,
+      span: { start: index * 100, end: index * 100 + 30 },
+    })),
     1,
-    { ...defaultDragSnapSettings, mode: "intent" },
+    { ...defaultDragSnapSettings },
   );
   const far = { start: -1000, end: -900, pixelsPerUnit: 1 };
   expect(axis.resolve(999, 100, far)).toEqual({ value: 999 });
@@ -405,20 +342,18 @@ it("intent rejects distant objects and prunes dense equal-coordinate clutter by 
 });
 
 it("a stronger canvas edge replaces a weaker object latch while equal-priority objects stay stable", () => {
-  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const settings = { ...defaultDragSnapSettings };
   const axis = createDragSnapAxis(
     400,
-    {
-      features: [
-        {
-          position: 1090,
-          source: "objects",
-          kind: "start",
-          span: { start: 0, end: 500 },
-        },
-        { position: 1080, source: "slide", kind: "end" },
-      ],
-    },
+    [
+      {
+        position: 1090,
+        source: "objects",
+        kind: "start",
+        span: { start: 0, end: 500 },
+      },
+      { position: 1080, source: "slide", kind: "end" },
+    ],
     1,
     settings,
   );
@@ -437,10 +372,10 @@ it("a stronger canvas edge replaces a weaker object latch while equal-priority o
 });
 
 it("deliberate sampled crossings capture an alignment while fast crossings remain free", () => {
-  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const settings = { ...defaultDragSnapSettings };
   const axis = createDragSnapAxis(
     400,
-    { features: [{ position: 1080, source: "slide", kind: "end" }] },
+    [{ position: 1080, source: "slide", kind: "end" }],
     1,
     settings,
   );
@@ -464,7 +399,7 @@ it("a left-edge latch permits bottom-edge capture despite distant screenshot-lik
   initial.slide.nodes[0].children = [a, target];
   const scope = initial.slide.nodes[0].id;
   const snapOptions = { ...options, toSlide: true, scale: 0.57 };
-  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const settings = { ...defaultDragSnapSettings };
   const move = createMoveGesture(
     initial,
     ["a"],
@@ -506,7 +441,7 @@ it("axis capture uses its own speed while the perpendicular axis moves quickly",
     ["a"],
     scope,
     { ...options, toSlide: true },
-    { ...defaultDragSnapSettings, mode: "intent" },
+    { ...defaultDragSnapSettings },
     0,
   );
   move({ x: 800, y: -10 }, 1000);
@@ -519,7 +454,7 @@ it("axis capture uses its own speed while the perpendicular axis moves quickly",
 it("zero holding distance captures once then releases without recapturing until a fresh approach", () => {
   const axis = createDragSnapAxis(
     100,
-    { features: [{ position: 200, source: "slide", kind: "end" }] },
+    [{ position: 200, source: "slide", kind: "end" }],
     1,
     { ...defaultDragSnapSettings, intentRelease: 0 },
   );
@@ -538,7 +473,7 @@ it("zero holding distance captures once then releases without recapturing until 
 it("holding distance can be smaller than capture distance and zero hold keeps stationary axes independent", () => {
   const axis = createDragSnapAxis(
     100,
-    { features: [{ position: 200, source: "slide", kind: "end" }] },
+    [{ position: 200, source: "slide", kind: "end" }],
     1,
     { ...defaultDragSnapSettings, intentRelease: 1 },
   );

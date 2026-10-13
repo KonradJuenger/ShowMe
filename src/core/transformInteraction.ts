@@ -16,7 +16,6 @@ import type { EditorChange } from "./editorChange";
 import type { ScopeId } from "./scene";
 import {
   isDirectChildSelection,
-  elementBoundsInScope,
   elementFrameInScope,
   scopeSnapTargets,
   selectionBoundsInScope,
@@ -25,7 +24,7 @@ import {
   worldVectorToScope,
   getSelectionScopeWorldMatrix,
 } from "./selectionGeometry";
-import { resolveResizeSnapAxis, resolveSnapAxis } from "./snapping";
+import { resolveResizeSnapAxis } from "./snapping";
 import {
   createDragSnapAxis,
   type DragSnapSettings,
@@ -93,71 +92,6 @@ function normalizeRotation(degrees: number) {
   return ((degrees % 360) + 360) % 360;
 }
 
-export function previewMove(
-  snapshot: TransformSnapshot,
-  ids: readonly string[],
-  scopeId: ScopeId,
-  worldDelta: Point,
-  options: TransformSnapOptions = emptySnap,
-): TransformPreview {
-  requireDirectSelection(snapshot, ids, scopeId);
-  let { x: dx, y: dy } = worldVectorToScope(
-    snapshot.slide,
-    scopeId,
-    worldDelta,
-  );
-  const scopeGuides: { x?: number; y?: number } = {};
-
-  if (options.enabled) {
-    if (ids.length === 1 && !options.disableSmartSnap) {
-      const moving = elementBoundsInScope(snapshot.slide, ids[0], scopeId);
-      const targets = scopeSnapTargets(
-        snapshot.slide,
-        snapshot.deck,
-        scopeId,
-        ids,
-        {
-          objects: options.toObjects,
-          guides: options.toGuides,
-          slide: options.toSlide,
-        },
-      );
-      const tolerance = 8 / Math.max(1e-9, options.scale);
-      const sx = resolveSnapAxis(
-        moving.x + dx,
-        moving.width,
-        targets.x,
-        tolerance,
-      );
-      const sy = resolveSnapAxis(
-        moving.y + dy,
-        moving.height,
-        targets.y,
-        tolerance,
-      );
-      if (sx.guide !== undefined) {
-        dx = sx.value - moving.x;
-        if (sx.source !== "persistent") scopeGuides.x = sx.guide;
-      } else dx = snap(dx, true);
-      if (sy.guide !== undefined) {
-        dy = sy.value - moving.y;
-        if (sy.source !== "persistent") scopeGuides.y = sy.guide;
-      } else dy = snap(dy, true);
-    } else {
-      dx = snap(dx, true);
-      dy = snap(dy, true);
-    }
-  }
-
-  const next = translateElements(snapshot, ids, dx, dy, scopeId);
-  return {
-    snapshot: next,
-    changed: changed(snapshot, next),
-    scopeGuides,
-    measurement: measurement(next, ids, scopeId),
-  };
-}
-
 /** Gesture-local move solver; document writes still go through the existing commit path. */
 export function createMoveGesture(
   snapshot: TransformSnapshot,
@@ -181,12 +115,12 @@ export function createMoveGesture(
         objects: options.enabled && options.toObjects,
         guides: options.enabled && options.toGuides,
         slide: options.enabled && options.toSlide,
-        intent: settings.mode === "intent",
+        drag: true,
       });
       return {
         moving,
-        xAxis: createDragSnapAxis(moving.width, targets.x, pixelsX, settings),
-        yAxis: createDragSnapAxis(moving.height, targets.y, pixelsY, settings),
+        xAxis: createDragSnapAxis(moving.width, targets.x.features!, pixelsX, settings),
+        yAxis: createDragSnapAxis(moving.height, targets.y.features!, pixelsY, settings),
       };
     },
   );

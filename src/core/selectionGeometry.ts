@@ -1,7 +1,7 @@
 import { deriveGuides } from "./guides";
 import type { Box, Point } from "./geometry";
 import type { SnapTargetSources } from "./snapping";
-import type { DragSnapTargetSources } from "./dragSnapping";
+import type { DragSnapTarget } from "./dragSnapping";
 import type { Deck, Slide } from "./document";
 import {
   IDENTITY,
@@ -31,8 +31,8 @@ export interface OrientedGeometry extends Box {
 }
 
 export interface ScopeSnapTargets {
-  x: DragSnapTargetSources;
-  y: DragSnapTargetSources;
+  x: SnapTargetSources & { features?: DragSnapTarget[] };
+  y: SnapTargetSources & { features?: DragSnapTarget[] };
 }
 
 function boundsFromPoints(points: readonly Point[]): Box {
@@ -342,11 +342,11 @@ export function scopeSnapTargets(
     objects: boolean;
     guides: boolean;
     slide: boolean;
-    intent?: boolean;
+    drag?: boolean;
   },
 ): ScopeSnapTargets {
   const target: ScopeSnapTargets = { x: {}, y: {} };
-  if (options.intent) {
+  if (options.drag) {
     target.x.features = [];
     target.y.features = [];
   }
@@ -378,7 +378,7 @@ export function scopeSnapTargets(
       box.y + box.height / 2,
       box.y + box.height,
     ]);
-    if (options.intent) {
+    if (options.drag) {
       for (const box of boxes) {
         for (const [axis, start, size, span] of [
           [
@@ -455,7 +455,7 @@ export function scopeSnapTargets(
     );
   }
 
-  if (options.intent) {
+  if (options.drag) {
     for (const axis of [target.x, target.y]) {
       const features = axis.features!;
       for (const position of axis.persistent ?? [])

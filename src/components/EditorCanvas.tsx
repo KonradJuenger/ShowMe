@@ -27,7 +27,6 @@ import type { EditorTransport } from "../core/editorSession";
 import {
   createOptimisticLease,
   createMoveGesture,
-  previewMove,
   previewResize,
   previewRotation,
   type TransformPreview,
@@ -708,17 +707,14 @@ export function EditorCanvasSurface({
         pointerStart.clientX,
         pointerStart.clientY,
       );
-      const refinedMove =
-        snapConfig.drag.mode === "classic"
-          ? null
-          : createMoveGesture(
-              base.snapshot,
-              base.movingElementIds,
-              scopeId,
-              transformSnapOptions(false),
-              snapConfig.drag,
-              event.timeStamp,
-            );
+      const movePreview = createMoveGesture(
+        base.snapshot,
+        base.movingElementIds,
+        scopeId,
+        transformSnapOptions(false),
+        snapConfig.drag,
+        event.timeStamp,
+      );
       let finalPreview: TransformSnapshot = base.snapshot;
       let moveChanged = false;
       const rollback = () => {
@@ -742,15 +738,7 @@ export function EditorCanvasSurface({
         applyPreview: (pointer) => {
           const point = pointToSlide(pointer.clientX, pointer.clientY);
           const delta = { x: point.x - startWorld.x, y: point.y - startWorld.y };
-          const preview = refinedMove
-            ? refinedMove(delta, pointer.timeStamp, pointer.altKey)
-            : previewMove(
-                base.snapshot,
-                base.movingElementIds,
-                scopeId,
-                delta,
-                transformSnapOptions(pointer.altKey),
-              );
+          const preview = movePreview(delta, pointer.timeStamp, pointer.altKey);
           const cropSnapshot = duplicate
             ? preview.snapshot
             : preserveCropSnapshot(

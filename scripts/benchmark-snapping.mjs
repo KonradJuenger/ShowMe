@@ -3,8 +3,7 @@ import { performance } from "node:perf_hooks";
 
 const bundled = await build({
   stdin: {
-    contents:
-      'export * from "./src/core/dragSnapping.ts"; export * from "./src/core/snapping.ts";',
+    contents: 'export * from "./src/core/dragSnapping.ts";',
     resolveDir: process.cwd(),
   },
   bundle: true,
@@ -12,10 +11,9 @@ const bundled = await build({
   platform: "node",
   format: "esm",
 });
-const { createDragSnapAxis, defaultDragSnapSettings, resolveSnapAxis } =
-  await import(
-    `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`
-  );
+const { createDragSnapAxis, defaultDragSnapSettings } = await import(
+  `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`
+);
 
 // Isolate solver costs: legacy scene target rebuilding is deliberately excluded.
 // Timings are observations, never CI pass/fail thresholds.
@@ -39,30 +37,16 @@ for (const count of [100, 1000, 10000]) {
           ? { start: 0, end: 100 }
           : { start: index * 100, end: index * 100 + 30 },
     }));
-    for (const mode of ["classic", "magnetic", "intent"]) {
+    {
       const prepareStart = performance.now();
-      const axis = createDragSnapAxis(
-        47,
-        mode === "intent" ? { ...targets, features } : targets,
-        1,
-        {
-          ...defaultDragSnapSettings,
-          mode,
-        },
-      );
+      const axis = createDragSnapAxis(47, features, 1, defaultDragSnapSettings);
       const prepareMs = performance.now() - prepareStart;
-      const query =
-        mode === "classic"
-          ? (position) => resolveSnapAxis(position, 47, targets, 8).value
-          : (position, index) =>
-              axis.resolve(position, 200, {
-                start: scenario === "spread" ? 0 : ((index * 17) % count) * 100,
-                end:
-                  scenario === "spread"
-                    ? 100
-                    : ((index * 17) % count) * 100 + 30,
-                pixelsPerUnit: 1,
-              }).value;
+      const query = (position, index) =>
+        axis.resolve(position, 200, {
+          start: scenario === "spread" ? 0 : ((index * 17) % count) * 100,
+          end: scenario === "spread" ? 100 : ((index * 17) % count) * 100 + 30,
+          pixelsPerUnit: 1,
+        }).value;
       const positionAt = (index) =>
         scenario === "spread"
           ? ((index * 13.37) % (count * 30)) + 0.25
@@ -81,8 +65,7 @@ for (const count of [100, 1000, 10000]) {
       results.push({
         targets: count,
         scenario,
-        mode,
-        prepareMs: mode === "classic" ? "—" : prepareMs.toFixed(3),
+        prepareMs: prepareMs.toFixed(3),
         queryMedianMicroseconds: timings[50].toFixed(3),
         queryP95Microseconds: timings[95].toFixed(3),
         checksum: Math.round(checksum),
