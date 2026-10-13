@@ -366,7 +366,7 @@ h1 {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #ddddda;
+  background: #dddddd;
   touch-action: none;
 }
 .is-panning .stage,
