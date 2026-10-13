@@ -86,14 +86,7 @@ export function usePreparedImage(
         elementId,
         profile,
       );
-      if (
-        image &&
-        live &&
-        !(
-          profile?.sampling === "canvas" &&
-          displayedImage.current?.hash === image.hash
-        )
-      ) {
+      if (image && live && displayedImage.current?.hash !== image.hash) {
         const probe = new Image();
         probe.crossOrigin = "anonymous";
         probe.src = image.url;
@@ -112,8 +105,8 @@ export function usePreparedImage(
           if (image) platform.releaseUrl(image.url);
           return;
         }
-        // Canvas requests may resolve to the same tier after a document revision
-        // or a small zoom change. Keep the existing decoded URL in that case.
+        // A readiness update or profile change may resolve to identical pixels.
+        // Keep the decoded URL for both canvas and exact presentation profiles.
         const current = displayedImage.current;
         displayedRequest.current =
           image &&
@@ -126,11 +119,7 @@ export function usePreparedImage(
           image.height === Math.min(image.sourceHeight, canvasHeight)
             ? { identity, requirement: requirementKey, invalidation }
             : null;
-        if (
-          image &&
-          profile?.sampling === "canvas" &&
-          current?.hash === image.hash
-        ) {
+        if (image && current?.hash === image.hash) {
           if (current.url !== image.url) platform.releaseUrl(image.url);
           setResult({ id: identity, key, image: current, settled: true });
           return;

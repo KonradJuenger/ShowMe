@@ -140,6 +140,27 @@ it("100-slide image preparation loads bounded demand and replans only affected d
     expect(coordinator.status(document.documentId)?.state).toBe("ready"),
   );
   expect(loads).toEqual([["s0", "s1"], ["s1"]]);
+  const prepared = prepare.mock.calls.length;
+  coordinator.prioritize(document.documentId, "s1");
+  await vi.waitFor(() => {
+    expect(coordinator.status(document.documentId)?.state).toBe("ready");
+    expect(loads).toEqual([["s0", "s1"], ["s1"], ["s2"]]);
+  });
+  // The new slide shares the existing variant. Navigation must retain both
+  // ready pixels and accepted requirement plans for overlapping slides.
+  expect(prepare).toHaveBeenCalledTimes(prepared);
+  expect(coordinator.image(document.documentId, "s2", image.id)).not.toBeNull();
+  coordinator.prioritize(document.documentId, "s0");
+  await vi.waitFor(() =>
+    expect(coordinator.status(document.documentId)?.total).toBe(2),
+  );
+  expect(prepare).toHaveBeenCalledTimes(prepared);
+  expect(loads).toEqual([["s0", "s1"], ["s1"], ["s2"], []]);
+  await coordinator.reconcile(document.documentId, true);
+  await vi.waitFor(() =>
+    expect(coordinator.status(document.documentId)?.state).toBe("ready"),
+  );
+  expect(prepare.mock.calls.length).toBeGreaterThan(prepared);
   const work = prepare.mock.calls.length;
   coordinator.advanceRevision(document.documentId, ++revision);
   await coordinator.reconcile(document.documentId);

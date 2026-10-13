@@ -57,7 +57,7 @@ export class ImagePreparationCoordinator {
     const changed = this.priorities.get(documentId) !== slideId;
     this.priorities.set(documentId, slideId);
     if (changed && this.documents.has(documentId))
-      void this.reconcile(documentId, true);
+      void this.reconcile(documentId);
     this.pump();
   }
   status(documentId: string) {
@@ -190,10 +190,11 @@ export class ImagePreparationCoordinator {
         previous.status.epoch === projection.epoch &&
         JSON.stringify(previous.status.profile) === JSON.stringify(profile);
       const planIds =
-        reusable && affectedSlides
+        reusable &&
+        (affectedSlides || previous.status.revision === projection.revision)
           ? interest.slideIds.filter(
               (id) =>
-                affectedSlides.includes(id) || !previous.requirements.has(id),
+                affectedSlides?.includes(id) || !previous.requirements.has(id),
             )
           : interest.slideIds;
       if (reusable)
@@ -256,23 +257,18 @@ export class ImagePreparationCoordinator {
       for (const requirement of requirements) {
         const cached =
           !retry &&
-          requirement.instances.map((instance) =>
-            previous?.images.get(`${instance.slideId}:${instance.elementId}`),
-          );
-        if (
-          cached &&
-          cached.every(
+          previous &&
+          Array.from(previous.images.values()).find(
             (image) =>
-              image &&
               image.assetId === requirement.assetId &&
               image.width === Math.min(image.sourceWidth, requirement.width) &&
               image.height === Math.min(image.sourceHeight, requirement.height),
-          )
-        ) {
-          requirement.instances.forEach((instance, index) =>
+          );
+        if (cached) {
+          requirement.instances.forEach((instance) =>
             interest.images.set(
               `${instance.slideId}:${instance.elementId}`,
-              cached[index]!,
+              cached,
             ),
           );
           interest.status.completed++;

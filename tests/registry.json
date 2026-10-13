@@ -227,8 +227,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-10",
-    "lastReviewed": "2026-10-12",
-    "reason": "Production canvas resizes retain decoded tiers without cache requests, in-flight swaps wait for release, URLs remain valid through DOM handoff, and explicit cache invalidation still rechecks"
+    "lastReviewed": "2026-10-13",
+    "reason": "Production canvas resizes retain decoded tiers without cache requests, exact profiles retain identical decoded pixels on rechecks, in-flight swaps wait for release, URLs remain valid through DOM handoff, and explicit cache invalidation still rechecks"
   },
   {
     "id": "media-image-sampling",
@@ -678,8 +678,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Dependency-aware invalidation, demanded image planning, immutable metadata and narrow canonical render projections"
+    "lastReviewed": "2026-10-13",
+    "reason": "Dependency-aware invalidation, bounded demanded image planning and navigation reuse, explicit image retries, immutable metadata and narrow canonical render projections"
   },
   {
     "id": "persistence-lan-work",
