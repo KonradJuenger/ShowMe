@@ -239,6 +239,33 @@ try {
                   });
               }
               if (mode === "snap-no-transform") dom.style.transform = "none";
+              if (mode === "snap-element-matrix") {
+                const left = Math.round(
+                  (view.originX + el.frame.x * view.scaleX) * view.dpr,
+                );
+                const top = Math.round(
+                  (view.originY + el.frame.y * view.scaleY) * view.dpr,
+                );
+                const right = Math.round(
+                  (view.originX + (el.frame.x + el.frame.width) * view.scaleX) *
+                    view.dpr,
+                );
+                const bottom = Math.round(
+                  (view.originY +
+                    (el.frame.y + el.frame.height) * view.scaleY) *
+                    view.dpr,
+                );
+                const x = (left / view.dpr - view.originX) / view.scaleX;
+                const y = (top / view.dpr - view.originY) / view.scaleY;
+                Object.assign(dom.style, {
+                  left: "0px",
+                  top: "0px",
+                  width: right - left + "px",
+                  height: bottom - top + "px",
+                  transformOrigin: "0px 0px",
+                  transform: `matrix(${1 / (view.scaleX * view.dpr)},0,0,${1 / (view.scaleY * view.dpr)},${x},${y})`,
+                });
+              }
             }
           }
         }

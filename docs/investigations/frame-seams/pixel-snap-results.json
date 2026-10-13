@@ -64,6 +64,15 @@
       "maxDisplacement": 0.515625,
       "maxGridResidual": 0.00006103515625,
       "maxJoinGap": 0.00000858306884765625
+    },
+    "snap-element-matrix": {
+      "cases": 1152,
+      "exactDifferences": 1152,
+      "over2": 1152,
+      "maxDifference": 113,
+      "maxDisplacement": 0.515625,
+      "maxGridResidual": 0.00006103515625,
+      "maxJoinGap": 0.0000095367431640625
     }
   },
   "images": {

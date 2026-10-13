@@ -42,6 +42,20 @@ The successful matrix variant has **zero exact pixel differences**, not merely
 differences below the two-level reporting threshold. DOM bounds have residual
 floating measurement error up to 0.000061 device pixels.
 
+A later attempt to reduce the fix to individual frame styles used integer box
+sizes and a per-frame inverse matrix to compensate the existing canvas transform.
+It still had seam differences in all 1,152 cases, despite measured grid residuals
+below 0.000061 pixels and join gaps below 0.000010 pixels. The original transformed
+canvas paint context remained. This is further evidence that final DOM bounds
+alone do not determine paint coverage; the exact internal raster stage remains
+untraced. The smallest successful prototype so far changes the canvas paint
+coordinate space, rather than only the individual frame's style.
+
+For an initial production scope, investigate a device-coordinate adapter in the
+existing SlideRenderer for plain axis-aligned fills, preserving the logical
+document and interaction geometry. Mixed content, logical child sizing, transforms,
+and effects still need integration work. There is no validated two-line CSS fix.
+
 For PNGs, existing rendering has 420 of 576 cases above two levels, whereas the
 device-matrix variant has zero exact differences in all 576. No page errors were
 reported. Uniform image content intentionally allows comparison with interior
@@ -150,6 +164,7 @@ Then run:
 node docs/investigations/frame-seams/pixel-snap-experiment.mjs
 node docs/investigations/frame-seams/pixel-snap-experiment.mjs snap-device-units
 node docs/investigations/frame-seams/pixel-snap-experiment.mjs snap-device-matrix
+node docs/investigations/frame-seams/pixel-snap-experiment.mjs snap-element-matrix
 node docs/investigations/frame-seams/pixel-snap-experiment.mjs baseline images
 node docs/investigations/frame-seams/pixel-snap-experiment.mjs snap-device-matrix images
 node docs/investigations/frame-seams/pixel-snap-geometry.mjs
