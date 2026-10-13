@@ -1,41 +1,24 @@
+import type { PresenterViewModel } from "./presenterViewModel";
 import type { usePresenterController } from "./usePresenterController";
 
 export function PresentationControls({
   controller,
+  view,
 }: {
   controller: ReturnType<typeof usePresenterController>;
+  view: PresenterViewModel;
 }) {
   const { state, command, end, fullscreen } = controller;
   if (!state) return null;
 
   const index = state.index;
   const slideCount = state.slideIds.length;
-  const currentSlideId = index === null ? undefined : state.slideIds[index];
-  const stages = currentSlideId
-    ? (state.motionSlides?.[currentSlideId] ?? [])
-    : [];
-  const nextStageIndex =
-    state.motion && state.motion.stageIndex + 1 < stages.length
-      ? state.motion.stageIndex + 1
-      : null;
-  const canAdvanceMotion = nextStageIndex !== null;
-  const canAdvance =
-    index !== null && (canAdvanceMotion || index < slideCount - 1);
-  const canPrevious =
-    index !== null && (index > 0 || state.motion !== undefined);
-
-  const advanceDetail =
-    nextStageIndex !== null
-      ? `Next: animation ${nextStageIndex + 1} / ${stages.length}`
-      : index !== null && index < slideCount - 1
-        ? `Next: slide ${index + 2} / ${slideCount}`
-        : "Last slide";
 
   return (
     <nav className="presentation-controls" aria-label="Presentation controls">
       <button
         className="presenter-previous"
-        disabled={!canPrevious}
+        disabled={!view.canPrevious}
         onClick={() => void command({ type: "previous" })}
       >
         <span aria-hidden="true">←</span>
@@ -44,11 +27,12 @@ export function PresentationControls({
 
       <button
         className="presenter-advance"
-        disabled={!canAdvance}
+        disabled={!view.canAdvance}
+        aria-label={"Advance, " + view.advanceDetail}
         onClick={() => void command({ type: "next" })}
       >
         <span className="presenter-advance-label">Advance</span>
-        <span className="presenter-advance-detail">{advanceDetail}</span>
+        <span className="presenter-advance-detail">{view.advanceDetail}</span>
         <span className="presenter-advance-arrow" aria-hidden="true">
           →
         </span>
