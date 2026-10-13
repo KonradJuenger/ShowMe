@@ -20,6 +20,7 @@ export default defineConfig({
   reporter: "list",
   outputDir: "test-results-browser",
   use: {
+    launchOptions: { args: ["--enable-blink-features=CanvasDrawElement"] },
     baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

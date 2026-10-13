@@ -1247,6 +1247,7 @@ export function effectDependencies(definition: EffectDefinition) {
       : /--p(?![\w-])|@keyframes\b/.test(css) || (js && /\bp\b/.test(source)),
     continuous:
       genericTime ||
+      /@keyframes\b/.test(css) ||
       (shader
         ? /\bu_(?:slideTime|presentationTime|stepTime)\b/.test(source)
         : /--(?:slideTime|presentationTime|stepTime)(?![\w-])/.test(css) ||

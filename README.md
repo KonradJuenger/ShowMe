@@ -20,6 +20,8 @@ It uses web technologies and supports programmable visual effects, reusable pres
 
 Elements can use CSS, JavaScript and GLSL fragment shaders. Effects can use continuous time, Click Timeline progress, or both.
 
+Text JavaScript effects transform strings before layout. Within each placement, CSS and shader effects compose pixels in their authored relative order; moving a text JavaScript effect after a shader does not make it consume pixels.
+
 ![Selected element with an original GLSL shader and Effect timing controls](docs/images/effects.png)
 
 ![Effect Editor with fragment shader code and its live visual preview](docs/images/effect-editor.png)

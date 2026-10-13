@@ -93,6 +93,13 @@ it("CSS and text JavaScript share one authoring family and preserve styling", ()
 });
 
 it("dependency detection distinguishes t and p from unrelated names, comments and declarations", () => {
+  expect(
+    effectDependencies({
+      ...blankEffect("css-js"),
+      source:
+        ":scope { animation: reveal 1s infinite; } @keyframes reveal { to { opacity: 0; } }",
+    }),
+  ).toMatchObject({ continuous: true, progress: true, genericTime: false });
   const shader = blankEffect("shader");
   const hybrid = {
     ...shader,

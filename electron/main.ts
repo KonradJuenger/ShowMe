@@ -104,6 +104,9 @@ import {
 } from "./windowing";
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+// Native browser painting at mixed CSS/media/shader boundaries. The renderer
+// checks API availability before creating a capture surface.
+app.commandLine.appendSwitch("enable-blink-features", "CanvasDrawElement");
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "studio",
