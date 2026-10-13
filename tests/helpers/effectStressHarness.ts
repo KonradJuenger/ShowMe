@@ -31,6 +31,7 @@ export type StressScenario = {
   id: string;
   family:
     | "original"
+    | "small-glass"
     | "shader"
     | "mixed"
     | "css"
@@ -197,7 +198,7 @@ void main(){vec2 p=v_uv*12.0;float n=0.0;for(int i=0;i<12;i++){float f=float(i)+
     }
     return children;
   };
-  if (scenario.family === "composite") {
+  if (scenario.family === "composite" || scenario.family === "small-glass") {
     for (let groupIndex = 0; groupIndex < scenario.count; groupIndex++) {
       const background = createContainerElement(
         `stress-generated-${groupIndex}`,
@@ -215,13 +216,20 @@ void main(){vec2 p=v_uv*12.0;float n=0.0;for(int i=0;i<12;i++){float f=float(i)+
       for (let i = 0; i < scenario.depth; i++) {
         const lens = createContainerElement(`stress-glass-${groupIndex}-${i}`);
         Object.assign(lens.frame, {
-          x: width * 0.05 + (i % 3) * width * 0.03,
+          x:
+            scenario.family === "small-glass"
+              ? width * (0.08 + i * 0.48)
+              : width * 0.05 + (i % 3) * width * 0.03,
           y: height * 0.05 + (i % 4) * height * 0.025,
-          width: width * 0.85,
-          height: height * 0.85,
+          width: width * (scenario.family === "small-glass" ? 0.3 : 0.85),
+          height: height * (scenario.family === "small-glass" ? 0.25 : 0.85),
         });
         lens.effects = [effect("stressGlass"), effect("stressCss")];
         children.push(lens);
+      }
+      if (scenario.family === "small-glass") {
+        roots.push(...children);
+        continue;
       }
       const group = createContainerElement(
         `stress-composite-${groupIndex}`,
@@ -319,7 +327,7 @@ export async function mountEffectStressHarness(
   scenario: StressScenario,
 ) {
   setGpuEffectChainingExperiment(scenario.backend === "gpu");
-  setDomRasterVideoExperiment(scenario.videoInvalidation ?? "decoded");
+  setDomRasterVideoExperiment(scenario.videoInvalidation ?? "poll");
   setEffectExecutionExperiment(
     scenario.backend === "refined" ? "refined" : "naive",
   );

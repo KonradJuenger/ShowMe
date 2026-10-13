@@ -139,6 +139,13 @@ add("shader", 8, 1, 1, 3840, true, "gpu");
 for (const depth of [8, 16]) add("mixed", depth, 1, 1, 1920, false, "gpu");
 // Identical fixtures exercise both strategies in the same renderer build.
 for (const backend of ["native", "refined"]) {
+  for (
+    let slideIndex = 0;
+    slideIndex < model.deck.slideIds.length;
+    slideIndex++
+  )
+    add("original", 0, 1, 1, 1920, false, backend, slideIndex);
+  add("small-glass", 2, 1, 1, 1920, false, backend);
   add("shader", 8, 1, 0, 1920, false, backend);
   add("js", 1, 512, 0, 1920, false, backend);
   add("video", 1, 1, 16, 1920, false, backend);
@@ -171,8 +178,12 @@ const unique = [
       selector === "all" ||
       value.family === selector ||
       value.id === selector ||
+      (selector === "realistic" &&
+        ["original", "small-glass"].includes(value.family) &&
+        ["native", "refined"].includes(value.backend)) ||
       (selector === "video-isolation" &&
-        (value.videoInvalidation || value.id === "video-d1-n1-v16-p1920-light-native")) ||
+        (value.videoInvalidation ||
+          value.id === "video-d1-n1-v16-p1920-light-native")) ||
       (selector === "gpu" && value.backend === "gpu") ||
       (selector === "refined" && value.backend === "refined") ||
       (selector === "v2extras" &&
