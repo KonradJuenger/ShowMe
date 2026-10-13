@@ -249,6 +249,7 @@ channel.onmessage = (event) => {
   )
     browserRuntimes.delete(next.deckId);
   presentation = event.data.state ?? null;
+  if (!presentation) browserAudienceProfile = null;
   if (!presentationRole && presentation?.index !== null && presentation?.index !== undefined)
     browserImages.prioritize(presentation.deckId, presentation.slideIds[presentation.index]);
   listeners.forEach((listener) => listener(presentation));
@@ -257,6 +258,7 @@ channel.onmessage = (event) => {
 
 async function broadcast(state: PresenterState | null) {
   presentation = state;
+  if (!state) browserAudienceProfile = null;
   await put("presentation", state);
   channel.postMessage({ type: "state", state });
   listeners.forEach((listener) => listener(state));
@@ -512,7 +514,7 @@ const browserImages = new ImagePreparationCoordinator({
   },
   projection: async (id, slideId) =>
     (await browserRuntime(id)).projection(id, slideId),
-  profile: () => browserAudienceProfile ?? outputImageProfile(screen.width, screen.height, devicePixelRatio),
+  profile: () => (presentation ? browserAudienceProfile : null) ?? outputImageProfile(screen.width, screen.height, devicePixelRatio),
   prepare: (_id, requirement, priority, canvas) => prepareBrowserVariant(requirement, priority, canvas),
 });
 if (!presentationRole) browserImages.subscribe(status => channel.postMessage({ type: "image-readiness", status }));

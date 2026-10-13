@@ -144,14 +144,16 @@ export class ImagePreparationCoordinator {
   }
 
   /** Wait for the current accepted plan, including a replan while work is running. */
-  async ready(documentId: string, allowMissing = false) {
+  async ready(documentId: string, allowFailures = false) {
     for (;;) {
       const interest = this.documents.get(documentId);
       if (this.paused || !interest) throw new Error("Image preparation is unavailable");
       await interest.done;
       if (this.documents.get(documentId) !== interest) continue;
       if (interest.status.state === "failed") {
-        if (allowMissing && interest.status.failures.length === interest.status.missing) return this.status(documentId)!;
+        // Derived cache failures are diagnostic outcomes. Audience geometry and
+        // healthy slides must remain usable; absent variants use original IO.
+        if (allowFailures) return this.status(documentId)!;
         throw new Error(interest.status.failures.map(f => f.message).join("; "));
       }
       if (interest.status.state !== "ready") throw new Error("Image preparation was interrupted");
@@ -176,7 +178,7 @@ export class ImagePreparationCoordinator {
     if (!pending) {
       const slide = resolveVisualSlide(projection.deck, projection.slide, projection.templates ?? {}).slide;
       pending = Promise.all(planPresentationImages(projection.deck, [slide], profile, true).map(async requirement => {
-        const image = await this.dependencies.prepare(documentId, requirement, priority, profile.sampling === "canvas" ? `${documentId}:${slideId}` : undefined);
+        const image = await this.dependencies.prepare(documentId, requirement, priority, profile.sampling === "canvas" ? `${documentId}:${slideId}` : undefined).catch(() => null);
         return requirement.instances.map(instance => [instance.elementId, image] as const);
       })).then(rows => Object.fromEntries(rows.flat()));
       this.slidePlans.set(key, pending);

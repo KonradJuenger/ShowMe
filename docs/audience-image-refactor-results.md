@@ -77,3 +77,24 @@ orientation and alpha; canonical native preview/PDF pixel checks also passed.
 The mandatory synthetic audience gate remains required for every main commit.
 macOS, packaged/release verification and physical multi-monitor testing were not
 run. No integration into main is authorized by these results.
+
+## PR review corrections
+
+Audience startup now tolerates every settled cache-preparation failure, while
+preserving `failed` status and failure details. Strict readiness callers still
+reject. Failed instances resolve to `null`, including individually requested
+profiles, so healthy variants and original/missing fallback remain usable.
+A deliberately throwing preparation job tests both the diagnostics and fallback.
+
+Browser presentation shutdown clears the negotiated audience profile for local
+and broadcast state changes. Background preparation only uses the override while
+a presentation exists. A real audience popup at 1111 × 777 tests that ending the
+session restores the editor's preparation profile.
+
+Verification after these corrections: `npm run test:feature -- presenter` passed
+20 unit, 10 browser and 1 Electron tests; `npm run test:feature -- media` passed
+35 unit, 9 browser and 2 Electron tests; `npm test` passed 15 core tests.
+`npm run typecheck`, `npm run lint`, `npm run test:stats` and
+`npm run test:audit` passed. Both feature commands rebuilt successfully.
+The full suite and release/platform checks were not rerun for this focused fix.
+Application versions and document formats remain unchanged.

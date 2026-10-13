@@ -8,7 +8,7 @@
     "runtime": "unit",
     "created": "2026-10-13",
     "lastReviewed": "2026-10-13",
-    "reason": "Canonical fractional output profiles, whole-deck shared image results, read-only readiness, stable navigation generations, explicit original outcomes, closed-waiter settlement and byte-admitted resident lookahead with shared rasters and pinned output"
+    "reason": "Canonical fractional output profiles, whole-deck shared image results, read-only readiness, stable navigation generations, explicit original outcomes, closed-waiter settlement and byte-admitted resident lookahead with shared rasters and pinned output; throwing cache jobs preserve failed diagnostics without blocking healthy slides or original fallback"
   },
   {
     "id": "presenter-audience-navigation",
@@ -657,7 +657,7 @@
     "runtime": "browser",
     "created": "2026-10-11",
     "lastReviewed": "2026-10-12",
-    "reason": "Screen-map dragging, keyboard assignment, default reset, focus and setup lock; presenter resizing reuses decoded rasters while audience sampling upgrades exactly with display resolution, independent of presenter raster size"
+    "reason": "Screen-map dragging, keyboard assignment, default reset, focus and setup lock; presenter resizing reuses decoded rasters while audience sampling upgrades exactly with display resolution, independent of presenter raster size; real browser popup shutdown restores editor preparation resolution"
   },
   {
     "id": "presenter-display-setup-electron",

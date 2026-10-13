@@ -59,6 +59,28 @@ it("whole-deck results are shared, navigation keeps the generation and status re
   coordinator.close(model.documentId);
 });
 
+it("a throwing image job remains failed but does not block healthy slides or per-instance original fallback", async () => {
+  const model = imageDocument(["a", "b"]);
+  const coordinator = new ImagePreparationCoordinator({
+    projection: (_id, slideId) => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides[slideId ?? "slide0"], templates: model.templates }),
+    profile: () => model.deck,
+    prepare: async (_id, requirement) => {
+      if (requirement.assetId === "b".repeat(64)) throw new Error("Worker failed deliberately");
+      return prepared(requirement);
+    },
+  });
+  await coordinator.reconcile(model.documentId);
+  await expect(coordinator.ready(model.documentId)).rejects.toThrow("Worker failed deliberately");
+  expect(await coordinator.ready(model.documentId, true)).toMatchObject({ state: "failed", completed: 1,
+    failures: [{ message: "Worker failed deliberately" }] });
+  expect((await coordinator.prepareSlide(model.documentId, "slide0", model.deck)).image?.assetId).toBe("a".repeat(64));
+  expect(await coordinator.prepareSlide(model.documentId, "slide1", model.deck)).toEqual({ image: null });
+  expect(await coordinator.prepareSlide(model.documentId, "slide1", { width: 1280, height: 720 })).toEqual({ image: null });
+  expect(coordinator.status(model.documentId)?.state).toBe("failed");
+  coordinator.close(model.documentId);
+});
+
 it("unsupported original rendering is counted explicitly and closing settles a preparation waiter", async () => {
   const model = imageDocument(["a"]);
   let finish!: () => void;
