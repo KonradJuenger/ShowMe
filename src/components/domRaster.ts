@@ -7,6 +7,11 @@ type PaintContext = CanvasRenderingContext2D & {
 export type DomRasterBackend = "svg" | "native" | "native-naive";
 let experimentBackend: DomRasterBackend = "native";
 let captureId = 0;
+let videoInvalidation: "decoded" | "poll" = "decoded";
+/** Runtime-only matched benchmark control; sampled when a source is created. */
+export function setDomRasterVideoExperiment(mode: "decoded" | "poll") {
+  videoInvalidation = mode;
+}
 /** In-memory benchmark control. Production always starts with native capture. */
 export function setDomRasterExperimentBackend(backend: DomRasterBackend) {
   experimentBackend = backend;
@@ -37,6 +42,7 @@ export function createDomRasterSource(
   const context = canvas.getContext("2d") as PaintContext | null;
   if (!context) throw new Error("Cannot allocate DOM source surface");
   const backend: DomRasterBackend = experimentBackend;
+  const decodedVideo = refined && videoInvalidation === "decoded";
   const scope = `capture-${++captureId}`;
   if (backend !== "svg" && (!context.drawElementImage || !canvas.requestPaint))
     throw new Error(
@@ -82,7 +88,7 @@ export function createDomRasterSource(
     return false;
   };
   const syncVideos = () => {
-    if (!refined) return;
+    if (!decodedVideo) return;
     const current = new Set(
       Array.from(
         originalRoot.querySelectorAll<HTMLVideoElement>("video"),
@@ -115,7 +121,7 @@ export function createDomRasterSource(
     const playing = Array.from(originalRoot.querySelectorAll("video")).some(
       (video) =>
         !video.paused &&
-        (!refined || typeof video.requestVideoFrameCallback !== "function"),
+        (!decodedVideo || typeof video.requestVideoFrameCallback !== "function"),
     );
     if (animated || playing || wasDynamic) {
       dirty = true;
@@ -469,7 +475,7 @@ export function createDomRasterSource(
       const video = Array.from(originalRoot.querySelectorAll("video")).some(
         (node) =>
           !node.paused &&
-          (!refined || typeof node.requestVideoFrameCallback !== "function"),
+          (!decodedVideo || typeof node.requestVideoFrameCallback !== "function"),
       );
       if (
         !dirty &&

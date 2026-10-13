@@ -158,6 +158,11 @@ for (const backend of ["native", "refined"]) {
   add("js", 1, 128, 0, 1920, false, backend);
   add("shader", 8, 1, 1, 3840, true, backend);
 }
+for (const videoInvalidation of ["decoded", "poll"]) {
+  add("video", 1, 1, 16, 1920, false, "refined");
+  cases.at(-1).id += `-${videoInvalidation}`;
+  cases.at(-1).videoInvalidation = videoInvalidation;
+}
 const unique = [
   ...new Map(cases.map((value) => [value.id, value])).values(),
 ].filter((value) =>
@@ -166,6 +171,8 @@ const unique = [
       selector === "all" ||
       value.family === selector ||
       value.id === selector ||
+      (selector === "video-isolation" &&
+        (value.videoInvalidation || value.id === "video-d1-n1-v16-p1920-light-native")) ||
       (selector === "gpu" && value.backend === "gpu") ||
       (selector === "refined" && value.backend === "refined") ||
       (selector === "v2extras" &&

@@ -12,6 +12,7 @@ import { walkElements, type Element } from "../../src/core/element";
 import {
   domRasterDiagnostics,
   setDomRasterExperimentBackend,
+  setDomRasterVideoExperiment,
   type DomRasterBackend,
 } from "../../src/components/domRaster";
 import {
@@ -45,6 +46,7 @@ export type StressScenario = {
   heavy?: boolean;
   taps?: number;
   slideIndex?: number;
+  videoInvalidation?: "decoded" | "poll";
   backend?: DomRasterBackend | "gpu" | "refined";
 };
 const passShader = `#version 300 es
@@ -317,6 +319,7 @@ export async function mountEffectStressHarness(
   scenario: StressScenario,
 ) {
   setGpuEffectChainingExperiment(scenario.backend === "gpu");
+  setDomRasterVideoExperiment(scenario.videoInvalidation ?? "decoded");
   setEffectExecutionExperiment(
     scenario.backend === "refined" ? "refined" : "naive",
   );
