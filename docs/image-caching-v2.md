@@ -60,19 +60,29 @@ This is independent from the required pixel dimensions. JPEG versus PNG should n
 
 ## Proposed V2 model
 
-Use two cache tiers plus the original.
+Use one user-selected cache target plus the original as fallback.
 
-### Tier A: persistent fallback tier
+### Cache target setting
 
-Maintain a low-priority "1080p-class" derivative for presentation images while a document is open and the machine is idle.
+Add an explicit **Cache target** selector in Settings:
 
-Do not literally assume a 1920 x 1080 deck. Define the fallback density from the deck aspect ratio so the shorter deck axis receives roughly 1080 pixels. Examples:
+- **Screen**
+- **1080p**
+- **4K**
+
+The selected target defines the profile for which presentation images are prepared.
+
+**Screen** means the currently assigned audience display. Its physical pixel size remains `bounds * scaleFactor`, matching the current exact audience-quality behavior.
+
+**1080p** means an output density equivalent to Full HD while preserving the deck aspect ratio. Do not force every deck into a literal 1920 x 1080 canvas. For example:
 
 - 16:9 deck: about 1920 x 1080
 - 4:3 deck: about 1440 x 1080
 - 9:16 deck: about 1080 x 1920
 
-The existing image planner then determines the correct per-image sampling dimensions at that density, including crop and Motion scale.
+**4K** uses the equivalent UHD density, again preserving deck aspect ratio. A 16:9 deck therefore targets about 3840 x 2160.
+
+The existing image planner continues to derive the actual per-image sampling requirements from deck geometry, crop, nested transforms and Motion scale. The target controls output density, not a fixed per-asset image size.
 
 Preparation order:
 
@@ -81,35 +91,40 @@ Preparation order:
 3. previous slide,
 4. remaining visible slides in presentation order during idle time.
 
-This cache is insurance, not final audience quality.
+### Screen mismatch detection
 
-### Tier B: exact audience tier
+When an audience display is attached or assigned, compare its physical pixel size with the active cache target.
 
-As soon as ShowMe knows the assigned audience display, prepare the exact audience profile already used today.
+If **Screen** is selected, the target follows the assigned audience display automatically and preparation switches to that exact display profile.
 
-Trigger this before the user presses Present when possible:
+If **1080p** or **4K** is selected and the audience display materially differs from the selected target, show a non-blocking warning before presentation:
 
-- when an external display appears,
-- when display assignment changes,
-- when the selected display resolution or scale factor changes,
-- when the document changes in a way that invalidates image requirements.
+**Example**
 
-Priority while not presenting:
+> The audience display is 3840 × 2160, but images are currently prepared for 1920 × 1080.
+>
+> Change cache target to this screen?
 
-1. current slide,
-2. next slide,
-3. following slides,
-4. previous slide,
-5. rest of the deck.
+Actions:
 
-Priority while presenting should be stricter:
+- **Use screen resolution**: change the Cache target to **Screen**, immediately reprioritize preparation for the attached display, and remember the new setting.
+- **Keep current target**: retain the selected 1080p or 4K target and continue presentation with the existing prepared images.
 
-1. current slide,
-2. next slide,
-3. next few slides,
-4. everything else only when idle.
+The warning should not prevent the user from starting the presentation. Its purpose is to make the quality/performance trade-off explicit.
 
-Exact audience preparation remains the definition of green "Ready".
+Avoid warning for small or irrelevant differences caused by platform rounding. The comparison should be based on effective output density rather than requiring exact integer equality.
+
+### Target changes
+
+Changing Cache target:
+
+- does not mutate presentation documents or originals,
+- immediately changes the desired preparation profile,
+- reuses any compatible immutable derivatives already in the cache,
+- schedules missing variants in the background,
+- updates readiness from Ready to Optimizing when necessary.
+
+If the target changes while presenting, keep the currently displayed raster pinned until a safe swap boundary. Future slides should use the new target as soon as their derivatives are ready.
 
 ### Original asset
 
@@ -155,16 +170,21 @@ This keeps background preparation from becoming presentation-time visual churn.
 
 Do not assume the main screen and projector match.
 
-The audience profile must continue to come from the assigned audience display's physical pixel dimensions. A laptop Retina display, 1080p projector and 4K projector can all require different derivatives.
+A laptop Retina display, 1080p projector and 4K projector can all expose different physical output profiles.
 
-If a display profile changes after the document is open:
+Behavior depends on Cache target:
 
-- existing exact derivatives for the old profile remain valid fallback candidates,
-- the new exact profile becomes the target immediately,
-- presentation remains usable while the new derivatives are prepared,
+- **Screen**: the assigned audience display becomes the active preparation target automatically.
+- **1080p** or **4K**: the configured target remains stable. If the attached audience display differs materially, ShowMe warns and offers to switch to **Screen**.
+
+If the active target changes after the document is open:
+
+- existing derivatives for the old target remain valid fallback candidates,
+- the new profile becomes the preparation target immediately,
+- presentation remains usable while new derivatives are prepared,
 - readiness changes from Ready to Optimizing, not to a blocking state.
 
-If the new target is lower-resolution than an existing derivative, that larger derivative may be used temporarily, but it should not be considered exact. The final exact derivative should still be generated so the audience path preserves the "scaled once to target sampling size" rule.
+If the target is lower-resolution than an existing derivative, that larger derivative may be used temporarily, but it should not be considered exact for the new target. The final derivative should still be generated so the audience path preserves the "scaled once to target sampling size" rule.
 
 ## JPEG versus PNG
 
@@ -290,17 +310,20 @@ Before implementation, benchmark these on Windows and macOS with realistic decks
 - Implement JPEG processing with mandatory PNG fallback for alpha and protected precision.
 - Keep all current exact audience planning behavior.
 
-### Phase 2: fallback tier
+### Phase 2: cache target and mismatch handling
 
-- Add the 1080p-class persistent presentation tier.
+- Add the Cache target selector: Screen / 1080p / 4K.
+- Derive the target profile from deck aspect ratio or the assigned Screen profile.
 - Generate current/next first, remaining slides only at low priority.
-- Add lookup for best available fallback without calling it exact.
+- Add audience-display mismatch detection for fixed 1080p/4K targets.
+- Add the non-blocking popup with Use screen resolution / Keep current target.
 
-### Phase 3: non-blocking audience upgrade
+### Phase 3: non-blocking presentation behavior
 
 - Make "usable" versus "exact" explicit in readiness.
 - Start presentation regardless of exact preparation status.
-- Prioritize exact current/next jobs when the audience display is known.
+- Prioritize current/next jobs for the active cache target.
+- Reuse another prepared target or the original as fallback.
 - Pin the active displayed raster through unsafe swap periods.
 
 ### Phase 4: scheduling and benchmarks
@@ -314,9 +337,11 @@ Before implementation, benchmark these on Windows and macOS with realistic decks
 
 Image caching V2 is successful when:
 
-- A presentation can start immediately after connecting a projector, even with an empty projector-specific cache.
+- A presentation can start immediately after connecting a projector, even when the active cache target is not fully prepared.
 - The first visible frame uses the best already-available image source rather than waiting on conversion.
-- A 4K audience eventually receives exact 4K-class sampling, not a permanently upscaled 1080p cache.
+- Cache target can be explicitly set to Screen, 1080p or 4K.
+- With Screen selected, a 4K audience eventually receives exact 4K-class sampling.
+- With a fixed 1080p or 4K target, a materially different attached display causes a clear non-blocking warning with an option to switch to Screen.
 - A lower-resolution projector does not force decoding the original when a suitable prepared fallback already exists.
 - JPEG and PNG are user-selectable cache policies without changing originals.
 - Transparent images remain correct.
