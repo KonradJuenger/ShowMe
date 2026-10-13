@@ -2,6 +2,8 @@
 
 User intent: Electron-only CSS, JS text/animation, custom CSS, images/video and shaders should compose in authored order, while paying for pixels only when a stack needs them. Work stays on `experiment/mixed-effect-compositing`; the user authorized pushing it and creating an in-progress draft PR. The user now wants a new instance to review the current implementation. Do not start another large rewrite before reviewing this evidence.
 
+Draft PR: [#4](https://github.com/KonradJuenger/ShowMe/pull/4). The branch and documentation are pushed. A read-only `git merge-tree --write-tree HEAD FETCH_HEAD` against main `d6494e3da6b59165167c04b3ce945cfc18bb900c` found no content conflicts; GitHub subsequently reported mergeable. The two newer main commits change AGENTS.md workflow guidance, not production code. Main was not merged or otherwise modified. Inspect the latest workflow instructions before any future integration; the renderer blockers below still prevent approval.
+
 ## State to review
 
 Renderer commits:
