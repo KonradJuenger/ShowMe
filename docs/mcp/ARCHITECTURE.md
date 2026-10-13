@@ -239,46 +239,27 @@ Do not expose React component internals, DOM nodes or arbitrary renderer executi
 
 ## Execution location
 
-There are two plausible places to translate semantic MCP operations into ShowMe commands.
+Repository inspection removes the need to choose between a host-side transaction assembler and routing every write through the live React editor. `EditorSession` is already a core, transport-independent class.
 
-### Option A: host-side semantic adapter
+The preferred future write path is:
 
-Electron main / a core service loads projections, applies semantic command functions, derives `DocumentOperation[]`, then commits through `DocumentRuntime`.
+```text
+semantic MCP operation
+  -> existing core editor command
+  -> EditorChange / DocumentOperation[]
+  -> dedicated EditorSession
+  -> actor-scoped EditorTransport
+  -> DocumentRuntime.*ForActor()
+  -> DocumentAuthority
+```
 
-Pros:
+The dedicated session can live outside React and use actor `mcp-local`. This preserves `EditorSession` lease derivation, queued commits, stale/conflict recovery, accepted-replica handling and history semantics without sharing the human editor's actor or component lifetime.
 
-- headless-friendly;
-- clean separation from React;
-- easy to test;
-- MCP does not depend on editor component lifetime.
+The actor-scoped transport is a small adapter still to be implemented. `DocumentRuntime` already exposes the required actor-specific commit/lease/history methods and accepted-transaction subscription.
 
-Cons:
+Renderer-only services such as text measurement and executable Effect validation should be called explicitly where needed. They are not a reason to route all writes through the live editor.
 
-- actor identity/history problem must be handled deliberately;
-- text auto-measurement and other renderer-dependent authoring behavior may need explicit services;
-- preview validation still needs renderer capabilities.
-
-Recommended long-term direction.
-
-### Option B: execute through the live editor's existing EditorSession
-
-MCP requests are routed into the editor renderer and executed through the exact active `EditorSession`.
-
-Pros:
-
-- identical local undo behavior;
-- identical editor context;
-- no second session using actor `local`;
-- renderer-dependent authoring services are already present.
-
-Cons:
-
-- more Electron request routing;
-- tighter coupling to an open editor window;
-- difficult to support headless/background use;
-- care is needed not to interrupt active gesture/history groups.
-
-Recommended only as an initial spike if it produces materially better UX with much less code.
+Do not build a second transaction assembler that recreates `EditorSession.commitOperations()`.
 
 Do not create a second independent `EditorSession` with actor `local`. `DocumentAuthority.acquire()` ignores conflicts from the same actor and replaces same-actor leases for the same scope. That can interfere with an active editor interaction.
 
@@ -334,6 +315,8 @@ inspect revision 41
   -> if current revision == 41: execute
   -> else: REVISION_CONFLICT
 ```
+
+This is a deliberately strict MCP policy. The underlying `DocumentAuthority` is more permissive: a stale `baseRevision` can still be accepted when operation guards prove the affected state is unchanged. MCP should not silently use that guarded stale-acceptance behavior for model-authored semantic intent.
 
 Do not silently rebase semantic intent onto unknown changes.
 
