@@ -166,6 +166,7 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
       /* @vite-ignore */ outputPath
     );
     const run = async (gpu: boolean, gap: boolean, lose: boolean) => {
+      runtime.setEffectExecutionExperiment(gpu ? "refined" : "naive");
       runtime.setGpuEffectChainingExperiment(gpu);
       const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
         configure(model) {
@@ -236,6 +237,7 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
       };
     } finally {
       runtime.setGpuEffectChainingExperiment(false);
+      runtime.setEffectExecutionExperiment("refined");
     }
   });
   expect(result.gpu.surfaces[0].backend).toBe("gpu");

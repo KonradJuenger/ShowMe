@@ -31,6 +31,7 @@ export function createDomRasterSource(
   invalidate: () => void,
   dependencies: () => Promise<void>,
   sourceTransform: () => DOMMatrix = () => new DOMMatrix(),
+  refined = false,
 ) {
   const canvas = document.createElement("canvas") as PaintCanvas;
   const context = canvas.getContext("2d") as PaintContext | null;
@@ -68,6 +69,43 @@ export function createDomRasterSource(
     fontRevision = 0;
   let animationFrame = 0;
   let wasDynamic = false;
+  const videoFrames = new Map<HTMLVideoElement, number>();
+  const included = (node: HTMLElement) => {
+    for (
+      let ancestor: HTMLElement | null = node;
+      ancestor;
+      ancestor = ancestor.parentElement
+    ) {
+      if (!include(ancestor)) return false;
+      if (ancestor === originalRoot) return true;
+    }
+    return false;
+  };
+  const syncVideos = () => {
+    if (!refined) return;
+    const current = new Set(
+      Array.from(
+        originalRoot.querySelectorAll<HTMLVideoElement>("video"),
+      ).filter(included),
+    );
+    for (const [video, id] of videoFrames)
+      if (!current.has(video)) {
+        video.cancelVideoFrameCallback(id);
+        videoFrames.delete(video);
+      }
+    for (const video of current)
+      if (
+        !videoFrames.has(video) &&
+        typeof video.requestVideoFrameCallback === "function"
+      ) {
+        const decoded = () => {
+          if (disposed) return;
+          markDirty();
+          videoFrames.set(video, video.requestVideoFrameCallback(decoded));
+        };
+        videoFrames.set(video, video.requestVideoFrameCallback(decoded));
+      }
+  };
   const pollAnimations = () => {
     animationFrame = 0;
     if (disposed) return;
@@ -75,7 +113,9 @@ export function createDomRasterSource(
       .getAnimations({ subtree: true })
       .some((animation) => animation.playState === "running");
     const playing = Array.from(originalRoot.querySelectorAll("video")).some(
-      (video) => !video.paused,
+      (video) =>
+        !video.paused &&
+        (!refined || typeof video.requestVideoFrameCallback !== "function"),
     );
     if (animated || playing || wasDynamic) {
       dirty = true;
@@ -99,8 +139,8 @@ export function createDomRasterSource(
           : record.target.parentElement;
       return (
         target &&
-        (target.closest("head") ||
-          (include(target) &&
+        (target.closest("head,style") ||
+          ((refined ? included(target) : include(target)) &&
             target.tagName !== "CANVAS" &&
             !record.attributeName?.startsWith("data-effect")))
       );
@@ -132,6 +172,17 @@ export function createDomRasterSource(
       characterData: true,
       attributes: true,
     });
+    source()
+      .closest(".slide-renderer")
+      ?.querySelectorAll("style")
+      .forEach((style) => {
+        observer.observe(style, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+        });
+      });
   };
   observe();
   const fontChanged = () => {
@@ -142,6 +193,7 @@ export function createDomRasterSource(
   const loaded = () => markDirty();
   source().addEventListener("load", loaded, true);
   const originalRoot = source();
+  syncVideos();
   animationFrame = requestAnimationFrame(pollAnimations);
   // Freeze pseudo-elements too. Copying entire stylesheets into an SVG image
   // would apply application body/:root rules to the image's own document.
@@ -196,6 +248,17 @@ export function createDomRasterSource(
   };
   const refresh = () => {
     const start = performance.now();
+    if (refined) {
+      syncVideos();
+      const structural = Array.from(
+        originalRoot.querySelectorAll<HTMLElement>("[data-effect-source]"),
+      ).map((node) => [node.parentElement?.dataset.effectId, include(node)]);
+      const key = JSON.stringify(structural);
+      if (key !== structureKey) {
+        structureKey = key;
+        structureDirty = true;
+      }
+    }
     if (backend !== "native" || structureDirty || !root) build();
     const pseudoRules: string[] = [];
     for (const [index, pair] of pairs.entries()) {
@@ -322,6 +385,7 @@ export function createDomRasterSource(
     root!.style.setProperty("top", "0px", "important");
     metrics.styleMs += performance.now() - start;
   };
+  let structureKey = "";
   const embedImage = (url: string) => {
     if (!images.has(url))
       images.set(
@@ -403,7 +467,9 @@ export function createDomRasterSource(
         .getAnimations({ subtree: true })
         .some((animation) => animation.playState === "running");
       const video = Array.from(originalRoot.querySelectorAll("video")).some(
-        (node) => !node.paused,
+        (node) =>
+          !node.paused &&
+          (!refined || typeof node.requestVideoFrameCallback !== "function"),
       );
       if (
         !dirty &&
@@ -521,6 +587,8 @@ export function createDomRasterSource(
       disposed = true;
       cancelPaint?.();
       cancelAnimationFrame(animationFrame);
+      for (const [video, id] of videoFrames) video.cancelVideoFrameCallback(id);
+      videoFrames.clear();
       observer.disconnect();
       document.fonts.removeEventListener("loadingdone", fontChanged);
       originalRoot.removeEventListener("load", loaded, true);

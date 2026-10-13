@@ -20,6 +20,8 @@ import {
   setEffectRuntimeDiagnostics,
   flushEffectSurfaces,
   setGpuEffectChainingExperiment,
+  setEffectExecutionExperiment,
+  effectSourceTextureBytes,
 } from "../../src/components/effectRuntime";
 import { platform } from "../../src/platform";
 import { shaderOutputTextureBytes } from "../../src/components/shaderOutput";
@@ -43,7 +45,7 @@ export type StressScenario = {
   heavy?: boolean;
   taps?: number;
   slideIndex?: number;
-  backend?: DomRasterBackend | "gpu";
+  backend?: DomRasterBackend | "gpu" | "refined";
 };
 const passShader = `#version 300 es
 precision highp float;
@@ -315,8 +317,13 @@ export async function mountEffectStressHarness(
   scenario: StressScenario,
 ) {
   setGpuEffectChainingExperiment(scenario.backend === "gpu");
+  setEffectExecutionExperiment(
+    scenario.backend === "refined" ? "refined" : "naive",
+  );
   setDomRasterExperimentBackend(
-    scenario.backend === "gpu" ? "native" : (scenario.backend ?? "native"),
+    scenario.backend === "gpu" || scenario.backend === "refined"
+      ? "native"
+      : (scenario.backend ?? "native"),
   );
   setEffectRuntimeDiagnostics(true);
   const { model, index } = buildEffectStressDocument(base, scenario);
@@ -488,6 +495,7 @@ export async function mountEffectStressHarness(
         visibleCanvasBytes,
         mirrorCanvasBytes: memory - visibleCanvasBytes,
         outputTextureBytes: shaderOutputTextureBytes(),
+        inputTextureBytes: effectSourceTextureBytes(),
       };
     },
     async settle() {

@@ -7,7 +7,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-10-13",
     "reason": "Native Chromium capture composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; paused caches and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; experimental GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss"
   },
   {
@@ -746,5 +746,16 @@
     "created": "2026-10-12",
     "lastReviewed": "2026-10-12",
     "reason": "Public v1 asset, Effect API, Library envelope, Effect schedule and Presence schedule round trips and unsupported-version rejection"
+  },
+  {
+    "id": "effects-execution-graph",
+    "path": "tests/feature/effects/execution-graph.test.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, cycle rejection and reference-counted pixel source ownership"
   }
 ]

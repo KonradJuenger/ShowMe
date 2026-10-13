@@ -133,7 +133,14 @@ export function neutralShaderBridge(
       parseFloat(style.paddingTop) !== 0 ||
       parseFloat(style.paddingLeft) !== 0 ||
       parseFloat(style.paddingBottom) !== 0 ||
-      parseFloat(style.paddingRight) !== 0
+      parseFloat(style.paddingRight) !== 0 ||
+      parseFloat(style.marginTop) !== 0 ||
+      parseFloat(style.marginLeft) !== 0 ||
+      parseFloat(style.marginBottom) !== 0 ||
+      parseFloat(style.marginRight) !== 0 ||
+      !["auto", "0px"].includes(style.left) ||
+      !["auto", "0px"].includes(style.top) ||
+      style.zoom !== "1"
     )
       return false;
     for (const pseudo of ["::before", "::after"]) {

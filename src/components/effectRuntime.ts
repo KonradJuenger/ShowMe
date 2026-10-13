@@ -1,4 +1,6 @@
 import { createTextEffectRunner } from "./textEffectRunner";
+import { EffectGraph } from "./effectGraph";
+import { EffectSources } from "./effectSources";
 import { frame, cancelFrame } from "motion";
 import {
   affineSamplingDensity,
@@ -25,6 +27,7 @@ import type { Element } from "../core/element";
 import type { EffectResources } from "../core/effects";
 import {
   consumedParameter,
+  effectDependencies,
   cssEffectValue,
   type EffectParameterValue,
   effectParameters,
@@ -39,7 +42,17 @@ export interface EffectSampling extends RenderDensity {
   retain?: boolean;
   envelope?: number;
 }
+function samplingRoot(node: HTMLElement, sampling: EffectSampling) {
+  return (
+    sampling.root ??
+    node.closest<HTMLElement>(".slide-renderer") ??
+    node.parentElement ??
+    node
+  );
+}
 type Surface = {
+  inputs(): HTMLElement[];
+  materialize(): void;
   gpuOutput(): ShaderOutput | null;
   setSampling(value: EffectSampling): void;
   prepareSampling(): void;
@@ -64,6 +77,62 @@ const scheduled = new Map<HTMLElement, { prepare(): void; draw(): unknown }>();
 const shaderRedraws = new Set<() => void>();
 let diagnosticsEnabled = false;
 let gpuChainingEnabled = false;
+export type EffectExecutionMode = "naive" | "refined";
+let executionMode: EffectExecutionMode = "refined";
+export function setEffectExecutionExperiment(mode: EffectExecutionMode) {
+  executionMode = mode;
+}
+type Raster =
+  | ReturnType<typeof createElementRasterSource>
+  | ReturnType<typeof createDomRasterSource>;
+type Coordinator = {
+  graph: EffectGraph<HTMLElement>;
+  sources: EffectSources<Raster>;
+  nodes: Set<HTMLElement>;
+  compiled: boolean;
+  observer: MutationObserver;
+};
+const coordinators = new WeakMap<HTMLElement, Coordinator>();
+const liveCoordinators = new Set<Coordinator>();
+function coordinatorFor(root: HTMLElement) {
+  let coordinator = coordinators.get(root);
+  if (!coordinator) {
+    const observer = new MutationObserver((records) => {
+      if (
+        records.some(
+          (record) =>
+            record.type === "childList" &&
+            [...record.addedNodes, ...record.removedNodes].some(
+              (node) => node instanceof HTMLElement,
+            ),
+        )
+      )
+        coordinator!.compiled = false;
+    });
+    coordinator = {
+      graph: new EffectGraph(),
+      sources: new EffectSources(),
+      nodes: new Set(),
+      compiled: false,
+      observer,
+    };
+    observer.observe(root, { childList: true, subtree: true });
+    coordinators.set(root, coordinator);
+    liveCoordinators.add(coordinator);
+  }
+  return coordinator;
+}
+function compileCoordinator(coordinator: Coordinator) {
+  if (coordinator.compiled) return;
+  coordinator.graph.compile((node) => surfaces.get(node)?.inputs() ?? []);
+  coordinator.compiled = true;
+}
+export function effectSourceTextureBytes() {
+  return [...liveCoordinators].reduce(
+    (sum, coordinator) => sum + coordinator.sources.textureBytes,
+    0,
+  );
+}
 export function setGpuEffectChainingExperiment(enabled: boolean) {
   gpuChainingEnabled = enabled;
 }
@@ -101,8 +170,28 @@ function flushScheduled() {
   scheduled.clear();
   // Read all current transforms after Motion writes, before allocating/painting.
   work.forEach(([, value]) => value.prepare());
-  work.forEach(([, value]) => value.draw());
+  work.forEach(([node, value]) => {
+    const coordinator = nodeCoordinators.get(node);
+    if (coordinator) {
+      compileCoordinator(coordinator);
+      void coordinator.graph
+        .resolve(node, (input) => !!surfaces.get(input)?.gpuOutput())
+        .then(() => {
+          if (
+            nodeCoordinators.get(node) === coordinator &&
+            coordinator.graph.isDirty(node)
+          ) {
+            scheduled.set(node, value);
+            frame.postRender(flushScheduled);
+          }
+        })
+        .catch((error) => {
+          node.dataset.effectError = String(error);
+        });
+    } else value.draw();
+  });
 }
+const nodeCoordinators = new WeakMap<HTMLElement, Coordinator>();
 export function effectSurface(node: HTMLElement) {
   return surfaces.get(node);
 }
@@ -302,6 +391,52 @@ export function mountEffectSurface(
     mode: "live",
   },
 ) {
+  const refined = executionMode === "refined";
+  const useGpu = refined || gpuChainingEnabled;
+  const sceneRoot = samplingRoot(node, initialSampling);
+  const coordinator = refined ? coordinatorFor(sceneRoot) : null;
+  const dependencies = effectDependencies(definition);
+  const cssSource =
+    (definition.kind === "css"
+      ? definition.source
+      : (definition.styleSource ?? "")) +
+    (content?.scene?.().deck.stylesheet ?? "");
+  const clockKey = (value: typeof timing) => {
+    // CSS variables and arbitrary JS property access are public Effect API.
+    // Keep their full delivery conservative; shader uniforms have explicit names.
+    if (definition.kind !== "fragment-glsl")
+      return [
+        value.time,
+        value.duration,
+        value.slideTime,
+        value.presentationTime,
+        value.stepTime,
+        value.stepIndex,
+        value.active,
+        value.started,
+        value.progress,
+      ];
+    const source =
+      definition.kind === "fragment-glsl"
+        ? definition.source.replace(/\buniform\s+[^;]+;/g, "")
+        : definition.source;
+    const uses = (key: string) =>
+      new RegExp(
+        `\\b${definition.kind === "fragment-glsl" ? "u_" : ""}${key}\\b`,
+      ).test(source) || new RegExp(`--${key}(?![\\w-])`).test(cssSource);
+    return [
+      value.started,
+      value.active,
+      value.duration,
+      dependencies.genericTime || uses("t") ? value.time : 0,
+      dependencies.progress || uses("p") ? value.progress : undefined,
+      dependencies.stepState || uses("stepIndex") ? value.stepIndex : 0,
+      uses("slideTime") ? value.slideTime : 0,
+      uses("presentationTime") ? value.presentationTime : 0,
+      uses("stepTime") ? value.stepTime : 0,
+      /@keyframes\b/.test(cssSource) ? value.time : 0,
+    ];
+  };
   const values = Object.fromEntries(
     effectParameters(definition).map((p) => [
       p.key,
@@ -315,6 +450,7 @@ export function mountEffectSurface(
   let heldDensity = 0;
   let preparedSampling = false;
   let logicalSize = size;
+  let samplingGeometry = "";
   const prepareSampling = () => {
     if (!live || definition.kind !== "fragment-glsl") return;
     try {
@@ -341,6 +477,17 @@ export function mountEffectSurface(
       );
       if (!Number.isFinite(next))
         throw new Error("Invalid shader transform sampling");
+      const geometry = JSON.stringify([
+        logicalSize.width,
+        logicalSize.height,
+        next,
+        ...Array.from(matrix.toFloat64Array()),
+      ]);
+      if (refined && samplingGeometry !== geometry) {
+        samplingGeometry = geometry;
+        coordinator?.graph.invalidate(node);
+        raster?.markDirty();
+      }
       samplingDensity = next;
       if (sampling.retain) heldDensity = Math.max(heldDensity, next);
       else heldDensity = next;
@@ -373,10 +520,10 @@ export function mountEffectSurface(
   let lastTextInput = "";
   let lastShaderInput = "";
   let lastCssOutput = "";
-  let raster:
-    | ReturnType<typeof createElementRasterSource>
-    | ReturnType<typeof createDomRasterSource>
-    | null = null;
+  let raster: Raster | null = null;
+  let createRaster: ((invalidate: () => void) => Raster) | null = null;
+  let sourceLease: ReturnType<EffectSources<Raster>["acquire"]> | null = null;
+  let leaseKey = "";
   let rasterPending = false;
   let shaderOutput: ShaderOutput | null = null;
   let rasterPrepared = false;
@@ -393,7 +540,9 @@ export function mountEffectSurface(
   let sourceOpacity = "";
   const ownerAbsent = () => !!node.closest('[data-presentation-absent="true"]');
   const schedule = () => {
-    if (live && !ownerAbsent()) {
+    if (live) {
+      coordinator?.graph.invalidate(node);
+      if (ownerAbsent()) return;
       scheduled.set(node, { prepare: prepareSampling, draw });
       frame.postRender(flushScheduled);
     }
@@ -414,9 +563,121 @@ export function mountEffectSurface(
     if (
       event.target instanceof Node &&
       event.target !== node &&
-      sourceRoot?.contains(event.target)
+      sourceRoot?.contains(event.target) &&
+      (!refined ||
+        definition.input !== "content" ||
+        !!sourceContent?.contains(event.target)) &&
+      (!refined ||
+        definition.input !== "backdrop" ||
+        inputDependencies().includes(event.target as HTMLElement))
     )
       sourceChanged();
+  };
+  const inputDependencies = () => {
+    const root =
+      definition.kind === "css"
+        ? node
+        : definition.input === "content"
+          ? sourceContent
+          : sourceRoot;
+    if (!root) return [];
+    const prefix =
+      definition.input === "backdrop" && content?.scene
+        ? backdropPrefix(
+            content.scene().slide,
+            content.scene().deck,
+            content.element.id,
+          )
+        : null;
+    const allowed = new Set<string>();
+    const collect = (elements: Element[]) =>
+      elements.forEach((element) => {
+        allowed.add(element.id);
+        collect(element.children);
+      });
+    if (prefix) collect(prefix.elements);
+    const candidates = Array.from(
+      root.querySelectorAll<HTMLElement>("[data-effect-id]"),
+    )
+      .filter((dependency) => {
+        if (dependency === node || dependency.contains(node)) return false;
+        const owner =
+          dependency.closest<HTMLElement>("[data-element-id]")?.dataset
+            .elementId;
+        return (
+          !prefix ||
+          (!!owner && allowed.has(owner) && !prefix.partial.has(owner))
+        );
+      })
+      .sort(dependencyOrder);
+    // The outer stage resolves its own inputs. Re-listing every descendant
+    // makes a deep stack repeatedly walk and wait on the same subtree.
+    return candidates.filter(
+      (candidate) =>
+        !candidates.some(
+          (other) => other !== candidate && other.contains(candidate),
+        ),
+    );
+  };
+  let domRevision = -1;
+  const materialize = () => {
+    if (
+      !canvas ||
+      !shaderOutput ||
+      node.dataset.effectError ||
+      node.dataset.effectStarted === "false" ||
+      domRevision === shaderOutput.revision
+    )
+      return;
+    const state = sharedGpu();
+    if (state.gl !== shaderOutput.gl || state.gl.isContextLost()) return;
+    const { gl, canvas: source } = state;
+    source.width = shaderOutput.width;
+    source.height = shaderOutput.height;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.blitFramebuffer(
+      0,
+      0,
+      source.width,
+      source.height,
+      0,
+      0,
+      source.width,
+      source.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const context = resizeRasterCanvas(canvas, source.width, source.height);
+    context.clearRect(0, 0, source.width, source.height);
+    const began = diagnosticsEnabled ? performance.now() : 0;
+    context.drawImage(source, 0, 0);
+    if (diagnosticsEnabled) {
+      runtimeMetrics.copies++;
+      runtimeMetrics.copyMs += performance.now() - began;
+    }
+    domRevision = shaderOutput.revision;
+    canvas.style.visibility = "visible";
+  };
+  const needsDomOutput = () => {
+    if (!refined) return true;
+    const source = node.parentElement;
+    const consumer = source?.parentElement;
+    if (
+      !source?.hasAttribute("data-effect-source") ||
+      !consumer?.dataset.effectId
+    )
+      return true;
+    const consumerSurface = surfaces.get(consumer);
+    return !(
+      consumerSurface &&
+      canvas &&
+      consumer.dataset.effectStarted !== "false" &&
+      !consumer.dataset.effectError &&
+      source.children.length === 1 &&
+      neutralShaderBridge(source, node, canvas, logicalSize)
+    );
   };
   let style: HTMLStyleElement | null = null;
   // Identity belongs to this stage, never to its Element or earlier stages.
@@ -478,8 +739,11 @@ export function mountEffectSurface(
         stepIndex: timing.stepIndex,
         active: Number(timing.active),
         duration: timing.duration,
-      }))
-        node.style.setProperty(`--${key}`, cssEffectValue(value));
+      })) {
+        const serialized = cssEffectValue(value);
+        if (node.style.getPropertyValue(`--${key}`) !== serialized)
+          node.style.setProperty(`--${key}`, serialized);
+      }
       const styled =
         definition.kind === "css"
           ? node
@@ -539,7 +803,9 @@ export function mountEffectSurface(
           active: timing.active,
           parameters: params,
         };
-        const signature = JSON.stringify(input);
+        const signature = JSON.stringify(
+          refined ? [input.text, input.parameters, clockKey(timing)] : input,
+        );
         if (signature === lastTextInput) return pending;
         lastTextInput = signature;
         const revision = ++sequence;
@@ -605,7 +871,7 @@ export function mountEffectSurface(
         const allocation = shaderSamplingSize(
           logicalSize,
           heldDensity,
-          raster
+          definition.input === "content" || definition.input === "backdrop"
             ? {
                 width: Math.min(capabilities.width, textureSize),
                 height: Math.min(capabilities.height, textureSize),
@@ -619,7 +885,7 @@ export function mountEffectSurface(
           node.dataset.effectSamplingWarning = `Shader requested ${allocation.requestedWidth} × ${allocation.requestedHeight}; GPU texture/viewport/renderbuffer limits reduced it to ${width} × ${height}.`;
         else delete node.dataset.effectSamplingWarning;
         const previousStage =
-          gpuChainingEnabled &&
+          useGpu &&
           definition.input === "content" &&
           sourceContent?.children.length === 1
             ? (sourceContent.firstElementChild as HTMLElement)
@@ -668,6 +934,29 @@ export function mountEffectSurface(
           if (diagnosticsEnabled) runtimeMetrics.sourceCoalesced++;
           return pending;
         }
+        if (refined && gpuInput && sourceLease) {
+          sourceLease.release();
+          sourceLease = null;
+          raster = null;
+          leaseKey = "";
+          rasterPrepared = false;
+        }
+        if (!gpuInput && createRaster && !rasterPending) {
+          if (refined && coordinator) {
+            const key = `${definition.input === "backdrop" ? `backdrop:${content!.element.id}` : `content:${instance.id}`}|${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
+            if (key !== leaseKey) {
+              sourceLease?.release();
+              sourceLease = coordinator.sources.acquire(
+                key,
+                createRaster,
+                schedule,
+              );
+              raster = sourceLease.source;
+              leaseKey = key;
+              rasterPrepared = false;
+            }
+          } else raster ??= createRaster(schedule);
+        }
         if (!rasterPrepared && !gpuInput) {
           const ready =
             raster &&
@@ -703,7 +992,7 @@ export function mountEffectSurface(
         rasterPrepared = false;
         const signature = JSON.stringify([
           params,
-          timing,
+          refined ? clockKey(timing) : timing,
           width,
           height,
           raster?.revision,
@@ -726,12 +1015,14 @@ export function mountEffectSurface(
               `Cannot allocate ${width} × ${height} shader drawing buffer`,
             );
         }
-        const context = resizeRasterCanvas(canvas, width, height);
-        if (gpuChainingEnabled)
+        const context = !refined
+          ? resizeRasterCanvas(canvas, width, height)
+          : null;
+        if (useGpu)
           shaderOutput = allocateShaderOutput(gl, width, height, shaderOutput);
         gl.bindFramebuffer(
           gl.FRAMEBUFFER,
-          gpuChainingEnabled ? shaderOutput!.framebuffer : null,
+          useGpu ? shaderOutput!.framebuffer : null,
         );
         gl.viewport(0, 0, width, height);
         gl.useProgram(program);
@@ -745,55 +1036,66 @@ export function mountEffectSurface(
         } else if (raster) {
           if ("backend" in raster)
             node.dataset.effectSourceBackend = raster.backend;
-          if (!texture || texture.gl !== gl) {
-            if (texture) texture.gl.deleteTexture(texture.value);
-            const value = gl.createTexture();
-            if (!value)
-              throw new Error("Cannot allocate content shader texture");
-            texture = { gl, value, revision: -1, width: 0, height: 0 };
-          }
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, texture.value);
-          if (texture.revision !== raster.revision) {
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-            gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.texParameteri(
-              gl.TEXTURE_2D,
-              gl.TEXTURE_WRAP_S,
-              gl.CLAMP_TO_EDGE,
-            );
-            gl.texParameteri(
-              gl.TEXTURE_2D,
-              gl.TEXTURE_WRAP_T,
-              gl.CLAMP_TO_EDGE,
-            );
-            const uploadStarted = diagnosticsEnabled ? performance.now() : 0;
-            gl.texImage2D(
-              gl.TEXTURE_2D,
-              0,
-              gl.RGBA,
-              gl.RGBA,
-              gl.UNSIGNED_BYTE,
-              raster.canvas,
-            );
-            if (diagnosticsEnabled) {
+          if (refined && sourceLease) {
+            const began = diagnosticsEnabled ? performance.now() : 0;
+            const upload = sourceLease.upload(gl);
+            if (diagnosticsEnabled && upload.uploaded) {
               runtimeMetrics.uploads++;
-              runtimeMetrics.uploadBytes +=
-                raster.canvas.width * raster.canvas.height * 4;
-              runtimeMetrics.uploadMs += performance.now() - uploadStarted;
+              runtimeMetrics.uploadBytes += upload.bytes;
+              runtimeMetrics.uploadMs += performance.now() - began;
             }
-            if (texture.width !== width || texture.height !== height) {
-              if (gl.getError() !== gl.NO_ERROR)
-                throw new Error(
-                  `Cannot allocate ${width} × ${height} shader input texture`,
-                );
-              texture.width = width;
-              texture.height = height;
-            }
-            texture.revision = raster.revision;
             node.dataset.effectSourceRevision = String(raster.revision);
+          } else {
+            if (!texture || texture.gl !== gl) {
+              if (texture) texture.gl.deleteTexture(texture.value);
+              const value = gl.createTexture();
+              if (!value)
+                throw new Error("Cannot allocate content shader texture");
+              texture = { gl, value, revision: -1, width: 0, height: 0 };
+            }
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texture.value);
+            if (texture.revision !== raster.revision) {
+              gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+              gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+              gl.texParameteri(
+                gl.TEXTURE_2D,
+                gl.TEXTURE_WRAP_S,
+                gl.CLAMP_TO_EDGE,
+              );
+              gl.texParameteri(
+                gl.TEXTURE_2D,
+                gl.TEXTURE_WRAP_T,
+                gl.CLAMP_TO_EDGE,
+              );
+              const uploadStarted = diagnosticsEnabled ? performance.now() : 0;
+              gl.texImage2D(
+                gl.TEXTURE_2D,
+                0,
+                gl.RGBA,
+                gl.RGBA,
+                gl.UNSIGNED_BYTE,
+                raster.canvas,
+              );
+              if (diagnosticsEnabled) {
+                runtimeMetrics.uploads++;
+                runtimeMetrics.uploadBytes +=
+                  raster.canvas.width * raster.canvas.height * 4;
+                runtimeMetrics.uploadMs += performance.now() - uploadStarted;
+              }
+              if (texture.width !== width || texture.height !== height) {
+                if (gl.getError() !== gl.NO_ERROR)
+                  throw new Error(
+                    `Cannot allocate ${width} × ${height} shader input texture`,
+                  );
+                texture.width = width;
+                texture.height = height;
+              }
+              texture.revision = raster.revision;
+              node.dataset.effectSourceRevision = String(raster.revision);
+            }
           }
           gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
         }
@@ -828,34 +1130,44 @@ export function mountEffectSurface(
         gl.clear(gl.COLOR_BUFFER_BIT);
         const drawStarted = diagnosticsEnabled ? performance.now() : 0;
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        if (gpuChainingEnabled && shaderOutput) {
+        if (useGpu && shaderOutput) {
           shaderOutput.revision++;
-          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
-          gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-          gl.blitFramebuffer(
-            0,
-            0,
-            width,
-            height,
-            0,
-            0,
-            width,
-            height,
-            gl.COLOR_BUFFER_BIT,
-            gl.NEAREST,
-          );
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          if (!refined) {
+            gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
+            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+            gl.blitFramebuffer(
+              0,
+              0,
+              width,
+              height,
+              0,
+              0,
+              width,
+              height,
+              gl.COLOR_BUFFER_BIT,
+              gl.NEAREST,
+            );
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          }
         }
         if (diagnosticsEnabled) {
           runtimeMetrics.draws++;
           runtimeMetrics.drawMs += performance.now() - drawStarted;
         }
-        context.clearRect(0, 0, width, height);
-        const copyStarted = diagnosticsEnabled ? performance.now() : 0;
-        context.drawImage(source, 0, 0);
-        if (diagnosticsEnabled) {
-          runtimeMetrics.copies++;
-          runtimeMetrics.copyMs += performance.now() - copyStarted;
+        if (refined) {
+          if (needsDomOutput()) materialize();
+          else {
+            canvas.width = canvas.height = 1;
+            domRevision = -1;
+          }
+        } else {
+          context!.clearRect(0, 0, width, height);
+          const copyStarted = diagnosticsEnabled ? performance.now() : 0;
+          context!.drawImage(source, 0, 0);
+          if (diagnosticsEnabled) {
+            runtimeMetrics.copies++;
+            runtimeMetrics.copyMs += performance.now() - copyStarted;
+          }
         }
         canvas.style.visibility = "visible";
         if (sourceContent) sourceContent.style.opacity = "0";
@@ -883,7 +1195,19 @@ export function mountEffectSurface(
     root?.removeEventListener("seeked", sourceChanged, true);
     root?.removeEventListener("timeupdate", sourceChanged, true);
     root?.removeEventListener("showme-effect-output", outputChanged);
-    raster?.dispose();
+    if (sourceLease) sourceLease.release();
+    else raster?.dispose();
+    if (coordinator) {
+      coordinator.graph.remove(node);
+      coordinator.nodes.delete(node);
+      coordinator.compiled = false;
+      nodeCoordinators.delete(node);
+      if (!coordinator.nodes.size) {
+        coordinator.observer.disconnect();
+        liveCoordinators.delete(coordinator);
+        coordinators.delete(sceneRoot);
+      }
+    }
     if (texture) texture.gl.deleteTexture(texture.value);
     if (shaderOutput) disposeShaderOutput(shaderOutput);
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
@@ -1012,100 +1336,148 @@ export function mountEffectSurface(
               });
             visit(prefix.elements);
           };
-          raster = createDomRasterSource(
-            () => {
-              refreshPrefix();
-              return inputRoot;
-            },
-            (candidate) => {
-              if (candidate.closest('[data-presentation-absent="true"]'))
-                return false;
-              const owner = candidate.closest<HTMLElement>("[data-element-id]");
-              if (
-                definition.input === "backdrop" &&
-                owner &&
-                !allowed.has(owner.dataset.elementId!)
-              )
-                return false;
-              if (owner && partial.has(owner.dataset.elementId!)) {
-                if (candidate.hasAttribute("data-element-stroke")) return false;
-                const effectId =
-                  candidate.closest<HTMLElement>("[data-effect-id]")?.dataset
-                    .effectId;
-                const instance = prefixElements
-                  .get(owner.dataset.elementId!)
-                  ?.effects?.find((effect) => effect.id === effectId);
-                if (instance?.placement === "overlay") return false;
+          createRaster = (invalidate) =>
+            createDomRasterSource(
+              () => {
+                refreshPrefix();
+                return inputRoot;
+              },
+              (candidate) => {
                 if (
-                  candidate instanceof HTMLCanvasElement &&
-                  instance &&
-                  effectPlacement(
-                    context.resources[instance.resourceId],
-                    instance,
-                  ) === "content"
+                  refined &&
+                  candidate !== inputRoot &&
+                  candidate.hasAttribute("data-effect-source") &&
+                  candidate.style.opacity === "0" &&
+                  !partial.has(
+                    candidate.closest<HTMLElement>("[data-element-id]")?.dataset
+                      .elementId ?? "",
+                  ) &&
+                  candidate.parentElement?.dataset.effectStarted === "true" &&
+                  !candidate.parentElement.dataset.effectError
                 )
                   return false;
-              }
-              return true;
-            },
-            (original, clone) => {
-              // Shader source opacity is a display bypass, not source alpha.
-              if (
-                original.hasAttribute("data-effect-source") &&
-                (original === sourceContent ||
-                  partial.has(
-                    original.closest<HTMLElement>("[data-element-id]")?.dataset
-                      .elementId ?? "",
-                  ))
-              )
-                clone.style.setProperty("opacity", "1", "important");
-              if (original === inputRoot && definition.input === "backdrop") {
-                // The capture viewport carries the world-to-frame transform.
-                clone.style.setProperty("transform", "none", "important");
-                clone.style.setProperty("transform-origin", "0 0", "important");
-              }
-            },
-            schedule,
-            async () => {
-              refreshPrefix();
-              const dependencies = Array.from(
-                inputRoot.querySelectorAll<HTMLElement>("[data-effect-id]"),
-              ).reverse();
-              for (const dependency of dependencies) {
-                if (dependency === node || dependency.contains(node)) continue;
+                if (candidate.closest('[data-presentation-absent="true"]'))
+                  return false;
                 const owner =
-                  dependency.closest<HTMLElement>("[data-element-id]");
+                  candidate.closest<HTMLElement>("[data-element-id]");
                 if (
                   definition.input === "backdrop" &&
                   owner &&
-                  (!allowed.has(owner.dataset.elementId!) ||
-                    partial.has(owner.dataset.elementId!))
+                  !allowed.has(owner.dataset.elementId!)
                 )
-                  continue;
-                await surfaces.get(dependency)?.flush();
-              }
-            },
-            () =>
-              definition.input === "backdrop"
-                ? elementWorldTransform(root, inputRoot).inverse()
-                : new DOMMatrix(),
-          );
-          node.dataset.effectSourceBackend = raster.backend;
+                  return false;
+                if (owner && partial.has(owner.dataset.elementId!)) {
+                  if (candidate.hasAttribute("data-element-stroke"))
+                    return false;
+                  const effectId =
+                    candidate.closest<HTMLElement>("[data-effect-id]")?.dataset
+                      .effectId;
+                  const instance = prefixElements
+                    .get(owner.dataset.elementId!)
+                    ?.effects?.find((effect) => effect.id === effectId);
+                  if (instance?.placement === "overlay") return false;
+                  if (
+                    candidate instanceof HTMLCanvasElement &&
+                    instance &&
+                    effectPlacement(
+                      context.resources[instance.resourceId],
+                      instance,
+                    ) === "content"
+                  )
+                    return false;
+                }
+                return true;
+              },
+              (original, clone) => {
+                // Shader source opacity is a display bypass, not source alpha.
+                if (
+                  original.hasAttribute("data-effect-source") &&
+                  (original === sourceContent ||
+                    partial.has(
+                      original.closest<HTMLElement>("[data-element-id]")
+                        ?.dataset.elementId ?? "",
+                    ))
+                )
+                  clone.style.setProperty("opacity", "1", "important");
+                if (original === inputRoot && definition.input === "backdrop") {
+                  // The capture viewport carries the world-to-frame transform.
+                  clone.style.setProperty("transform", "none", "important");
+                  clone.style.setProperty(
+                    "transform-origin",
+                    "0 0",
+                    "important",
+                  );
+                }
+              },
+              invalidate,
+              async () => {
+                refreshPrefix();
+                const dependencies = Array.from(
+                  inputRoot.querySelectorAll<HTMLElement>("[data-effect-id]"),
+                ).reverse();
+                for (const dependency of dependencies) {
+                  if (dependency === node || dependency.contains(node))
+                    continue;
+                  const owner =
+                    dependency.closest<HTMLElement>("[data-element-id]");
+                  if (
+                    definition.input === "backdrop" &&
+                    owner &&
+                    (!allowed.has(owner.dataset.elementId!) ||
+                      partial.has(owner.dataset.elementId!))
+                  )
+                    continue;
+                  const surface = surfaces.get(dependency);
+                  if (!refined) await surface?.flush();
+                  if (refined) {
+                    let hidden = false;
+                    for (
+                      let ancestor = dependency.parentElement;
+                      ancestor && ancestor !== inputRoot;
+                      ancestor = ancestor.parentElement
+                    ) {
+                      if (
+                        ancestor.hasAttribute("data-effect-source") &&
+                        ancestor.style.opacity === "0" &&
+                        !partial.has(
+                          ancestor.closest<HTMLElement>("[data-element-id]")
+                            ?.dataset.elementId ?? "",
+                        )
+                      ) {
+                        hidden = true;
+                        break;
+                      }
+                    }
+                    if (!hidden) surface?.materialize();
+                  }
+                }
+              },
+              () =>
+                definition.input === "backdrop"
+                  ? elementWorldTransform(root, inputRoot).inverse()
+                  : new DOMMatrix(),
+              refined,
+            );
+          if (!refined) {
+            raster = createRaster(schedule);
+            node.dataset.effectSourceBackend =
+              "backend" in raster ? raster.backend : "primitive";
+          }
         } else if (definition.input === "backdrop") {
           if (!content.scene)
             throw new Error("Backdrop shaders require a slide scene.");
-          raster = createBackdropRasterSource(
-            content.element,
-            content.scene,
-            context,
-            schedule,
-          );
+          createRaster = (invalidate) =>
+            createBackdropRasterSource(
+              content.element,
+              content.scene!,
+              context,
+              invalidate,
+            );
         } else
-          raster = createElementRasterSource(
-            content.element,
-            context,
-            schedule,
-          );
+          createRaster = (invalidate) =>
+            createElementRasterSource(content.element, context, invalidate);
+        if (!refined && createRaster && !raster)
+          raster = createRaster(schedule);
         observer = new MutationObserver((records) => {
           if (
             records.some(
@@ -1140,6 +1512,8 @@ export function mountEffectSurface(
     return dispose;
   }
   const surface: Surface = {
+    inputs: inputDependencies,
+    materialize,
     gpuOutput() {
       return live &&
         node.dataset.effectStarted !== "false" &&
@@ -1158,10 +1532,12 @@ export function mountEffectSurface(
     },
     prepareSampling,
     set(key, value) {
+      if (values[key] === value) return;
       values[key] = value;
       schedule();
     },
     setTiming(value) {
+      const previous = refined ? JSON.stringify(clockKey(timing)) : "";
       timing = {
         progress: value.progress,
         ...value,
@@ -1173,13 +1549,44 @@ export function mountEffectSurface(
         running: value.running ?? false,
         started: value.started ?? true,
       };
+      // Preserve the complete CSS clock API even when a static shader needs no
+      // new GPU draw. Arbitrary stylesheet rules may consume inherited clocks.
+      if (refined && definition.kind === "fragment-glsl" && !ownerAbsent()) {
+        for (const [key, clock] of Object.entries({
+          t: timing.time * (definition.speed ?? 1),
+          p: timing.progress ?? 1,
+          slideTime: timing.slideTime,
+          presentationTime: timing.presentationTime,
+          stepTime: timing.stepTime,
+          stepIndex: timing.stepIndex,
+          active: Number(timing.active),
+          duration: timing.duration,
+        })) {
+          const serialized = cssEffectValue(clock);
+          if (node.style.getPropertyValue(`--${key}`) !== serialized)
+            node.style.setProperty(`--${key}`, serialized);
+        }
+      }
       if (!timing.started) bypass();
+      if (refined && previous === JSON.stringify(clockKey(timing))) return;
       schedule();
     },
     async flush() {
       cancelFrame(draw);
       scheduled.delete(node);
       if (ownerAbsent()) return;
+      if (coordinator) {
+        compileCoordinator(coordinator);
+        await coordinator.graph.flush(node);
+        if (needsDomOutput()) {
+          try {
+            materialize();
+          } catch (error) {
+            diagnose(error);
+          }
+        }
+        return;
+      }
       void draw();
       // Await the frame requested by this call. Live video/animation can enqueue
       // another frame while it paints; chasing every replacement never settles.
@@ -1205,6 +1612,15 @@ export function mountEffectSurface(
     },
   };
   surfaces.set(node, surface);
+  if (coordinator) {
+    coordinator.nodes.add(node);
+    coordinator.graph.register(node, async () => {
+      void draw();
+      await pending;
+    });
+    coordinator.compiled = false;
+    nodeCoordinators.set(node, coordinator);
+  }
   if (definition.kind === "fragment-glsl") shaderRedraws.add(schedule);
   bypass();
   schedule();
