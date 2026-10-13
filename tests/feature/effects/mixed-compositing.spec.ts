@@ -5,6 +5,108 @@ type HarnessWindow = Window & {
 };
 test.use({ deviceScaleFactor: 1.25 });
 
+test("a mounted backdrop switches from primitive capture when lower CSS is added", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
+      factoryPath = "/src/core/elementFactory.ts",
+      effectsPath = "/src/core/effects.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const { newEffectInstance }: typeof import("../../../src/core/effects") =
+      await import(/* @vite-ignore */ effectsPath);
+    let model!: import("../../../src/core/document").PresentationDocument;
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(value) {
+        model = value;
+        const slide = value.slides[value.deck.slideIds[0]];
+        const red = createBasicShape("red", "rectangle", { x: 40, y: 40 });
+        red.frame.width = 120;
+        red.frame.height = 120;
+        red.appearance.fill = "red";
+        red.effects = [
+          newEffectInstance("shader", slide.effectResources!.shader, "content"),
+        ];
+        slide.nodes[0].children = [red, slide.nodes[0].children[1]];
+        slide.effectResources = {
+          backdrop: slide.effectResources!.backdrop,
+          shader: slide.effectResources!.shader,
+        };
+        delete value.deck.stylesheet;
+      },
+    });
+    try {
+      const before = await harness.stage(0);
+      const slide = model.slides[model.deck.slideIds[0]],
+        red = slide.nodes[0].children[0];
+      const css = {
+        apiVersion: 1 as const,
+        name: "Reveal",
+        category: "effect" as const,
+        kind: "css" as const,
+        target: "content" as const,
+        source: ":scope { opacity: var(--p); }",
+        timeControl: {
+          start: "slide" as const,
+          stop: { mode: "none" as const },
+        },
+        parameters: [],
+      };
+      slide.effectResources = { ...slide.effectResources, css };
+      red.effects = [...red.effects!, newEffectInstance("css", css, "content")];
+      await harness.setZoom(1);
+      const visible = await harness.stage(0.5, 0, 1);
+      const hidden = await harness.stage(0.5, 0, 0);
+      slide.effectResources = {
+        backdrop: slide.effectResources.backdrop,
+        shader: slide.effectResources.shader,
+      };
+      red.effects = red.effects.slice(0, 1);
+      await harness.setZoom(1);
+      const restored = await harness.stage(0.5, 0, 1);
+      harness.setStylesheet('[data-element-id="red"] { filter:grayscale(1); }');
+      await harness.setZoom(1);
+      const styled = await harness.stage(0.5, 0, 1);
+      return {
+        before,
+        visible,
+        hidden,
+        restored,
+        styled,
+        warnings: Array.from(
+          harness.host.querySelectorAll('[role="status"]'),
+          (node) => node.textContent,
+        ),
+      };
+    } finally {
+      harness.dispose();
+    }
+  });
+  expect(result.before.errors).toEqual([]);
+  expect(result.before.surfaces.at(-1)!.opaque).toBeGreaterThan(1000);
+  expect(result.visible.errors).toEqual([]);
+  expect(result.visible.surfaces.at(-1)!.backend).toBe("native");
+  expect(result.visible.surfaces.at(-1)!.green).toBeGreaterThan(1000);
+  expect(result.hidden.surfaces.at(-1)!.green).toBe(0);
+  expect(result.restored.errors).toEqual([]);
+  expect(result.restored.surfaces.at(-1)!.backend).toBe("primitive");
+  expect(result.restored.surfaces.at(-1)!.green).toBeGreaterThan(1000);
+  expect(result.styled.errors).toEqual([]);
+  expect(result.styled.surfaces.at(-1)!.backend).toBe("native");
+  expect(result.styled.surfaces.at(-1)!.green).toBe(0);
+  expect(result.warnings).toEqual([]);
+});
+
 test("retained snapshots preserve mixed text insertion and CSS changes around unchanged media", async ({
   page,
 }) => {

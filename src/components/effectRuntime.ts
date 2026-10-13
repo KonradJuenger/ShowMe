@@ -530,6 +530,7 @@ export function mountEffectSurface(
   let lastCssOutput = "";
   let raster: Raster | null = null;
   let createRaster: ((invalidate: () => void) => Raster) | null = null;
+  let needsDomRaster = () => false;
   let sourceLease: ReturnType<EffectSources<Raster>["acquire"]> | null = null;
   let leaseKey = "";
   let rasterPending = false;
@@ -952,8 +953,9 @@ export function mountEffectSurface(
           rasterPrepared = false;
         }
         if (!gpuInput && createRaster && !rasterPending) {
+          const dom = needsDomRaster();
           if (refined && coordinator) {
-            const key = `${definition.input === "backdrop" ? `backdrop:${content!.element.id}` : `content:${instance.id}`}|${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
+            const key = `${definition.input === "backdrop" ? `backdrop:${content!.element.id}` : `content:${instance.id}`}|${dom ? "dom" : "primitive"}|${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
             if (key !== leaseKey) {
               sourceLease?.release();
               sourceLease = coordinator.sources.acquire(
@@ -964,8 +966,18 @@ export function mountEffectSurface(
               raster = sourceLease.source;
               leaseKey = key;
               rasterPrepared = false;
+              lastShaderInput = "";
             }
-          } else raster ??= createRaster(schedule);
+          } else {
+            if (raster && "backend" in raster !== dom) {
+              raster.dispose();
+              raster = null;
+              rasterPrepared = false;
+              lastShaderInput = "";
+              if (texture) texture.revision = -1;
+            }
+            raster ??= createRaster(schedule);
+          }
         }
         const captureKey = `${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
         if (rasterPreparedKey !== captureKey) rasterPrepared = false;
@@ -1047,8 +1059,8 @@ export function mountEffectSurface(
           node.dataset.effectSourceRevision = String(gpuInput.revision);
           if (diagnosticsEnabled) runtimeMetrics.gpuSamples++;
         } else if (raster) {
-          if ("backend" in raster)
-            node.dataset.effectSourceBackend = raster.backend;
+          node.dataset.effectSourceBackend =
+            "backend" in raster ? raster.backend : "primitive";
           if (refined && sourceLease) {
             const began = diagnosticsEnabled ? performance.now() : 0;
             const upload = sourceLease.upload(gl);
@@ -1316,19 +1328,59 @@ export function mountEffectSurface(
             (element) =>
               element.content?.type === "text" || hasText(element.children),
           );
-        const scene = content.scene?.();
-        const inputElements =
-          definition.input === "backdrop" && scene
-            ? backdropPrefix(scene.slide, scene.deck, content.element.id)
-                .elements
-            : [content.element];
-        const domInput =
-          scene?.deck.stylesheet ||
-          hasText(inputElements) ||
-          Object.values(context.resources).some(
-            (resource) => resource.kind !== "fragment-glsl",
+        let sampledSlide: Slide | undefined,
+          sampledResources: EffectResources | undefined;
+        let sampledStylesheet: string | undefined,
+          domInput = false,
+          sampled = false;
+        needsDomRaster = () => {
+          const scene = content.scene?.(),
+            resources = context.resources,
+            stylesheet = scene?.deck.stylesheet;
+          // Authority revisions provide immutable slide/resource identities.
+          // Routing must follow those revisions without remounting the lens.
+          if (
+            !sampled ||
+            scene?.slide !== sampledSlide ||
+            resources !== sampledResources ||
+            stylesheet !== sampledStylesheet
+          ) {
+            sampled = true;
+            sampledSlide = scene?.slide;
+            sampledResources = resources;
+            sampledStylesheet = stylesheet;
+            const inputElements =
+              definition.input === "backdrop" && scene
+                ? backdropPrefix(scene.slide, scene.deck, content.element.id)
+                    .elements
+                : [content.element];
+            domInput =
+              !!stylesheet ||
+              hasText(inputElements) ||
+              Object.values(resources).some(
+                (resource) => resource.kind !== "fragment-glsl",
+              );
+          }
+          return domInput;
+        };
+        const createPrimitiveRaster = (invalidate: () => void) => {
+          if (definition.input === "backdrop") {
+            if (!content.scene)
+              throw new Error("Backdrop shaders require a slide scene.");
+            return createBackdropRasterSource(
+              content.element,
+              content.scene,
+              context,
+              invalidate,
+            );
+          }
+          return createElementRasterSource(
+            content.element,
+            context,
+            invalidate,
           );
-        if (domInput) {
+        };
+        {
           const inputRoot =
             definition.input === "backdrop" ? sourceRoot : sourceContent!;
           let allowed = new Set<string>(),
@@ -1349,7 +1401,7 @@ export function mountEffectSurface(
               });
             visit(prefix.elements);
           };
-          createRaster = (invalidate) =>
+          const createNativeRaster = (invalidate: () => void) =>
             createDomRasterSource(
               () => {
                 refreshPrefix();
@@ -1471,24 +1523,11 @@ export function mountEffectSurface(
                   : new DOMMatrix(),
               refined,
             );
-          if (!refined) {
-            raster = createRaster(schedule);
-            node.dataset.effectSourceBackend =
-              "backend" in raster ? raster.backend : "primitive";
-          }
-        } else if (definition.input === "backdrop") {
-          if (!content.scene)
-            throw new Error("Backdrop shaders require a slide scene.");
           createRaster = (invalidate) =>
-            createBackdropRasterSource(
-              content.element,
-              content.scene!,
-              context,
-              invalidate,
-            );
-        } else
-          createRaster = (invalidate) =>
-            createElementRasterSource(content.element, context, invalidate);
+            needsDomRaster()
+              ? createNativeRaster(invalidate)
+              : createPrimitiveRaster(invalidate);
+        }
         if (!refined && createRaster && !raster)
           raster = createRaster(schedule);
         observer = new MutationObserver((records) => {
