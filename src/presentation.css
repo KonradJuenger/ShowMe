@@ -120,6 +120,11 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.console-next {
+  align-self: center;
+  height: 82%;
+}
+
 .console-section-header,
 .console-notes-header {
   min-height: 20px;
