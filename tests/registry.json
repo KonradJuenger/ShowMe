@@ -768,5 +768,16 @@
     "created": "2026-10-13",
     "lastReviewed": "2026-10-13",
     "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership"
+  },
+  {
+    "id": "presenter-view-model",
+    "path": "tests/feature/presenter/view-model.test.ts",
+    "area": "presenter",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Presenter readiness, explicit Advance semantics, Motion stage boundaries, Previous eligibility, pause/black/preparing priority and no-visible-slide handling"
   }
 ]
