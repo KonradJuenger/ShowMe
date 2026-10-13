@@ -247,7 +247,7 @@ export function PropertyControl<K extends ElementPropertyId>({
             if (choice !== undefined) editing.set(id, choice);
           }}
         >
-          {resolved.state === "mixed" && <option value="">Mixed</option>}
+          {resolved.state === "mixed" && <option value="">—</option>}
           {options?.map((option) => (
             <option key={String(option)} value={String(option)}>
               {String(option)}
@@ -271,7 +271,7 @@ export function PropertyControl<K extends ElementPropertyId>({
           ref={inputRef}
           aria-label={title}
           defaultValue={String(value)}
-          placeholder={resolved.state === "mixed" ? "Mixed" : undefined}
+          placeholder={resolved.state === "mixed" ? "—" : undefined}
           onBlur={(event) => {
             if (event.currentTarget.value !== String(value))
               editing.set(id, event.currentTarget.value as PropertyValue<K>);
@@ -294,7 +294,7 @@ export function PropertyControl<K extends ElementPropertyId>({
                   ? Number(value.toFixed(precision))
                   : ""
           }
-          placeholder={resolved.state === "mixed" ? "Mixed" : undefined}
+          placeholder={resolved.state === "mixed" ? "—" : undefined}
           min={min}
           max={max}
           step={step}
@@ -884,7 +884,7 @@ export function ElementPanel({
             aria-label="Element name"
             key={`${elements.map((e) => e.id).join()}-${one?.name}`}
             defaultValue={one?.name ?? ""}
-            placeholder={one ? title : "Mixed"}
+            placeholder={one ? title : "—"}
             onBlur={(event) => {
               if (event.currentTarget.value !== (one?.name ?? ""))
                 onIdentity("name", event.currentTarget.value);
@@ -914,7 +914,7 @@ export function ElementPanel({
             aria-label="CSS classes"
             key={`classes-${elements.map((e) => e.id).join()}-${one?.cssClasses?.join()}`}
             defaultValue={one?.cssClasses?.join(" ") ?? ""}
-            placeholder={one ? "class names" : "Mixed"}
+            placeholder={one ? "class names" : "—"}
             onBlur={(event) => {
               if (
                 event.currentTarget.value !== (one?.cssClasses?.join(" ") ?? "")
