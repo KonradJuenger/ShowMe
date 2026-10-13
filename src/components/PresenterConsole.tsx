@@ -4,11 +4,9 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { usePreparedSlideImages } from "./usePreparedSlideImages";
 import type { Deck, Slide } from "../core/document";
 import { SlideRenderer } from "./SlideRenderer";
-import {
-  usePresenterController,
-  formatPresenterTime,
-} from "./usePresenterController";
+import { usePresenterController } from "./usePresenterController";
 import { PresentationControls } from "./PresentationControls";
+import { derivePresenterView } from "./presenterViewModel";
 
 function Preview({
   slide,
@@ -48,21 +46,15 @@ function Preview({
   }, [width, height]);
 
   return (
-    <div
-      ref={container}
-      className="console-slide"
-      aria-label={label}
-      style={{
-        aspectRatio: deck ? `${deck.width} / ${deck.height}` : undefined,
-      }}
-    >
+    <div ref={container} className="console-slide" aria-label={label}>
       {slide && deck ? (
         <div
           className="console-slide-content"
           style={{
             width: deck.width,
             height: deck.height,
-            transform: `scale(${scale})`,
+            transform:
+              "scale(" + scale + ") translate(-50%, -50%)",
             visibility: prepared ? "visible" : "hidden",
           }}
         >
@@ -78,7 +70,7 @@ function Preview({
           />
         </div>
       ) : (
-        <span>
+        <span className="console-slide-empty">
           {label === "Next slide preview" ? "End" : "No visible slides"}
         </span>
       )}
@@ -91,52 +83,61 @@ export function PresenterConsole() {
   const { notes, state, deck, slide, nextSlide, elapsed, clock, error } =
     controller;
   const [noteSize, setNoteSize] = useState(28);
+  const presenter = state ? derivePresenterView(state, clock) : null;
+  const elapsedMinutes = Math.floor(elapsed / 60_000);
 
   return (
     <main className="presenter-console" aria-label="Presenter Console">
-      <header className="console-header">
-        <div className="console-position">
-          <span>Slide</span>
-          <strong aria-label="Visible slide position">
-            {state?.index == null ? 0 : state.index + 1}
-            <small> / {state?.slideIds.length ?? 0}</small>
-          </strong>
+      <header className="console-status-strip">
+        <div
+          className="console-slide-position"
+          aria-label={
+            "Slide " +
+            (presenter?.slidePosition ?? 0) +
+            " of " +
+            (presenter?.slideCount ?? 0)
+          }
+        >
+          <strong>{presenter?.slidePosition ?? 0}</strong>
+          <span>/</span>
+          <span>{presenter?.slideCount ?? 0}</span>
         </div>
-        <div className="console-timing">
-          <div>
-            <span>Elapsed</span>
-            <strong
-              className="presenter-timer"
-              aria-label="Elapsed presentation time"
-            >
-              {formatPresenterTime(elapsed)}
-            </strong>
-          </div>
-          <div>
-            <span>Time</span>
-            <time>
-              {new Date(clock).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </time>
-          </div>
+        <div className="console-clocks">
+          <span aria-label={elapsedMinutes + " minutes since presentation start"}>
+            <strong>{elapsedMinutes}</strong> min
+          </span>
+          <time
+            aria-label="Current time"
+            dateTime={new Date(clock).toISOString()}
+          >
+            {new Date(clock).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </time>
         </div>
       </header>
 
-      {!state ? (
+      {!state || !presenter ? (
         <div className="console-ended" role="status">
           Presentation ended
         </div>
       ) : (
         <>
-          <div className="console-workspace">
+          <div
+            className="console-readiness"
+            data-readiness={presenter.readiness}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="console-readiness-mark" aria-hidden="true" />
+            <span>{presenter.readinessLabel}</span>
+          </div>
+
+          <div className="console-preview-row">
             <section className="console-current">
               <div className="console-section-header">
                 <h2>Current</h2>
-                {state.black && (
-                  <strong className="console-black-status">Audience black</strong>
-                )}
               </div>
               <div className="console-current-frame">
                 <Preview
@@ -156,49 +157,47 @@ export function PresenterConsole() {
               </div>
             </section>
 
-            <aside className="console-side">
-              <section className="console-next">
-                <div className="console-section-header">
-                  <h2>Next slide</h2>
-                </div>
-                <Preview
-                  slide={nextSlide}
-                  deck={deck}
-                  label="Next slide preview"
-                  imageProfile={controller.audienceProfile}
-                />
-              </section>
-
-              <section className="console-notes" aria-label="Presenter notes">
-                <div className="console-notes-header">
-                  <h2>Notes</h2>
-                  <div className="console-note-size" aria-label="Note text size">
-                    <button
-                      type="button"
-                      aria-label="Make notes smaller"
-                      disabled={noteSize <= 18}
-                      onClick={() => setNoteSize((size) => Math.max(18, size - 2))}
-                    >
-                      A−
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Make notes larger"
-                      disabled={noteSize >= 40}
-                      onClick={() => setNoteSize((size) => Math.min(40, size + 2))}
-                    >
-                      A+
-                    </button>
-                  </div>
-                </div>
-                <p className="presenter-notes" style={{ fontSize: noteSize }}>
-                  {notes || "No notes for this slide."}
-                </p>
-              </section>
-            </aside>
+            <section className="console-next">
+              <div className="console-section-header">
+                <h2>Next</h2>
+              </div>
+              <Preview
+                slide={nextSlide}
+                deck={deck}
+                label="Next slide preview"
+                imageProfile={controller.audienceProfile}
+              />
+            </section>
           </div>
 
-          <PresentationControls controller={controller} />
+          <section className="console-notes" aria-label="Presenter notes">
+            <div className="console-notes-header">
+              <h2>Notes</h2>
+              <div className="console-note-size" aria-label="Note text size">
+                <button
+                  type="button"
+                  aria-label="Make notes smaller"
+                  disabled={noteSize <= 18}
+                  onClick={() => setNoteSize((size) => Math.max(18, size - 2))}
+                >
+                  A−
+                </button>
+                <button
+                  type="button"
+                  aria-label="Make notes larger"
+                  disabled={noteSize >= 40}
+                  onClick={() => setNoteSize((size) => Math.min(40, size + 2))}
+                >
+                  A+
+                </button>
+              </div>
+            </div>
+            <p className="presenter-notes" style={{ fontSize: noteSize }}>
+              {notes || "No notes for this slide."}
+            </p>
+          </section>
+
+          <PresentationControls controller={controller} view={presenter} />
 
           {(state.displayWarning || error) && (
             <div className="console-alerts">
