@@ -5,6 +5,86 @@ type HarnessWindow = Window & {
 };
 test.use({ deviceScaleFactor: 1.25 });
 
+test("retained snapshots preserve mixed text insertion and CSS changes around unchanged media", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const differences = await page.evaluate(async () => {
+    const path = "/src/components/domRaster.ts";
+    const {
+      createDomRasterSource,
+    }: typeof import("../../../src/components/domRaster") = await import(
+      /* @vite-ignore */ path
+    );
+    const node = document.createElement("div");
+    node.style.cssText = "width:150px;height:50px;color:red;font:20px Arial";
+    const middle = document.createElement("b");
+    middle.textContent = "a";
+    const bitmap = document.createElement("canvas");
+    bitmap.width = 20;
+    bitmap.height = 20;
+    const context = bitmap.getContext("2d")!;
+    context.fillStyle = "blue";
+    context.fillRect(0, 0, 20, 20);
+    node.append(
+      document.createTextNode("a"),
+      middle,
+      document.createTextNode("a"),
+      bitmap,
+    );
+    document.body.append(node);
+    const create = () =>
+      createDomRasterSource(
+        () => node,
+        () => true,
+        () => {},
+        () => {},
+        async () => {},
+        undefined,
+        true,
+      );
+    const retained = create();
+    const rows: number[] = [];
+    try {
+      await retained.update(150, 50, 150, 50);
+      for (const mutate of [
+        () => middle.after(document.createTextNode("d")),
+        () => middle.after(node.firstChild!),
+        () => {
+          node.style.filter = "brightness(0.5)";
+        },
+      ]) {
+        mutate();
+        await Promise.resolve();
+        await retained.update(150, 50, 150, 50);
+        const fresh = create();
+        try {
+          await fresh.update(150, 50, 150, 50);
+          const a = retained.canvas
+            .getContext("2d")!
+            .getImageData(0, 0, 150, 50).data;
+          const b = fresh.canvas
+            .getContext("2d")!
+            .getImageData(0, 0, 150, 50).data;
+          rows.push(
+            a.reduce(
+              (max, value, index) => Math.max(max, Math.abs(value - b[index])),
+              0,
+            ),
+          );
+        } finally {
+          fresh.dispose();
+        }
+      }
+      return rows;
+    } finally {
+      retained.dispose();
+      node.remove();
+    }
+  });
+  expect(differences.every((difference) => difference <= 1)).toBe(true);
+});
+
 test("batched raster reads preserve text, pseudo-element and fitted-media pixels", async ({
   page,
 }) => {

@@ -8,7 +8,7 @@
     "runtime": "browser",
     "created": "2026-10-12",
     "lastReviewed": "2026-10-13",
-    "reason": "Native Chromium capture composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; batched reads preserve pseudo/text/media pixels; paused caches, viewport/transform changes, failed-capture retry and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; experimental GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss"
+    "reason": "Native Chromium capture composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; batched reads preserve pseudo/text/media pixels; retained mirrors preserve mixed text topology and unchanged-media CSS changes; paused caches, viewport/transform changes, failed-capture retry and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; experimental GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss"
   },
   {
     "id": "editor-scale-properties",

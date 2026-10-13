@@ -74,6 +74,7 @@ export function createDomRasterSource(
     clone: HTMLElement;
     style: string;
     revision: string;
+    children: number[];
     bitmap?: HTMLCanvasElement;
   }> = [];
   let dirty = true,
@@ -82,14 +83,17 @@ export function createDomRasterSource(
     revision = 0;
   let inFlight: Promise<void> | null = null;
   let cancelPaint: (() => void) | null = null;
-  let lastSnapshot = "",
-    fontRevision = 0;
+  type SnapshotValue = string | number | boolean | undefined;
+  let lastSnapshot: SnapshotValue[] | null = null;
+  let fontRevision = 0;
   let lastLogicalWidth = 0,
     lastLogicalHeight = 0;
   let lastTransform = "";
   let animationFrame = 0;
   let wasDynamic = false;
   let sampledVideos: number[] = [];
+  let bitmapWritten = false;
+  let structureRevision = 0;
   const videoFrames = new Map<HTMLVideoElement, number>();
   const included = (node: HTMLElement) => {
     for (
@@ -171,13 +175,24 @@ export function createDomRasterSource(
     });
     if (!relevant.length) return;
     if (
-      relevant.some(
-        (record) =>
-          record.type === "childList" &&
+      relevant.some((record) => {
+        if (record.type !== "childList") return false;
+        if (
           [...record.addedNodes, ...record.removedNodes].some(
             (node) => node.nodeType === Node.ELEMENT_NODE,
-          ),
-      )
+          )
+        )
+          return true;
+        const pair = pairs.find((pair) => pair.original === record.target);
+        if (!pair) return false;
+        const children = pair.original.childNodes;
+        return (
+          children.length !== pair.children.length ||
+          Array.from(children).some(
+            (child, index) => child.nodeType !== pair.children[index],
+          )
+        );
+      })
     )
       structureDirty = true;
     markDirty();
@@ -258,7 +273,14 @@ export function createDomRasterSource(
         )
           clone.removeAttribute(attribute.name);
       clone.dataset.domRasterNode = `${scope}-node-${pairs.length}`;
-      pairs.push({ original, clone, bitmap, style: "", revision: "" });
+      pairs.push({
+        original,
+        clone,
+        bitmap,
+        style: "",
+        revision: "",
+        children: Array.from(original.childNodes, (child) => child.nodeType),
+      });
       for (const child of original.childNodes) {
         if (child instanceof HTMLElement) {
           const copied = visit(child);
@@ -274,6 +296,7 @@ export function createDomRasterSource(
     viewport.replaceChildren(root);
     canvas.replaceChildren(styles, viewport);
     structureDirty = false;
+    structureRevision++;
     metrics.clones++;
   };
   let properties: string[] | null = null;
@@ -294,6 +317,7 @@ export function createDomRasterSource(
   const refresh = () => {
     const start = performance.now();
     sampledVideos = [];
+    bitmapWritten = false;
     if (refined) {
       syncVideos();
       const structural = Array.from(
@@ -389,6 +413,7 @@ export function createDomRasterSource(
             const bitmapContext = output.getContext("2d")!;
             bitmapContext.clearRect(0, 0, output.width, output.height);
             bitmapContext.drawImage(original, 0, 0);
+            bitmapWritten = true;
             metrics.mediaCopies++;
             metrics.mediaCopyBytes += output.width * output.height * 4;
             if (original instanceof HTMLVideoElement)
@@ -562,25 +587,36 @@ export function createDomRasterSource(
           root!.style.setProperty("transform", matrix.toString(), "important");
           root!.style.setProperty("transform-origin", "0 0", "important");
         }
-        const snapshot = JSON.stringify([
+        // Compare the same paint inputs without concatenating/escaping every
+        // node's complete declarations into another large JSON string.
+        const snapshot: SnapshotValue[] = [
           width,
           height,
           logicalWidth,
           logicalHeight,
           matrix.toString(),
           fontRevision,
+          structureRevision,
           styles.textContent,
-          ...pairs.map((pair) => [
+          ...pairs.flatMap((pair) => [
             pair.clone.style.cssText,
             pair.clone.textContent,
             pair.revision,
             pair.bitmap?.style.cssText,
             pair.original instanceof HTMLImageElement
-              ? [pair.original.currentSrc, pair.original.complete]
-              : "",
+              ? pair.original.currentSrc
+              : undefined,
+            pair.original instanceof HTMLImageElement
+              ? pair.original.complete
+              : undefined,
           ]),
-        ]);
-        if (backend === "native" && snapshot === lastSnapshot) return;
+        ];
+        if (
+          backend === "native" &&
+          lastSnapshot?.length === snapshot.length &&
+          snapshot.every((value, index) => value === lastSnapshot![index])
+        )
+          return;
         captured = true;
         return (
           backend === "svg"
@@ -625,8 +661,7 @@ export function createDomRasterSource(
                 };
                 // A nested canvas's latest bitmap is committed during paint. Waiting
                 // one paint before recording avoids sampling the preceding shader frame.
-                const hasCanvas = pairs.some((pair) => !!pair.bitmap);
-                if (hasCanvas) {
+                if (bitmapWritten) {
                   canvas.addEventListener("paint", primed, { once: true });
                 } else
                   canvas.addEventListener("paint", painted, { once: true });
