@@ -129,6 +129,7 @@ export function createDomRasterSource(
       .some((animation) => animation.playState === "running");
     const playing = Array.from(originalRoot.querySelectorAll("video")).some(
       (video) =>
+        (!refined || included(video)) &&
         !video.paused &&
         (!decodedVideo ||
           typeof video.requestVideoFrameCallback !== "function"),
@@ -495,6 +496,7 @@ export function createDomRasterSource(
         .some((animation) => animation.playState === "running");
       const video = Array.from(originalRoot.querySelectorAll("video")).some(
         (node) =>
+          (!refined || included(node)) &&
           !node.paused &&
           (!decodedVideo ||
             typeof node.requestVideoFrameCallback !== "function"),

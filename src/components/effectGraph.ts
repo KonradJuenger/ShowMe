@@ -31,9 +31,10 @@ export class EffectGraph<Key> {
       if (
         next.length !== node.inputs.length ||
         next.some((input, index) => input !== node.inputs[index])
-      )
+      ) {
         changed.push(key);
-      node.inputs = next;
+        node.inputs = next;
+      }
       for (const input of node.inputs) {
         const users = this.consumers.get(input) ?? new Set<Key>();
         users.add(key);
@@ -79,9 +80,10 @@ export class EffectGraph<Key> {
     if (node.pending) return node.pending;
     if (node.resolved === node.dirty) return Promise.resolve();
     const work = async () => {
+      const inputs = node.inputs;
       if (!inputsPrepared)
         await Promise.all(
-          node.inputs.map((input) => {
+          inputs.map((input) => {
             // Interactive GPU consumers can animate a published input while its
             // next native snapshot paints. Explicit flushes omit this option.
             if (this.nodes.get(input)?.pending && published?.(input)) return;
@@ -89,7 +91,7 @@ export class EffectGraph<Key> {
           }),
         );
       // Teardown/replacement while inputs were pending invalidates this request.
-      if (this.nodes.get(key) !== node) return;
+      if (this.nodes.get(key) !== node || node.inputs !== inputs) return;
       // Input publication during dependency resolution belongs to this request.
       const version = node.dirty;
       await node.execute();
@@ -115,9 +117,14 @@ export class EffectGraph<Key> {
     // A prior interactive request may have used published inputs. Resolve the
     // requested dependency cohort before accepting its terminal as settled.
     const work = async () => {
-      await Promise.all(node.inputs.map((input) => this.flush(input, cohort)));
+      const inputs = node.inputs;
+      await Promise.all(inputs.map((input) => this.flush(input, cohort)));
       await node.pending;
       if (this.nodes.get(key) !== node) return;
+      if (node.inputs !== inputs) {
+        await this.flush(key);
+        return;
+      }
       await this.resolveNode(key, undefined, true);
     };
     const pending = work();

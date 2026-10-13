@@ -2,6 +2,37 @@ import { expect, it } from "vitest";
 import { EffectGraph } from "../../../src/components/effectGraph";
 import { EffectSources } from "../../../src/components/effectSources";
 
+it("replanned dependencies during capture defer the consumer until its new input is resolved", async () => {
+  const graph = new EffectGraph<string>();
+  let finish!: () => void;
+  let ready = false,
+    outputs = 0;
+  graph.register(
+    "old",
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  graph.register("new", () => {
+    ready = true;
+  });
+  graph.register("output", () => {
+    expect(ready).toBe(true);
+    outputs++;
+  });
+  graph.compile((key) => (key === "output" ? ["old"] : []));
+  const pending = graph.resolve("output");
+  await Promise.resolve();
+  graph.compile((key) => (key === "output" ? ["new"] : []));
+  finish();
+  await pending;
+  expect(outputs).toBe(0);
+  expect(graph.isDirty("output")).toBe(true);
+  await graph.flush("output");
+  expect(outputs).toBe(1);
+});
+
 it("removed or replaced consumers never execute after an asynchronous dependency completes", async () => {
   const graph = new EffectGraph<string>();
   let finish!: () => void;
