@@ -170,6 +170,21 @@ for (const videoInvalidation of ["decoded", "poll"]) {
   cases.at(-1).id += `-${videoInvalidation}`;
   cases.at(-1).videoInvalidation = videoInvalidation;
 }
+for (const refreshMode of ["interleaved", "batched"]) {
+  for (const family of ["small-glass", "video"]) {
+    add(
+      family,
+      family === "video" ? 1 : 2,
+      1,
+      family === "video" ? 16 : 1,
+      1920,
+      false,
+      "refined",
+    );
+    cases.at(-1).id += `-${refreshMode}`;
+    cases.at(-1).refreshMode = refreshMode;
+  }
+}
 const unique = [
   ...new Map(cases.map((value) => [value.id, value])).values(),
 ].filter((value) =>
@@ -178,6 +193,7 @@ const unique = [
       selector === "all" ||
       value.family === selector ||
       value.id === selector ||
+      (selector === "raster-isolation" && value.refreshMode) ||
       (selector === "realistic" &&
         ["original", "small-glass"].includes(value.family) &&
         ["native", "refined"].includes(value.backend)) ||
