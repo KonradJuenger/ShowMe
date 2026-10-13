@@ -714,20 +714,17 @@ test("backdrop pixels retain the red element's world position at editor zoom and
   }
 });
 
-test("custom pseudo-element rules remain independent across simultaneous shader captures", async ({
+test("custom pseudo-element rules remain independent across duplicated shader instances", async ({
   page,
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
   const state = await page.evaluate(async () => {
-    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
-      effectsPath = "/src/core/effects.ts";
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
     const {
       mountMixedEffectsHarness,
     }: typeof import("../../helpers/mixedEffectsHarness") = await import(
       /* @vite-ignore */ harnessPath
     );
-    const { newEffectInstance }: typeof import("../../../src/core/effects") =
-      await import(/* @vite-ignore */ effectsPath);
     const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
       configure(model) {
         const slide = model.slides[model.deck.slideIds[0]],
@@ -735,13 +732,7 @@ test("custom pseudo-element rules remain independent across simultaneous shader 
           second = structuredClone(first);
         second.id = "second";
         second.frame.y = 180;
-        second.effects = second.effects!.map((instance) =>
-          newEffectInstance(
-            instance.resourceId,
-            slide.effectResources![instance.resourceId],
-            instance.placement,
-          ),
-        );
+        // Duplication retains instance IDs; source ownership includes the Element.
         slide.nodes[0].children = [first, second];
         model.deck.stylesheet += ` [data-element-id="animated"] [data-effect-text-output]::before {content:"TEST";color:red;}
         [data-element-id="second"] [data-effect-text-output]::before {content:"TEST";color:blue;}`;

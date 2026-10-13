@@ -955,7 +955,7 @@ export function mountEffectSurface(
         if (!gpuInput && createRaster && !rasterPending) {
           const dom = needsDomRaster();
           if (refined && coordinator) {
-            const key = `${definition.input === "backdrop" ? `backdrop:${content!.element.id}` : `content:${instance.id}`}|${dom ? "dom" : "primitive"}|${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
+            const key = `${definition.input === "backdrop" ? `backdrop:${content!.element.id}` : `content:${content!.element.id}:${instance.id}`}|${dom ? "dom" : "primitive"}|${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
             if (key !== leaseKey) {
               sourceLease?.release();
               sourceLease = coordinator.sources.acquire(
