@@ -608,18 +608,26 @@ export function createBackdropRasterSource(
       const ctx = canvas.getContext("2d")!;
       ctx.resetTransform();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(
-        canvas.width / element.frame.width,
-        canvas.height / element.frame.height,
-      );
-      const world = target().inverse();
-      ctx.transform(world.a, world.b, world.c, world.d, world.e, world.f);
-      ctx.beginPath();
-      ctx.rect(0, 0, deck.width, deck.height);
-      ctx.clip();
-      ctx.fillStyle = slide.background;
-      ctx.fillRect(0, 0, deck.width, deck.height);
-      for (const entry of prefix.elements) render(ctx, entry, painting, false);
+      // The backing store survives ordinary drags. Keep the slide clip local
+      // to this paint so an out-of-slide viewport cannot clip later updates.
+      ctx.save();
+      try {
+        ctx.scale(
+          canvas.width / element.frame.width,
+          canvas.height / element.frame.height,
+        );
+        const world = target().inverse();
+        ctx.transform(world.a, world.b, world.c, world.d, world.e, world.f);
+        ctx.beginPath();
+        ctx.rect(0, 0, deck.width, deck.height);
+        ctx.clip();
+        ctx.fillStyle = slide.background;
+        ctx.fillRect(0, 0, deck.width, deck.height);
+        for (const entry of prefix.elements)
+          render(ctx, entry, painting, false);
+      } finally {
+        ctx.restore();
+      }
     },
   );
 }

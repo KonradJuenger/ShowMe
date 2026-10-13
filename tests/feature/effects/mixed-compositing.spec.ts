@@ -5,6 +5,76 @@ type HarnessWindow = Window & {
 };
 test.use({ deviceScaleFactor: 1.25 });
 
+test("backdrop pixels recover after dragging outside the slide without resizing", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const states = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
+    const factoryPath = "/src/core/elementFactory.ts";
+    const effectsPath = "/src/core/effects.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const { newEffectInstance }: typeof import("../../../src/core/effects") =
+      await import(/* @vite-ignore */ effectsPath);
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(model) {
+        const slide = model.slides[model.deck.slideIds[0]];
+        const resources = slide.effectResources!;
+        const lower = createBasicShape("lower", "rectangle", { x: 0, y: 0 });
+        lower.frame.width = model.deck.width;
+        lower.frame.height = model.deck.height;
+        lower.appearance.fill = "red";
+        lower.effects = [
+          newEffectInstance("shader", resources.shader, "content"),
+        ];
+        const glass = slide.nodes[0].children[1];
+        glass.frame.width = glass.frame.height = 100;
+        slide.nodes[0].children = [lower, glass];
+        delete model.deck.stylesheet;
+      },
+    });
+    try {
+      const glass = harness.host.querySelector<HTMLElement>(
+        '[data-element-id="glass"]',
+      )!;
+      const states = [await harness.stage(0)];
+      // Preserve the backing-store size throughout the drag, including a fully
+      // out-of-slide position and a return to the original position.
+      for (const x of [-50, -120, 0, 200, 0]) {
+        glass.style.transform = `translateX(${x}px)`;
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
+        states.push(await harness.stage(0));
+      }
+      return states;
+    } finally {
+      harness.dispose();
+    }
+  });
+  for (const state of states) expect(state.errors).toEqual([]);
+  const initial = states[0].surfaces[1];
+  expect(initial.backend).toBe("primitive");
+  expect(initial.green).toBeGreaterThan(0);
+  expect(states[1].surfaces[1].green).toBeLessThan(initial.green);
+  expect(states[2].surfaces[1].opaque).toBe(0);
+  for (const state of states.slice(3)) {
+    expect(state.surfaces[1].width).toBe(initial.width);
+    expect(state.surfaces[1].height).toBe(initial.height);
+    expect(state.surfaces[1].green).toBe(initial.green);
+    expect(state.surfaces[1].opaque).toBe(initial.opaque);
+  }
+});
+
 test("inherited shader clocks refresh captured stylesheet pixels after forward and backward seeks", async ({
   page,
 }) => {
