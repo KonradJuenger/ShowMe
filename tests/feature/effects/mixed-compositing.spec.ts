@@ -5,6 +5,75 @@ type HarnessWindow = Window & {
 };
 test.use({ deviceScaleFactor: 1.25 });
 
+test("batched raster reads preserve text, pseudo-element and fitted-media pixels", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const difference = await page.evaluate(async () => {
+    const path = "/src/components/domRaster.ts";
+    const {
+      createDomRasterSource,
+      setDomRasterRefreshExperiment,
+    }: typeof import("../../../src/components/domRaster") = await import(
+      /* @vite-ignore */ path
+    );
+    const node = document.createElement("div");
+    node.id = "raster-read-parity";
+    node.style.cssText =
+      "width:100px;height:100px;background:#123456;overflow:hidden";
+    const text = document.createElement("span");
+    text.textContent = "Mixed";
+    text.style.cssText = "color:red;font:18px Arial;text-shadow:1px 2px blue";
+    const bitmap = document.createElement("canvas");
+    bitmap.width = 20;
+    bitmap.height = 10;
+    bitmap.style.cssText =
+      "width:40px;height:40px;object-fit:contain;object-position:20% 80%";
+    const context = bitmap.getContext("2d")!;
+    context.fillStyle = "green";
+    context.fillRect(0, 0, 20, 10);
+    const style = document.createElement("style");
+    style.textContent =
+      '#raster-read-parity span::before { content:"X"; color:yellow; }';
+    document.head.append(style);
+    node.append(text, bitmap);
+    document.body.append(node);
+    const images: Uint8ClampedArray[] = [];
+    try {
+      for (const mode of ["interleaved", "batched"] as const) {
+        setDomRasterRefreshExperiment(mode);
+        const source = createDomRasterSource(
+          () => node,
+          () => true,
+          () => {},
+          () => {},
+          async () => {},
+          undefined,
+          true,
+        );
+        try {
+          await source.update(100, 100, 100, 100);
+          images.push(
+            source.canvas.getContext("2d")!.getImageData(0, 0, 100, 100).data,
+          );
+        } finally {
+          source.dispose();
+        }
+      }
+      return images[0].reduce(
+        (max, value, index) =>
+          Math.max(max, Math.abs(value - images[1][index])),
+        0,
+      );
+    } finally {
+      setDomRasterRefreshExperiment("batched");
+      node.remove();
+      style.remove();
+    }
+  });
+  expect(difference).toBeLessThanOrEqual(1);
+});
+
 test("DOM snapshots refresh logical viewport changes at fixed raster size and ignore disposed work", async ({
   page,
 }) => {
@@ -20,6 +89,7 @@ test("DOM snapshots refresh logical viewport changes at fixed raster size and ig
     node.style.cssText = "width:100px;height:100px;background:red";
     document.body.append(node);
     let invalidations = 0;
+    let matrix = new DOMMatrix();
     const source = createDomRasterSource(
       () => node,
       () => true,
@@ -28,7 +98,7 @@ test("DOM snapshots refresh logical viewport changes at fixed raster size and ig
         invalidations++;
       },
       async () => {},
-      undefined,
+      () => matrix,
       true,
     );
     await source.update(100, 100, 100, 100);
@@ -37,6 +107,9 @@ test("DOM snapshots refresh logical viewport changes at fixed raster size and ig
     const cached = source.revision;
     await source.update(100, 100, 200, 100);
     const resized = source.revision;
+    matrix = new DOMMatrix().translate(10, 0);
+    await source.update(100, 100, 200, 100);
+    const transformed = source.revision;
     const pending = source.update(200, 100, 200, 100);
     source.dispose();
     const before = invalidations;
@@ -47,6 +120,7 @@ test("DOM snapshots refresh logical viewport changes at fixed raster size and ig
       first,
       cached,
       resized,
+      transformed,
       final: source.revision,
       before,
       after: invalidations,
@@ -55,9 +129,65 @@ test("DOM snapshots refresh logical viewport changes at fixed raster size and ig
   });
   expect(result.cached).toBe(result.first);
   expect(result.resized).toBeGreaterThan(result.cached);
-  expect(result.final).toBe(result.resized);
+  expect(result.transformed).toBeGreaterThan(result.resized);
+  expect(result.final).toBe(result.transformed);
   expect(result.after).toBe(result.before);
   expect(result.attached).toBe(false);
+});
+
+test("a failed DOM capture stays dirty and an explicit retry can recover", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const path = "/src/components/domRaster.ts";
+    const {
+      createDomRasterSource,
+    }: typeof import("../../../src/components/domRaster") = await import(
+      /* @vite-ignore */ path
+    );
+    const node = document.createElement("div");
+    node.style.cssText = "width:100px;height:100px;background:red";
+    document.body.append(node);
+    const source = createDomRasterSource(
+      () => node,
+      () => true,
+      () => {},
+      () => {},
+      async () => {},
+      undefined,
+      true,
+    );
+    await source.update(100, 100, 100, 100);
+    const first = source.revision;
+    source.markDirty();
+    const context = source.canvas.getContext(
+      "2d",
+    )! as CanvasRenderingContext2D & {
+      drawElementImage(element: HTMLElement, x: number, y: number): DOMMatrix;
+    };
+    const draw = context.drawElementImage;
+    context.drawElementImage = () => {
+      throw new Error("injected paint failure");
+    };
+    node.style.background = "blue";
+    let failed = false;
+    try {
+      await source.update(100, 100, 100, 100);
+    } catch {
+      failed = true;
+    }
+    const dirty = source.isDirty;
+    context.drawElementImage = draw;
+    await source.update(100, 100, 100, 100);
+    const recovered = source.revision;
+    source.dispose();
+    node.remove();
+    return { first, failed, dirty, recovered };
+  });
+  expect(result.failed).toBe(true);
+  expect(result.dirty).toBe(true);
+  expect(result.recovered).toBeGreaterThan(result.first);
 });
 
 async function mount(page: Page) {

@@ -10,6 +10,10 @@ let captureId = 0;
 // Electron's decoded callback route regresses decoder drops under many-video
 // load. Poll until that route has matching playback and freshness evidence.
 let videoInvalidation: "decoded" | "poll" = "poll";
+let refreshMode: "batched" | "interleaved" = "batched";
+export function setDomRasterRefreshExperiment(mode: "batched" | "interleaved") {
+  refreshMode = mode;
+}
 /** Runtime-only matched benchmark control; sampled when a source is created. */
 export function setDomRasterVideoExperiment(mode: "decoded" | "poll") {
   videoInvalidation = mode;
@@ -49,6 +53,7 @@ export function createDomRasterSource(
   if (!context) throw new Error("Cannot allocate DOM source surface");
   const backend: DomRasterBackend = experimentBackend;
   const decodedVideo = refined && videoInvalidation === "decoded";
+  const batchReads = refined && refreshMode === "batched";
   const scope = `capture-${++captureId}`;
   if (backend !== "svg" && (!context.drawElementImage || !canvas.requestPaint))
     throw new Error(
@@ -81,6 +86,7 @@ export function createDomRasterSource(
     fontRevision = 0;
   let lastLogicalWidth = 0,
     lastLogicalHeight = 0;
+  let lastTransform = "";
   let animationFrame = 0;
   let wasDynamic = false;
   let sampledVideos: number[] = [];
@@ -238,6 +244,11 @@ export function createDomRasterSource(
         ? document.createElement("div")
         : (original.cloneNode(false) as HTMLElement);
       if (bitmap) clone.append(bitmap);
+      if (clone instanceof HTMLImageElement) {
+        clone.removeAttribute("srcset");
+        clone.removeAttribute("sizes");
+        clone.removeAttribute("loading");
+      }
       for (const attribute of Array.from(clone.attributes))
         if (
           attribute.name.startsWith("on") ||
@@ -246,6 +257,7 @@ export function createDomRasterSource(
           attribute.name === "class"
         )
           clone.removeAttribute(attribute.name);
+      clone.dataset.domRasterNode = `${scope}-node-${pairs.length}`;
       pairs.push({ original, clone, bitmap, style: "", revision: "" });
       for (const child of original.childNodes) {
         if (child instanceof HTMLElement) {
@@ -264,6 +276,21 @@ export function createDomRasterSource(
     structureDirty = false;
     metrics.clones++;
   };
+  let properties: string[] | null = null;
+  const declarations = (style: CSSStyleDeclaration) => {
+    const keys =
+      properties ??
+      Array.from(style).filter(
+        (key) =>
+          !key.startsWith("--") &&
+          !key.startsWith("animation") &&
+          !key.startsWith("transition"),
+      );
+    if (refined) properties = keys;
+    return keys
+      .map((key) => `${key}:${style.getPropertyValue(key)} !important;`)
+      .join("");
+  };
   const refresh = () => {
     const start = performance.now();
     sampledVideos = [];
@@ -280,19 +307,32 @@ export function createDomRasterSource(
     }
     if (backend !== "native" || structureDirty || !root) build();
     const pseudoRules: string[] = [];
-    for (const [index, pair] of pairs.entries()) {
+    const read = (pair: (typeof pairs)[number]) => {
       const { original, clone } = pair;
       const computed = getComputedStyle(original);
       metrics.styleReads++;
-      const value = Array.from(computed)
-        .filter(
-          (key) =>
-            !key.startsWith("--") &&
-            !key.startsWith("animation") &&
-            !key.startsWith("transition"),
-        )
-        .map((key) => `${key}:${computed.getPropertyValue(key)} !important;`)
-        .join("");
+      const value = declarations(computed);
+      // CSSStyleDeclaration is live. Copy geometry/fit values before any writes.
+      const media = {
+        width: computed.width,
+        height: computed.height,
+        objectFit: computed.objectFit,
+        objectPosition: computed.objectPosition,
+      };
+      const key = clone.dataset.domRasterNode!;
+      for (const pseudo of ["::before", "::after"]) {
+        const style = getComputedStyle(original, pseudo);
+        if (style.content !== "none" && style.content !== "normal")
+          pseudoRules.push(
+            `[data-dom-raster-node="${key}"]${pseudo}{${declarations(style)}animation:none!important;transition:none!important;}`,
+          );
+      }
+      return { value, media };
+    };
+    const reads = batchReads ? pairs.map(read) : null;
+    for (const [index, pair] of pairs.entries()) {
+      const { original, clone } = pair;
+      const { value, media } = reads?.[index] ?? read(pair);
       if (value !== pair.style) {
         clone.style.cssText = value;
         clone.style.setProperty("animation", "none", "important");
@@ -300,28 +340,6 @@ export function createDomRasterSource(
         pair.style = value;
       }
       normalize(original, clone);
-      const key = `${scope}-node-${index}`;
-      clone.dataset.domRasterNode = key;
-      for (const pseudo of ["::before", "::after"]) {
-        const style = getComputedStyle(original, pseudo);
-        if (style.content !== "none" && style.content !== "normal") {
-          const declarations = Array.from(style)
-            .filter(
-              (property) =>
-                !property.startsWith("--") &&
-                !property.startsWith("animation") &&
-                !property.startsWith("transition"),
-            )
-            .map(
-              (property) =>
-                `${property}:${style.getPropertyValue(property)} !important;`,
-            )
-            .join("");
-          pseudoRules.push(
-            `[data-dom-raster-node="${key}"]${pseudo}{${declarations}animation:none!important;transition:none!important;}`,
-          );
-        }
-      }
       const texts = Array.from(original.childNodes).filter(
         (child) => child.nodeType === Node.TEXT_NODE,
       );
@@ -344,9 +362,9 @@ export function createDomRasterSource(
       if (
         original instanceof HTMLImageElement &&
         clone instanceof HTMLImageElement &&
-        clone.src !== original.src
+        clone.src !== (original.currentSrc || original.src)
       )
-        clone.src = original.src;
+        clone.src = original.currentSrc || original.src;
       if (
         original instanceof HTMLCanvasElement ||
         original instanceof HTMLVideoElement
@@ -379,12 +397,12 @@ export function createDomRasterSource(
           pair.revision = next;
         }
         const bitmap = pair.bitmap!;
-        const boxWidth = parseFloat(computed.width),
-          boxHeight = parseFloat(computed.height);
+        const boxWidth = parseFloat(media.width),
+          boxHeight = parseFloat(media.height);
         if (bitmap.width && bitmap.height && boxWidth > 0 && boxHeight > 0) {
           let width = boxWidth,
             height = boxHeight;
-          const fit = computed.objectFit;
+          const fit = media.objectFit;
           if (fit !== "fill") {
             let factor =
               fit === "cover"
@@ -395,7 +413,7 @@ export function createDomRasterSource(
             width = bitmap.width * factor;
             height = bitmap.height * factor;
           }
-          const position = computed.objectPosition.split(" ");
+          const position = media.objectPosition.split(" ");
           const offset = (value: string, free: number) =>
             value.endsWith("%")
               ? (parseFloat(value) * free) / 100
@@ -491,6 +509,7 @@ export function createDomRasterSource(
     ): void | Promise<void> {
       if (disposed) return;
       if (inFlight) return inFlight;
+      const requestedTransform = sourceTransform().toString();
       const animated = originalRoot
         .getAnimations({ subtree: true })
         .some((animation) => animation.playState === "running");
@@ -507,16 +526,29 @@ export function createDomRasterSource(
         canvas.height === height &&
         lastLogicalWidth === logicalWidth &&
         lastLogicalHeight === logicalHeight &&
+        lastTransform === requestedTransform &&
         !animated &&
         !video
       )
         return;
       const start = performance.now();
       let captured = false;
-      const paint = dependencies().then(() => {
+      const paint = dependencies().then(async () => {
         if (disposed) return;
         dirty = false;
         refresh();
+        // Original readiness does not establish readiness of its independent
+        // native mirror, especially after a currentSrc change.
+        await Promise.all(
+          pairs.map(({ clone }) =>
+            clone instanceof HTMLImageElement &&
+            clone.src &&
+            (!clone.complete || !clone.naturalWidth)
+              ? clone.decode()
+              : undefined,
+          ),
+        );
+        if (disposed) return;
         resizeRasterCanvas(canvas, width, height);
         canvas.style.width = `${logicalWidth}px`;
         canvas.style.height = `${logicalHeight}px`;
@@ -604,6 +636,7 @@ export function createDomRasterSource(
           lastSnapshot = snapshot;
           lastLogicalWidth = logicalWidth;
           lastLogicalHeight = logicalHeight;
+          lastTransform = matrix.toString();
         });
       });
       inFlight = paint
@@ -619,6 +652,10 @@ export function createDomRasterSource(
             metrics.captures++;
             metrics.paintMs += performance.now() - start;
           }
+        })
+        .catch((error) => {
+          if (!disposed) dirty = true;
+          throw error;
         })
         .finally(() => {
           inFlight = null;
