@@ -191,9 +191,11 @@ Choose based on implementation simplicity and security testing on Windows/macOS.
 
 ### Host-side semantic adapter
 
-Long-term preference: semantic operation adapter outside React, using core commands and `DocumentRuntime`.
+Long-term preference: semantic operation adapter outside React, using existing core commands through a dedicated `EditorSession` and an actor-scoped `EditorTransport` backed by `DocumentRuntime.*ForActor()`.
 
-A live-renderer adapter may still be useful for the first spike if it significantly simplifies editor-context and local undo behavior.
+Reason: `EditorSession` is already core and transport-independent. Reusing it preserves native lease derivation, transaction assembly, stale/conflict handling and accepted-replica behavior without coupling MCP to the live React editor.
+
+Renderer-only services such as text measurement and executable Effect validation should remain explicit shared services, not a reason to bypass this session path.
 
 ## Open questions
 
