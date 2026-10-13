@@ -39,10 +39,9 @@ Can the audience render this image right now?
 
 A usable source can be, in order of preference:
 
-1. exact cached derivative for the current audience profile,
+1. exact cached derivative for the active cache target,
 2. another already-prepared derivative that is good enough as a temporary fallback,
-3. a persistent 1080p-class fallback derivative,
-4. the original asset.
+3. the original asset.
 
 If none are available, the normal missing-media placeholder is the last resort.
 
@@ -140,9 +139,9 @@ When Present is pressed:
 
 1. open the audience and presenter windows immediately,
 2. render each image from the best already-available source,
-3. raise exact current-slide and next-slide preparation to highest priority,
-4. continue preparing exact audience derivatives in the background,
-5. upgrade future slides to exact derivatives as they become available.
+3. raise current-slide and next-slide preparation for the active cache target to highest priority,
+4. continue preparing missing target derivatives in the background,
+5. upgrade future slides to target derivatives as they become available.
 
 Do not use a blocking modal or a required "finish preparing" step.
 
@@ -231,9 +230,8 @@ For final audience quality:
 
 For immediate fallback:
 
-- exact current profile,
+- exact active cache target,
 - otherwise a prepared derivative at equal or greater sampling dimensions if already available,
-- otherwise the 1080p-class fallback tier,
 - otherwise another prepared derivative,
 - otherwise original.
 
@@ -298,7 +296,7 @@ Before implementation, benchmark these on Windows and macOS with realistic decks
 4. Disk size and retained-cache hit behavior.
 5. Whether one worker during presentation is enough to prepare the next slide before navigation.
 6. Whether swapping a newly-ready raster while a slide is static is visually safe or should always wait for slide transition.
-7. How much opening a document is affected if the 1080p-class fallback tier starts immediately versus only after a short idle delay.
+7. How much opening a document is affected by immediately preparing the selected target versus starting after a short idle delay.
 
 ## Suggested implementation phases
 
@@ -308,7 +306,7 @@ Before implementation, benchmark these on Windows and macOS with realistic decks
 - Add a preferred cache-format setting.
 - Version cache identity by format/encoder recipe.
 - Implement JPEG processing with mandatory PNG fallback for alpha and protected precision.
-- Keep all current exact audience planning behavior.
+- Keep the current exact sampling planner and apply it to the selected Screen / 1080p / 4K target.
 
 ### Phase 2: cache target and mismatch handling
 
