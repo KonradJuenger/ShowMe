@@ -40,10 +40,10 @@ const temporary = await mkdtemp(
 );
 await mkdir(output, { recursive: true });
 await mkdir(path.resolve(".agenttmp"), { recursive: true });
-await writeFile(
-  path.resolve(".agenttmp/effects-stress.html"),
-  `<!doctype html><html><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module">import '/src/presentation.css';import '/src/style.css';import '/src/frame.css';</script></body></html>`,
-);
+const harnessPath = path.resolve(".agenttmp/effects-stress.html");
+const harnessHtml = `<!doctype html><html><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module">import '/src/presentation.css';import '/src/style.css';import '/src/frame.css';</script></body></html>`;
+if ((await readFile(harnessPath, "utf8").catch(() => "")) !== harnessHtml)
+  await writeFile(harnessPath, harnessHtml);
 const ids = new Set();
 function visit(elements) {
   for (const element of elements) {
@@ -137,6 +137,27 @@ for (const taps of [128, 512, 1024]) {
 }
 add("shader", 8, 1, 1, 3840, true, "gpu");
 for (const depth of [8, 16]) add("mixed", depth, 1, 1, 1920, false, "gpu");
+// Identical fixtures exercise both strategies in the same renderer build.
+for (const backend of ["native", "refined"]) {
+  add("shader", 8, 1, 0, 1920, false, backend);
+  add("js", 1, 512, 0, 1920, false, backend);
+  add("video", 1, 1, 16, 1920, false, backend);
+  for (const depth of [4, 8, 16, 32, 64])
+    add("shader", depth, 1, 1, 1920, false, backend);
+  for (const depth of [8, 16, 32])
+    add("mixed", depth, 1, 1, 1920, false, backend);
+  for (const count of [1, 4, 16, 64])
+    add("tiles", 4, count, 0, 1920, false, backend);
+  for (const count of [1, 4, 8])
+    add("backdrop", 1, count, 1, 1920, false, backend);
+  for (const depth of [1, 2, 4])
+    add("composite", depth, 1, 1, 1920, false, backend);
+  for (const count of [2, 4])
+    add("composite", 2, count, 1, 1920, false, backend);
+  add("css", 16, 1, 1, 1920, false, backend);
+  add("js", 1, 128, 0, 1920, false, backend);
+  add("shader", 8, 1, 1, 3840, true, backend);
+}
 const unique = [
   ...new Map(cases.map((value) => [value.id, value])).values(),
 ].filter((value) =>
@@ -146,6 +167,49 @@ const unique = [
       value.family === selector ||
       value.id === selector ||
       (selector === "gpu" && value.backend === "gpu") ||
+      (selector === "refined" && value.backend === "refined") ||
+      (selector === "v2extras" &&
+        ["native", "refined"].includes(value.backend) &&
+        ((value.family === "shader" &&
+          value.depth === 8 &&
+          value.videoCount === 0) ||
+          (value.backend === "refined" &&
+            value.family === "shader" &&
+            [32, 64].includes(value.depth) &&
+            !value.heavy) ||
+          (value.family === "js" && value.count === 512) ||
+          (value.family === "video" && value.videoCount === 16))) ||
+      (selector === "v2cold" &&
+        value.backend === "refined" &&
+        ((value.family === "shader" && value.depth === 64 && !value.heavy) ||
+          (value.family === "mixed" &&
+            value.depth === 32 &&
+            value.count === 1) ||
+          (value.family === "composite" &&
+            value.depth === 2 &&
+            [2, 4].includes(value.count)))) ||
+      (selector === "v2limits" &&
+        (value.backend === "refined" ||
+          (value.backend === "native" &&
+            ((value.family === "tiles" && [1, 16, 64].includes(value.count)) ||
+              (value.family === "backdrop" && [4, 8].includes(value.count)) ||
+              (value.family === "composite" &&
+                (value.depth === 4 || [2, 4].includes(value.count))) ||
+              (value.family === "css" && value.depth === 16) ||
+              (value.family === "js" && value.count === 128) ||
+              (value.family === "shader" &&
+                value.depth === 8 &&
+                value.profileWidth === 3840 &&
+                value.heavy))))) ||
+      (selector === "v2compare" &&
+        ["native", "refined"].includes(value.backend) &&
+        value.count === 1 &&
+        value.videoCount === 1 &&
+        value.profileWidth === 1920 &&
+        !value.heavy &&
+        ((value.family === "shader" && [4, 8, 16].includes(value.depth)) ||
+          (value.family === "mixed" && value.depth === 8) ||
+          (value.family === "composite" && value.depth === 2))) ||
       (selector === "compare" &&
         ["native", "gpu"].includes(value.backend) &&
         value.count === 1 &&
@@ -188,12 +252,18 @@ function summarize(data) {
     visibleCanvasMiB: data.visibleCanvasBytes / 1048576,
     mirrorCanvasMiB: data.mirrorCanvasBytes / 1048576,
     outputTextureMiB: data.outputTextureBytes / 1048576,
+    inputTextureMiB: data.inputTextureBytes / 1048576,
     dom: data.dom,
     runtime: data.runtime,
     state: data.state,
   };
 }
 const report = {
+  rendererCommit: await new Promise((resolve, reject) =>
+    execFile("git", ["rev-parse", "HEAD"], (error, stdout) =>
+      error ? reject(error) : resolve(stdout.trim()),
+    ),
+  ),
   source: path.resolve(sourcePath),
   sourceDigest: createHash("sha256").update(bytes).digest("hex"),
   durationMs: duration,
@@ -273,7 +343,7 @@ async function launch() {
       JSON.stringify({ phase: "background-policy", error: String(error) }),
     ),
   );
-  await page.waitForSelector("#root", { state: "attached" });
+  await page.waitForFunction(() => Boolean(document.getElementById("root")));
   if (!report.renderer)
     report.renderer = await page.evaluate(() => {
       const canvas = document.createElement("canvas"),
@@ -395,6 +465,11 @@ try {
           8000,
         );
         if (
+          (scenario.backend === "refined" &&
+            scenario.family === "shader" &&
+            [32, 64].includes(scenario.depth) &&
+            !scenario.heavy) ||
+          (scenario.family === "js" && scenario.count === 512) ||
           (scenario.family === "composite" &&
             scenario.depth === 1 &&
             scenario.count === 1) ||

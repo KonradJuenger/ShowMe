@@ -3,7 +3,11 @@ import path from "node:path";
 
 // Compact, reviewable data accompanies the report; raw events/traces stay in
 // ignored test-results-effects-stress. Pass the final sweep and repeated run.
-const inputs = process.argv.slice(2);
+const args = process.argv.slice(2);
+const destinationArgument = args.find((value) =>
+  value.startsWith("--destination="),
+);
+const inputs = args.filter((value) => !value.startsWith("--destination="));
 if (!inputs.length)
   throw new Error("Pass one or more stress report JSON paths");
 const reports = await Promise.all(
@@ -43,6 +47,7 @@ const rows = reports.flatMap(({ file, data }) =>
       );
     return {
       report: path.basename(file),
+      rendererCommit: data.rendererCommit ?? null,
       trial: record.trial ?? 1,
       durationMs: data.durationMs,
       ...record.scenario,
@@ -56,6 +61,7 @@ const rows = reports.flatMap(({ file, data }) =>
       canvasMiB: summary?.canvasMiB ?? null,
       mirrorCanvasMiB: summary?.mirrorCanvasMiB ?? null,
       outputTextureMiB: summary?.outputTextureMiB ?? null,
+      inputTextureMiB: summary?.inputTextureMiB ?? null,
       sourceCapturesPerSecond: summary
         ? (summary.dom.captures * 1000) / summary.elapsedMs
         : null,
@@ -113,7 +119,10 @@ const groups = [...new Set(rows.map((row) => row.id))].map((id) => {
     outputMaxFps: values.length ? values.at(-1) : null,
   };
 });
-const destination = path.resolve("docs/benchmarks/mixed-effects-2026-10-12");
+const destination = path.resolve(
+  destinationArgument?.slice("--destination=".length) ??
+    "docs/benchmarks/mixed-effects-2026-10-12",
+);
 await mkdir(destination, { recursive: true });
 await writeFile(
   path.join(destination, "results.json"),
@@ -125,11 +134,18 @@ await writeFile(
       renderer: first.renderer,
       electron: first.electron,
       inputs: reports.map(({ file }) => path.basename(file)),
+      rendererCommits: [
+        ...new Set(
+          reports.map(({ data }) => data.rendererCommit).filter(Boolean),
+        ),
+      ],
       units: {
         canvasMiB:
           "Logical RGBA8 canvas bitmaps, including every DOM mirror; excludes GL input textures, drawing buffers, driver copies, decoded media and managed image caches",
         outputTextureMiB:
-          "Additional logical RGBA8 FBO output textures in GPU prototype; not VRAM residency",
+          "Additional logical RGBA8 FBO output textures; not VRAM residency",
+        inputTextureMiB:
+          "Logical uploaded source textures in refined strategy; naive upload allocations are not instrumented",
         processPrivateMiB:
           "Electron process private bytes sampled before/after, not GPU VRAM or peak memory",
         outputFps:
@@ -149,6 +165,7 @@ await writeFile(
 const columns = [
   "id",
   "report",
+  "rendererCommit",
   "trial",
   "durationMs",
   "status",
@@ -158,6 +175,7 @@ const columns = [
   "canvasMiB",
   "mirrorCanvasMiB",
   "outputTextureMiB",
+  "inputTextureMiB",
   "sourceCapturesPerSecond",
   "uploadMiBPerSecond",
   "videoFrames",
