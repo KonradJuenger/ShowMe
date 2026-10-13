@@ -193,6 +193,18 @@ const unique = [
       selector === "all" ||
       value.family === selector ||
       value.id === selector ||
+      (selector === "review-smoke" &&
+        !value.refreshMode &&
+        !value.videoInvalidation &&
+        ((value.family === "small-glass" &&
+          ["native", "refined"].includes(value.backend)) ||
+          (value.family === "video" &&
+            value.videoCount === 16 &&
+            ["native", "refined"].includes(value.backend)) ||
+          (value.family === "shader" &&
+            value.depth === 8 &&
+            value.videoCount === 0 &&
+            value.backend === "refined"))) ||
       (selector === "raster-isolation" && value.refreshMode) ||
       (selector === "realistic" &&
         ["original", "small-glass"].includes(value.family) &&
