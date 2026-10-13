@@ -46,8 +46,8 @@ Left:
 - slide position, e.g. `7 / 24`
 
 Center/right:
-- elapsed presentation time
-- wall clock
+- elapsed presentation time as whole minutes from start, e.g. `12 min`
+- actual wall clock time, e.g. `20:29`
 
 Do not add a product title, "Presenter Console" heading or other chrome.
 
