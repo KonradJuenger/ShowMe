@@ -4,6 +4,17 @@ Status: design proposal only. This branch does not add an MCP server yet.
 
 Base reviewed: `main` at `7640df7c2b4d229a4baa51567b095d9d1901946b`.
 
+## Research and Codex investigation
+
+The initial architecture was followed by a second research pass focused specifically on how models should see current presentation state.
+
+Read these before implementation:
+
+- [RESEARCH_CONTEXT_AND_STATE.md](./RESEARCH_CONTEXT_AND_STATE.md) — current MCP/Figma/context-engineering research and the recommended Agent Projection.
+- [CODEX_PHASED_PLAN.md](./CODEX_PHASED_PLAN.md) — investigation-first implementation sequence with phase gates and evals.
+
+The research makes the model-facing read projection a first-class part of the design: compact orientation, scoped semantic inspection, world-space geometry, explicit UI epoch, on-demand source/native detail, and production-rendered visual verification.
+
 ## Goal
 
 Build an MCP interface that lets an external agent inspect, edit, animate, preview and refine a running ShowMe presentation while preserving ShowMe's existing document, collaboration, undo, rendering and Effect semantics.
