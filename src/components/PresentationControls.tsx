@@ -1,16 +1,15 @@
-import type { PresenterViewModel } from "./presenterViewModel";
+import { derivePresenterView } from "./presenterViewModel";
 import type { usePresenterController } from "./usePresenterController";
 
 export function PresentationControls({
   controller,
-  view,
 }: {
   controller: ReturnType<typeof usePresenterController>;
-  view: PresenterViewModel;
 }) {
   const { state, command, end, fullscreen } = controller;
   if (!state) return null;
 
+  const view = derivePresenterView(state, controller.clock);
   const index = state.index;
   const slideCount = state.slideIds.length;
 
