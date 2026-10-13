@@ -173,3 +173,10 @@ generation asserted zero exact differences in the successful 1,152-fill and
 576-image matrices. `node --check` passed for all four retained scripts, and
 Prettier and `git diff --check` passed for this change. Runtime benchmarks have no
 performance pass/fail thresholds.
+
+The Vite server also logged `Target container is not a DOM element` during
+experiment runs. These synthetic fixtures replace the application body, and the
+trace points to the normal entrypoint trying to mount its original root. The
+captured page-error arrays were empty, but server logs were not error-free; this
+is not log-clean verification of the production editor. The fixture startup
+logging was not investigated further for these diagnostic-only changes.
