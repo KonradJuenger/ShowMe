@@ -177,11 +177,12 @@ export function EditorSettings(props: EditorSettingsProps) {
         ) : props.dragSnapping.mode === "intent" ? (
           <>
             <p className="element-wide editor-selection-description">
-              Slow down to capture an alignment. It stays held until you pull
-              away, then eases back to your pointer. Fast passes stay free.
+              Slow down to capture nearby edges and centers. Canvas edges take
+              priority over object alignments. Set Hold distance to 0 for
+              capture without sticking after movement.
             </p>
             {slider("Capture distance", "intentCapture", 1, 8)}
-            {slider("Hold distance", "intentRelease", 10, 24)}
+            {slider("Hold distance", "intentRelease", 0, 24)}
             {slider(
               "Capture below speed",
               "intentSpeed",

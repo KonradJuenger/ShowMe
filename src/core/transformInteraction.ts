@@ -181,6 +181,7 @@ export function createMoveGesture(
         objects: options.enabled && options.toObjects,
         guides: options.enabled && options.toGuides,
         slide: options.enabled && options.toSlide,
+        intent: settings.mode === "intent",
       });
       return {
         moving,
@@ -223,8 +224,16 @@ export function createMoveGesture(
           return { x: { value: moving.x + raw.x }, y: { value: moving.y + raw.y } };
         }
         return {
-          x: xAxis.resolve(moving.x + raw.x, currentSpeedX),
-          y: yAxis.resolve(moving.y + raw.y, currentSpeedY),
+          x: xAxis.resolve(moving.x + raw.x, currentSpeedX, {
+            start: moving.y + raw.y,
+            end: moving.y + raw.y + moving.height,
+            pixelsPerUnit: pixelsY,
+          }),
+          y: yAxis.resolve(moving.y + raw.y, currentSpeedY, {
+            start: moving.x + raw.x,
+            end: moving.x + raw.x + moving.width,
+            pixelsPerUnit: pixelsX,
+          }),
         };
       },
     );

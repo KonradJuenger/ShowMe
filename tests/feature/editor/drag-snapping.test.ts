@@ -27,6 +27,10 @@ const options = {
   toSlide: false,
   scale: 1,
 };
+const magneticSettings = {
+  ...defaultDragSnapSettings,
+  mode: "magnetic" as const,
+};
 
 function fixture(): EditorSnapshot {
   const document = newPresentationDocument("Snapping");
@@ -46,7 +50,7 @@ it("magnetic movement is continuous and monotone through attraction, exact captu
     0,
     { objects: [100, 112, 130] },
     1,
-    defaultDragSnapSettings,
+    magneticSettings,
   );
   let previous = axis.resolve(85).value;
   for (let x = 85.01; x <= 145; x += 0.01) {
@@ -74,7 +78,7 @@ it("indexed anchors preserve source priority and deterministic nearest alignment
       persistent: [1234500, 1234500],
     },
     1,
-    defaultDragSnapSettings,
+    magneticSettings,
   );
   expect(axis.targetCount).toBe(60000);
   expect(axis.resolve(1234490.5)).toEqual({
@@ -90,23 +94,13 @@ it("indexed anchors preserve source priority and deterministic nearest alignment
 });
 
 it("magnetic and intent capture distances remain constant in screen pixels at different zoom levels", () => {
-  const normal = createDragSnapAxis(
-    0,
-    { slide: [100] },
-    1,
-    defaultDragSnapSettings,
-  );
-  const zoomed = createDragSnapAxis(
-    0,
-    { slide: [200] },
-    0.5,
-    defaultDragSnapSettings,
-  );
+  const normal = createDragSnapAxis(0, { slide: [100] }, 1, magneticSettings);
+  const zoomed = createDragSnapAxis(0, { slide: [200] }, 0.5, magneticSettings);
   expect(zoomed.resolve(186).value * 0.5).toBeCloseTo(normal.resolve(93).value);
   const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
   const intent = createDragSnapAxis(0, { slide: [200] }, 0.5, settings);
-  expect(intent.resolve(192).guide).toBeUndefined();
-  expect(intent.resolve(195).guide).toBe(200);
+  expect(intent.resolve(186).guide).toBeUndefined();
+  expect(intent.resolve(190).guide).toBe(200);
 });
 
 it("intent latch ignores fast passes, holds its target against competitors and releases continuously", () => {
@@ -140,7 +134,7 @@ it("multi-selection snaps its aggregate bounds and keeps relative geometry witho
     ["a", "b"],
     scope,
     options,
-    defaultDragSnapSettings,
+    magneticSettings,
     0,
   );
   const free = move({ x: 13.25, y: 7.75 }, 16);
@@ -164,14 +158,14 @@ it("gesture previews derive from the original snapshot, reset on bypass and comm
     { ...defaultDragSnapSettings, mode: "intent" },
     0,
   );
-  const captured = move({ x: 158, y: 0 }, 1000);
+  const captured = move({ x: 158, y: 180 }, 1000);
   expect(findElement(captured.snapshot.slide, "a")!.frame.x).toBe(180);
-  const held = move({ x: 166, y: 0 }, 1100);
+  const held = move({ x: 166.5, y: 180 }, 1100);
   expect(findElement(held.snapshot.slide, "a")!.frame.x).toBe(180);
-  const bypass = move({ x: 166, y: 0 }, 1200, true);
-  expect(findElement(bypass.snapshot.slide, "a")!.frame.x).toBe(186);
-  const released = move({ x: 166, y: 0 }, 1300);
-  expect(findElement(released.snapshot.slide, "a")!.frame.x).toBe(186);
+  const bypass = move({ x: 166.5, y: 180 }, 1200, true);
+  expect(findElement(bypass.snapshot.slide, "a")!.frame.x).toBe(186.5);
+  const released = move({ x: 166.5, y: 180 }, 1300);
+  expect(findElement(released.snapshot.slide, "a")!.frame.x).toBe(186.5);
   const geometry = selectionWorldGeometry(
     released.snapshot.slide,
     ["a"],
@@ -188,7 +182,7 @@ it("gesture previews derive from the original snapshot, reset on bypass and comm
     ["a"],
     scope,
     { ...options, enabled: false },
-    defaultDragSnapSettings,
+    magneticSettings,
     0,
   );
   expect(
@@ -225,7 +219,7 @@ it("transformed scopes preserve local alignments and measure attraction in scree
     ["a"],
     group.id,
     options,
-    defaultDragSnapSettings,
+    magneticSettings,
     0,
   );
   const delta = scopeVectorToWorld(initial.slide, group.id, {
@@ -262,14 +256,14 @@ it("intent speed gating uses elapsed time and axis screen distances instead of e
   const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
   const fast = createMoveGesture(initial, ["a"], scope, options, settings, 0);
   expect(
-    findElement(fast({ x: 158, y: 0 }, 16).snapshot.slide, "a")!.frame.x,
+    findElement(fast({ x: 158, y: 180 }, 16).snapshot.slide, "a")!.frame.x,
   ).toBe(178);
   expect(
-    findElement(fast({ x: 159, y: 0 }, 300).snapshot.slide, "a")!.frame.x,
+    findElement(fast({ x: 159, y: 180 }, 300).snapshot.slide, "a")!.frame.x,
   ).toBe(180);
   const slow = createMoveGesture(initial, ["a"], scope, options, settings, 0);
   expect(
-    findElement(slow({ x: 158, y: 0 }, 1000).snapshot.slide, "a")!.frame.x,
+    findElement(slow({ x: 158, y: 180 }, 1000).snapshot.slide, "a")!.frame.x,
   ).toBe(180);
 });
 
@@ -322,7 +316,7 @@ it("refined previews commit through the existing authority with one undoable fin
     ["a", "b"],
     layerId,
     options,
-    defaultDragSnapSettings,
+    magneticSettings,
     0,
   );
   session.apply(move({ x: 13.25, y: 7.75 }, 16).snapshot, false);
@@ -342,4 +336,231 @@ it("refined previews commit through the existing authority with one undoable fin
   await session.flush();
   expect(findElement(session.snapshot!.slide, "a")!.frame.x).toBe(150);
   expect(findElement(session.snapshot!.slide, "b")!.frame.x).toBe(180);
+});
+
+it("intent uses matching canvas boundaries and object centers instead of unrelated cross-anchor midpoints", () => {
+  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const canvas = createDragSnapAxis(
+    400,
+    {
+      features: [
+        { position: 0, source: "slide", kind: "start" },
+        { position: 540, source: "slide", kind: "center" },
+        { position: 1080, source: "slide", kind: "end" },
+      ],
+    },
+    1,
+    settings,
+  );
+  expect(canvas.resolve(540).guide).toBeUndefined();
+  canvas.reset();
+  expect(canvas.resolve(-200).guide).toBeUndefined();
+  canvas.reset();
+  expect(canvas.resolve(683)).toEqual({
+    value: 680,
+    guide: 1080,
+    source: "slide",
+  });
+  const center = createDragSnapAxis(
+    100,
+    {
+      features: [
+        {
+          position: 250,
+          source: "objects",
+          kind: "center",
+          span: { start: 0, end: 100 },
+        },
+      ],
+    },
+    1,
+    settings,
+  );
+  const context = { start: 0, end: 100, pixelsPerUnit: 1 };
+  expect(center.resolve(249, 100, context)).toEqual({ value: 249 });
+  center.reset();
+  expect(center.resolve(201, 100, context).guide).toBe(250);
+});
+
+it("intent rejects distant objects and prunes dense equal-coordinate clutter by perpendicular proximity", () => {
+  const axis = createDragSnapAxis(
+    100,
+    {
+      features: Array.from({ length: 20000 }, (_, index) => ({
+        position: 1000,
+        source: "objects" as const,
+        kind: "start" as const,
+        span: { start: index * 100, end: index * 100 + 30 },
+      })),
+    },
+    1,
+    { ...defaultDragSnapSettings, mode: "intent" },
+  );
+  const far = { start: -1000, end: -900, pixelsPerUnit: 1 };
+  expect(axis.resolve(999, 100, far)).toEqual({ value: 999 });
+  const near = { start: 1234500, end: 1234530, pixelsPerUnit: 1 };
+  expect(axis.resolve(999, 100, near).guide).toBe(1000);
+  // A remote object latch fades out if movement along the line leaves its span.
+  expect(axis.resolve(999, 100, far)).toEqual({ value: 999 });
+});
+
+it("a stronger canvas edge replaces a weaker object latch while equal-priority objects stay stable", () => {
+  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const axis = createDragSnapAxis(
+    400,
+    {
+      features: [
+        {
+          position: 1090,
+          source: "objects",
+          kind: "start",
+          span: { start: 0, end: 500 },
+        },
+        { position: 1080, source: "slide", kind: "end" },
+      ],
+    },
+    1,
+    settings,
+  );
+  const context = { start: 0, end: 500, pixelsPerUnit: 1 };
+  expect(axis.resolve(692, 100, context)).toEqual({
+    value: 690,
+    guide: 1090,
+    source: "objects",
+  });
+  expect(axis.resolve(684, 100, context)).toEqual({
+    value: 680,
+    guide: 1080,
+    source: "slide",
+  });
+  expect(axis.resolve(686, 100, context).guide).toBe(1080);
+});
+
+it("deliberate sampled crossings capture an alignment while fast crossings remain free", () => {
+  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const axis = createDragSnapAxis(
+    400,
+    { features: [{ position: 1080, source: "slide", kind: "end" }] },
+    1,
+    settings,
+  );
+  expect(axis.resolve(672, 300)).toEqual({ value: 672 });
+  expect(axis.resolve(688, 300)).toEqual({
+    value: 680,
+    guide: 1080,
+    source: "slide",
+  });
+  axis.reset();
+  expect(axis.resolve(672, 900)).toEqual({ value: 672 });
+  expect(axis.resolve(688, 900)).toEqual({ value: 688 });
+});
+
+it("a left-edge latch permits bottom-edge capture despite distant screenshot-like object clutter", () => {
+  const initial = fixture();
+  const a = findElement(initial.slide, "a")!;
+  const target = findElement(initial.slide, "target")!;
+  a.frame = { ...a.frame, x: 100, y: 600, width: 550, height: 400 };
+  target.frame = { ...target.frame, x: 1440, y: 300, width: 480, height: 600 };
+  initial.slide.nodes[0].children = [a, target];
+  const scope = initial.slide.nodes[0].id;
+  const snapOptions = { ...options, toSlide: true, scale: 0.57 };
+  const settings = { ...defaultDragSnapSettings, mode: "intent" as const };
+  const move = createMoveGesture(
+    initial,
+    ["a"],
+    scope,
+    snapOptions,
+    settings,
+    0,
+  );
+  const left = move({ x: -99, y: 101 }, 1000);
+  expect(left.scopeGuides.x).toBe(0);
+  expect(left.scopeGuides.y).toBeUndefined();
+  expect(findElement(left.snapshot.slide, "a")!.frame.y).toBe(701);
+  const corner = move({ x: -99, y: 83 }, 1100);
+  expect(corner.scopeGuides).toEqual({ x: 0, y: 1080 });
+  expect(findElement(corner.snapshot.slide, "a")!.frame).toMatchObject({
+    x: 0,
+    y: 680,
+  });
+
+  const reverse = createMoveGesture(
+    initial,
+    ["a"],
+    scope,
+    snapOptions,
+    settings,
+    0,
+  );
+  expect(reverse({ x: 0, y: 83 }, 1000).scopeGuides.y).toBe(1080);
+  const bottomThenLeft = reverse({ x: -99, y: 83 }, 1100);
+  expect(bottomThenLeft.scopeGuides).toEqual({ x: 0, y: 1080 });
+});
+
+it("axis capture uses its own speed while the perpendicular axis moves quickly", () => {
+  const initial = fixture();
+  initial.slide.nodes[0].children = [findElement(initial.slide, "a")!];
+  const scope = initial.slide.nodes[0].id;
+  const move = createMoveGesture(
+    initial,
+    ["a"],
+    scope,
+    { ...options, toSlide: true },
+    { ...defaultDragSnapSettings, mode: "intent" },
+    0,
+  );
+  move({ x: 800, y: -10 }, 1000);
+  const result = move({ x: 900, y: -17 }, 1020);
+  expect(result.scopeGuides.y).toBe(0);
+  expect(findElement(result.snapshot.slide, "a")!.frame.y).toBe(0);
+  expect(findElement(result.snapshot.slide, "a")!.frame.x).toBe(920);
+});
+
+it("zero holding distance captures once then releases without recapturing until a fresh approach", () => {
+  const axis = createDragSnapAxis(
+    100,
+    { features: [{ position: 200, source: "slide", kind: "end" }] },
+    1,
+    { ...defaultDragSnapSettings, intentRelease: 0 },
+  );
+  expect(axis.resolve(103, 100)).toEqual({
+    value: 100,
+    guide: 200,
+    source: "slide",
+  });
+  expect(axis.resolve(103, 0).guide).toBe(200);
+  expect(axis.resolve(103.25, 100)).toEqual({ value: 103.25 });
+  expect(axis.resolve(104, 100)).toEqual({ value: 104 });
+  expect(axis.resolve(107, 100)).toEqual({ value: 107 });
+  expect(axis.resolve(103, 100).guide).toBe(200);
+});
+
+it("holding distance can be smaller than capture distance and zero hold keeps stationary axes independent", () => {
+  const axis = createDragSnapAxis(
+    100,
+    { features: [{ position: 200, source: "slide", kind: "end" }] },
+    1,
+    { ...defaultDragSnapSettings, intentRelease: 1 },
+  );
+  expect(axis.resolve(105, 100).guide).toBe(200);
+  expect(axis.resolve(106, 100)).toEqual({ value: 106 });
+  const initial = fixture();
+  const a = findElement(initial.slide, "a")!;
+  a.frame = { ...a.frame, x: 100, y: 600, width: 550, height: 400 };
+  initial.slide.nodes[0].children = [a];
+  const move = createMoveGesture(
+    initial,
+    ["a"],
+    initial.slide.nodes[0].id,
+    { ...options, toSlide: true },
+    { ...defaultDragSnapSettings, intentRelease: 0 },
+    0,
+  );
+  expect(move({ x: -99, y: 80 }, 1000).scopeGuides).toEqual({ x: 0, y: 1080 });
+  const movingAlongLeft = move({ x: -99, y: 85 }, 1100);
+  expect(movingAlongLeft.scopeGuides.x).toBe(0);
+  expect(movingAlongLeft.scopeGuides.y).toBeUndefined();
+  expect(findElement(movingAlongLeft.snapshot.slide, "a")!.frame).toMatchObject(
+    { x: 0, y: 685 },
+  );
 });

@@ -1,6 +1,7 @@
 import { deriveGuides } from "./guides";
 import type { Box, Point } from "./geometry";
 import type { SnapTargetSources } from "./snapping";
+import type { DragSnapTargetSources } from "./dragSnapping";
 import type { Deck, Slide } from "./document";
 import {
   IDENTITY,
@@ -30,8 +31,8 @@ export interface OrientedGeometry extends Box {
 }
 
 export interface ScopeSnapTargets {
-  x: SnapTargetSources;
-  y: SnapTargetSources;
+  x: DragSnapTargetSources;
+  y: DragSnapTargetSources;
 }
 
 function boundsFromPoints(points: readonly Point[]): Box {
@@ -341,9 +342,14 @@ export function scopeSnapTargets(
     objects: boolean;
     guides: boolean;
     slide: boolean;
+    intent?: boolean;
   },
 ): ScopeSnapTargets {
   const target: ScopeSnapTargets = { x: {}, y: {} };
+  if (options.intent) {
+    target.x.features = [];
+    target.y.features = [];
+  }
   const selected = new Set(selectedIds);
 
   if (options.objects) {
@@ -372,6 +378,31 @@ export function scopeSnapTargets(
       box.y + box.height / 2,
       box.y + box.height,
     ]);
+    if (options.intent) {
+      for (const box of boxes) {
+        for (const [axis, start, size, span] of [
+          [
+            target.x, box.x, box.width,
+            { start: box.y, end: box.y + box.height },
+          ],
+          [
+            target.y, box.y, box.height,
+            { start: box.x, end: box.x + box.width },
+          ],
+        ] as const) {
+          axis.features!.push(
+            { position: start, source: "objects", kind: "start", span },
+            {
+              position: start + size / 2,
+              source: "objects",
+              kind: "center",
+              span,
+            },
+            { position: start + size, source: "objects", kind: "end", span },
+          );
+        }
+      }
+    }
   }
 
   if (options.guides && deck.defaultGuideSetId) {
@@ -424,6 +455,21 @@ export function scopeSnapTargets(
     );
   }
 
+  if (options.intent) {
+    for (const axis of [target.x, target.y]) {
+      const features = axis.features!;
+      for (const position of axis.persistent ?? [])
+        features.push({ position, source: "persistent", kind: "guide" });
+      const slideLines = [...(axis.slide ?? [])].sort((a, b) => a - b);
+      for (const [index, position] of slideLines.entries())
+        features.push({
+          position,
+          source: "slide",
+          kind: index === 0 ? "start"
+            : index === slideLines.length - 1 ? "end" : "center",
+        });
+    }
+  }
   return target;
 }
 
