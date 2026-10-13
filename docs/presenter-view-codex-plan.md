@@ -65,8 +65,8 @@ Fixed layout:
 
 1. thin top status strip
    - slide number
-   - elapsed time
-   - wall clock
+   - elapsed whole minutes from presentation start
+   - actual wall clock time
 
 2. thin readiness/status indicator
 
