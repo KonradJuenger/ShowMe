@@ -101,6 +101,7 @@ function EditorSlideThumbnail({
   const generation = useImageGeneration(documentId);
   const density = useDisplayDensity();
   const [fontRevision, setFontRevision] = useState(0);
+  const [resourceRevision, setResourceRevision] = useState(0);
   const [composed, setComposed] = useState<{ key: string; url: string } | null>(
     null,
   );
@@ -140,7 +141,11 @@ function EditorSlideThumbnail({
         reload();
     });
     const invalidated = platform.onDocumentInvalidated?.((event) => {
-      if (event.documentId === documentId) reload();
+      if (event.documentId !== documentId) return;
+      // Asset bytes can change while the slide document stays identical. Force
+      // cached thumbnails to recapture when external Library content arrives.
+      setResourceRevision((value) => value + 1);
+      reload();
     });
     reload();
     return () => {
@@ -176,6 +181,7 @@ function EditorSlideThumbnail({
         thumbnailScale,
         density,
         fontRevision,
+        resourceRevision,
         generation.slice(generation.lastIndexOf(":") + 1),
       ])
     : "";

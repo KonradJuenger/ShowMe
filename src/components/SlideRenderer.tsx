@@ -371,6 +371,53 @@ function VideoView({
   );
 }
 
+function MissingMediaPlaceholder() {
+  return (
+    <svg
+      data-missing-media="true"
+      role="img"
+      aria-label="Missing asset"
+      width="100%"
+      height="100%"
+      style={{ display: "block", borderRadius: "inherit", overflow: "hidden" }}
+    >
+      <rect width="100%" height="100%" fill="#d8d8d4" />
+      <g stroke="#b6b6b2" strokeWidth="4">
+        <line x1="0" y1="0" x2="100%" y2="100%" />
+        <line x1="100%" y1="0" x2="0" y2="100%" />
+        <rect
+          x="2"
+          y="2"
+          style={{ width: "calc(100% - 4px)", height: "calc(100% - 4px)" }}
+          fill="none"
+        />
+      </g>
+      <rect
+        x="50%"
+        y="50%"
+        width="154"
+        height="38"
+        rx="4"
+        fill="#d8d8d4"
+        transform="translate(-77 -19)"
+      />
+      <text
+        x="50%"
+        y="50%"
+        dominantBaseline="middle"
+        textAnchor="middle"
+        fill="#5f5f5b"
+        fontFamily="Arial, Helvetica, sans-serif"
+        fontSize="20"
+        fontWeight="500"
+        letterSpacing="0.4"
+      >
+        content missing
+      </text>
+    </svg>
+  );
+}
+
 function MediaView({
   element,
   staticVideo,
@@ -512,11 +559,8 @@ function MediaSurface({
       ? { width: prepared.sourceWidth, height: prepared.sourceHeight }
       : intrinsic,
   );
-  if (
-    !checking &&
-    (failed || (url === null && (content.type !== "video" || !previewUrl)))
-  )
-    return <div className="missing" role="img" aria-label="Missing asset" />;
+  if (!checking && (failed || url === null))
+    return <MissingMediaPlaceholder />;
   if (!frame)
     return (
       <div data-media-loading={content.type === "image" ? "true" : undefined} />

@@ -61,7 +61,7 @@ These rules apply to ChatGPT sessions that implement changes in this repository:
 
 Branches listed here have already been integrated into `main` and are safe to delete:
 
-- `chatgpt/agent-git-workflow`
+None.
 
 Keep this list accurate. Do not delete a branch merely because it appears stale; only branches known to be successfully integrated into `main` belong here.
 

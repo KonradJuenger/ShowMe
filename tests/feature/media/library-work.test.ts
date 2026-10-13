@@ -15,6 +15,9 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { storedDocument } from "../../helpers/storage";
 import { libraryIndex, managedFilename } from "../../../electron/mediaLibrary";
+import { createMediaElement } from "../../../src/core/media";
+import { insertElements } from "../../../src/core/editorCommands";
+import type { Asset } from "../../../src/core/assets";
 
 it("warm asset lookup and listing reuse inventory without directory enumeration", async () => {
   const { storage } = await storedDocument();
@@ -164,6 +167,44 @@ it("stream imports hash their written payload without rereading the source or te
   } finally {
     streamed.mockRestore();
   }
+});
+
+it("a referenced missing Library asset invalidates the open document when it arrives", async () => {
+  const { storage, session, id, runtime } = await storedDocument();
+  const bytes = Buffer.from("arrives-later"),
+    assetId = createHash("sha256").update(bytes).digest("hex"),
+    filename = managedFilename("synced.png", assetId);
+  const asset: Asset = {
+    version: 1,
+    id: assetId,
+    filename,
+    names: ["synced.png"],
+    type: "image",
+    mediaType: "image",
+    mime: "image/png",
+    bytes: bytes.length,
+    width: 32,
+    height: 32,
+    createdAt: "2026-10-12T00:00:00Z",
+  };
+  const media = createMediaElement("synced-media", asset);
+  session.apply(
+    insertElements(
+      session.snapshot!,
+      [media],
+      session.snapshot!.slide.nodes[0].id,
+    ),
+  );
+  await session.flush();
+  const revision = runtime.authority.revision,
+    changed = vi.fn();
+  storage.onResourcesChanged = changed;
+
+  await writeFile(path.join(storage.assetRoot, "images", filename), bytes);
+  await libraryIndex(storage.assetRoot)!.refresh();
+
+  expect(changed).toHaveBeenCalledWith([id]);
+  expect(runtime.authority.revision).toBe(revision);
 });
 
 it("an unrelated Library arrival does not invalidate an open document", async () => {
