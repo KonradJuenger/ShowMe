@@ -27,6 +27,11 @@ does not expose intermediate raster surfaces.
 No specific rendering change has been accepted. The next work is to identify
 where alignment or edge coverage changes in the existing renderer.
 
+The subsequent [render-only pixel-snapping experiment](pixel-snap-results.md)
+quantifies a successful device-coordinate painting prototype, failed local-CSS
+rounding variants, displacement, thin-element collapse, and synthetic DOM costs.
+It is not enabled in production and does not use dynamic region combining.
+
 ## Constraints and rejected directions
 
 The developer has explicitly ruled out dynamic region combining/batching as a

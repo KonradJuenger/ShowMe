@@ -1,0 +1,385 @@
+{
+  "testedDate": "2026-10-13",
+  "baseCommit": "b496bd5118d5cd92b9765e1125c794af2d606680",
+  "performanceMetadata": {
+    "browserVersion": "153.0.8010.12",
+    "node": "v24.4.1",
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "logicalCpus": 16,
+    "dpr": 1.25,
+    "headless": true,
+    "productionRenderer": false
+  },
+  "visual": {
+    "baseline": {
+      "cases": 1152,
+      "exactDifferences": 841,
+      "over2": 840,
+      "maxDifference": 113,
+      "maxDisplacement": 0,
+      "maxGridResidual": 0.5,
+      "maxJoinGap": 0.00000762939453125
+    },
+    "snap-local": {
+      "cases": 1152,
+      "exactDifferences": 872,
+      "over2": 872,
+      "maxDifference": 204,
+      "maxDisplacement": 0.5126953125,
+      "maxGridResidual": 0.0546875,
+      "maxJoinGap": 0.046875
+    },
+    "snap-no-transform": {
+      "cases": 1152,
+      "exactDifferences": 872,
+      "over2": 872,
+      "maxDifference": 204,
+      "maxDisplacement": 0.5126953125,
+      "maxGridResidual": 0.0546875,
+      "maxJoinGap": 0.046875
+    },
+    "snap-zoom": {
+      "cases": 1152,
+      "exactDifferences": 432,
+      "over2": 432,
+      "maxDifference": 113,
+      "maxDisplacement": 0.5078125,
+      "maxGridResidual": 0.03125,
+      "maxJoinGap": 0.0234375
+    },
+    "snap-device-units": {
+      "cases": 1152,
+      "exactDifferences": 432,
+      "over2": 432,
+      "maxDifference": 113,
+      "maxDisplacement": 0.515625,
+      "maxGridResidual": 0.046875,
+      "maxJoinGap": 0.0234375
+    },
+    "snap-device-matrix": {
+      "cases": 1152,
+      "exactDifferences": 0,
+      "over2": 0,
+      "maxDifference": 0,
+      "maxDisplacement": 0.515625,
+      "maxGridResidual": 0.00006103515625,
+      "maxJoinGap": 0.00000858306884765625
+    }
+  },
+  "images": {
+    "baseline": {
+      "cases": 576,
+      "exactDifferences": 421,
+      "over2": 420,
+      "maxDifference": 53,
+      "maxDisplacement": 0,
+      "maxGridResidual": 0.5,
+      "maxJoinGap": 0.00000762939453125
+    },
+    "snapped": {
+      "cases": 576,
+      "exactDifferences": 0,
+      "over2": 0,
+      "maxDifference": 0,
+      "maxDisplacement": 0.515625,
+      "maxGridResidual": 0.000030517578125,
+      "maxJoinGap": 0.00000858306884765625
+    }
+  },
+  "geometry": {
+    "cases": 19600,
+    "maxEdge": 0.5000000000000142,
+    "maxSize": 0.9750000000000001,
+    "maxJoin": 4.440892098500626e-15,
+    "collapse": [
+      {
+        "width": 0.25,
+        "total": 2800,
+        "collapsed": 1933
+      },
+      {
+        "width": 0.5,
+        "total": 2800,
+        "collapsed": 1290
+      },
+      {
+        "width": 1,
+        "total": 2800,
+        "collapsed": 745
+      },
+      {
+        "width": 2,
+        "total": 2800,
+        "collapsed": 398
+      },
+      {
+        "width": 5,
+        "total": 2800,
+        "collapsed": 113
+      },
+      {
+        "width": 10,
+        "total": 2800,
+        "collapsed": 0
+      },
+      {
+        "width": 120,
+        "total": 2800,
+        "collapsed": 0
+      }
+    ]
+  },
+  "math": [
+    {
+      "count": 100,
+      "medianMs": 0.004850000000004684,
+      "p95Ms": 0.015570000000002438
+    },
+    {
+      "count": 1000,
+      "medianMs": 0.03613000000000284,
+      "p95Ms": 0.0662399999999991
+    },
+    {
+      "count": 10000,
+      "medianMs": 0.3470899999999972,
+      "p95Ms": 0.550970000000001
+    }
+  ],
+  "domPerformance": [
+    {
+      "count": 100,
+      "scenario": "pan",
+      "mode": "baseline",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.1,
+      "layoutP95Ms": 0.1,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 100,
+      "scenario": "pan",
+      "mode": "snap",
+      "jsMedianMs": 0.1,
+      "jsP95Ms": 0.2,
+      "layoutMedianMs": 0.3,
+      "layoutP95Ms": 0.4,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.8,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 100,
+      "scenario": "pan",
+      "mode": "device",
+      "jsMedianMs": 0.2,
+      "jsP95Ms": 0.3,
+      "layoutMedianMs": 0.2,
+      "layoutP95Ms": 0.3,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 100,
+      "scenario": "edit",
+      "mode": "baseline",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.1,
+      "layoutP95Ms": 0.3,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 100,
+      "scenario": "edit",
+      "mode": "snap",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.1,
+      "layoutP95Ms": 0.3,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.8,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 100,
+      "scenario": "edit",
+      "mode": "device",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.2,
+      "layoutP95Ms": 0.6,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 1000,
+      "scenario": "pan",
+      "mode": "baseline",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.1,
+      "layoutP95Ms": 0.2,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 1000,
+      "scenario": "pan",
+      "mode": "snap",
+      "jsMedianMs": 1.1,
+      "jsP95Ms": 1.6,
+      "layoutMedianMs": 2.2,
+      "layoutP95Ms": 2.9,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 1000,
+      "scenario": "pan",
+      "mode": "device",
+      "jsMedianMs": 2,
+      "jsP95Ms": 4.7,
+      "layoutMedianMs": 1.4,
+      "layoutP95Ms": 3.3,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 1000,
+      "scenario": "edit",
+      "mode": "baseline",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.7,
+      "layoutP95Ms": 2.3,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 1000,
+      "scenario": "edit",
+      "mode": "snap",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.7,
+      "layoutP95Ms": 2.6,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.8,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 1000,
+      "scenario": "edit",
+      "mode": "device",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.7,
+      "layoutP95Ms": 2.5,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 5000,
+      "scenario": "pan",
+      "mode": "baseline",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 0.2,
+      "layoutP95Ms": 0.6,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 5000,
+      "scenario": "pan",
+      "mode": "snap",
+      "jsMedianMs": 5.2,
+      "jsP95Ms": 6.2,
+      "layoutMedianMs": 10.4,
+      "layoutP95Ms": 11.9,
+      "frameMedianMs": 33.3,
+      "frameP95Ms": 33.4,
+      "framesOver25Ms": 220,
+      "samples": 270
+    },
+    {
+      "count": 5000,
+      "scenario": "pan",
+      "mode": "device",
+      "jsMedianMs": 8.7,
+      "jsP95Ms": 10.8,
+      "layoutMedianMs": 6.9,
+      "layoutP95Ms": 11,
+      "frameMedianMs": 33.2,
+      "frameP95Ms": 33.4,
+      "framesOver25Ms": 144,
+      "samples": 270
+    },
+    {
+      "count": 5000,
+      "scenario": "edit",
+      "mode": "baseline",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 3.7,
+      "layoutP95Ms": 9.5,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 5000,
+      "scenario": "edit",
+      "mode": "snap",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 3.7,
+      "layoutP95Ms": 4.9,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.8,
+      "framesOver25Ms": 0,
+      "samples": 270
+    },
+    {
+      "count": 5000,
+      "scenario": "edit",
+      "mode": "device",
+      "jsMedianMs": 0,
+      "jsP95Ms": 0.1,
+      "layoutMedianMs": 3.2,
+      "layoutP95Ms": 9.2,
+      "frameMedianMs": 16.7,
+      "frameP95Ms": 16.7,
+      "framesOver25Ms": 0,
+      "samples": 270
+    }
+  ]
+}
