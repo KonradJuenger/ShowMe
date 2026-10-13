@@ -81,13 +81,19 @@ export function createDomRasterSource(
     }
     return false;
   };
+  const hasRunningAnimations = () =>
+    originalRoot.getAnimations({ subtree: true }).some((animation) => {
+      if (animation.playState !== "running") return false;
+      if (!refined || !(animation.effect instanceof KeyframeEffect))
+        return true;
+      const target = animation.effect.target;
+      return target instanceof HTMLElement && included(target);
+    });
   // Polling preserves decoder throughput in the native capture route.
   const pollAnimations = () => {
     animationFrame = 0;
     if (disposed) return;
-    const animated = originalRoot
-      .getAnimations({ subtree: true })
-      .some((animation) => animation.playState === "running");
+    const animated = hasRunningAnimations();
     const playing = Array.from(originalRoot.querySelectorAll("video")).some(
       (video) => (!refined || included(video)) && !video.paused,
     );
@@ -412,9 +418,7 @@ export function createDomRasterSource(
       if (disposed) return;
       if (inFlight) return inFlight;
       const requestedTransform = sourceTransform().toString();
-      const animated = originalRoot
-        .getAnimations({ subtree: true })
-        .some((animation) => animation.playState === "running");
+      const animated = hasRunningAnimations();
       const video = Array.from(originalRoot.querySelectorAll("video")).some(
         (node) => (!refined || included(node)) && !node.paused,
       );

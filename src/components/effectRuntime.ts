@@ -380,7 +380,7 @@ export function mountEffectSurface(
   const sceneRoot = samplingRoot(node, initialSampling);
   const coordinator = refined ? coordinatorFor(sceneRoot) : null;
   const dependencies = effectDependencies(definition);
-  const cssSource =
+  const cssSource = () =>
     (definition.kind === "css"
       ? definition.source
       : (definition.styleSource ?? "")) +
@@ -407,7 +407,7 @@ export function mountEffectSurface(
     const uses = (key: string) =>
       new RegExp(
         `\\b${definition.kind === "fragment-glsl" ? "u_" : ""}${key}\\b`,
-      ).test(source) || new RegExp(`--${key}(?![\\w-])`).test(cssSource);
+      ).test(source) || new RegExp(`--${key}(?![\\w-])`).test(cssSource());
     return [
       value.started,
       value.active,
@@ -418,7 +418,7 @@ export function mountEffectSurface(
       uses("slideTime") ? value.slideTime : 0,
       uses("presentationTime") ? value.presentationTime : 0,
       uses("stepTime") ? value.stepTime : 0,
-      /@keyframes\b/.test(cssSource) ? value.time : 0,
+      /@keyframes\b/.test(cssSource()) ? value.time : 0,
     ];
   };
   const values = Object.fromEntries(
@@ -1268,6 +1268,16 @@ export function mountEffectSurface(
             (element) =>
               element.content?.type === "text" || hasText(element.children),
           );
+        const hasDomEffects = (elements: Element[]): boolean =>
+          elements.some(
+            (element) =>
+              element.effects?.some(
+                (effect) =>
+                  effect.enabled &&
+                  context.resources[effect.resourceId] &&
+                  context.resources[effect.resourceId].kind !== "fragment-glsl",
+              ) || hasDomEffects(element.children),
+          );
         let sampledSlide: Slide | undefined,
           sampledResources: EffectResources | undefined;
         let sampledStylesheet: string | undefined,
@@ -1297,9 +1307,7 @@ export function mountEffectSurface(
             domInput =
               !!stylesheet ||
               hasText(inputElements) ||
-              Object.values(resources).some(
-                (resource) => resource.kind !== "fragment-glsl",
-              );
+              hasDomEffects(inputElements);
           }
           return domInput;
         };
@@ -1543,7 +1551,9 @@ export function mountEffectSurface(
       };
       // Preserve the complete CSS clock API even when a static shader needs no
       // new GPU draw. Arbitrary stylesheet rules may consume inherited clocks.
+      let inheritedClockChanged = false;
       if (refined && definition.kind === "fragment-glsl" && !ownerAbsent()) {
+        const stylesheet = content?.scene?.().deck.stylesheet ?? "";
         for (const [key, clock] of Object.entries({
           t: timing.time * (definition.speed ?? 1),
           p: timing.progress ?? 1,
@@ -1555,12 +1565,23 @@ export function mountEffectSurface(
           duration: timing.duration,
         })) {
           const serialized = cssEffectValue(clock);
-          if (node.style.getPropertyValue(`--${key}`) !== serialized)
+          if (node.style.getPropertyValue(`--${key}`) !== serialized) {
             node.style.setProperty(`--${key}`, serialized);
+            if (new RegExp(`--${key}(?![\\w-])`).test(stylesheet))
+              inheritedClockChanged = true;
+          }
         }
       }
+      // The stage's variables are outside its captured subtree. Updating them
+      // changes inherited paint without a mutation inside that source.
+      if (inheritedClockChanged) raster?.markDirty();
       if (!timing.started) bypass();
-      if (refined && previous === JSON.stringify(clockKey(timing))) return;
+      if (
+        refined &&
+        !inheritedClockChanged &&
+        previous === JSON.stringify(clockKey(timing))
+      )
+        return;
       schedule();
     },
     async flush(cohort) {

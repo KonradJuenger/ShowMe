@@ -5,6 +5,208 @@ type HarnessWindow = Window & {
 };
 test.use({ deviceScaleFactor: 1.25 });
 
+test("inherited shader clocks refresh captured stylesheet pixels after forward and backward seeks", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const rows = await page.evaluate(async () => {
+    const path = "/tests/helpers/mixedEffectsHarness.tsx";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ path
+    );
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(model) {
+        const slide = model.slides[model.deck.slideIds[0]];
+        const text = slide.nodes[0].children[0];
+        text.effects = text.effects!.slice(2);
+        slide.nodes[0].children = [text];
+        model.deck.stylesheet =
+          "[data-text-content] { color:red!important; opacity:var(--slideTime); }";
+      },
+    });
+    try {
+      const rows = [];
+      for (const clock of ["slideTime", "p", "t"]) {
+        harness.setStylesheet(
+          `[data-text-content] { color:red!important; opacity:var(--${clock}); }`,
+        );
+        const hidden = await harness.stage(0, 0, 0);
+        const visible = await harness.stage(1, 0, 1);
+        const repeated = await harness.stage(1, 0, 1);
+        const backward = await harness.stage(0, 0, 0);
+        rows.push({ hidden, visible, repeated, backward });
+      }
+      return rows;
+    } finally {
+      harness.dispose();
+    }
+  });
+  for (const row of rows) {
+    expect(row.hidden.errors).toEqual([]);
+    expect(row.visible.errors).toEqual([]);
+    expect(row.hidden.surfaces[0].opaque).toBe(0);
+    expect(row.visible.surfaces[0].green).toBeGreaterThan(1000);
+    expect(row.backward.surfaces[0].opaque).toBe(0);
+    expect(row.repeated.diagnostics.captures).toBe(
+      row.visible.diagnostics.captures,
+    );
+  }
+});
+
+test("unused, disabled and unrelated CSS effects preserve primitive content and backdrop sources", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const rows = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
+    const factoryPath = "/src/core/elementFactory.ts";
+    const effectsPath = "/src/core/effects.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const { newEffectInstance }: typeof import("../../../src/core/effects") =
+      await import(/* @vite-ignore */ effectsPath);
+    const rows = [];
+    for (const placement of [
+      "unused",
+      "disabled",
+      "unrelated",
+      "contributing",
+    ]) {
+      const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+        configure(model) {
+          const slide = model.slides[model.deck.slideIds[0]];
+          const resources = slide.effectResources!;
+          const red = createBasicShape("red", "rectangle", { x: 40, y: 40 });
+          red.frame.width = red.frame.height = 120;
+          red.appearance.fill = "red";
+          red.effects = [
+            newEffectInstance("shader", resources.shader, "content"),
+          ];
+          const unrelated = createBasicShape("unrelated", "rectangle", {
+            x: 300,
+            y: 40,
+          });
+          if (placement === "unrelated")
+            unrelated.effects = [
+              newEffectInstance("css", resources.css, "content"),
+            ];
+          if (placement === "disabled" || placement === "contributing") {
+            const css = newEffectInstance("css", resources.css, "content");
+            css.enabled = placement === "contributing";
+            red.effects.unshift(css);
+          }
+          slide.nodes[0].children = [
+            red,
+            slide.nodes[0].children[1],
+            unrelated,
+          ];
+          slide.effectResources = {
+            css: resources.css,
+            shader: resources.shader,
+            backdrop: resources.backdrop,
+          };
+          delete model.deck.stylesheet;
+        },
+      });
+      try {
+        rows.push({ placement, state: await harness.stage(0, 0, 1) });
+      } finally {
+        harness.dispose();
+      }
+    }
+    return rows;
+  });
+  for (const { placement, state } of rows) {
+    expect(state.errors).toEqual([]);
+    expect(
+      state.surfaces.every(
+        (surface) =>
+          surface.backend ===
+          (placement === "contributing" ? "native" : "primitive"),
+      ),
+    ).toBe(true);
+    expect(state.surfaces.every((surface) => surface.green > 1000)).toBe(true);
+  }
+});
+
+test("excluded animations do not refresh a source while contributing animations still change its pixels", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const path = "/src/components/domRaster.ts";
+    const {
+      createDomRasterSource,
+      domRasterDiagnostics,
+    }: typeof import("../../../src/components/domRaster") = await import(
+      /* @vite-ignore */ path
+    );
+    const root = document.createElement("div");
+    root.style.cssText = "width:100px;height:100px;background:red";
+    const excluded = document.createElement("div");
+    root.append(excluded);
+    document.body.append(root);
+    const animation = excluded.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: 60000,
+      iterations: Infinity,
+    });
+    let invalidations = 0;
+    const source = createDomRasterSource(
+      () => root,
+      (node) => node !== excluded,
+      () => {},
+      () => invalidations++,
+      async () => {},
+      undefined,
+      true,
+    );
+    let contributing: Animation | undefined;
+    try {
+      await source.update(100, 100, 100, 100);
+      const before = domRasterDiagnostics();
+      const initialInvalidations = invalidations;
+      for (let i = 0; i < 5; i++) {
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
+        await source.update(100, 100, 100, 100);
+      }
+      const after = domRasterDiagnostics();
+      const excludedInvalidations = invalidations - initialInvalidations;
+      contributing = root.animate(
+        [{ backgroundColor: "red" }, { backgroundColor: "blue" }],
+        { duration: 60000 },
+      );
+      contributing.currentTime = 30000;
+      await source.update(100, 100, 100, 100);
+      const pixel = Array.from(
+        source.canvas.getContext("2d")!.getImageData(50, 50, 1, 1).data,
+      );
+      return { before, after, excludedInvalidations, pixel };
+    } finally {
+      source.dispose();
+      animation.cancel();
+      contributing?.cancel();
+      root.remove();
+    }
+  });
+  expect(result.excludedInvalidations).toBe(0);
+  expect(result.after.styleReads).toBe(result.before.styleReads);
+  expect(result.after.captures).toBe(result.before.captures);
+  expect(result.pixel[0]).toBeGreaterThan(50);
+  expect(result.pixel[2]).toBeGreaterThan(50);
+});
+
 test("a mounted backdrop switches from primitive capture when lower CSS is added", async ({
   page,
 }) => {
