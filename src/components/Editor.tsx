@@ -1394,9 +1394,8 @@ export function Editor({
             }}
             style={{
               position: "absolute",
-              left: `calc(50% + ${pan.x}px)`,
-              top: `calc(50% + ${pan.y}px)`,
-              transform: "translate(-50%, -50%)",
+              left: `calc(50% + ${pan.x - (deck.width * scale) / 2}px)`,
+              top: `calc(50% + ${pan.y - (deck.height * scale) / 2}px)`,
             }}
           />
           {trimVideoId && trimVideo && trimElement && (
