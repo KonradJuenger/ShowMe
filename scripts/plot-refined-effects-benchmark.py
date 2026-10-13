@@ -18,14 +18,13 @@ for backend, label, color in [("native", "Naive native", "#b5473c"), ("refined",
         ("composite", axes[1, 0], "depth", "Glass lenses in one layered scene"),
         ("tiles", axes[1, 1], "count", "Independent stacks, fixed total area"),
     ]:
-        values = sorted([row for row in rows.values() if row["backend"] == backend and row["family"] == family and not row["heavy"] and row["profileWidth"] == 1920 and (family == "tiles" or row["count"] == 1) and groups[row["id"]]["outputMedianFps"] is not None], key=lambda row: row[coordinate])
+        values = sorted([row for row in rows.values() if row["backend"] == backend and row["family"] == family and not row["heavy"] and row["profileWidth"] == 1920 and (family != "shader" or row["videoCount"] == 1) and (family == "tiles" or row["count"] == 1) and groups[row["id"]]["outputMedianFps"] is not None], key=lambda row: row[coordinate])
         axis.plot([row[coordinate] for row in values], [groups[row["id"]]["outputMedianFps"] for row in values], marker="o", label=label, color=color)
         axis.set_xlabel(xlabel)
         axis.set_ylabel("Terminal publications / second")
-        axis.set_ylim(bottom=0)
         axis.grid(axis="y", alpha=.2)
         axis.legend()
-    values = sorted([row for row in rows.values() if row["backend"] == backend and row["family"] == "shader" and not row["heavy"] and row["profileWidth"] == 1920 and row["status"] == "ok"], key=lambda row: row["depth"])
+    values = sorted([row for row in rows.values() if row["backend"] == backend and row["family"] == "shader" and row["videoCount"] == 1 and not row["heavy"] and row["profileWidth"] == 1920 and row["status"] == "ok"], key=lambda row: row["depth"])
     # The naive strategy's input textures are not instrumented. Plot measured
     # logical canvases alone so the comparison has the same accounting boundary.
     axes[0, 1].plot([row["depth"] for row in values], [row["canvasMiB"] for row in values], marker="o", label=label, color=color)
@@ -34,6 +33,10 @@ axes[0, 1].set_xlabel("Shader stages")
 axes[0, 1].set_ylabel("Logical canvas bitmap MiB (excludes GPU textures)")
 axes[0, 1].grid(axis="y", alpha=.2)
 axes[0, 1].legend()
+for axis in axes.flat:
+    axis.relim()
+    axis.autoscale_view()
+    axis.set_ylim(bottom=0)
 fig.suptitle("Electron mixed-effect renderer: same-machine comparison\nPublications include shader-clock changes; they are not unique video frames")
 fig.savefig(folder / "comparison.png", dpi=180)
 fig.savefig(folder / "comparison.svg")
