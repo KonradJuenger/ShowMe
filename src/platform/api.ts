@@ -89,6 +89,9 @@ export interface PresenterState {
   deckId: string;
   slideIds: string[];
   index: number | null;
+  /** Last activated slide before the current activation. */
+  previousSlideId?: string;
+  previousSlideIndex?: number;
   black?: boolean;
   restartToken?: number;
   startedAt?: number;

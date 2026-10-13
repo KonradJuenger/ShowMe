@@ -749,6 +749,11 @@ export type EffectClocks = {
   presentationTime: number;
   stepTime?: number;
   stepIndex?: number;
+  slideIndex?: number;
+  slideCount?: number;
+  slideSeed?: number;
+  previousSlideIndex?: number;
+  previousSlideSeed?: number;
   /** Logical slide-time offsets, in seconds, at which click stages were entered. */
   stageStarts?: readonly number[];
   /** Capture both clocks: local preparation can pause Slide independently. */
@@ -906,6 +911,14 @@ export function effectTiming(
     presentationTime,
     stepTime,
     stepIndex: Math.max(0, Math.trunc(clocks?.stepIndex ?? stageIndex)),
+    slideIndex: Math.max(0, Math.trunc(clocks?.slideIndex ?? 0)),
+    slideCount: Math.max(1, Math.trunc(clocks?.slideCount ?? 1)),
+    slideSeed: clocks?.slideSeed ?? 0,
+    previousSlideIndex: Math.max(
+      0,
+      Math.trunc(clocks?.previousSlideIndex ?? clocks?.slideIndex ?? 0),
+    ),
+    previousSlideSeed: clocks?.previousSlideSeed ?? clocks?.slideSeed ?? 0,
     active: true,
   };
 }
@@ -1004,6 +1017,11 @@ const shaderBuiltinUniforms: Record<string, string> = {
   u_stepIndex: "float",
   u_active: "float",
   u_slideTime: "float",
+  u_slideIndex: "float",
+  u_slideCount: "float",
+  u_slideSeed: "float",
+  u_previousSlideIndex: "float",
+  u_previousSlideSeed: "float",
   u_presentationTime: "float",
   u_duration: "float",
   u_size: "vec2",

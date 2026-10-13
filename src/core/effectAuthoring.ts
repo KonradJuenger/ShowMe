@@ -241,6 +241,16 @@ Current speed ${speed}x means one elapsed Effect second advances time by ${speed
 Explicit advanced reference clocks u_presentationTime, u_slideTime and u_stepTime (JS presentationTime, slideTime, stepTime; CSS --presentationTime, --slideTime, --stepTime) remain unscaled and independent. stepTime measures seconds since entering the current logical slide step (including Slide start). Use them only when the requested visual intentionally needs a global/reference clock independent of normal Effect time.
 ${shader ? "uniform float u_stepIndex; pairs with u_stepTime." : "JS stepIndex pairs with stepTime; CSS --stepIndex pairs with --stepTime."}
 stepIndex is read-only integer presentation context: 0 = Slide start, 1 = Click 1, 2 = Click 2, including empty clicks. It resets on slide activation/re-entry. Inserting/removing earlier Clicks changes later numeric indexes; it is not a stable semantic event ID. Use stepIndex/stepTime to derive visuals reacting to multiple steps, never presentation navigation or scheduling. stepIndex alone is event-driven and does not require continuous redraw. Start bypass still applies. For a multi-state text transition use Start Slide / Stop None, stepIndex to select authored string states and stepTime / a duration parameter to derive the transition; t/p still describe one Effect interval.
+${shader ? `SLIDE CONTEXT
+
+uniform float u_slideIndex;
+uniform float u_slideCount;
+uniform float u_slideSeed;
+uniform float u_previousSlideIndex;
+uniform float u_previousSlideSeed;
+
+These values are read-only presentation context. slideIndex is the zero-based index in the visible presentation sequence and slideCount is its size. slideSeed is a deterministic 0..1 value derived from the current slide identity. previousSlideIndex / previousSlideSeed describe the slide activation the presenter actually came from, including backward navigation and jumps. On initial presentation entry they equal the current slide, so an Effect does not invent a transition from an unrelated state.
+Use the seeds to derive deterministic per-slide configurations and u_slideTime to blend from the previous configuration toward the current one. Do not store cross-slide state inside the shader and do not derive slide identity from elapsed presentation time.` : ""}
 Do not normalize time to 0..1 unless intentionally creating a repeating cycle. For example, ${shader ? "sin(u_t * 2.0)" : "Math.sin(t * 2) in JS"} is continuous oscillation; ${shader ? "fract(u_t / 4.0)" : "(t % 4) / 4 in JS"} is a repeating four-second cycle.
 
 ${p} = NORMALIZED EFFECT INTERVAL
@@ -262,13 +272,7 @@ ${currentCode}
 HOW TO RESPOND
 
 ${response}
-Use ${shader ? "u_t" : "t / --t"} for continuous motion, ${shader ? "u_p" : "p / --p"} for optional normalized finite progress, and both when appropriate. Do not replace ShowMe timing with your own clock. Keep explanation short unless requested.
-
-WHAT I WANT TO CREATE
-
-Paste this entire prompt into your coding model, then replace the placeholder or simply append a sentence describing the visual Effect or change. For example: "Create slowly moving irregular glass ribs, keeping the image recognizable; expose distortion strength and rib spacing."
-MY REQUEST:
-[DESCRIBE THE EFFECT OR CHANGE HERE]`;
+Use ${shader ? "u_t" : "t / --t"} for continuous motion, ${shader ? "u_p" : "p / --p"} for optional normalized finite progress, and both when appropriate. Do not replace ShowMe timing with your own clock. Keep explanation short unless requested.`;
 }
 
 function shaderPromptEnvironment(affects: EffectAffects) {

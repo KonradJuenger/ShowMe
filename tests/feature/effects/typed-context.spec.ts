@@ -258,7 +258,7 @@ test("GLSL and CSS receive logical step context while float parameters remain nu
     });
     const definition = reconcileShaderSource(
       base,
-      "#version 300 es\nprecision highp float; uniform float u_stepIndex; uniform float u_stepTime;\nuniform float strength; // @param 12 [0,60]\nout vec4 outColor; void main(){outColor=vec4(u_stepIndex/4.0, u_stepTime, strength/60.0, 1.0);}",
+      "#version 300 es\nprecision highp float; uniform float u_stepIndex; uniform float u_stepTime; uniform float u_slideIndex; uniform float u_slideCount; uniform float u_slideSeed; uniform float u_previousSlideIndex; uniform float u_previousSlideSeed;\nuniform float strength; // @param 12 [0,60]\nout vec4 outColor; void main(){outColor=vec4((u_stepIndex + u_slideIndex) / 8.0, (u_stepTime + u_previousSlideIndex) / 6.0, (u_slideCount / 4.0) * fract(u_slideSeed + u_previousSlideSeed) * (strength / 12.0), 1.0);}",
     );
     const node = document.createElement("div"),
       canvas = document.createElement("canvas");
@@ -271,7 +271,17 @@ test("GLSL and CSS receive logical step context while float parameters remain nu
       newEffectInstance("shader", definition, "overlay"),
       { width: 4, height: 4 },
     );
-    const timing = effectTiming(undefined, 2, 500, "e", "i");
+    const timing = effectTiming(undefined, 2, 500, "e", "i", {
+      slideTime: 0.5,
+      presentationTime: 2.5,
+      stepTime: 0.5,
+      stepIndex: 2,
+      slideIndex: 2,
+      slideCount: 4,
+      slideSeed: 0.2,
+      previousSlideIndex: 1,
+      previousSlideSeed: 0.3,
+    });
     effectSurface(node)!.setTiming(timing);
     await effectSurface(node)!.flush();
     const pixel = Array.from(
@@ -307,7 +317,9 @@ test("GLSL and CSS receive logical step context while float parameters remain nu
   expect(sampled.opacity).toBe("0.5");
   expect(sampled.pixel[0]).toBeGreaterThanOrEqual(127);
   expect(sampled.pixel[0]).toBeLessThanOrEqual(128);
-  expect(sampled.pixel[1]).toBeGreaterThanOrEqual(127);
-  expect(sampled.pixel[1]).toBeLessThanOrEqual(128);
-  expect(sampled.pixel.slice(2)).toEqual([51, 255]);
+  expect(sampled.pixel[1]).toBeGreaterThanOrEqual(63);
+  expect(sampled.pixel[1]).toBeLessThanOrEqual(64);
+  expect(sampled.pixel[2]).toBeGreaterThanOrEqual(127);
+  expect(sampled.pixel[2]).toBeLessThanOrEqual(128);
+  expect(sampled.pixel[3]).toBe(255);
 });

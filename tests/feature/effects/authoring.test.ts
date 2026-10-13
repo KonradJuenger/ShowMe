@@ -20,6 +20,7 @@ import {
 import {
   sampleEffectClocks,
   presenterEffectClockOrigins,
+  effectSlideSeed,
 } from "../../../src/core/effectClocks";
 import {
   startSession,
@@ -488,6 +489,16 @@ it("copied prompts describe the selected contract, speed, parameters and source"
   expect(prompt).toContain("uniform float strength; // @param 12 [0, 60]");
   expect(prompt).toContain(definition.source);
   expect(prompt).toContain("Do not derive p from time");
+  expect(prompt).toContain("uniform float u_slideIndex;");
+  expect(prompt).toContain("uniform float u_slideCount;");
+  expect(prompt).toContain("uniform float u_slideSeed;");
+  expect(prompt).toContain("uniform float u_previousSlideSeed;");
+  expect(prompt).toContain(
+    "including backward navigation and jumps",
+  );
+  expect(prompt).toContain(
+    "Use the seeds to derive deterministic per-slide configurations and u_slideTime to blend",
+  );
   expect(
     buildEffectAuthoringPrompt(
       changeEffectAffects(definition, "backdrop", true),
@@ -508,7 +519,7 @@ it("copied prompts describe the selected contract, speed, parameters and source"
   );
 });
 
-it("AI prompt exports ShowMe context before the contract and leaves the user's sentence at the end", () => {
+it("AI prompt exports ShowMe context before the contract without a request placeholder", () => {
   const definition = {
     ...blankEffect("shader"),
     name: "Ribbed Glass",
@@ -526,8 +537,6 @@ it("AI prompt exports ShowMe context before the contract and leaves the user's s
     "RUNTIME RESTRICTIONS",
     "CURRENT CODE",
     "HOW TO RESPOND",
-    "WHAT I WANT TO CREATE",
-    "MY REQUEST:",
   ];
   const positions = sections.map((section) => prompt.indexOf(section));
   expect(positions.every((position) => position >= 0)).toBe(true);
@@ -564,10 +573,10 @@ it("AI prompt exports ShowMe context before the contract and leaves the user's s
   expect(prompt).toContain("vec2 position = v_uv * u_size");
   expect(prompt).toContain("No custom float uniforms are currently declared.");
   expect(prompt).toContain("Do not return a separate PARAMETERS section");
-  expect(prompt).toContain("simply append a sentence");
-  expect(
-    prompt.endsWith("MY REQUEST:\n[DESCRIBE THE EFFECT OR CHANGE HERE]"),
-  ).toBe(true);
+  expect(prompt).not.toContain("WHAT I WANT TO CREATE");
+  expect(prompt).not.toContain("Paste this entire prompt");
+  expect(prompt).not.toContain("MY REQUEST:");
+  expect(prompt).not.toContain("[DESCRIBE THE EFFECT OR CHANGE HERE]");
   expect(prompt.match(/```/g)).toHaveLength(2);
   expect(buildEffectAuthoringPrompt(definition, { creating: true })).toContain(
     "Create the requested Effect from this minimal draft",
@@ -627,7 +636,22 @@ it("step clocks continue beyond finite Motion, reset at clicks and retain slide/
   );
   const clocks = (state: typeof started, now: number) =>
     sampleEffectClocks(presenterEffectClockOrigins(state)!, now);
+  const firstSlideContext = {
+    slideIndex: 0,
+    slideCount: 2,
+    slideSeed: effectSlideSeed("one"),
+    previousSlideIndex: 0,
+    previousSlideSeed: effectSlideSeed("one"),
+  };
+  const secondSlideContext = {
+    slideIndex: 1,
+    slideCount: 2,
+    slideSeed: effectSlideSeed("two"),
+    previousSlideIndex: 0,
+    previousSlideSeed: effectSlideSeed("one"),
+  };
   expect(clocks(started, 9400)).toEqual({
+    ...firstSlideContext,
     stepIndex: 0,
     stepTime: 8.4,
     slideTime: 8.4,
@@ -638,6 +662,7 @@ it("step clocks continue beyond finite Motion, reset at clicks and retain slide/
     0, 8400,
   ]);
   expect(clocks(clicked, 9800)).toEqual({
+    ...firstSlideContext,
     stepIndex: 1,
     stepTime: 0.4,
     slideTime: 8.8,
@@ -651,6 +676,7 @@ it("step clocks continue beyond finite Motion, reset at clicks and retain slide/
     10000,
   );
   expect(clocks(paused, 12000)).toEqual({
+    ...firstSlideContext,
     stepIndex: 1,
     stepTime: 0.6,
     slideTime: 9,
@@ -665,6 +691,7 @@ it("step clocks continue beyond finite Motion, reset at clicks and retain slide/
     12000,
   );
   expect(clocks(resumed, 12400)).toEqual({
+    ...firstSlideContext,
     stepIndex: 1,
     stepTime: 1,
     slideTime: 9.4,
@@ -695,6 +722,7 @@ it("step clocks continue beyond finite Motion, reset at clicks and retain slide/
 
   const next = applyPresentationCommand(clicked, { type: "next" }, 17800);
   expect(clocks(next, 18800)).toEqual({
+    ...secondSlideContext,
     stepIndex: 0,
     stepTime: 1,
     slideTime: 1,

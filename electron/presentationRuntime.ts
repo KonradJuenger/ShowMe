@@ -32,6 +32,8 @@ const stateSchema = z.object({
   deckId: idSchema,
   slideIds: z.array(idSchema).max(10000),
   index: z.number().int().nonnegative().nullable(),
+  previousSlideId: idSchema.optional(),
+  previousSlideIndex: z.number().int().nonnegative().optional(),
   black: z.boolean().optional(),
   restartToken: z.number().int().nonnegative().optional(),
   startedAt: z.number().finite().optional(),

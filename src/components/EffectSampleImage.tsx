@@ -30,6 +30,11 @@ export function EffectSampleImage({
     slideTime: number;
     stepTime: number;
     stepIndex?: number;
+    slideIndex?: number;
+    slideCount?: number;
+    slideSeed?: number;
+    previousSlideIndex?: number;
+    previousSlideSeed?: number;
   };
   active?: boolean;
   started?: boolean;

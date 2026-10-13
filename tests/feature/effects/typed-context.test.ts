@@ -29,6 +29,7 @@ import { findElement } from "../../../src/core/scene";
 import {
   sampleEffectClocks,
   presenterEffectClockOrigins,
+  effectSlideSeed,
 } from "../../../src/core/effectClocks";
 import {
   startSession,
@@ -143,6 +144,14 @@ it("typed values are bounded primitives and only the current API is accepted", (
   expect(
     scanShaderParameters("uniform bool u_stepIndex;").diagnostics,
   ).toContain("u_stepIndex must be float");
+  expect(
+    scanShaderParameters(
+      "uniform float u_slideIndex; uniform float u_slideCount; uniform float u_slideSeed; uniform float u_previousSlideIndex; uniform float u_previousSlideSeed;",
+    ).parameters,
+  ).toEqual([]);
+  expect(
+    scanShaderParameters("uniform vec2 u_slideSeed;").diagnostics,
+  ).toContain("u_slideSeed must be float");
 });
 it("step dependencies are event-driven in JS, CSS and GLSL and stepTime stays continuous", () => {
   expect(
@@ -171,6 +180,81 @@ it("step dependencies are event-driven in JS, CSS and GLSL and stepTime stays co
     continuous: true,
   });
 });
+it("slide context is deterministic and follows actual navigation rather than element identity", () => {
+  const deck = {
+    slideIds: ["one", "two", "three"],
+    slideMeta: {
+      one: { name: "One", hidden: false, section: "", templateId: null },
+      two: { name: "Two", hidden: false, section: "", templateId: null },
+      three: { name: "Three", hidden: false, section: "", templateId: null },
+    },
+  };
+  const started = startSession(
+    { deckId: "deck", slideIds: [], index: null },
+    deck,
+    1000,
+  );
+  const clocks = (state: typeof started, now: number) =>
+    sampleEffectClocks(presenterEffectClockOrigins(state)!, now);
+
+  expect(clocks(started, 1200)).toMatchObject({
+    slideIndex: 0,
+    slideCount: 3,
+    slideSeed: effectSlideSeed("one"),
+    previousSlideIndex: 0,
+    previousSlideSeed: effectSlideSeed("one"),
+  });
+
+  const next = applyPresentationCommand(started, { type: "next" }, 2000);
+  const nextClocks = clocks(next, 2000);
+  expect(nextClocks).toMatchObject({
+    slideIndex: 1,
+    slideCount: 3,
+    slideSeed: effectSlideSeed("two"),
+    previousSlideIndex: 0,
+    previousSlideSeed: effectSlideSeed("one"),
+    slideTime: 0,
+  });
+  expect(
+    effectTiming(undefined, 0, 0, "element", "effect", nextClocks),
+  ).toMatchObject({
+    slideIndex: 1,
+    slideCount: 3,
+    slideSeed: effectSlideSeed("two"),
+    previousSlideIndex: 0,
+    previousSlideSeed: effectSlideSeed("one"),
+  });
+
+  const jumped = applyPresentationCommand(next, { type: "jump", index: 2 }, 3000);
+  expect(clocks(jumped, 3000)).toMatchObject({
+    slideIndex: 2,
+    slideSeed: effectSlideSeed("three"),
+    previousSlideIndex: 1,
+    previousSlideSeed: effectSlideSeed("two"),
+  });
+
+  const back = applyPresentationCommand(jumped, { type: "previous" }, 4000);
+  expect(clocks(back, 4000)).toMatchObject({
+    slideIndex: 1,
+    slideSeed: effectSlideSeed("two"),
+    previousSlideIndex: 2,
+    previousSlideSeed: effectSlideSeed("three"),
+  });
+
+  const reentered = applyPresentationCommand(
+    back,
+    { type: "jump", index: 1 },
+    5000,
+  );
+  expect(clocks(reentered, 5000)).toMatchObject({
+    slideIndex: 1,
+    slideSeed: effectSlideSeed("two"),
+    previousSlideIndex: 1,
+    previousSlideSeed: effectSlideSeed("two"),
+    slideTime: 0,
+  });
+});
+
 it("logical stage context counts empty clicks, follows Previous, jumps, re-entry, pause and reconnect", () => {
   const deck = {
     slideIds: ["one", "two"],

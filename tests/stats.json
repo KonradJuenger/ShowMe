@@ -1,9 +1,9 @@
 {
-  "activeTests": 368,
+  "activeTests": 369,
   "activeGroups": 69,
   "byTier": {
     "core": 15,
-    "feature": 348,
+    "feature": 349,
     "extended": 3,
     "release": 2,
     "deprecated": 0
@@ -12,14 +12,14 @@
     "desktop": 1,
     "document": 12,
     "editor": 65,
-    "effects": 126,
+    "effects": 127,
     "media": 40,
     "motion": 46,
     "persistence": 54,
     "presenter": 24
   },
   "byRuntime": {
-    "unit": 273,
+    "unit": 274,
     "browser": 90,
     "electron": 4,
     "packaged": 1

@@ -106,6 +106,16 @@ export function reconcileSession(
         ),
       ]),
     ),
+    previousSlideId:
+      nextId !== current
+        ? (current ?? nextId ?? state.previousSlideId)
+        : state.previousSlideId,
+    previousSlideIndex:
+      nextId !== current
+        ? current
+          ? (state.index ?? sequence.index ?? 0)
+          : (sequence.index ?? state.previousSlideIndex ?? 0)
+        : state.previousSlideIndex,
     slideStartedAt:
       nextId !== current ? (state.pausedAt ?? now) : state.slideStartedAt,
     stepStartedAt:
@@ -158,8 +168,13 @@ export function startSession(
     now,
   );
   const awaitingAudience = waitForAudience && state.index !== null;
+  const initialIndex = state.index ?? 0;
+  const initialSlideId =
+    state.index === null ? undefined : state.slideIds[initialIndex];
   return {
     ...state,
+    previousSlideId: initialSlideId,
+    previousSlideIndex: state.index ?? undefined,
     prepareAudience: waitForAudience,
     presentationReady: !awaitingAudience,
     awaitingAudience,
@@ -337,6 +352,12 @@ export function applyPresentationCommand(
     transition,
     slideStartedAt: now,
     stepStartedAt: now,
+    previousSlideId:
+      state.index === null
+        ? (incomingId ?? state.previousSlideId)
+        : state.slideIds[state.index],
+    previousSlideIndex:
+      state.index ?? nextIndex ?? state.previousSlideIndex ?? 0,
     index: nextIndex,
     awaitingAudience,
     motionStageStartedOffsets: motion ? [0] : undefined,

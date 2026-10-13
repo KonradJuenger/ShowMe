@@ -64,6 +64,11 @@ type Surface = {
     presentationTime?: number;
     stepTime?: number;
     stepIndex?: number;
+    slideIndex?: number;
+    slideCount?: number;
+    slideSeed?: number;
+    previousSlideIndex?: number;
+    previousSlideSeed?: number;
     active?: boolean;
     started?: boolean;
     running?: boolean;
@@ -489,6 +494,11 @@ export function mountEffectSurface(
     presentationTime: 0,
     stepTime: 0,
     stepIndex: 0,
+    slideIndex: 0,
+    slideCount: 1,
+    slideSeed: 0,
+    previousSlideIndex: 0,
+    previousSlideSeed: 0,
     active: true,
     started: false,
     running: false,
@@ -1095,6 +1105,11 @@ export function mountEffectSurface(
           u_presentationTime: timing.presentationTime,
           u_stepTime: timing.stepTime,
           u_stepIndex: timing.stepIndex,
+          u_slideIndex: timing.slideIndex,
+          u_slideCount: timing.slideCount,
+          u_slideSeed: timing.slideSeed,
+          u_previousSlideIndex: timing.previousSlideIndex,
+          u_previousSlideSeed: timing.previousSlideSeed,
           u_active: Number(timing.active),
           u_duration: timing.duration,
           ...params,
@@ -1545,6 +1560,11 @@ export function mountEffectSurface(
         presentationTime: value.presentationTime ?? value.time,
         stepTime: value.stepTime ?? value.time,
         stepIndex: value.stepIndex ?? 0,
+        slideIndex: value.slideIndex ?? 0,
+        slideCount: value.slideCount ?? 1,
+        slideSeed: value.slideSeed ?? 0,
+        previousSlideIndex: value.previousSlideIndex ?? value.slideIndex ?? 0,
+        previousSlideSeed: value.previousSlideSeed ?? value.slideSeed ?? 0,
         active: value.active ?? true,
         running: value.running ?? false,
         started: value.started ?? true,
@@ -1614,6 +1634,11 @@ export function mountEffectSurface(
         presentationTime: 0,
         stepTime: 0,
         stepIndex: 0,
+        slideIndex: 0,
+        slideCount: 1,
+        slideSeed: 0,
+        previousSlideIndex: 0,
+        previousSlideSeed: 0,
         active: true,
         started: false,
         running: false,

@@ -742,7 +742,10 @@ test("CSS + JS exposes optional isolated text code and preserves it through Affe
   expect(prompt).toContain("isolated worker with bounded execution time");
   expect(prompt).toContain(js);
   expect(prompt).toContain(":scope { color: red; }");
-  expect(prompt).toContain("MY REQUEST:");
+  expect(prompt).not.toContain("MY REQUEST:");
+  expect(prompt).not.toContain("WHAT I WANT TO CREATE");
+  expect(prompt).not.toContain("Paste this entire prompt");
+  expect(prompt).not.toContain("[DESCRIBE THE EFFECT OR CHANGE HERE]");
 });
 
 test("all runtime surfaces deliver interval p, scaled t and independent reference clocks", async ({

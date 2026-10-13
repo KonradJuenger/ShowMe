@@ -1,4 +1,6 @@
 import { EFFECT_SCHEDULE_VERSION } from "../core/motionModel";
+import { effectSlideSeed } from "../core/effectClocks";
+import { getPresentationSlideIds } from "../core/presentationSequence";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   effectDependencies,
@@ -47,6 +49,21 @@ export function EffectEditorPreview({
   );
   const previewViewport = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState({ width: 280, height: 140 });
+  const presentationSlideIds = getPresentationSlideIds(snapshot.deck);
+  const slideIndex = Math.max(
+    0,
+    presentationSlideIds.indexOf(snapshot.slide.id),
+  );
+  const slideSeed = effectSlideSeed(snapshot.slide.id);
+  const previewClocks = {
+    ...clocks,
+    stepIndex: clocks.stageStarts.length - 1,
+    slideIndex,
+    slideCount: Math.max(1, presentationSlideIds.length),
+    slideSeed,
+    previousSlideIndex: slideIndex,
+    previousSlideSeed: slideSeed,
+  };
   useLayoutEffect(() => {
     const node = previewViewport.current;
     if (!node) return;
@@ -121,7 +138,7 @@ export function EffectEditorPreview({
     clocks.stepTime * 1000,
     "preview",
     "preview",
-    clocks,
+    previewClocks,
     control,
   );
   const effectTime = timing.time,
@@ -194,7 +211,7 @@ export function EffectEditorPreview({
               progress={progress}
               duration={duration}
               time={effectTime}
-              clocks={{ ...clocks, stepIndex: clocks.stageStarts.length - 1 }}
+              clocks={previewClocks}
               active={active}
               started={timing.started}
             />
@@ -207,7 +224,7 @@ export function EffectEditorPreview({
               progress={progress}
               duration={duration}
               time={effectTime}
-              clocks={{ ...clocks, stepIndex: clocks.stageStarts.length - 1 }}
+              clocks={previewClocks}
               active={active}
               started={timing.started}
               wholeSlide={previewSource === "slide"}
@@ -222,8 +239,7 @@ export function EffectEditorPreview({
               previewTiming={{
                 progress,
                 time: effectTime,
-                ...clocks,
-                stepIndex: clocks.stageStarts.length - 1,
+                ...previewClocks,
                 active,
                 started: timing.started,
                 duration: duration / 1000,

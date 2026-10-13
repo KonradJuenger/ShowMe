@@ -370,8 +370,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
-    "reason": "Shader parameter discovery/reconciliation, native typed JS and serialized CSS AI prompt contracts, fenced paste, Affects/API/timing and presenter clock independence"
+    "lastReviewed": "2026-10-13",
+    "reason": "Effect authoring model, GLSL parameter metadata, diagnostics, copied AI contract without request placeholders, timing semantics and deterministic slide-context shader inputs"
   },
   {
     "id": "effect-authoring-editor",
@@ -381,8 +381,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
-    "reason": "Effect authoring and interval-completion explanation; sidebar numeric drafts commit with Enter/blur, cancel with Escape, restore empty input and extend slider ranges; Click Timeline and Studio Text Scramble activation/completion, all-placement bypass, shader/text stacks and copying displayed errors by mouse or keyboard"
+    "lastReviewed": "2026-10-13",
+    "reason": "Effect authoring, copied AI contract without request placeholders and interval-completion explanation; sidebar numeric drafts commit with Enter/blur, cancel with Escape, restore empty input and extend slider ranges; Click Timeline and Studio Text Scramble activation/completion, all-placement bypass, shader/text stacks and copying displayed errors by mouse or keyboard"
   },
   {
     "id": "effect-snapshot-persistence",
@@ -469,8 +469,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Native typed values, current API validation, numeric Motion validation and atomic pruning, logical stage clocks, persistence transports"
+    "lastReviewed": "2026-10-13",
+    "reason": "Typed Effect context, deterministic presentation slide identity/previous-slide navigation state, parameter Motion contracts and current persistence/collaboration round-trips"
   },
   {
     "id": "effects-typed-context-browser",
@@ -480,8 +480,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Production multi-state text renderer scrubbing, event-only steps, typed CSS/JS delivery, definition/sidebar controls and preview transport showing Play only for continuous/progress dependencies"
+    "lastReviewed": "2026-10-13",
+    "reason": "Production text/CSS/GLSL typed context delivery, logical click context, deterministic slide-context uniforms and authoring/sidebar native values"
   },
   {
     "id": "editor-text-styles",
