@@ -1,5 +1,9 @@
 import { PropertySection } from "./ElementPanel";
 import type { SelectionMode } from "../core/editorPreferences";
+import {
+  defaultDragSnapSettings,
+  type DragSnapSettings,
+} from "../core/dragSnapping";
 import "./EditorSettings.css";
 
 export interface EditorSettingsProps {
@@ -14,6 +18,8 @@ export interface EditorSettingsProps {
   onToggleSnapToGuides(): void;
   snapToSlide: boolean;
   onToggleSnapToSlide(): void;
+  dragSnapping: DragSnapSettings;
+  onDragSnappingChange(settings: DragSnapSettings): void;
   showRulers: boolean;
   onToggleRulers(): void;
   showGuides: boolean;
@@ -28,6 +34,39 @@ export interface EditorSettingsProps {
 }
 
 export function EditorSettings(props: EditorSettingsProps) {
+  const slider = (
+    label: string,
+    key: keyof DragSnapSettings,
+    min: number,
+    max: number,
+    step = 1,
+    unit = "px",
+  ) => (
+    <label className="element-wide editor-snap-slider">
+      <span>
+        {label}{" "}
+        <output>
+          {props.dragSnapping[key]} {unit}
+        </output>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        aria-label={label}
+        aria-valuetext={`${props.dragSnapping[key]} ${unit}`}
+        value={props.dragSnapping[key]}
+        disabled={!props.snapping}
+        onChange={(event) =>
+          props.onDragSnappingChange({
+            ...props.dragSnapping,
+            [key]: Number(event.target.value),
+          })
+        }
+      />
+    </label>
+  );
   const toggle = (label: string, checked: boolean, onChange: () => void) => (
     <label className="element-property element-property-checkbox">
       <span>{label}</span>
@@ -109,6 +148,26 @@ export function EditorSettings(props: EditorSettingsProps) {
           props.snapToSlide,
           props.onToggleSnapToSlide,
         )}
+        <p className="element-wide editor-selection-description">
+          Slow down to capture nearby edges and centers. Canvas edges take
+          priority over object alignments. Set Hold distance to 0 for capture
+          without sticking after movement.
+        </p>
+        {slider("Capture distance", "intentCapture", 1, 8)}
+        {slider("Hold distance", "intentRelease", 0, 24)}
+        {slider("Capture below speed", "intentSpeed", 150, 1200, 50, "px/s")}
+        <button
+          type="button"
+          className="element-wide"
+          onClick={() =>
+            props.onDragSnappingChange({ ...defaultDragSnapSettings })
+          }
+        >
+          Reset tuning
+        </button>
+        <p className="element-wide editor-selection-description">
+          Drag tuning lasts for this editor session.
+        </p>
         <p className="element-wide">
           Hold Alt while dragging to bypass snapping.
         </p>

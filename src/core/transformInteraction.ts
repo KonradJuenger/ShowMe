@@ -16,15 +16,21 @@ import type { EditorChange } from "./editorChange";
 import type { ScopeId } from "./scene";
 import {
   isDirectChildSelection,
-  elementBoundsInScope,
   elementFrameInScope,
   scopeSnapTargets,
   selectionBoundsInScope,
   selectionWorldGeometry,
   worldPointToScope,
   worldVectorToScope,
+  getSelectionScopeWorldMatrix,
 } from "./selectionGeometry";
-import { resolveResizeSnapAxis, resolveSnapAxis } from "./snapping";
+import { resolveResizeSnapAxis } from "./snapping";
+import {
+  createDragSnapAxis,
+  type DragSnapSettings,
+  type DragAxisResult,
+} from "./dragSnapping";
+import { measurePerformance } from "./performance";
 
 export type TransformSnapshot = EditorSnapshot | EditorChange;
 export type GestureMeasurement = Box & { rotation?: number };
@@ -86,68 +92,104 @@ function normalizeRotation(degrees: number) {
   return ((degrees % 360) + 360) % 360;
 }
 
-export function previewMove(
+/** Gesture-local move solver; document writes still go through the existing commit path. */
+export function createMoveGesture(
   snapshot: TransformSnapshot,
   ids: readonly string[],
   scopeId: ScopeId,
-  worldDelta: Point,
-  options: TransformSnapOptions = emptySnap,
-): TransformPreview {
+  options: TransformSnapOptions,
+  settings: DragSnapSettings,
+) {
   requireDirectSelection(snapshot, ids, scopeId);
-  let { x: dx, y: dy } = worldVectorToScope(
-    snapshot.slide,
-    scopeId,
-    worldDelta,
+  const matrix = getSelectionScopeWorldMatrix(snapshot.slide, scopeId);
+  const toScope = inverse(matrix);
+  const pixelsX = options.scale * Math.hypot(matrix[0], matrix[1]);
+  const pixelsY = options.scale * Math.hypot(matrix[2], matrix[3]);
+  const initialMeasurement = measurement(snapshot, ids, scopeId);
+  const { moving, xAxis, yAxis } = measurePerformance(
+    "interaction.snap.prepare",
+    () => {
+      const moving = selectionBoundsInScope(snapshot.slide, ids, scopeId);
+      const targets = scopeSnapTargets(snapshot.slide, snapshot.deck, scopeId, ids, {
+        objects: options.enabled && options.toObjects,
+        guides: options.enabled && options.toGuides,
+        slide: options.enabled && options.toSlide,
+        drag: true,
+      });
+      return {
+        moving,
+        xAxis: createDragSnapAxis(moving.width, targets.x.features!, pixelsX, settings),
+        yAxis: createDragSnapAxis(moving.height, targets.y.features!, pixelsY, settings),
+      };
+    },
   );
-  const scopeGuides: { x?: number; y?: number } = {};
+  let previous: (Point & { time: number }) | undefined;
+  let speedX = 0;
+  let speedY = 0;
 
-  if (options.enabled) {
-    if (ids.length === 1 && !options.disableSmartSnap) {
-      const moving = elementBoundsInScope(snapshot.slide, ids[0], scopeId);
-      const targets = scopeSnapTargets(
-        snapshot.slide,
-        snapshot.deck,
-        scopeId,
-        ids,
-        {
-          objects: options.toObjects,
-          guides: options.toGuides,
-          slide: options.toSlide,
-        },
-      );
-      const tolerance = 8 / Math.max(1e-9, options.scale);
-      const sx = resolveSnapAxis(
-        moving.x + dx,
-        moving.width,
-        targets.x,
-        tolerance,
-      );
-      const sy = resolveSnapAxis(
-        moving.y + dy,
-        moving.height,
-        targets.y,
-        tolerance,
-      );
-      if (sx.guide !== undefined) {
-        dx = sx.value - moving.x;
-        if (sx.source !== "persistent") scopeGuides.x = sx.guide;
-      } else dx = snap(dx, true);
-      if (sy.guide !== undefined) {
-        dy = sy.value - moving.y;
-        if (sy.source !== "persistent") scopeGuides.y = sy.guide;
-      } else dy = snap(dy, true);
-    } else {
-      dx = snap(dx, true);
-      dy = snap(dy, true);
+  return (worldDelta: Point, time: number, bypass = false): TransformPreview => {
+    const raw = {
+      x: toScope[0] * worldDelta.x + toScope[2] * worldDelta.y,
+      y: toScope[1] * worldDelta.x + toScope[3] * worldDelta.y,
+    };
+    // Pointer-down can precede movement by an arbitrary stationary hold.
+    // Until two movement samples establish velocity, moving axes cannot capture.
+    const elapsed = previous ? time - previous.time : 0;
+    let currentSpeedX = raw.x === (previous?.x ?? 0) ? speedX : Infinity;
+    let currentSpeedY = raw.y === (previous?.y ?? 0) ? speedY : Infinity;
+    if (previous && elapsed > 0) {
+      const instantaneousX =
+        (Math.abs(raw.x - previous.x) * pixelsX * 1000) / elapsed;
+      const instantaneousY =
+        (Math.abs(raw.y - previous.y) * pixelsY * 1000) / elapsed;
+      const blend = 1 - Math.exp(-elapsed / 32);
+      speedX += (instantaneousX - speedX) * blend;
+      speedY += (instantaneousY - speedY) * blend;
+      // React immediately to fast movement; decay smoothly when slowing down.
+      currentSpeedX = Math.max(instantaneousX, speedX);
+      currentSpeedY = Math.max(instantaneousY, speedY);
     }
-  }
-
-  const next = translateElements(snapshot, ids, dx, dy, scopeId);
-  return {
-    snapshot: next,
-    changed: changed(snapshot, next),
-    scopeGuides,
-    measurement: measurement(next, ids, scopeId),
+    previous = { ...raw, time };
+    const snapped = measurePerformance(
+      "interaction.snap.query",
+      (): { x: DragAxisResult; y: DragAxisResult } => {
+        if (!options.enabled || bypass) {
+          xAxis.reset();
+          yAxis.reset();
+          return { x: { value: moving.x + raw.x }, y: { value: moving.y + raw.y } };
+        }
+        return {
+          x: xAxis.resolve(moving.x + raw.x, currentSpeedX, {
+            start: moving.y + raw.y,
+            end: moving.y + raw.y + moving.height,
+            pixelsPerUnit: pixelsY,
+          }),
+          y: yAxis.resolve(moving.y + raw.y, currentSpeedY, {
+            start: moving.x + raw.x,
+            end: moving.x + raw.x + moving.width,
+            pixelsPerUnit: pixelsX,
+          }),
+        };
+      },
+    );
+    const dx = snapped.x.value - moving.x;
+    const dy = snapped.y.value - moving.y;
+    const next = translateElements(snapshot, ids, dx, dy, scopeId);
+    const worldX = matrix[0] * dx + matrix[2] * dy;
+    const worldY = matrix[1] * dx + matrix[3] * dy;
+    return {
+      snapshot: next,
+      changed: changed(snapshot, next),
+      scopeGuides: {
+        x: snapped.x.source === "persistent" ? undefined : snapped.x.guide,
+        y: snapped.y.source === "persistent" ? undefined : snapped.y.guide,
+      },
+      measurement: {
+        ...initialMeasurement,
+        x: initialMeasurement.x + worldX,
+        y: initialMeasurement.y + worldY,
+      },
+    };
   };
 }
 

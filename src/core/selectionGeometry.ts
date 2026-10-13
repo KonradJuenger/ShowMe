@@ -1,10 +1,12 @@
 import { deriveGuides } from "./guides";
 import type { Box, Point } from "./geometry";
 import type { SnapTargetSources } from "./snapping";
+import type { DragSnapTarget } from "./dragSnapping";
 import type { Deck, Slide } from "./document";
 import {
   IDENTITY,
   inverse,
+  localMatrix,
   multiply,
   transformPoint,
   type Matrix,
@@ -29,8 +31,8 @@ export interface OrientedGeometry extends Box {
 }
 
 export interface ScopeSnapTargets {
-  x: SnapTargetSources;
-  y: SnapTargetSources;
+  x: SnapTargetSources & { features?: DragSnapTarget[] };
+  y: SnapTargetSources & { features?: DragSnapTarget[] };
 }
 
 function boundsFromPoints(points: readonly Point[]): Box {
@@ -340,9 +342,14 @@ export function scopeSnapTargets(
     objects: boolean;
     guides: boolean;
     slide: boolean;
+    drag?: boolean;
   },
 ): ScopeSnapTargets {
   const target: ScopeSnapTargets = { x: {}, y: {} };
+  if (options.drag) {
+    target.x.features = [];
+    target.y.features = [];
+  }
   const selected = new Set(selectedIds);
 
   if (options.objects) {
@@ -350,7 +357,17 @@ export function scopeSnapTargets(
     if (!children) throw new Error(`Unknown or non-container scope: ${scopeId}`);
     const boxes = children
       .filter(({ id }) => !selected.has(id))
-      .map(({ id }) => elementBoundsInScope(slide, id, scopeId));
+      // Direct children already have frames in this scope. Avoid one full
+      // scene lookup per sibling while preparing a large gesture target set.
+      .map((element) =>
+        boundsFromPoints(
+          rectangleCorners(
+            localMatrix(element.frame),
+            element.frame.width,
+            element.frame.height,
+          ),
+        ),
+      );
     target.x.objects = boxes.flatMap((box) => [
       box.x,
       box.x + box.width / 2,
@@ -361,6 +378,31 @@ export function scopeSnapTargets(
       box.y + box.height / 2,
       box.y + box.height,
     ]);
+    if (options.drag) {
+      for (const box of boxes) {
+        for (const [axis, start, size, span] of [
+          [
+            target.x, box.x, box.width,
+            { start: box.y, end: box.y + box.height },
+          ],
+          [
+            target.y, box.y, box.height,
+            { start: box.x, end: box.x + box.width },
+          ],
+        ] as const) {
+          axis.features!.push(
+            { position: start, source: "objects", kind: "start", span },
+            {
+              position: start + size / 2,
+              source: "objects",
+              kind: "center",
+              span,
+            },
+            { position: start + size, source: "objects", kind: "end", span },
+          );
+        }
+      }
+    }
   }
 
   if (options.guides && deck.defaultGuideSetId) {
@@ -413,6 +455,21 @@ export function scopeSnapTargets(
     );
   }
 
+  if (options.drag) {
+    for (const axis of [target.x, target.y]) {
+      const features = axis.features!;
+      for (const position of axis.persistent ?? [])
+        features.push({ position, source: "persistent", kind: "guide" });
+      const slideLines = [...(axis.slide ?? [])].sort((a, b) => a - b);
+      for (const [index, position] of slideLines.entries())
+        features.push({
+          position,
+          source: "slide",
+          kind: index === 0 ? "start"
+            : index === slideLines.length - 1 ? "end" : "center",
+        });
+    }
+  }
   return target;
 }
 
