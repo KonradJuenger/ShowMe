@@ -27,6 +27,15 @@ export interface ImageOutputProfile {
   width: number;
   height: number;
 }
+
+/** One physical output calculation for preparation and every consuming view. */
+export function audienceImageProfile(width: number, height: number, pixelRatio: number): ImageOutputProfile {
+  if (![width, height, pixelRatio].every(value => Number.isFinite(value) && value > 0))
+    throw new Error("Invalid audience output geometry");
+  return { width: imagePixels(width * pixelRatio), height: imagePixels(height * pixelRatio) };
+}
+
+export type PreparedSlideImages = Record<string, PreparedImage | null>;
 /** Canvas sampling is disposable; audience and export profiles stay exact. */
 export interface ImageRequestProfile extends ImageOutputProfile {
   sampling?: "canvas";
@@ -61,6 +70,10 @@ export interface ImageReadiness {
   state: "checking" | "preparing" | "ready" | "failed";
   total: number;
   completed: number;
+  /** Settled requirements that deliberately use the original (SVG/animated raster). */
+  originals?: number;
+  /** Definitively unavailable sources; preparation failures remain separately actionable. */
+  missing?: number;
   failures: Array<{ assetId: string; slideIds: string[]; message: string }>;
 }
 

@@ -18,6 +18,45 @@ export interface BrowserImageRecord {
   descriptor: Omit<PreparedImage, "url">;
 }
 
+const imageWorkers = new Set<Worker>();
+const idleImageWorkers: Worker[] = [];
+const imageWorkerWaiters: Array<{ resolve: (worker: Worker) => void; reject: (error: Error) => void }> = [];
+const activeImageJobs = new Map<Worker, (error: Error) => void>();
+
+function createImageWorker() {
+  const worker = new Worker(new URL("./imageWorker.ts", import.meta.url), { type: "module" });
+  imageWorkers.add(worker);
+  worker.addEventListener("error", () => {
+    imageWorkers.delete(worker);
+    const index = idleImageWorkers.indexOf(worker);
+    if (index >= 0) idleImageWorkers.splice(index, 1);
+    worker.terminate();
+  });
+  return worker;
+}
+
+async function acquireImageWorker() {
+  const idle = idleImageWorkers.pop();
+  if (idle) return idle;
+  if (imageWorkers.size < 2) return createImageWorker();
+  return new Promise<Worker>((resolve, reject) => imageWorkerWaiters.push({ resolve, reject }));
+}
+
+function releaseImageWorker(worker: Worker) {
+  const waiter = imageWorkerWaiters.shift();
+  if (waiter) waiter.resolve(imageWorkers.has(worker) ? worker : createImageWorker());
+  else if (imageWorkers.has(worker)) idleImageWorkers.push(worker);
+}
+
+window.addEventListener("pagehide", () => {
+  const error = new Error("Image worker owner closed");
+  for (const job of activeImageJobs.values()) job(error);
+  for (const worker of imageWorkers) worker.terminate();
+  imageWorkers.clear();
+  idleImageWorkers.length = 0;
+  for (const waiter of imageWorkerWaiters.splice(0)) waiter.reject(error);
+});
+
 export async function validBrowserImage(
   record: BrowserImageRecord,
   assetId: string,
@@ -54,11 +93,10 @@ export async function createBrowserImage(
   width?: number,
   height?: number,
 ): Promise<BrowserImageRecord | null> {
-  const worker = new Worker(new URL("./imageWorker.ts", import.meta.url), {
-    type: "module",
-  });
+  const worker = await acquireImageWorker();
   try {
     return await new Promise((resolve, reject) => {
+      activeImageJobs.set(worker, reject);
       worker.onmessage = (
         event: MessageEvent<{
           result: BrowserImageRecord | null;
@@ -72,7 +110,9 @@ export async function createBrowserImage(
       worker.postMessage({ blob, assetId, size, width, height });
     });
   } finally {
-    worker.terminate();
+    activeImageJobs.delete(worker);
+    worker.onmessage = worker.onerror = null;
+    releaseImageWorker(worker);
   }
 }
 

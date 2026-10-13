@@ -61,10 +61,10 @@ test("small production canvas resizes neither request nor replace the displayed 
     const { platform }: typeof import("../../../src/platform") = await import(
       /* @vite-ignore */ path
     );
-    const prepare = platform.preparedImage!;
+    const prepare = platform.preparedSlideImages!;
     window.canvasImageRequests = 0;
-    platform.preparedImage = (...args) => {
-      if (args[3]?.sampling === "canvas") window.canvasImageRequests++;
+    platform.preparedSlideImages = (...args) => {
+      if (args[2]?.sampling === "canvas") window.canvasImageRequests++;
       return prepare(...args);
     };
   });
@@ -173,4 +173,35 @@ test("explicit cache invalidation still rechecks a retained canvas tier", async 
   await expect(page.getByLabel("Released images")).toHaveText("1");
   await expect(page.getByLabel("Displayed URL releases")).toHaveText("0");
   await expect(page.getByLabel("Displayed resolution")).toHaveText("256");
+});
+
+test("exact presentation rechecks retain identical decoded pixels and release only the redundant URL", async ({
+  page,
+}) => {
+  await harness(page);
+  const source = await page
+    .getByRole("img", { name: "Canvas image" })
+    .getAttribute("src");
+  await page.evaluate(() => {
+    const decode = HTMLImageElement.prototype.decode;
+    const counter = document.createElement("output");
+    counter.setAttribute("aria-label", "Repeated decodes");
+    counter.textContent = "0";
+    document.body.append(counter);
+    let calls = 0;
+    HTMLImageElement.prototype.decode = function () {
+      counter.textContent = String(++calls);
+      return decode.call(this);
+    };
+  });
+  await page.getByRole("button", { name: "Clear cache" }).click();
+  await expect(page.getByLabel("Requests")).toHaveText("2");
+  await page.getByRole("button", { name: "Finish preparation" }).click();
+  await expect(page.getByLabel("Released images")).toHaveText("1");
+  await expect(page.getByLabel("Displayed URL releases")).toHaveText("0");
+  await expect(page.getByRole("img", { name: "Canvas image" })).toHaveAttribute(
+    "src",
+    source!,
+  );
+  await expect(page.getByLabel("Repeated decodes")).toHaveText("0");
 });

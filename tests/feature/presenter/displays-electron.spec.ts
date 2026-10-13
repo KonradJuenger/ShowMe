@@ -66,6 +66,25 @@ test("desktop IPC prepares the selected audience resolution and rejects screen r
       .find((window) => window.url().includes("present=audience"));
     expect(audience).toBeDefined();
     await expect(audience!.locator("[data-active-slide]")).toBeVisible();
+    const measured = await audience!.evaluate(async () => {
+      const state = await window.desktop!.getPresentation();
+      return {
+        expected: {
+          width: Math.ceil(innerWidth * devicePixelRatio),
+          height: Math.ceil(innerHeight * devicePixelRatio),
+        },
+        actual: await window.desktop!.audienceImageProfile!(state!.deckId),
+      };
+    });
+    expect(measured.actual).toEqual(measured.expected);
+    const denied = await page.evaluate(async () => {
+      const state = await window.desktop!.getPresentation();
+      try {
+        await window.desktop!.prepareAudience!(state!.deckId);
+        return null;
+      } catch (error) { return String(error); }
+    });
+    expect(denied).toBeTruthy();
     await expect(
       page.getByRole("button", { name: "Presentation screen setup" }),
     ).toBeDisabled();

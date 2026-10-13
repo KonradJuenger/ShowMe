@@ -147,6 +147,10 @@ export class PresentationRuntime {
     return this.current;
   }
 
+  async outputShown() {
+    await this.whenAudienceShown;
+  }
+
   get assignment() {
     if (
       this.current?.presenterDisplayId !== undefined &&

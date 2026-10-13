@@ -188,6 +188,15 @@ export interface Platform {
     elementId: string,
     profile?: import("../core/presentationImages").ImageRequestProfile,
   ): Promise<import("../core/presentationImages").PreparedImage | null>;
+  preparedSlideImages?(
+    documentId: string,
+    slideId: string,
+    profile: import("../core/presentationImages").ImageRequestProfile,
+  ): Promise<import("../core/presentationImages").PreparedSlideImages>;
+  /** Audience-only preparation handshake; completes the current whole-deck plan. */
+  prepareAudience?(documentId: string): Promise<import("../core/presentationImages").ImageOutputProfile>;
+  audienceImageProfile?(documentId: string): Promise<import("../core/presentationImages").ImageOutputProfile>;
+  prioritizeCanvasImages?(documentId: string, slideId: string): Promise<void>;
   preparedAssetImage?(
     assetId: string,
     size: number,
@@ -336,6 +345,7 @@ export interface Platform {
   importDroppedFiles(files: File[]): Promise<Asset[]>;
   assetUrl(id: string, preview?: boolean): Promise<string | null>;
   releaseUrl(url: string): void;
+  retainUrl?(url: string): void;
   updateAsset(asset: Asset): Promise<void>;
   storePreview(id: string, data: Uint8Array): Promise<void>;
   capturePreview?(

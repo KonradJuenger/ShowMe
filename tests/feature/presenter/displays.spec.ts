@@ -1,6 +1,33 @@
 import { expect, test } from "@playwright/test";
 import { readyEditor } from "../../helpers/startup";
 
+test("ending browser presentation restores the editor preparation profile", async ({ page }) => {
+  await page.goto("/");
+  await readyEditor(page);
+  const before = await page.evaluate(async () => {
+    const { platform } = await import("/src/platform/index.ts" as string);
+    const id = document.querySelector("[data-editor]")!.getAttribute("data-document-id")!;
+    return { id, profile: (await platform.imageReadiness(id, true))!.profile };
+  });
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Present", exact: true }).click();
+  const audience = await popupPromise;
+  await audience.setViewportSize({ width: 1111, height: 777 });
+  await expect.poll(() => page.evaluate(async id => {
+    const { platform } = await import("/src/platform/index.ts" as string);
+    return (await platform.imageReadiness(id))?.profile;
+  }, before.id)).toEqual({ width: 1111, height: 777 });
+  await page.evaluate(async () => {
+    const { platform } = await import("/src/platform/index.ts" as string);
+    await platform.closePresentation();
+  });
+  const after = await page.evaluate(async id => {
+    const { platform } = await import("/src/platform/index.ts" as string);
+    return (await platform.imageReadiness(id, true))!.profile;
+  }, before.id);
+  expect(after).toEqual(before.profile);
+});
+
 test("screen popup supports dragging, keyboard assignments, reset and locks when Present starts", async ({
   page,
 }) => {

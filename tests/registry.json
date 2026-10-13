@@ -1,5 +1,27 @@
 [
   {
+    "id": "presenter-audience-images",
+    "path": "tests/feature/presenter/audience-images.test.ts",
+    "area": "presenter",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Canonical fractional output profiles, whole-deck shared image results, read-only readiness, stable navigation generations, explicit original outcomes, closed-waiter settlement and byte-admitted resident lookahead with shared rasters and pinned output; throwing cache jobs preserve failed diagnostics without blocking healthy slides or original fallback"
+  },
+  {
+    "id": "presenter-audience-navigation",
+    "path": "tests/feature/presenter/audience-navigation.spec.ts",
+    "area": "presenter",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Synthetic 30-slide audience reproduction: early shared rasters and warm revisits avoid image IO, while a late new image must prepare and decode during the preceding slide rather than block navigation; controlled IO and virtual time avoid machine-dependent performance thresholds"
+  },
+  {
     "id": "editor-drag-snapping",
     "path": "tests/feature/editor/drag-snapping.test.ts",
     "area": "editor",
@@ -227,8 +249,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-10",
-    "lastReviewed": "2026-10-12",
-    "reason": "Production canvas resizes retain decoded tiers without cache requests, in-flight swaps wait for release, URLs remain valid through DOM handoff, and explicit cache invalidation still rechecks"
+    "lastReviewed": "2026-10-13",
+    "reason": "Production canvas resizes retain decoded tiers without cache requests, exact profiles retain identical decoded pixels on rechecks, in-flight swaps wait for release, URLs remain valid through DOM handoff, and explicit cache invalidation still rechecks"
   },
   {
     "id": "media-image-sampling",
@@ -635,7 +657,7 @@
     "runtime": "browser",
     "created": "2026-10-11",
     "lastReviewed": "2026-10-12",
-    "reason": "Screen-map dragging, keyboard assignment, default reset, focus and setup lock; presenter resizing reuses decoded rasters while audience sampling upgrades exactly with display resolution, independent of presenter raster size"
+    "reason": "Screen-map dragging, keyboard assignment, default reset, focus and setup lock; presenter resizing reuses decoded rasters while audience sampling upgrades exactly with display resolution, independent of presenter raster size; real browser popup shutdown restores editor preparation resolution"
   },
   {
     "id": "presenter-display-setup-electron",
@@ -645,8 +667,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-11",
-    "reason": "Native screen inventory and IPC, selected audience cache profile and assignment lock through start/end"
+    "lastReviewed": "2026-10-13",
+    "reason": "Native screen inventory and IPC, selected audience cache profile and assignment lock through start/end, measured audience pixels and audience-only preparation authorization"
   },
   {
     "id": "editor-operation-work",
@@ -667,8 +689,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Metadata-only startup, lazy byte verification, targeted inventory events including referenced missing assets arriving later, watcher disposal, idle scans and single-pass imports"
+    "lastReviewed": "2026-10-13",
+    "reason": "Metadata-only startup, lazy byte verification, targeted inventory events including referenced missing assets arriving later, watcher disposal, idle scans and single-pass imports, unchanged first verification emits no pixel invalidation"
   },
   {
     "id": "media-derived-work",
@@ -678,8 +700,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Dependency-aware invalidation, demanded image planning, immutable metadata and narrow canonical render projections"
+    "lastReviewed": "2026-10-13",
+    "reason": "Dependency-aware invalidation, whole-deck deduplicated image planning and read-only navigation reuse, visible image priority and abandoned-slide demotion within the memory budget, explicit image retries, immutable metadata and narrow canonical render projections"
   },
   {
     "id": "persistence-lan-work",
@@ -711,8 +733,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-12",
-    "reason": "Restart reuse, process-pinned cache safety, explicit clearing and constant-work quit release; exact Audience pixels come from one original-source resize and derived-source hash mismatches are rejected"
+    "lastReviewed": "2026-10-13",
+    "reason": "Restart reuse, process-pinned cache safety, explicit clearing and constant-work quit release; exact Audience pixels come from one original-source resize, derived-source hash mismatches are rejected, and cold variants reuse workers after rejected source validation"
   },
   {
     "id": "media-preview-native",
@@ -722,8 +744,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-12",
-    "reason": "Canonical custom visual behavior in bounded native composition, overlay isolation, released surfaces and immutable revision"
+    "lastReviewed": "2026-10-13",
+    "reason": "Canonical custom visual behavior in bounded native composition, small thumbnail derivatives instead of original raster fallback, overlay isolation, released surfaces and immutable revision; retained decoded sidebar thumbnail during resource invalidation"
   },
   {
     "id": "presenter-image-readiness",

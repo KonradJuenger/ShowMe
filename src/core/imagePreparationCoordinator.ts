@@ -1,4 +1,5 @@
 import { resolveVisualSlide } from "./templates";
+import { getPresentationSlideIds } from "./presentationSequence";
 import type { DocumentProjection } from "./documentProjection";
 import {
   planPresentationImages,
@@ -6,6 +7,8 @@ import {
   type ImageReadiness,
   type ImageRequirement,
   type PreparedImage,
+  type ImageRequestProfile,
+  type PreparedSlideImages,
 } from "./presentationImages";
 
 interface Dependencies {
@@ -22,6 +25,8 @@ interface Dependencies {
   prepare(
     documentId: string,
     requirement: ImageRequirement,
+    priority?: number,
+    canvas?: string,
   ): Promise<PreparedImage | null>;
   profile(): ImageOutputProfile;
 }
@@ -31,6 +36,8 @@ interface Interest {
   signature: string;
   slideIds: string[];
   requirements: Map<string, ImageRequirement[]>;
+  done: Promise<void>;
+  finish: () => void;
 }
 
 /** Derived accepted-state service, with a single bounded queue for all documents. */
@@ -45,6 +52,7 @@ export class ImagePreparationCoordinator {
   private listeners = new Set<(status: ImageReadiness) => void>();
   private notifications = new Map<string, ImageReadiness>();
   private notificationTimer: ReturnType<typeof setTimeout> | undefined;
+  private slidePlans = new Map<string, Promise<PreparedSlideImages>>();
   private queue: Array<{
     documentId: string;
     slideIds: string[];
@@ -54,10 +62,7 @@ export class ImagePreparationCoordinator {
   }> = [];
   constructor(private readonly dependencies: Dependencies) {}
   prioritize(documentId: string, slideId: string) {
-    const changed = this.priorities.get(documentId) !== slideId;
     this.priorities.set(documentId, slideId);
-    if (changed && this.documents.has(documentId))
-      void this.reconcile(documentId, true);
     this.pump();
   }
   status(documentId: string) {
@@ -92,6 +97,7 @@ export class ImagePreparationCoordinator {
     for (const id of this.documents.keys())
       this.requests.set(id, ++this.serial);
     for (const [id, interest] of this.documents) {
+      interest.finish();
       const replacement = {
         ...interest,
         images: new Map<string, PreparedImage>(),
@@ -119,10 +125,12 @@ export class ImagePreparationCoordinator {
     return Array.from(this.documents.get(documentId)?.images.values() ?? []);
   }
   close(documentId: string) {
+    this.documents.get(documentId)?.finish();
     this.notifications.delete(documentId);
     this.requests.set(documentId, ++this.serial);
     this.documents.delete(documentId);
     this.priorities.delete(documentId);
+    for (const key of this.slidePlans.keys()) if (key.startsWith(documentId + ":")) this.slidePlans.delete(key);
     this.pump();
   }
   advanceRevision(documentId: string, revision: number) {
@@ -130,8 +138,54 @@ export class ImagePreparationCoordinator {
     if (interest) interest.status.revision = revision;
   }
   invalidate(documentIds?: readonly string[]) {
+    this.slidePlans.clear();
     for (const id of documentIds ?? this.documents.keys())
       void this.reconcile(id, true);
+  }
+
+  /** Wait for the current accepted plan, including a replan while work is running. */
+  async ready(documentId: string, allowFailures = false) {
+    for (;;) {
+      const interest = this.documents.get(documentId);
+      if (this.paused || !interest) throw new Error("Image preparation is unavailable");
+      await interest.done;
+      if (this.documents.get(documentId) !== interest) continue;
+      if (interest.status.state === "failed") {
+        // Derived cache failures are diagnostic outcomes. Audience geometry and
+        // healthy slides must remain usable; absent variants use original IO.
+        if (allowFailures) return this.status(documentId)!;
+        throw new Error(interest.status.failures.map(f => f.message).join("; "));
+      }
+      if (interest.status.state !== "ready") throw new Error("Image preparation was interrupted");
+      return this.status(documentId)!;
+    }
+  }
+
+  /** One accepted slide/profile plan per bulk consumer, shared by all its images. */
+  async prepareSlide(documentId: string, slideId: string, profile: ImageRequestProfile, priority = 0): Promise<PreparedSlideImages> {
+    const projection = await this.dependencies.projection(documentId, slideId);
+    const interest = this.documents.get(documentId);
+    if (!profile.sampling && interest && interest.slideIds.includes(slideId) &&
+        interest.status.epoch === projection.epoch && interest.status.revision === projection.revision &&
+        interest.status.profile.width === profile.width && interest.status.profile.height === profile.height) {
+      await this.ready(documentId, true);
+      if (this.documents.get(documentId) !== interest) return this.prepareSlide(documentId, slideId, profile, priority);
+      return Object.fromEntries((interest.requirements.get(slideId) ?? []).flatMap(r => r.instances
+        .filter(i => i.slideId === slideId).map(i => [i.elementId, interest.images.get(`${slideId}:${i.elementId}`) ?? null])));
+    }
+    const key = `${documentId}:${projection.epoch}:${projection.revision}:${slideId}:${profile.width}x${profile.height}:${profile.sampling ?? "exact"}`;
+    let pending = this.slidePlans.get(key);
+    if (!pending) {
+      const slide = resolveVisualSlide(projection.deck, projection.slide, projection.templates ?? {}).slide;
+      pending = Promise.all(planPresentationImages(projection.deck, [slide], profile, true).map(async requirement => {
+        const image = await this.dependencies.prepare(documentId, requirement, priority, profile.sampling === "canvas" ? `${documentId}:${slideId}` : undefined).catch(() => null);
+        return requirement.instances.map(instance => [instance.elementId, image] as const);
+      })).then(rows => Object.fromEntries(rows.flat()));
+      this.slidePlans.set(key, pending);
+      void pending.catch(() => { if (this.slidePlans.get(key) === pending) this.slidePlans.delete(key); });
+      while (this.slidePlans.size > 128) this.slidePlans.delete(this.slidePlans.keys().next().value!);
+    }
+    return pending;
   }
 
   async reconcile(
@@ -145,14 +199,7 @@ export class ImagePreparationCoordinator {
     const projection = await this.dependencies.projection(documentId);
     if (this.paused || this.requests.get(documentId) !== request) return;
     const profile = this.dependencies.profile();
-    const ids = projection.deck.slideIds.filter(
-      (id) => !projection.deck.slideMeta[id].hidden,
-    );
-    const selectedIndex = Math.max(
-      0,
-      ids.indexOf(this.priorities.get(documentId) ?? ids[0]),
-    );
-    const demand = ids.slice(Math.max(0, selectedIndex - 1), selectedIndex + 2);
+    const demand = getPresentationSlideIds(projection.deck);
     const previous = this.documents.get(documentId);
     if (
       !retry &&
@@ -164,7 +211,11 @@ export class ImagePreparationCoordinator {
     )
       return;
     const generation = ++this.serial;
+    let finish!: () => void;
+    const done = new Promise<void>(resolve => { finish = resolve; });
+    previous?.finish();
     const interest: Interest = {
+      done, finish,
       images: new Map(),
       requirements: new Map(),
       signature: "",
@@ -178,6 +229,8 @@ export class ImagePreparationCoordinator {
         state: "checking",
         total: 0,
         completed: 0,
+        originals: 0,
+        missing: 0,
         failures: [],
       },
     };
@@ -190,10 +243,11 @@ export class ImagePreparationCoordinator {
         previous.status.epoch === projection.epoch &&
         JSON.stringify(previous.status.profile) === JSON.stringify(profile);
       const planIds =
-        reusable && affectedSlides
+        reusable &&
+        (affectedSlides || previous.status.revision === projection.revision)
           ? interest.slideIds.filter(
               (id) =>
-                affectedSlides.includes(id) || !previous.requirements.has(id),
+                affectedSlides?.includes(id) || !previous.requirements.has(id),
             )
           : interest.slideIds;
       if (reusable)
@@ -230,7 +284,16 @@ export class ImagePreparationCoordinator {
           slide.id,
           planPresentationImages(projection.deck, [slide], profile),
         );
-      const requirements = [...interest.requirements.values()].flat();
+      const unique = new Map<string, ImageRequirement>();
+      for (const requirement of [...interest.requirements.values()].flat()) {
+        const key = `${requirement.assetId}:${requirement.width}x${requirement.height}`;
+        const prior = unique.get(key);
+        if (prior) {
+          prior.instances.push(...requirement.instances);
+          prior.slideIds = [...new Set([...prior.slideIds, ...requirement.slideIds])];
+        } else unique.set(key, { ...requirement, instances: [...requirement.instances], slideIds: [...requirement.slideIds] });
+      }
+      const requirements = [...unique.values()];
       const signature = JSON.stringify(requirements);
       if (
         !retry &&
@@ -244,8 +307,10 @@ export class ImagePreparationCoordinator {
           state: "ready",
           total: previous.status.total,
           completed: previous.status.completed,
+          originals: previous.status.originals,
         };
         interest.status.generation = previous.status.generation;
+        interest.finish();
         this.publish(interest);
         return;
       }
@@ -256,23 +321,18 @@ export class ImagePreparationCoordinator {
       for (const requirement of requirements) {
         const cached =
           !retry &&
-          requirement.instances.map((instance) =>
-            previous?.images.get(`${instance.slideId}:${instance.elementId}`),
-          );
-        if (
-          cached &&
-          cached.every(
+          previous &&
+          Array.from(previous.images.values()).find(
             (image) =>
-              image &&
               image.assetId === requirement.assetId &&
               image.width === Math.min(image.sourceWidth, requirement.width) &&
               image.height === Math.min(image.sourceHeight, requirement.height),
-          )
-        ) {
-          requirement.instances.forEach((instance, index) =>
+          );
+        if (cached) {
+          requirement.instances.forEach((instance) =>
             interest.images.set(
               `${instance.slideId}:${instance.elementId}`,
-              cached[index]!,
+              cached,
             ),
           );
           interest.status.completed++;
@@ -285,9 +345,13 @@ export class ImagePreparationCoordinator {
           live,
           run: async () => {
             try {
+              const selected = this.priorities.get(documentId) ?? interest.slideIds[0];
+              const next = interest.slideIds[interest.slideIds.indexOf(selected) + 1];
+              const priority = requirement.slideIds.includes(selected) ? 3 : requirement.slideIds.includes(next) ? 2 : 0;
               const image = await this.dependencies.prepare(
                 documentId,
                 requirement,
+                priority,
               );
               if (!live()) return;
               if (image) {
@@ -297,14 +361,16 @@ export class ImagePreparationCoordinator {
                     image,
                   );
               }
-              if (image) interest.status.completed++;
-              else interest.status.total--;
+              interest.status.completed++;
+              if (!image) interest.status.originals = (interest.status.originals ?? 0) + 1;
             } catch (error) {
               if (!live()) return;
+              const message = error instanceof Error ? error.message : String(error);
+              if (message.startsWith("Asset not found:") || message === "Image asset is missing") interest.status.missing = (interest.status.missing ?? 0) + 1;
               interest.status.failures.push({
                 assetId: requirement.assetId,
                 slideIds: requirement.slideIds,
-                message: error instanceof Error ? error.message : String(error),
+                message,
               });
             } finally {
               if (
@@ -315,6 +381,7 @@ export class ImagePreparationCoordinator {
                 interest.status.state = interest.status.failures.length
                   ? "failed"
                   : "ready";
+              if (live() && ["ready", "failed"].includes(interest.status.state)) interest.finish();
               if (live()) this.publish(interest);
             }
           },
@@ -322,11 +389,13 @@ export class ImagePreparationCoordinator {
       }
       if (interest.status.completed === interest.status.total)
         interest.status.state = "ready";
+      if (interest.status.state === "ready") interest.finish();
       this.publish(interest);
       this.pump();
     } catch (error) {
       if (live()) {
         interest.status.state = "failed";
+        interest.finish();
         interest.status.failures.push({
           assetId: "",
           slideIds: [],

@@ -188,6 +188,11 @@ function EditorSlideThumbnail({
     : "";
   const cached =
     composed?.key === previewKey ? composed.url : slidePreview(previewKey);
+  const lastThumbnail = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (cached) lastThumbnail.current = cached;
+  }, [cached]);
+  const displayedThumbnail = cached ?? lastThumbnail.current ?? composed?.url;
   useEffect(() => {
     const loaded = () => setFontRevision((value) => value + 1);
     document.fonts.addEventListener("loadingdone", loaded);
@@ -238,6 +243,10 @@ function EditorSlideThumbnail({
           Math.ceil(current.height * density),
         );
         if (url && live) {
+          const image = new Image();
+          image.src = url;
+          await image.decode();
+          if (!live) return;
           storeSlidePreview(previewKey, url);
           setComposed({ key: previewKey, url });
         }
@@ -272,9 +281,9 @@ function EditorSlideThumbnail({
         background: "#fff",
       }}
     >
-      {cached ? (
+      {displayedThumbnail ? (
         <img
-          src={cached}
+          src={displayedThumbnail}
           alt=""
           draggable={false}
           style={{ display: "block", width: "100%", height: "100%" }}

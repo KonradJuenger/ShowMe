@@ -162,6 +162,8 @@ export function registerIpcRouter({
         presenterConsole && event.sender.id === presenterConsole.webContents.id;
       const readMethods = [
         "preparedImage",
+        "preparedSlideImages",
+        "audienceImageProfile",
         "imageReadiness",
         "documentProjection",
         "managedFonts",
@@ -171,12 +173,15 @@ export function registerIpcRouter({
       ];
       const audienceMethods = [
         ...readMethods,
+        "prepareAudience",
         "presentationCommand",
         "closePresentation",
         "fullscreen",
       ];
       const presenterMethods = [
         "preparedImage",
+        "preparedSlideImages",
+        "audienceImageProfile",
         "imageReadiness",
         "documentProjection",
         "managedFonts",
@@ -195,7 +200,7 @@ export function registerIpcRouter({
       ];
       if (
         (!isEditor && !isAudience && !isConsole && !isExport && !isPreview) ||
-        (isPreview && !["assetUrl", "managedFonts", "preparedImage"].includes(method)) ||
+        (isPreview && !["assetUrl", "managedFonts", "preparedImage", "preparedSlideImages"].includes(method)) ||
         (isExport &&
           !["documentProjection", "assetUrl", "managedFonts", "exportReady"].includes(
             method,
@@ -222,12 +227,12 @@ export function registerIpcRouter({
         throw new Error("The host owns presentation files during collaboration");
       if (
         (isAudience || isConsole) &&
-        ["thumbnail", "documentProjection", "preparedImage", "imageReadiness"].includes(method)
+        ["thumbnail", "documentProjection", "preparedImage", "preparedSlideImages", "imageReadiness", "audienceImageProfile", "prepareAudience"].includes(method)
       ) {
         if (
           !state ||
           args[0] !== state.deckId ||
-          (method === "documentProjection" && !state.slideIds.includes(String(args[1])))
+          (["documentProjection", "preparedSlideImages", "preparedImage"].includes(method) && !state.slideIds.includes(String(args[1])))
         )
           throw new Error("Outside presentation session");
       }
@@ -246,7 +251,8 @@ export function registerIpcRouter({
           throw new Error("Outside font document scope");
         args[0] = requested ?? scope ?? undefined;
       }
-      if (isPreview && method === "preparedImage" && args[0] !== getPreviewDocumentId()) throw new Error("Outside preview document");
+      if (isPreview && ["preparedImage", "preparedSlideImages"].includes(method) && args[0] !== getPreviewDocumentId()) throw new Error("Outside preview document");
+      if (method === "prepareAudience" && !isAudience) throw new Error("Unauthorized audience preparation");
       if (isAudience && method === "documentProjection") {
         return Promise.resolve(operation(...args)).then(
           (projection: import("../src/core/documentProjection").DocumentProjection) =>

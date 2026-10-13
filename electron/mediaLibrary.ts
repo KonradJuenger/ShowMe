@@ -415,7 +415,10 @@ export class LibraryIndex {
           this.verified.set(source.file, signature);
           if (entry) entry.signature = signature;
           else this.trash.set(id, [(source as { folder: string }).folder]);
-          this.publish([id]);
+          // Inventory changes already notify consumers. Verifying an unchanged
+          // live source establishes trust, rather than changing its pixels.
+          // Trash becomes newly restorable only after successful verification.
+          if (!entry) this.publish([id]);
           this.persist();
         }
         return source.file;

@@ -12,6 +12,61 @@ import { build } from "esbuild";
 import sharp from "sharp";
 import { ImageVariantCache } from "../../../electron/storage/imageVariantCache";
 
+it("cold image variants reuse processing workers and recover from rejected source validation", async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "showme-image-pool-"));
+  const cache = new ImageVariantCache(
+    () => path.join(folder, "cache"),
+    path.join(folder, "worker.cjs"),
+  );
+  try {
+    const sharpPath = createRequire(import.meta.url).resolve("sharp");
+    await build({
+      entryPoints: ["electron/imageWorker.ts"],
+      outfile: path.join(folder, "worker.cjs"),
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      external: [sharpPath],
+      alias: { sharp: sharpPath },
+    });
+    const bytes = await sharp({
+      create: { width: 1024, height: 768, channels: 4, background: "#00ff00" },
+    })
+      .png()
+      .toBuffer();
+    const source = path.join(folder, "source.png");
+    await writeFile(source, bytes);
+    const assetId = createHash("sha256").update(bytes).digest("hex");
+    await expect(
+      cache.prepare(source, "a".repeat(64), 100, 100, 100),
+    ).rejects.toThrow("Source image hash mismatch");
+    const first = await cache.prepare(source, assetId, 320, 320, 180);
+    const second = await cache.prepare(source, assetId, 640, 640, 360);
+    expect(first).toMatchObject({
+      width: 320,
+      height: 180,
+      sourceWidth: 1024,
+      sourceHeight: 768,
+    });
+    expect(second).toMatchObject({
+      width: 640,
+      height: 360,
+      sourceWidth: 1024,
+      sourceHeight: 768,
+    });
+    expect(cache.diagnostics()).toMatchObject({ jobs: 3, workerStarts: 1 });
+    const pixels = await sharp(
+      await readFile(path.join(cache.root, second!.hash + ".png")),
+    )
+      .raw()
+      .toBuffer();
+    expect([...pixels.subarray(0, 4)]).toEqual([0, 255, 0, 255]);
+  } finally {
+    await cache.releaseOnQuit(false);
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 it("retained derivatives survive restart, clear safely across processes, and rebuild after deletion", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-retained-"));
   try {

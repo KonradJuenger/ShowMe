@@ -3,6 +3,8 @@ import { resolveTextTypography } from "../core/textTypography";
 import type { EffectClockOrigins } from "../core/effectClocks";
 import { resolveVisualSlide } from "../core/templates";
 import { usePreparedImage } from "./usePreparedImage";
+import { useSlideImagePlan, type SlideImagePlan } from "./useSlideImagePlan";
+import { useCanvasImagePrefetch } from "./useCanvasImagePrefetch";
 import {
   planPresentationImages,
   type ImageRequestProfile,
@@ -61,6 +63,7 @@ const ImageDocumentContext = createContext<{
   profile?: ImageRequestProfile;
   deferUpdates: boolean;
   requirements?: Map<string, ImageRequirement>;
+  plan?: SlideImagePlan;
 } | null>(null);
 
 type VideoContent = Extract<MediaContent, { type: "video" }>;
@@ -478,6 +481,7 @@ function MediaSurface({
     imageDocument?.profile,
     imageDocument?.deferUpdates,
     imageDocument?.requirements?.get(element.id),
+    imageDocument?.plan,
   );
   const [failedPreparedUrl, setFailedPreparedUrl] = useState<string | null>(
     null,
@@ -978,40 +982,41 @@ export const SlideRenderer = memo(function SlideRenderer({
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
   const layers = new Map(deck.layers.map((layer) => [layer.id, layer]));
+  const plannedProfile = useMemo<ImageRequestProfile | undefined>(() => imageProfile ?? (output ? {
+    width: output.width, height: output.height, ...(canvasImageSampling ? { sampling: "canvas" as const } : {}),
+  } : undefined), [imageProfile, output, canvasImageSampling]);
+  const canvasRequirements = useMemo(() => canvasImageSampling && plannedProfile ? new Map(
+    planPresentationImages(deck, [slide], plannedProfile, true).flatMap(requirement => requirement.instances.map(({ elementId }) => [elementId, requirement] as const)),
+  ) : undefined, [canvasImageSampling, deck, slide, plannedProfile]);
+  const canvasSignature = canvasRequirements ? JSON.stringify([...canvasRequirements].map(([id, r]) => [id, r.assetId, r.width, r.height])) : undefined;
+  const imagePlan = useSlideImagePlan(slide, deck, plannedProfile, preparedImages, deferImageUpdates, canvasSignature);
   const imageContext = useMemo(() => {
-    if (!preparedImages || !output) return null;
-    const profile: ImageRequestProfile = imageProfile ?? {
-      width: output.width,
-      height: output.height,
-      ...(canvasImageSampling ? { sampling: "canvas" as const } : {}),
-    };
-    const requirements =
-      canvasImageSampling && profile
-        ? new Map(
-            planPresentationImages(deck, [slide], profile, true).flatMap(
-              (requirement) =>
-                requirement.instances.map(
-                  ({ elementId }) => [elementId, requirement] as const,
-                ),
-            ),
-          )
-        : undefined;
+    if (!preparedImages || !plannedProfile) return null;
+    const profile = plannedProfile;
     return {
       documentId: deck.id,
       slideId: slide.id,
       deferUpdates: deferImageUpdates,
       profile,
-      requirements,
+      requirements: canvasRequirements,
+      plan: imagePlan,
     };
   }, [
     preparedImages,
-    imageProfile,
+    plannedProfile,
     deck,
     slide,
-    output,
-    canvasImageSampling,
+    canvasRequirements,
     deferImageUpdates,
+    imagePlan,
   ]);
+  useCanvasImagePrefetch(
+    root,
+    deck,
+    slide.id,
+    imageContext?.profile,
+    preparedImages && canvasImageSampling && !deferImageUpdates,
+  );
   return (
     <EffectRenderContext.Provider value={effectRender}>
       <EffectResourcesContext.Provider
