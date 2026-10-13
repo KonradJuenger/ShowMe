@@ -45,3 +45,22 @@
 .editor-guide-actions button.danger {
   color: #9d2929;
 }
+.editor-snap-slider {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.editor-snap-slider > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.editor-snap-slider output {
+  color: var(--inspector-label);
+  font-variant-numeric: tabular-nums;
+}
+.right-sidebar .editor-snap-slider input {
+  width: 100%;
+  padding: 0;
+  accent-color: #2478ff;
+}
