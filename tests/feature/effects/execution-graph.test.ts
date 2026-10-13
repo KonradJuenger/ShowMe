@@ -138,3 +138,21 @@ it("compatible pixel leases share invalidation and release their source only aft
   other.release();
   expect(disposals).toBe(2);
 });
+
+it("one scene flush shares its dependency cohort and a subsequent flush resolves newer input", async () => {
+  const graph = new EffectGraph<string>();
+  let inputs = 0;
+  graph.register("input", () => {
+    inputs++;
+  });
+  graph.register("a", () => {});
+  graph.register("b", () => {});
+  graph.compile((key) => (key === "input" ? [] : ["input"]));
+  const cohort = new Map<string, Promise<void>>();
+  await graph.flush("a", cohort);
+  graph.invalidate("input");
+  await graph.flush("b", cohort);
+  expect(inputs).toBe(1);
+  await graph.flush("b");
+  expect(inputs).toBe(2);
+});

@@ -58,23 +58,34 @@ export class EffectGraph<Key> {
     dirty(key);
   }
   resolve(key: Key, published?: (key: Key) => boolean): Promise<void> {
+    return this.resolveNode(key, published, false);
+  }
+  private resolveNode(
+    key: Key,
+    published: ((key: Key) => boolean) | undefined,
+    inputsPrepared: boolean,
+  ): Promise<void> {
     const node = this.nodes.get(key);
     if (!node) return Promise.resolve();
     if (node.pending) return node.pending;
     if (node.resolved === node.dirty) return Promise.resolve();
     const work = async () => {
-      await Promise.all(
-        node.inputs.map((input) => {
-          // Interactive GPU consumers can animate a published input while its
-          // next native snapshot paints. Explicit flushes omit this option.
-          if (this.nodes.get(input)?.pending && published?.(input)) return;
-          return this.resolve(input, published);
-        }),
-      );
+      if (!inputsPrepared)
+        await Promise.all(
+          node.inputs.map((input) => {
+            // Interactive GPU consumers can animate a published input while its
+            // next native snapshot paints. Explicit flushes omit this option.
+            if (this.nodes.get(input)?.pending && published?.(input)) return;
+            return this.resolve(input, published);
+          }),
+        );
       // Input publication during dependency resolution belongs to this request.
       const version = node.dirty;
       await node.execute();
-      node.resolved = version;
+      // A cohort can intentionally retain an earlier input while a new video
+      // frame arrives. Keep that newer invalidation for the next request.
+      if (!inputsPrepared || !node.inputs.some((input) => this.isDirty(input)))
+        node.resolved = version;
     };
     node.pending = work().finally(() => {
       node.pending = undefined;
@@ -95,7 +106,7 @@ export class EffectGraph<Key> {
     const work = async () => {
       await Promise.all(node.inputs.map((input) => this.flush(input, cohort)));
       await node.pending;
-      await this.resolve(key);
+      await this.resolveNode(key, undefined, true);
     };
     const pending = work();
     cohort.set(key, pending);

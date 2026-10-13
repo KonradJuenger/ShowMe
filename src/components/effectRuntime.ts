@@ -69,7 +69,7 @@ type Surface = {
     running?: boolean;
     progress?: number;
   }): void;
-  flush(): void | Promise<void>;
+  flush(cohort?: Map<HTMLElement, Promise<void>>): void | Promise<void>;
   reset(): void;
 };
 const surfaces = new WeakMap<HTMLElement, Surface>();
@@ -202,7 +202,15 @@ export async function flushEffectSurfaces(root: ParentNode) {
     root.querySelectorAll<HTMLElement>("[data-effect-id]"),
   ).sort(dependencyOrder);
   nodes.forEach((node) => surfaces.get(node)?.prepareSampling());
-  for (const node of nodes) await surfaces.get(node)?.flush();
+  const cohorts = new Map<Coordinator, Map<HTMLElement, Promise<void>>>();
+  for (const node of nodes) {
+    const coordinator = nodeCoordinators.get(node);
+    if (coordinator && !cohorts.has(coordinator))
+      cohorts.set(coordinator, new Map());
+    await surfaces
+      .get(node)
+      ?.flush(coordinator ? cohorts.get(coordinator) : undefined);
+  }
   return !Array.from(root.querySelectorAll('[data-effect-ready="false"]')).some(
     (node) => !node.closest('[data-presentation-absent="true"]'),
   );
@@ -1571,13 +1579,13 @@ export function mountEffectSurface(
       if (refined && previous === JSON.stringify(clockKey(timing))) return;
       schedule();
     },
-    async flush() {
+    async flush(cohort) {
       cancelFrame(draw);
       scheduled.delete(node);
       if (ownerAbsent()) return;
       if (coordinator) {
         compileCoordinator(coordinator);
-        await coordinator.graph.flush(node);
+        await coordinator.graph.flush(node, cohort);
         if (needsDomOutput()) {
           try {
             materialize();
