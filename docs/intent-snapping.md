@@ -13,6 +13,10 @@ The two axes acquire and release independently. Deliberate sampled crossings can
 capture a target; fast passes stay free. Zero hold releases on the next movement
 on that axis without repeatedly recapturing the same target.
 
+Speed is measured between drag samples, excluding any stationary hold before
+dragging. A moving axis waits for a second sample with elapsed time before it can
+capture; a stationary axis can align independently from the first sample.
+
 Targets, scope transforms and geometry are prepared once per gesture. A balanced
 range tree prunes candidates by coordinate, perpendicular span and strength;
 worst-case lookup depends on overlapping local density. Frame-coalesced previews,

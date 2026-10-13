@@ -713,7 +713,6 @@ export function EditorCanvasSurface({
         scopeId,
         transformSnapOptions(false),
         snapConfig.drag,
-        event.timeStamp,
       );
       let finalPreview: TransformSnapshot = base.snapshot;
       let moveChanged = false;

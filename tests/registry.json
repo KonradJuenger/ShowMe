@@ -8,7 +8,7 @@
     "runtime": "unit",
     "created": "2026-10-13",
     "lastReviewed": "2026-10-13",
-    "reason": "Intent drag snapping with screen-space capture, semantic canvas/object anchors and local object spans, stronger edge handoff and deliberate swept capture, independent corner capture and axis speed, zero hold without immediate recapture, aggregate selection movement, Alt bypass, transformed scope alignment and measurements, mirrored sibling bounds and one authority move with undo/redo"
+    "reason": "Intent drag snapping with screen-space capture, semantic canvas/object anchors and local object spans, stronger edge handoff and deliberate swept capture, independent corner capture and axis speed, initial speed excluding pre-drag idle time and shared-timestamp movement, zero hold without immediate recapture, aggregate selection movement, Alt bypass, transformed scope alignment and measurements, mirrored sibling bounds and one authority move with undo/redo"
   },
   {
     "id": "effects-mixed-compositing",

@@ -99,7 +99,6 @@ export function createMoveGesture(
   scopeId: ScopeId,
   options: TransformSnapOptions,
   settings: DragSnapSettings,
-  startedAt: number,
 ) {
   requireDirectSelection(snapshot, ids, scopeId);
   const matrix = getSelectionScopeWorldMatrix(snapshot.slide, scopeId);
@@ -124,7 +123,7 @@ export function createMoveGesture(
       };
     },
   );
-  let previous = { x: 0, y: 0, time: startedAt };
+  let previous: (Point & { time: number }) | undefined;
   let speedX = 0;
   let speedY = 0;
 
@@ -133,10 +132,12 @@ export function createMoveGesture(
       x: toScope[0] * worldDelta.x + toScope[2] * worldDelta.y,
       y: toScope[1] * worldDelta.x + toScope[3] * worldDelta.y,
     };
-    const elapsed = time - previous.time;
-    let currentSpeedX = speedX;
-    let currentSpeedY = speedY;
-    if (elapsed > 0) {
+    // Pointer-down can precede movement by an arbitrary stationary hold.
+    // Until two movement samples establish velocity, moving axes cannot capture.
+    const elapsed = previous ? time - previous.time : 0;
+    let currentSpeedX = raw.x === (previous?.x ?? 0) ? speedX : Infinity;
+    let currentSpeedY = raw.y === (previous?.y ?? 0) ? speedY : Infinity;
+    if (previous && elapsed > 0) {
       const instantaneousX =
         (Math.abs(raw.x - previous.x) * pixelsX * 1000) / elapsed;
       const instantaneousY =
@@ -147,8 +148,8 @@ export function createMoveGesture(
       // React immediately to fast movement; decay smoothly when slowing down.
       currentSpeedX = Math.max(instantaneousX, speedX);
       currentSpeedY = Math.max(instantaneousY, speedY);
-      previous = { ...raw, time };
     }
+    previous = { ...raw, time };
     const snapped = measurePerformance(
       "interaction.snap.query",
       (): { x: DragAxisResult; y: DragAxisResult } => {

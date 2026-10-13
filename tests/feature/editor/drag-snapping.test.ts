@@ -86,7 +86,6 @@ it("multi-selection snaps its aggregate bounds and keeps relative geometry witho
     scope,
     options,
     defaultDragSnapSettings,
-    0,
   );
   const free = move({ x: 13.25, y: 7.75 }, 16);
   expect(findElement(free.snapshot.slide, "a")!.frame.x).toBe(33.25);
@@ -107,8 +106,8 @@ it("gesture previews derive from the original snapshot, reset on bypass and comm
     scope,
     options,
     { ...defaultDragSnapSettings },
-    0,
   );
+  move({ x: 1, y: 1 }, 16);
   const captured = move({ x: 158, y: 180 }, 1000);
   expect(findElement(captured.snapshot.slide, "a")!.frame.x).toBe(180);
   const held = move({ x: 166.5, y: 180 }, 1100);
@@ -134,7 +133,6 @@ it("gesture previews derive from the original snapshot, reset on bypass and comm
     scope,
     { ...options, enabled: false },
     defaultDragSnapSettings,
-    0,
   );
   expect(
     findElement(disabled({ x: 158.5, y: 0 }, 100).snapshot.slide, "a")!.frame.x,
@@ -163,8 +161,8 @@ it("transformed scopes preserve local alignments and measure attraction in scree
     group.id,
     options,
     defaultDragSnapSettings,
-    0,
   );
+  moving(scopeVectorToWorld(initial.slide, group.id, { x: 1, y: 1 }), 16);
   const delta = scopeVectorToWorld(initial.slide, group.id, {
     x: 159.5,
     y: 180,
@@ -197,17 +195,58 @@ it("intent speed gating uses elapsed time and axis screen distances instead of e
   const initial = fixture();
   const scope = initial.slide.nodes[0].id;
   const settings = { ...defaultDragSnapSettings };
-  const fast = createMoveGesture(initial, ["a"], scope, options, settings, 0);
+  const fast = createMoveGesture(initial, ["a"], scope, options, settings);
   expect(
     findElement(fast({ x: 158, y: 180 }, 16).snapshot.slide, "a")!.frame.x,
   ).toBe(178);
   expect(
     findElement(fast({ x: 159, y: 180 }, 300).snapshot.slide, "a")!.frame.x,
   ).toBe(180);
-  const slow = createMoveGesture(initial, ["a"], scope, options, settings, 0);
+  const slow = createMoveGesture(initial, ["a"], scope, options, settings);
+  slow({ x: 1, y: 1 }, 16);
   expect(
     findElement(slow({ x: 158, y: 180 }, 1000).snapshot.slide, "a")!.frame.x,
   ).toBe(180);
+});
+
+it("initial movement after a stationary hold stays free until sampled speed permits capture", () => {
+  const initial = fixture();
+  findElement(initial.slide, "a")!.frame.y = 200;
+  const move = createMoveGesture(
+    initial,
+    ["a"],
+    initial.slide.nodes[0].id,
+    options,
+    defaultDragSnapSettings,
+  );
+  // The first movement arrives two seconds after pointer-down. That idle time
+  // supplies no evidence of velocity; the unchanged Y axis can still align.
+  const first = move({ x: 158, y: 0 }, 2016);
+  expect(findElement(first.snapshot.slide, "a")!.frame.x).toBe(178);
+  expect(first.scopeGuides).toEqual({ x: undefined, y: 200 });
+  const fast = move({ x: 159, y: 0 }, 2017);
+  expect(findElement(fast.snapshot.slide, "a")!.frame.x).toBe(179);
+  expect(fast.scopeGuides.x).toBeUndefined();
+  const slow = move({ x: 159.5, y: 0 }, 2300);
+  expect(findElement(slow.snapshot.slide, "a")!.frame.x).toBe(180);
+  expect(slow.scopeGuides.x).toBe(200);
+});
+
+it("movement samples sharing a timestamp cannot establish a slow capture speed", () => {
+  const initial = fixture();
+  const move = createMoveGesture(
+    initial,
+    ["a"],
+    initial.slide.nodes[0].id,
+    options,
+    defaultDragSnapSettings,
+  );
+  move({ x: 158, y: 180 }, 1000);
+  const untimed = move({ x: 159, y: 180 }, 1000);
+  expect(findElement(untimed.snapshot.slide, "a")!.frame.x).toBe(179);
+  expect(untimed.scopeGuides.x).toBeUndefined();
+  const slow = move({ x: 159.5, y: 180 }, 1100);
+  expect(findElement(slow.snapshot.slide, "a")!.frame.x).toBe(180);
 });
 
 it("compiled sibling targets preserve rotated, mirrored and scaled bounds without including the selection", () => {
@@ -260,7 +299,6 @@ it("refined previews commit through the existing authority with one undoable fin
     layerId,
     options,
     defaultDragSnapSettings,
-    0,
   );
   session.apply(move({ x: 13.25, y: 7.75 }, 16).snapshot, false);
   session.apply(move({ x: 129, y: 180 }, 1000).snapshot, false);
@@ -406,8 +444,8 @@ it("a left-edge latch permits bottom-edge capture despite distant screenshot-lik
     scope,
     snapOptions,
     settings,
-    0,
   );
+  move({ x: -1, y: 1 }, 16);
   const left = move({ x: -99, y: 101 }, 1000);
   expect(left.scopeGuides.x).toBe(0);
   expect(left.scopeGuides.y).toBeUndefined();
@@ -425,8 +463,8 @@ it("a left-edge latch permits bottom-edge capture despite distant screenshot-lik
     scope,
     snapOptions,
     settings,
-    0,
   );
+  reverse({ x: 0, y: 1 }, 16);
   expect(reverse({ x: 0, y: 83 }, 1000).scopeGuides.y).toBe(1080);
   const bottomThenLeft = reverse({ x: -99, y: 83 }, 1100);
   expect(bottomThenLeft.scopeGuides).toEqual({ x: 0, y: 1080 });
@@ -442,7 +480,6 @@ it("axis capture uses its own speed while the perpendicular axis moves quickly",
     scope,
     { ...options, toSlide: true },
     { ...defaultDragSnapSettings },
-    0,
   );
   move({ x: 800, y: -10 }, 1000);
   const result = move({ x: 900, y: -17 }, 1020);
@@ -489,8 +526,8 @@ it("holding distance can be smaller than capture distance and zero hold keeps st
     initial.slide.nodes[0].id,
     { ...options, toSlide: true },
     { ...defaultDragSnapSettings, intentRelease: 0 },
-    0,
   );
+  move({ x: -1, y: 1 }, 16);
   expect(move({ x: -99, y: 80 }, 1000).scopeGuides).toEqual({ x: 0, y: 1080 });
   const movingAlongLeft = move({ x: -99, y: 85 }, 1100);
   expect(movingAlongLeft.scopeGuides.x).toBe(0);
