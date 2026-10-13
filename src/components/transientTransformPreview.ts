@@ -14,6 +14,7 @@ import {
   selectionWorldGeometry,
 } from "../core/selectionGeometry";
 import type { GestureMeasurement } from "../core/transformInteraction";
+import { framePaintProjection, framePaintStyle } from "./framePaint";
 
 export interface GestureFeedback {
   guides?: { x?: number; y?: number };
@@ -62,6 +63,14 @@ export function createTransientTransformPreview(
   scale: number,
 ) {
   const rendered = new Map<string, HTMLElement>();
+  const pixelPaint = stage.querySelector('[data-pixel-paint="true"]');
+  const bounds = pixelPaint ? stage.getBoundingClientRect() : null;
+  const projection = bounds
+    ? framePaintProjection(
+        { x: bounds.left, y: bounds.top, scale },
+        window.devicePixelRatio || 1,
+      )
+    : undefined;
   stage
     .querySelectorAll<HTMLElement>("[data-element-id]")
     .forEach((node) => rendered.set(node.dataset.elementId!, node));
@@ -93,7 +102,24 @@ export function createTransientTransformPreview(
       const frame = element?.frame;
       if (!frame || sameFrame(lastFrames.get(id), frame)) continue;
       const target = rendered.get(id);
-      if (target) applyLocalFrame(target, frame);
+      if (target) {
+        if (projection && target.parentElement?.hasAttribute("data-layer-id")) {
+          const style = framePaintStyle(element!, projection);
+          // React adds units to numeric lengths; imperative DOM updates must too.
+          target.style.left = `${style.left}px`;
+          target.style.top = `${style.top}px`;
+          target.style.width = `${style.width}px`;
+          target.style.height = `${style.height}px`;
+          target.style.transform = style.transform;
+          target.style.transformOrigin = style.transformOrigin;
+          target.style.setProperty(
+            "--frame-border-width",
+            style.transform === "none"
+              ? `${projection.pixelRatio}px`
+              : `${1 / scale}px`,
+          );
+        } else applyLocalFrame(target, frame);
+      }
       const content = media.get(id);
       if (content && element) {
         const image = content.querySelector("img");

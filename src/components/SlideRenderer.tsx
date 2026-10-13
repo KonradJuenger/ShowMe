@@ -40,6 +40,13 @@ import { useAssetUrl } from "./useAssetUrl";
 import { useDisplayDensity } from "./useDisplayDensity";
 import { EffectRenderContext } from "./EffectRenderContext";
 import {
+  framePaintProjection,
+  framePaintStyle,
+  supportsPixelFramePaint,
+  type CanvasPaintViewport,
+  type FramePaintProjection,
+} from "./framePaint";
+import {
   liveRenderProfile,
   renderDensity,
   shaderScaleEnvelopes,
@@ -709,6 +716,7 @@ const ElementView = memo(function ElementView({
   editorPlayback,
   editingTextId,
   inherited = false,
+  paint,
 }: {
   element: Element;
   staticVideo: boolean;
@@ -716,8 +724,10 @@ const ElementView = memo(function ElementView({
   editorPlayback?: EditorPlayback;
   editingTextId?: string | null;
   inherited?: boolean;
+  paint?: FramePaintProjection;
 }) {
   const { frame, appearance } = element;
+  const paintStyle = paint ? framePaintStyle(element, paint) : undefined;
   const resources = useContext(EffectResourcesContext);
   const effectRender = useContext(EffectRenderContext);
   const scene = useContext(RasterSceneContext);
@@ -880,6 +890,10 @@ const ElementView = memo(function ElementView({
         transform: frameCssTransform(frame),
         transformOrigin: frameCssOrigin(frame),
         opacity: appearance.opacity,
+        ...paintStyle,
+        ...(paintStyle?.transform === "none" && paint
+          ? { ["--frame-border-width" as string]: `${paint.pixelRatio}px` }
+          : {}),
       }}
     >
       {visual}
@@ -907,6 +921,7 @@ export const SlideRenderer = memo(function SlideRenderer({
   deferImageUpdates = false,
   prepareVideo = false,
   effectClock,
+  paintViewport,
 }: {
   slide: Slide;
   deck: Deck;
@@ -926,6 +941,7 @@ export const SlideRenderer = memo(function SlideRenderer({
   deferImageUpdates?: boolean;
   prepareVideo?: boolean;
   effectClock?: EffectClockOrigins;
+  paintViewport?: CanvasPaintViewport;
 }) {
   const resolved = useMemo(
     () => (templates ? resolveVisualSlide(deck, localSlide, templates) : null),
@@ -937,6 +953,23 @@ export const SlideRenderer = memo(function SlideRenderer({
     : null;
   const root = useRef<HTMLDivElement>(null);
   const pixelRatio = useDisplayDensity();
+  const eligible = useMemo(
+    () => supportsPixelFramePaint(slide, deck),
+    [slide, deck],
+  );
+  const pixelPaint =
+    !!paintViewport && !editingTextId && !editingMediaId && eligible;
+  const projection = paintViewport
+    ? framePaintProjection(paintViewport, pixelRatio)
+    : undefined;
+  const factor = projection?.factor ?? 1;
+  const offsetX = projection?.offsetX ?? 0;
+  const offsetY = projection?.offsetY ?? 0;
+  const paint = useMemo(
+    () => (pixelPaint ? { factor, offsetX, offsetY, pixelRatio } : undefined),
+    // Integer-pixel pans move the surface without rerendering each frame.
+    [pixelPaint, factor, offsetX, offsetY, pixelRatio],
+  );
   const width = deck.width,
     height = deck.height;
   const scaleX = typeof renderScale === "number" ? renderScale : renderScale.x;
@@ -1025,10 +1058,21 @@ export const SlideRenderer = memo(function SlideRenderer({
                   ref={root}
                   className="slide-renderer"
                   data-slide-id={slide.id}
+                  data-pixel-paint={paint ? "true" : undefined}
                   style={{
-                    position: "relative",
-                    width: deck.width,
-                    height: deck.height,
+                    position: paintViewport ? "absolute" : "relative",
+                    // Cancel layout placement before applying the device-space
+                    // matrix: a fractional CSS origin would antialias shared edges.
+                    left: paint ? -paintViewport!.x : undefined,
+                    top: paint ? -paintViewport!.y : undefined,
+                    width: deck.width * (paint?.factor ?? 1),
+                    height: deck.height * (paint?.factor ?? 1),
+                    transformOrigin: "0 0",
+                    transform: paint
+                      ? `matrix(${1 / pixelRatio},0,0,${1 / pixelRatio},${Math.round(paintViewport!.x * pixelRatio) / pixelRatio},${Math.round(paintViewport!.y * pixelRatio) / pixelRatio})`
+                      : paintViewport
+                        ? `scale(${paintViewport.scale})`
+                        : undefined,
                     background: slide.background,
                     overflow: editorOverflow ? "visible" : "hidden",
                   }}
@@ -1057,6 +1101,7 @@ export const SlideRenderer = memo(function SlideRenderer({
                             inherited={
                               resolved?.sources.get(element.id) === "template"
                             }
+                            paint={paint}
                           />
                         ))}
                       </div>

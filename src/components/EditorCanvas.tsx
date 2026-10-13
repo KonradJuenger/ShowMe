@@ -83,6 +83,7 @@ import {
   type CanvasSelection,
 } from "./editorCanvasCoordinator";
 import { SlideRenderer } from "./SlideRenderer";
+import { useCanvasPaintViewport } from "./useCanvasPaintViewport";
 import { installCanvasInteractionDiagnostics } from "./canvasInteractionDiagnostics";
 import { FrameEditorOverlay } from "./FrameEditorOverlay";
 import { useEditorSession } from "./useEditorSession";
@@ -326,6 +327,7 @@ export function EditorCanvasSurface({
   selectionRef.current = selection;
 
   const canvasScale = Math.max(scale, 1e-9);
+  const paintViewport = useCanvasPaintViewport(stage, canvasScale);
   const snapConfig = useMemo(
     () => ({ ...defaultSnapping, ...snapping }),
     [snapping],
@@ -736,7 +738,10 @@ export function EditorCanvasSurface({
         renderPreview,
         applyPreview: (pointer) => {
           const point = pointToSlide(pointer.clientX, pointer.clientY);
-          const delta = { x: point.x - startWorld.x, y: point.y - startWorld.y };
+          const delta = {
+            x: point.x - startWorld.x,
+            y: point.y - startWorld.y,
+          };
           const preview = movePreview(delta, pointer.timeStamp, pointer.altKey);
           const cropSnapshot = duplicate
             ? preview.snapshot
@@ -1798,9 +1803,8 @@ export function EditorCanvasSurface({
         onDragStart={(event) => event.preventDefault()}
         style={{
           position: "relative",
-          width: deck.width,
-          height: deck.height,
-          transform: `scale(${canvasScale})`,
+          width: deck.width * canvasScale,
+          height: deck.height * canvasScale,
           transformOrigin: "top left",
           userSelect: "none",
           touchAction: "none",
@@ -1814,6 +1818,7 @@ export function EditorCanvasSurface({
           renderScale={canvasScale}
           canvasImageSampling
           deferImageUpdates={deferImageUpdates}
+          paintViewport={paintViewport}
           editingTextId={textEditing?.editingId}
           editingMediaId={frameEditingId}
           editorOverflow={!previewMedia}
@@ -1822,275 +1827,289 @@ export function EditorCanvasSurface({
             trimMedia ? "trim" : previewMedia ? "preview" : "inactive"
           }
         />
-        {!previewMedia && (
-          <div
-            data-canvas-outside-overlay="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              boxShadow: "0 0 0 100000px rgba(221, 221, 221, 0.6)",
-              zIndex: 800,
-            }}
-          />
-        )}
-        {!previewMedia &&
-          (guides.length > 0 || guidePreview) &&
-          onPreviewGuideMove &&
-          onCommitGuideMove &&
-          onDeleteGuide &&
-          onSnapGuide && (
-            <GuidesOverlay
-              guides={guides}
-              preview={guidePreview}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: deck.width,
+            height: deck.height,
+            transform: `scale(${canvasScale})`,
+            transformOrigin: "top left",
+            pointerEvents: "none",
+          }}
+        >
+          {!previewMedia && (
+            <div
+              data-canvas-outside-overlay="true"
+              style={{
+                position: "absolute",
+                inset: 0,
+                pointerEvents: "none",
+                boxShadow: "0 0 0 100000px rgba(221, 221, 221, 0.6)",
+                zIndex: 800,
+              }}
+            />
+          )}
+          {!previewMedia &&
+            (guides.length > 0 || guidePreview) &&
+            onPreviewGuideMove &&
+            onCommitGuideMove &&
+            onDeleteGuide &&
+            onSnapGuide && (
+              <GuidesOverlay
+                guides={guides}
+                preview={guidePreview}
+                scale={canvasScale}
+                onBeginMove={onBeginGuideMove}
+                onPreviewMove={onPreviewGuideMove}
+                onCommitMove={onCommitGuideMove}
+                onCancelMove={onCancelGuideMove}
+                onDelete={onDeleteGuide}
+                onSnapGuide={onSnapGuide}
+              />
+            )}
+          {!previewMedia &&
+            textEditing &&
+            textEditingElement &&
+            textEditingLocation && (
+              <InlineTextEditor
+                deck={snapshot!.deck}
+                element={textEditingElement}
+                world={textEditingLocation.world}
+                controller={textEditing}
+              />
+            )}
+          {!previewMedia && editingElement && editingLocation && (
+            <FrameEditorOverlay
+              element={editingElement}
+              world={editingLocation.world}
+              intrinsic={frameEditingIntrinsic}
               scale={canvasScale}
-              onBeginMove={onBeginGuideMove}
-              onPreviewMove={onPreviewGuideMove}
-              onCommitMove={onCommitGuideMove}
-              onCancelMove={onCancelGuideMove}
-              onDelete={onDeleteGuide}
-              onSnapGuide={onSnapGuide}
+              onMovePointerDown={(event) =>
+                beginMediaContentGesture(event, "move")
+              }
+              onResizePointerDown={(event, handle) =>
+                beginMediaContentGesture(event, "resize", handle)
+              }
+              onRotatePointerDown={(event) =>
+                beginMediaContentGesture(event, "rotate")
+              }
+              onExit={() => onFrameEditRequest?.(null)}
             />
           )}
-        {!previewMedia &&
-          textEditing &&
-          textEditingElement &&
-          textEditingLocation && (
-            <InlineTextEditor
-              deck={snapshot!.deck}
-              element={textEditingElement}
-              world={textEditingLocation.world}
-              controller={textEditing}
-            />
-          )}
-        {!previewMedia && editingElement && editingLocation && (
-          <FrameEditorOverlay
-            element={editingElement}
-            world={editingLocation.world}
-            intrinsic={frameEditingIntrinsic}
-            scale={canvasScale}
-            onMovePointerDown={(event) =>
-              beginMediaContentGesture(event, "move")
-            }
-            onResizePointerDown={(event, handle) =>
-              beginMediaContentGesture(event, "resize", handle)
-            }
-            onRotatePointerDown={(event) =>
-              beginMediaContentGesture(event, "rotate")
-            }
-            onExit={() => onFrameEditRequest?.(null)}
-          />
-        )}
-        {!previewMedia &&
-          remoteSelections.map((peer) => {
-            if (!peer.selectionScopeId) return null;
-            let remoteGeometry;
-            try {
-              remoteGeometry = selectionWorldGeometry(
-                slide,
-                peer.selection,
-                peer.selectionScopeId,
-              );
-            } catch {
-              return null;
-            }
-            return (
-              <div
-                key={peer.id}
-                data-remote-selection={peer.id}
-                style={{
-                  position: "absolute",
-                  left:
-                    remoteGeometry.center.x - remoteGeometry.orientedWidth / 2,
-                  top:
-                    remoteGeometry.center.y - remoteGeometry.orientedHeight / 2,
-                  width: remoteGeometry.orientedWidth,
-                  height: remoteGeometry.orientedHeight,
-                  transform: selectionCssTransform(remoteGeometry),
-                  transformOrigin: "center",
-                  border: `${1 / canvasScale}px solid ${peer.color}`,
-                  boxSizing: "border-box",
-                  pointerEvents: "none",
-                  zIndex: 950,
-                }}
-              >
-                <span
+          {!previewMedia &&
+            remoteSelections.map((peer) => {
+              if (!peer.selectionScopeId) return null;
+              let remoteGeometry;
+              try {
+                remoteGeometry = selectionWorldGeometry(
+                  slide,
+                  peer.selection,
+                  peer.selectionScopeId,
+                );
+              } catch {
+                return null;
+              }
+              return (
+                <div
+                  key={peer.id}
+                  data-remote-selection={peer.id}
                   style={{
                     position: "absolute",
-                    left: 0,
-                    top: -22 / canvasScale,
-                    padding: `${2 / canvasScale}px ${5 / canvasScale}px`,
-                    background: peer.color,
-                    color: "white",
-                    fontSize: 10 / canvasScale,
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap",
+                    left:
+                      remoteGeometry.center.x -
+                      remoteGeometry.orientedWidth / 2,
+                    top:
+                      remoteGeometry.center.y -
+                      remoteGeometry.orientedHeight / 2,
+                    width: remoteGeometry.orientedWidth,
+                    height: remoteGeometry.orientedHeight,
+                    transform: selectionCssTransform(remoteGeometry),
+                    transformOrigin: "center",
+                    border: `${1 / canvasScale}px solid ${peer.color}`,
+                    boxSizing: "border-box",
+                    pointerEvents: "none",
+                    zIndex: 950,
                   }}
                 >
-                  {peer.displayName}
-                </span>
-              </div>
-            );
-          })}
-        {!previewMedia && marquee && (
-          <div
-            className={`marquee${marquee.crossing ? " crossing" : ""}`}
-            data-selection-mode={marquee.touching ? "touching" : "contained"}
-            style={{
-              position: "absolute",
-              left: marquee.x,
-              top: marquee.y,
-              width: marquee.width,
-              height: marquee.height,
-              pointerEvents: "none",
-              zIndex: 900,
-            }}
-          >
-            {marquee.crossing && (
-              <svg width="100%" height="100%" aria-hidden="true">
-                <rect
-                  width="100%"
-                  height="100%"
-                  fill="none"
-                  stroke="white"
-                  vectorEffect="non-scaling-stroke"
-                />
-                <rect
-                  className="marquee-ants"
-                  width="100%"
-                  height="100%"
-                  fill="none"
-                  stroke="#25364a"
-                  strokeDasharray="4 4"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            )}
-          </div>
-        )}
-        {geometry && overlayStyle && (
-          <div
-            className={`selection-bounds ${isCropping ? "crop-selection" : ""}`}
-            data-selection-overlay="true"
-            onPointerDown={selectionPointerDown}
-            style={overlayStyle}
-          >
-            {resizeHandles.map((handle) => (
-              <div
-                key={handle}
-                className={`handle resize handle-${handle}`}
-                data-selection-handle={handle}
-                onPointerDown={(event) => beginResize(event, handle)}
-                style={{
-                  ...handleStyle,
-                  ...(!isCropping ? handlePositions[handle] : {}),
-                  ...(isCropping
-                    ? {
-                        width:
-                          (handle.length === 2
-                            ? 16
-                            : handle === "n" || handle === "s"
-                              ? 28
-                              : 6) / canvasScale,
-                        height:
-                          (handle.length === 2
-                            ? 16
-                            : handle === "n" || handle === "s"
-                              ? 6
-                              : 28) / canvasScale,
-                      }
-                    : {}),
-                  cursor: resizeHandleCursor(handle, [
-                    (geometry.corners[1].x - geometry.corners[0].x) /
-                      geometry.orientedWidth,
-                    (geometry.corners[1].y - geometry.corners[0].y) /
-                      geometry.orientedWidth,
-                    (geometry.corners[3].x - geometry.corners[0].x) /
-                      geometry.orientedHeight,
-                    (geometry.corners[3].y - geometry.corners[0].y) /
-                      geometry.orientedHeight,
-                    0,
-                    0,
-                  ]),
-                  transform: "translate(-50%, -50%)",
-                }}
-              />
-            ))}
-            {!isCropping && (
-              <>
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: -22 / canvasScale,
+                      padding: `${2 / canvasScale}px ${5 / canvasScale}px`,
+                      background: peer.color,
+                      color: "white",
+                      fontSize: 10 / canvasScale,
+                      lineHeight: 1.2,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {peer.displayName}
+                  </span>
+                </div>
+              );
+            })}
+          {!previewMedia && marquee && (
+            <div
+              className={`marquee${marquee.crossing ? " crossing" : ""}`}
+              data-selection-mode={marquee.touching ? "touching" : "contained"}
+              style={{
+                position: "absolute",
+                left: marquee.x,
+                top: marquee.y,
+                width: marquee.width,
+                height: marquee.height,
+                pointerEvents: "none",
+                zIndex: 900,
+              }}
+            >
+              {marquee.crossing && (
+                <svg width="100%" height="100%" aria-hidden="true">
+                  <rect
+                    width="100%"
+                    height="100%"
+                    fill="none"
+                    stroke="white"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <rect
+                    className="marquee-ants"
+                    width="100%"
+                    height="100%"
+                    fill="none"
+                    stroke="#25364a"
+                    strokeDasharray="4 4"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              )}
+            </div>
+          )}
+          {geometry && overlayStyle && (
+            <div
+              className={`selection-bounds ${isCropping ? "crop-selection" : ""}`}
+              data-selection-overlay="true"
+              onPointerDown={selectionPointerDown}
+              style={overlayStyle}
+            >
+              {resizeHandles.map((handle) => (
                 <div
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    left: "50%",
-                    top: -28 / canvasScale,
-                    width: 0,
-                    height: 20 / canvasScale,
-                    borderLeft: `${1 / canvasScale}px solid currentColor`,
-                    pointerEvents: "none",
-                  }}
-                />
-                <div
-                  data-rotation-handle="true"
-                  onPointerDown={beginRotation}
+                  key={handle}
+                  className={`handle resize handle-${handle}`}
+                  data-selection-handle={handle}
+                  onPointerDown={(event) => beginResize(event, handle)}
                   style={{
                     ...handleStyle,
-                    left: "50%",
-                    top: -32 / canvasScale,
-                    borderRadius: "50%",
-                    cursor: "grab",
+                    ...(!isCropping ? handlePositions[handle] : {}),
+                    ...(isCropping
+                      ? {
+                          width:
+                            (handle.length === 2
+                              ? 16
+                              : handle === "n" || handle === "s"
+                                ? 28
+                                : 6) / canvasScale,
+                          height:
+                            (handle.length === 2
+                              ? 16
+                              : handle === "n" || handle === "s"
+                                ? 6
+                                : 28) / canvasScale,
+                        }
+                      : {}),
+                    cursor: resizeHandleCursor(handle, [
+                      (geometry.corners[1].x - geometry.corners[0].x) /
+                        geometry.orientedWidth,
+                      (geometry.corners[1].y - geometry.corners[0].y) /
+                        geometry.orientedWidth,
+                      (geometry.corners[3].x - geometry.corners[0].x) /
+                        geometry.orientedHeight,
+                      (geometry.corners[3].y - geometry.corners[0].y) /
+                        geometry.orientedHeight,
+                      0,
+                      0,
+                    ]),
                     transform: "translate(-50%, -50%)",
                   }}
                 />
-              </>
-            )}
-          </div>
-        )}
-        <div
-          data-gesture-guide-x="true"
-          style={{
-            display: "none",
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            width: 0,
-            borderLeft: `${1 / canvasScale}px solid #246bfe`,
-            pointerEvents: "none",
-            zIndex: 1100,
-          }}
-        />
-        <div
-          data-gesture-guide-y="true"
-          style={{
-            display: "none",
-            position: "absolute",
-            left: 0,
-            right: 0,
-            height: 0,
-            borderTop: `${1 / canvasScale}px solid #246bfe`,
-            pointerEvents: "none",
-            zIndex: 1100,
-          }}
-        />
-        <div
-          data-gesture-measurement="true"
-          style={{
-            display: "none",
-            position: "absolute",
-            transform: "translate(-50%, -100%)",
-            padding: `${3 / canvasScale}px ${6 / canvasScale}px`,
-            borderRadius: 4 / canvasScale,
-            background: "var(--km-bg-surface, #fff)",
-            color: "var(--km-text-primary, #0f172a)",
-            border: `${1 / canvasScale}px solid var(--km-border-default, #cbd5e1)`,
-            boxShadow: "var(--km-shadow-sm)",
-            fontSize: 11 / canvasScale,
-            lineHeight: 1.2,
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-            zIndex: 1200,
-          }}
-        />
+              ))}
+              {!isCropping && (
+                <>
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      top: -28 / canvasScale,
+                      width: 0,
+                      height: 20 / canvasScale,
+                      borderLeft: `${1 / canvasScale}px solid currentColor`,
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <div
+                    data-rotation-handle="true"
+                    onPointerDown={beginRotation}
+                    style={{
+                      ...handleStyle,
+                      left: "50%",
+                      top: -32 / canvasScale,
+                      borderRadius: "50%",
+                      cursor: "grab",
+                      transform: "translate(-50%, -50%)",
+                    }}
+                  />
+                </>
+              )}
+            </div>
+          )}
+          <div
+            data-gesture-guide-x="true"
+            style={{
+              display: "none",
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              width: 0,
+              borderLeft: `${1 / canvasScale}px solid #246bfe`,
+              pointerEvents: "none",
+              zIndex: 1100,
+            }}
+          />
+          <div
+            data-gesture-guide-y="true"
+            style={{
+              display: "none",
+              position: "absolute",
+              left: 0,
+              right: 0,
+              height: 0,
+              borderTop: `${1 / canvasScale}px solid #246bfe`,
+              pointerEvents: "none",
+              zIndex: 1100,
+            }}
+          />
+          <div
+            data-gesture-measurement="true"
+            style={{
+              display: "none",
+              position: "absolute",
+              transform: "translate(-50%, -100%)",
+              padding: `${3 / canvasScale}px ${6 / canvasScale}px`,
+              borderRadius: 4 / canvasScale,
+              background: "var(--km-bg-surface, #fff)",
+              color: "var(--km-text-primary, #0f172a)",
+              border: `${1 / canvasScale}px solid var(--km-border-default, #cbd5e1)`,
+              boxShadow: "var(--km-shadow-sm)",
+              fontSize: 11 / canvasScale,
+              lineHeight: 1.2,
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              zIndex: 1200,
+            }}
+          />
+        </div>
       </div>
     </div>
   );

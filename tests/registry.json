@@ -1,5 +1,27 @@
 [
   {
+    "id": "editor-frame-paint",
+    "path": "tests/feature/editor/frame-paint.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Render-only shared device-edge rounding, unchanged document geometry, thin and rotated logical fallback, signed scales and unsupported motion/CSS eligibility"
+  },
+  {
+    "id": "editor-frame-paint-browser",
+    "path": "tests/feature/editor/frame-paint.spec.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-13",
+    "reason": "Adjacent translucent frame fills remain seamless across fractional pan/zoom/DPR; mixed text/rotation keep logical geometry and move previews commit through authority with undo/redo"
+  },
+  {
     "id": "editor-drag-snapping",
     "path": "tests/feature/editor/drag-snapping.test.ts",
     "area": "editor",
