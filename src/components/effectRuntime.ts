@@ -535,6 +535,7 @@ export function mountEffectSurface(
   let rasterPending = false;
   let shaderOutput: ShaderOutput | null = null;
   let rasterPrepared = false;
+  let rasterPreparedKey = "";
   let texture: {
     gl: WebGL2RenderingContext;
     value: WebGLTexture;
@@ -640,8 +641,9 @@ export function mountEffectSurface(
     const state = sharedGpu();
     if (state.gl !== shaderOutput.gl || state.gl.isContextLost()) return;
     const { gl, canvas: source } = state;
-    source.width = shaderOutput.width;
-    source.height = shaderOutput.height;
+    if (source.width !== shaderOutput.width) source.width = shaderOutput.width;
+    if (source.height !== shaderOutput.height)
+      source.height = shaderOutput.height;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.blitFramebuffer(
@@ -965,6 +967,8 @@ export function mountEffectSurface(
             }
           } else raster ??= createRaster(schedule);
         }
+        const captureKey = `${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
+        if (rasterPreparedKey !== captureKey) rasterPrepared = false;
         if (!rasterPrepared && !gpuInput) {
           const ready =
             raster &&
@@ -987,6 +991,7 @@ export function mountEffectSurface(
                 // arrived during paint. Retrying before publication would starve
                 // continuously changing sources; the next update coalesces it.
                 rasterPrepared = true;
+                rasterPreparedKey = captureKey;
                 void draw();
                 if (raster && "isDirty" in raster && raster.isDirty) schedule();
               })

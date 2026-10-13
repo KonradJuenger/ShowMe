@@ -16,16 +16,24 @@ export class EffectGraph<Key> {
     this.nodes.set(key, { inputs: [], execute, dirty: 1, resolved: 0 });
   }
   remove(key: Key) {
+    this.invalidate(key);
     this.nodes.delete(key);
     this.consumers.delete(key);
     for (const users of this.consumers.values()) users.delete(key);
   }
   compile(inputs: (key: Key) => Key[]) {
     this.consumers.clear();
+    const changed: Key[] = [];
     for (const [key, node] of this.nodes) {
-      node.inputs = inputs(key).filter(
+      const next = inputs(key).filter(
         (input) => input !== key && this.nodes.has(input),
       );
+      if (
+        next.length !== node.inputs.length ||
+        next.some((input, index) => input !== node.inputs[index])
+      )
+        changed.push(key);
+      node.inputs = next;
       for (const input of node.inputs) {
         const users = this.consumers.get(input) ?? new Set<Key>();
         users.add(key);
@@ -45,6 +53,7 @@ export class EffectGraph<Key> {
       complete.add(key);
     };
     for (const key of this.nodes.keys()) visit(key);
+    changed.forEach((key) => this.invalidate(key));
   }
   invalidate(key: Key) {
     const seen = new Set<Key>();
@@ -79,6 +88,8 @@ export class EffectGraph<Key> {
             return this.resolve(input, published);
           }),
         );
+      // Teardown/replacement while inputs were pending invalidates this request.
+      if (this.nodes.get(key) !== node) return;
       // Input publication during dependency resolution belongs to this request.
       const version = node.dirty;
       await node.execute();
@@ -106,6 +117,7 @@ export class EffectGraph<Key> {
     const work = async () => {
       await Promise.all(node.inputs.map((input) => this.flush(input, cohort)));
       await node.pending;
+      if (this.nodes.get(key) !== node) return;
       await this.resolveNode(key, undefined, true);
     };
     const pending = work();

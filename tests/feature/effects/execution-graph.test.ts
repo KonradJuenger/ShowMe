@@ -2,6 +2,54 @@ import { expect, it } from "vitest";
 import { EffectGraph } from "../../../src/components/effectGraph";
 import { EffectSources } from "../../../src/components/effectSources";
 
+it("removed or replaced consumers never execute after an asynchronous dependency completes", async () => {
+  const graph = new EffectGraph<string>();
+  let finish!: () => void;
+  let obsolete = 0,
+    replacement = 0;
+  graph.register(
+    "input",
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  graph.register("output", () => {
+    obsolete++;
+  });
+  graph.compile((key) => (key === "output" ? ["input"] : []));
+  const pending = graph.resolve("output");
+  await Promise.resolve();
+  graph.remove("output");
+  graph.register("output", () => {
+    replacement++;
+  });
+  finish();
+  await pending;
+  expect(obsolete).toBe(0);
+  expect(replacement).toBe(0);
+  await graph.resolve("output");
+  expect(replacement).toBe(1);
+});
+
+it("changing dependency edges invalidates already settled consumers", async () => {
+  const graph = new EffectGraph<string>();
+  let outputs = 0;
+  graph.register("a", () => {});
+  graph.register("b", () => {});
+  graph.register("output", () => {
+    outputs++;
+  });
+  graph.compile((key) => (key === "output" ? ["a"] : []));
+  await graph.resolve("output");
+  graph.compile((key) => (key === "output" ? ["b"] : []));
+  expect(graph.isDirty("output")).toBe(true);
+  await graph.resolve("output");
+  expect(outputs).toBe(2);
+  graph.remove("b");
+  expect(graph.isDirty("output")).toBe(true);
+});
+
 it("shared inputs execute once while independent terminals resolve without waiting", async () => {
   const graph = new EffectGraph<string>();
   let finish!: () => void;

@@ -33,8 +33,11 @@ export function allocateShaderOutput(
     return previous;
   const texture = gl.createTexture(),
     framebuffer = gl.createFramebuffer();
-  if (!texture || !framebuffer)
+  if (!texture || !framebuffer) {
+    if (texture) gl.deleteTexture(texture);
+    if (framebuffer) gl.deleteFramebuffer(framebuffer);
     throw new Error("Cannot allocate shader output surface");
+  }
   try {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, texture);

@@ -5,6 +5,61 @@ type HarnessWindow = Window & {
 };
 test.use({ deviceScaleFactor: 1.25 });
 
+test("DOM snapshots refresh logical viewport changes at fixed raster size and ignore disposed work", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const path = "/src/components/domRaster.ts";
+    const {
+      createDomRasterSource,
+    }: typeof import("../../../src/components/domRaster") = await import(
+      /* @vite-ignore */ path
+    );
+    const node = document.createElement("div");
+    node.style.cssText = "width:100px;height:100px;background:red";
+    document.body.append(node);
+    let invalidations = 0;
+    const source = createDomRasterSource(
+      () => node,
+      () => true,
+      () => {},
+      () => {
+        invalidations++;
+      },
+      async () => {},
+      undefined,
+      true,
+    );
+    await source.update(100, 100, 100, 100);
+    const first = source.revision;
+    await source.update(100, 100, 100, 100);
+    const cached = source.revision;
+    await source.update(100, 100, 200, 100);
+    const resized = source.revision;
+    const pending = source.update(200, 100, 200, 100);
+    source.dispose();
+    const before = invalidations;
+    source.markDirty();
+    await pending;
+    node.remove();
+    return {
+      first,
+      cached,
+      resized,
+      final: source.revision,
+      before,
+      after: invalidations,
+      attached: source.canvas.isConnected,
+    };
+  });
+  expect(result.cached).toBe(result.first);
+  expect(result.resized).toBeGreaterThan(result.cached);
+  expect(result.final).toBe(result.resized);
+  expect(result.after).toBe(result.before);
+  expect(result.attached).toBe(false);
+});
+
 async function mount(page: Page) {
   await page.goto("/tests/helpers/effects-harness.html");
   await page.evaluate(async () => {

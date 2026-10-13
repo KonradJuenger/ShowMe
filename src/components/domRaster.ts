@@ -7,7 +7,9 @@ type PaintContext = CanvasRenderingContext2D & {
 export type DomRasterBackend = "svg" | "native" | "native-naive";
 let experimentBackend: DomRasterBackend = "native";
 let captureId = 0;
-let videoInvalidation: "decoded" | "poll" = "decoded";
+// Electron's decoded callback route regresses decoder drops under many-video
+// load. Poll until that route has matching playback and freshness evidence.
+let videoInvalidation: "decoded" | "poll" = "poll";
 /** Runtime-only matched benchmark control; sampled when a source is created. */
 export function setDomRasterVideoExperiment(mode: "decoded" | "poll") {
   videoInvalidation = mode;
@@ -22,6 +24,10 @@ const metrics = {
   styleReads: 0,
   styleMs: 0,
   paintMs: 0,
+  mediaCopies: 0,
+  mediaCopyBytes: 0,
+  videoSamples: 0,
+  videoSampleAgeMs: 0,
 };
 export function domRasterDiagnostics() {
   return { ...metrics };
@@ -73,8 +79,11 @@ export function createDomRasterSource(
   let cancelPaint: (() => void) | null = null;
   let lastSnapshot = "",
     fontRevision = 0;
+  let lastLogicalWidth = 0,
+    lastLogicalHeight = 0;
   let animationFrame = 0;
   let wasDynamic = false;
+  let sampledVideos: number[] = [];
   const videoFrames = new Map<HTMLVideoElement, number>();
   const included = (node: HTMLElement) => {
     for (
@@ -121,7 +130,8 @@ export function createDomRasterSource(
     const playing = Array.from(originalRoot.querySelectorAll("video")).some(
       (video) =>
         !video.paused &&
-        (!decodedVideo || typeof video.requestVideoFrameCallback !== "function"),
+        (!decodedVideo ||
+          typeof video.requestVideoFrameCallback !== "function"),
     );
     if (animated || playing || wasDynamic) {
       dirty = true;
@@ -132,6 +142,7 @@ export function createDomRasterSource(
   };
   const images = new Map<string, Promise<string>>();
   const markDirty = () => {
+    if (disposed) return;
     dirty = true;
     invalidate();
     if (!animationFrame && !disposed)
@@ -254,6 +265,7 @@ export function createDomRasterSource(
   };
   const refresh = () => {
     const start = performance.now();
+    sampledVideos = [];
     if (refined) {
       syncVideos();
       const structural = Array.from(
@@ -344,16 +356,25 @@ export function createDomRasterSource(
             : `${original.currentTime}:${original.videoWidth}:${original.videoHeight}`;
         if (next !== pair.revision || backend === "svg") {
           const output = pair.bitmap!;
-          output.width =
+          const bitmapWidth =
             original instanceof HTMLCanvasElement
               ? original.width
               : original.videoWidth;
-          output.height =
+          const bitmapHeight =
             original instanceof HTMLCanvasElement
               ? original.height
               : original.videoHeight;
-          if (output.width && output.height)
-            output.getContext("2d")!.drawImage(original, 0, 0);
+          if (output.width !== bitmapWidth) output.width = bitmapWidth;
+          if (output.height !== bitmapHeight) output.height = bitmapHeight;
+          if (output.width && output.height) {
+            const bitmapContext = output.getContext("2d")!;
+            bitmapContext.clearRect(0, 0, output.width, output.height);
+            bitmapContext.drawImage(original, 0, 0);
+            metrics.mediaCopies++;
+            metrics.mediaCopyBytes += output.width * output.height * 4;
+            if (original instanceof HTMLVideoElement)
+              sampledVideos.push(performance.now());
+          }
           pair.revision = next;
         }
         const bitmap = pair.bitmap!;
@@ -475,12 +496,15 @@ export function createDomRasterSource(
       const video = Array.from(originalRoot.querySelectorAll("video")).some(
         (node) =>
           !node.paused &&
-          (!decodedVideo || typeof node.requestVideoFrameCallback !== "function"),
+          (!decodedVideo ||
+            typeof node.requestVideoFrameCallback !== "function"),
       );
       if (
         !dirty &&
         canvas.width === width &&
         canvas.height === height &&
+        lastLogicalWidth === logicalWidth &&
+        lastLogicalHeight === logicalHeight &&
         !animated &&
         !video
       )
@@ -507,6 +531,8 @@ export function createDomRasterSource(
         const snapshot = JSON.stringify([
           width,
           height,
+          logicalWidth,
+          logicalHeight,
           matrix.toString(),
           fontRevision,
           styles.textContent,
@@ -574,11 +600,19 @@ export function createDomRasterSource(
               })
         ).then(() => {
           lastSnapshot = snapshot;
+          lastLogicalWidth = logicalWidth;
+          lastLogicalHeight = logicalHeight;
         });
       });
       inFlight = paint
         .then(() => {
           if (!disposed && captured) {
+            const completed = performance.now();
+            metrics.videoSamples += sampledVideos.length;
+            metrics.videoSampleAgeMs += sampledVideos.reduce(
+              (sum, sampled) => sum + completed - sampled,
+              0,
+            );
             revision++;
             metrics.captures++;
             metrics.paintMs += performance.now() - start;
