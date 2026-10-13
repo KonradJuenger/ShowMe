@@ -197,7 +197,7 @@ export function PresenterConsole() {
             </p>
           </section>
 
-          <PresentationControls controller={controller} view={presenter} />
+          <PresentationControls controller={controller} />
 
           {(state.displayWarning || error) && (
             <div className="console-alerts">
