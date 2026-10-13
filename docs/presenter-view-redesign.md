@@ -2,183 +2,249 @@
 
 Research date: 2026-10-13
 
+## Product decision
+
+ShowMe presenter view will use **Keynote's presenter display as the primary design reference**.
+
+We are not copying Keynote pixel-for-pixel. We are adopting its mental model because it is the clearest under presentation stress:
+
+- current slide and next slide are the visual center
+- presenter notes are a large dedicated region
+- slide position and time are always visible but visually secondary
+- readiness is communicated as presentation state
+- navigation is simple and keyboard-first
+- secondary functions do not compete with the presentation itself
+
+For now there is **one fixed presenter layout**. Do not add presenter-layout customization, draggable panels, presets, visibility toggles or configuration UI.
+
+Apple's current Keynote presenter display exposes current slide, next slide, presenter notes, a ready-to-advance indicator, clock/timer and slide navigation. Keynote also changes readiness while transitions/builds are active. That basic model is the reference.
+
+Primary source:
+- https://support.apple.com/en-hk/guide/keynote/tana4da2681/mac
+
 ## Goal
 
-Presenter view is an operational interface used under stress. It should optimize for recognition at a glance, large targets, predictable navigation and minimal mode hunting.
+Presenter view is an operational interface used under stress. The presenter should not need to hunt for functionality.
 
-The presenter should be able to answer four questions immediately:
+At a glance it must answer:
 
 1. What is the audience seeing now?
-2. What happens when I advance?
-3. What do I need to say?
-4. Am I on time?
+2. What comes after this?
+3. What happens if I press Space / Advance now?
+4. What do I need to say?
+5. Am I on time?
 
 Everything else is secondary.
 
-## Market research
+## Reference layout: Keynote, simplified
 
-### PowerPoint
+### Top status strip
 
-Presenter View centers on current slide, next slide, speaker notes, elapsed time/current time and previous/next navigation. It also exposes slide overview, black screen, pen/laser, zoom and notes text-size controls.
+A thin strip only.
 
-Useful ideas:
-- current + next + notes are the permanent core
-- notes font can be enlarged
-- black screen is a first-class presentation action
-- slide overview is available without permanently occupying space
+Left:
+- slide position, e.g. `7 / 24`
 
-Sources:
-- https://support.microsoft.com/en-us/powerpoint/training/start-the-presentation-and-see-your-notes-in-presenter-view
-- https://support.microsoft.com/en-gb/powerpoint/training/use-presenter-view-in-powerpoint
-
-### Keynote
-
-Keynote keeps current slide, next slide, presenter notes, clock/timer and a ready-to-advance status visible. The presenter display can be customized and notes can be resized.
-
-Useful ideas:
-- very low visual chrome
-- readiness is a presentation state, not an editor concept
-- current/next/notes hierarchy can be adapted to the presenter
-
-Source:
-- https://support.apple.com/en-nz/guide/keynote/tana4da2681/mac
-
-### Pitch
-
-Pitch Speaker View can show/hide current slide, next slide, slide navigator, speaker notes, progress line, clock and timer. The slide navigator expands to a grid when needed.
-
-Useful ideas:
-- hide secondary information until needed
-- a slide navigator belongs behind one clear action
-- progress is useful but should not compete with notes or slide previews
-
-Source:
-- https://help.pitch.com/en/articles/4056889-present-using-speaker-view
-
-### Google Slides
-
-Presenter view separates speaker notes from the audience output and provides presenter navigation. The product is comparatively sparse.
-
-Useful idea:
-- minimal permanent controls reduce hunting
-
-Source:
-- https://support.google.com/docs/answer/1696787
-
-### Canva
-
-Presenter View uses a separate presenter window with notes, timer, upcoming slides and controls. Remote control can expose notes on a second device.
-
-Useful ideas:
-- upcoming slides and notes are the essential private context
-- remote control is valuable later, but should not complicate the desktop presenter UI
-
-Sources:
-- https://www.canva.com/help/presentation-modes/
-- https://www.canva.com/help/presenting-designs/
-
-### LibreOffice Impress
-
-Presenter Console shows current slide, upcoming slide, optional notes and a timer.
-
-Useful idea:
-- the same basic information hierarchy has survived across very different presentation products
-
-Source:
-- https://help.libreoffice.org/latest/is/text/simpress/guide/presenter_console.html
-
-## ShowMe-specific problem
-
-ShowMe's Next command does not always mean "next slide". If the current slide has Click Timeline / Motion stages, the same command advances the next stage first.
-
-The presenter UI must therefore make the next action explicit.
-
-Examples:
-
-- `Advance · animation 2 / 3`
-- `Advance · slide 8 / 24`
-- `Advance · end of presentation`
-
-The next-slide preview should still show the next slide. This separates "what the next button does" from "what slide follows this one".
-
-## Initial layout
-
-### Header
-
-One compact status row only:
-
-- slide position
-- elapsed presentation time, visually strongest time value
+Center/right:
+- elapsed presentation time
 - wall clock
 
-Remove the title/eyebrow chrome. It uses valuable vertical space without helping the presenter.
+Do not add a product title, "Presenter Console" heading or other chrome.
 
-### Main area
+### Readiness indicator
 
-Two-column layout:
+Use Keynote's ready/not-ready idea, but make it more informative for ShowMe.
 
-- left, about 62-66%: large current audience slide
-- right, about 34-38%:
-  - next slide preview
-  - speaker notes filling the remaining height
+A thin full-width state indicator should communicate whether the next input can advance cleanly:
 
-Speaker notes use substantially larger default type than the existing console. Provide small +/- controls beside the Notes label.
+- active transition / motion: not ready
+- settled: ready
+- paused: paused
+- audience black: black
 
-If the audience is black, show a strong overlay on the current preview. Do not rely on a small status sentence below the slide.
+Do not require the presenter to read a paragraph to understand this.
 
-### Control dock
+Keynote uses a red/green state bar. ShowMe can use the same simple concept, but the exact colors should follow the application's existing palette and accessibility requirements.
 
-Always visible at the bottom.
+### Main visual row
+
+Follow the Keynote spatial model:
+
+- large current slide on the left
+- next slide on the right
+- both visible simultaneously
+- current slide is larger than next slide because it is the most important reference
+
+Target proportion:
+- current: about 60-65%
+- next: about 35-40%
+
+The labels `Current` and `Next` should be small and visually quiet.
+
+### Notes region
+
+Presenter notes span the width below the slide previews.
+
+This is a deliberate change from the first branch experiment, where notes were placed in the right column.
+
+Reasons:
+- matches the Keynote mental model
+- gives long notes enough line length and height
+- avoids squeezing notes beside the current slide
+- lets the presenter's eye move vertically: slides -> notes -> controls
+
+Notes should:
+- use a large readable default size
+- scroll independently
+- provide simple A- / A+ controls
+- preserve line breaks
+- never resize the slide previews while scrolling
+
+### Controls
+
+Keep permanent controls extremely small in number.
 
 Primary:
 - Previous
-- Advance, the largest control, with explicit next-action text
+- Advance
+
+Advance is the dominant action.
 
 Secondary:
 - Black screen
 - Pause / Resume
-- slide jump
+- slide navigator
 
-Rare / risky actions:
+Rare / risky:
 - Restart media
 - Fullscreen
 - End presentation
 
-These should be visually demoted and separated from Advance.
+Rare actions belong behind one `More` control or another clearly separated area.
 
-Keyboard navigation remains unchanged.
+Do not implement Keynote's presenter-layout customization.
 
-## Design rules
+## ShowMe improvement over Keynote
 
-- No editor controls in presenter view.
-- No hover-only essential controls.
-- Do not make all actions visually equal.
-- Core controls need large click targets.
-- Labels should describe effects, not implementation terminology.
-- Current audience state must be obvious.
-- Errors and display warnings must remain visible without displacing the main UI.
-- The layout should work at common laptop resolutions, especially 1366x768 and 1440x900.
-- Keep current slide rendering and audience-quality image reuse unchanged.
+ShowMe has a state that Keynote's generic `next slide/build` model does not explain clearly enough: pressing Advance may trigger another Click Timeline / Motion stage instead of changing slides.
 
-## Phase 1 implemented on this branch
+The presenter should never have to infer this from the slide.
 
-- restructure the presenter console around current / next / notes
-- increase notes prominence and add local note-size controls
-- make Advance the dominant action
-- show whether Advance will trigger another animation stage or the next slide
-- make black-screen state visually obvious
-- compact the timing/header area
-- move rare controls away from the primary navigation path
-- keep presenter state, rendering, keyboard shortcuts and display architecture unchanged
+The Advance control must state what the next input does.
 
-## Later candidates
+Examples:
 
-Only after testing the basic layout:
+- `Advance`
+  `Animation 2 / 3`
 
-- slide navigator overlay/grid instead of a permanent select
-- presenter layout presets
-- ready-to-advance indicator for long-running animations
-- optional countdown / target-duration pacing
-- phone/remote presenter view
-- laser/pointer tools
+- `Advance`
+  `Slide 8 / 24`
+
+- `Advance`
+  `End`
+
+This is separate from the next-slide preview. The preview answers "what slide follows this one?" while the Advance label answers "what will Space do right now?"
+
+### Ready-to-advance semantics
+
+The readiness indicator and Advance label should agree.
+
+Examples:
+
+- a motion stage is currently running:
+  - status = `Animating`
+  - Advance remains available according to current runtime semantics
+  - next-action label still describes the next stage/slide
+
+- stage settled and another stage exists:
+  - status = `Ready`
+  - Advance = `Animation 3 / 3`
+
+- final stage settled:
+  - status = `Ready`
+  - Advance = next slide
+
+- audience black:
+  - current preview gets an obvious black-output state
+  - status indicates `Audience black`
+
+Do not create a parallel playback model for presenter UI. Derive these states from the existing PresenterState / motion state.
+
+## Interaction principles
+
+- Space / Enter / Right Arrow remain the primary forward controls.
+- Left Arrow remains previous.
+- Mouse buttons must be large enough to use quickly but should not visually overpower the slides.
+- No essential action is hover-only.
+- No editor controls appear in presenter mode.
+- No hidden modes.
+- No layout customization in this iteration.
+- Do not change presentation document formats or persistence.
+- Do not change audience rendering quality.
+- Do not add a second presentation runtime.
+
+## Responsive targets
+
+The fixed design must work at least at:
+
+- 1366 x 768
+- 1440 x 900
+- 1920 x 1080
+
+At smaller presenter resolutions, preserve priority in this order:
+
+1. current slide
+2. next slide
+3. notes
+4. Advance / Previous
+5. elapsed time
+6. secondary controls
+
+Do not solve small screens by introducing a configurable layout system.
+
+## Current branch status
+
+Branch: `chatgpt/presenter-view-redesign`
+
+The branch already contains an initial experimental presenter redesign. Treat its implementation as provisional.
+
+Keep useful work from it:
+- explicit Advance semantics
+- larger note typography
+- stronger audience-black indication
+- demotion of rare actions
+- compact timing
+- unchanged presenter/runtime architecture
+
+Revise:
+- move from the experimental right-column notes layout to the Keynote-inspired slides-above / notes-below layout
+- add a simple readiness indicator
+- simplify visual chrome further
+- make the result feel like one stable presenter surface, not a dashboard
+
+## Out of scope
+
+Do not add yet:
+
+- customizable presenter layouts
+- draggable/resizable presenter panels
+- presenter presets
+- remote/phone presenter
+- laser pointer or drawing tools
 - presenter notes editing during playback
+- target-duration pacing
+- new document schema
+- new presentation runtime
+
+## Acceptance criteria
+
+The redesign is successful when a presenter can glance at the screen for less than a second and reliably identify:
+
+- current audience slide
+- next slide
+- whether the presentation is ready/animating/paused/black
+- what Advance will do
+- current notes
+- elapsed time
+
+The UI should remain understandable with no mouse movement and no opened menus.
