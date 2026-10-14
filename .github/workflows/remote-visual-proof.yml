@@ -1,0 +1,38 @@
+name: Remote visual proof
+
+on:
+  push:
+    branches:
+      - chatgpt/remote-screenshot-proof
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Electron runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64
+
+      - run: npm run build
+
+      - name: Capture ShowMe
+        run: xvfb-run -a node scripts/capture-ci-screenshot.mjs
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: showme-editor-screenshot
+          path: artifacts/showme-editor.png
+          if-no-files-found: error
