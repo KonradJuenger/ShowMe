@@ -146,3 +146,87 @@ deferral, original-image fallback, decoded URL ownership and audience readiness
 remain covered. The follow-up commit only records these benchmark results in
 this Markdown file and is exempt from rerunning the rendering gate because it
 cannot affect rendering, capture, layout, sizing, visibility or performance.
+
+
+## Native cold-open cache review correction — 2026-10-15
+
+Three clean runs of `b217cb6b64e6c82729176f17e73ebdd1a68fcc4e` compared with
+three clean runs of `047bc65d313ee2ae703a74c43b0f6e73f16a42dd`. The latter
+separates presentation readiness from background precaching and reduces native
+image admission to two jobs; browser CPU sizing remains unchanged. The earlier
+`b18f33b` measurements above cover a different synthetic rendering workload.
+
+Environment: AMD Ryzen AI 9 365 w/ Radeon 880M; 20 logical threads;
+Windows, Electron 44.4.1, Node v26.3.0, libuv default (4).
+Audience profile 2561 × 1601; editor 1429 × 886 DIP at DPR 1.6041666269302368.
+The same compiled harness measured both freshly built revisions, with no other
+verification running alongside either group. These were sequential baseline then
+candidate groups, not interleaved trials.
+
+Workload: 24 visible patterned 2048 × 1536 PNG sources and two 6000 × 4000
+background-only sources (one hidden slide and one hidden layer), using real Sharp
+processing and PNG cache encoding. Every run used a fresh app process, temporary
+Library/user data and empty derived cache. Fixture generation was excluded; source
+files were freshly written and could be warm in the OS file cache. All six runs
+finished all 26 jobs. The baseline created seven workers each run; the candidate
+created two each run.
+
+Values are **median [minimum–maximum]** across three runs.
+
+| Metric | b217cb6 | 047bc65 |
+| --- | ---: | ---: |
+| Editor available (ms) | 1115.9 [1006.2–1270.6] | 869.5 [829.7–1069.5] |
+| Visible variants ready (s) | 3.605 [3.593–3.720] | 4.335 [4.330–4.907] |
+| Present to visible active renderer (s) | 4.691 [1.696–8.506] | 1.851 [0.720–5.069] |
+| Whole cache ready (s) | 8.850 [5.308–15.044] | 6.990 [6.255–14.374] |
+| App CPU time (s) | 18.130 [17.123–18.566] | 16.889 [15.966–17.858] |
+| Peak main RSS (MiB) | 529.4 [528.8–548.8] | 367.8 [359.9–393.5] |
+| Peak summed process working sets (MiB) | 2278.4 [2133.0–2379.8] | 2026.2 [1927.0–2049.9] |
+| Main IPC p95 (ms) | 25.1 [23.4–25.4] | 22.0 [19.4–25.1] |
+| Main IPC max (ms) | 49.8 [31.6–61.7] | 32.9 [30.6–44.7] |
+| Editor frame gap p95 (ms) | 16.9 [16.8–17.0] | 16.9 [16.9–16.9] |
+| Editor frame gap max (ms) | 233.3 [106.3–299.6] | 216.5 [104.9–299.9] |
+| Editor long-task count | 1.0 [1.0–1.0] | 1.0 [1.0–1.0] |
+| Editor long-task total (ms) | 133.0 [127.0–136.0] | 112.0 [112.0–129.0] |
+
+Median visible-cache preparation increased by 20.3%, a throughput cost of the
+smaller native admission limit in this combined candidate. This comparison does
+not isolate concurrency from readiness/priority changes. Median peak main RSS
+fell by 30.5%; median app
+CPU fell by 6.8%. CPU covers startup, rendering, IO and encoding across app
+processes, not encoding alone. Frame-gap p95 stayed at 16.9 ms, but 105–300 ms
+startup gaps and 112–129 ms long tasks remain in the candidate; this is not a
+guarantee of stall-free editing. Main IPC p95 was 19–25 ms in candidate runs.
+
+Present and total elapsed times varied widely in both groups. Their medians
+fell, but these three-run, non-interleaved observations do not establish a
+general speedup. In one candidate run the active audience appeared while
+whole-deck status was still preparing; in the other two, hidden work had finished
+by audience activation. All baseline runs reached whole-cache ready before
+activation. Deterministic tests separately hold hidden work pending/failing and
+verify that it cannot hold presentation readiness.
+
+Present timing ends at a visible active audience renderer; it is not a pixel
+readback or keyboard-latency measurement.
+
+Memory is sampled at roughly 100 ms plus IPC latency after the first window
+appears. Main RSS is
+process resident memory; summed working sets may double-count shared pages and
+exclude GPU allocations. Short peaks before/between samples can be missed.
+Frame/long-task samples stop before Present so editor occlusion cannot inflate
+those gaps. See `docs/audience-rendering-benchmark.md` for methodology.
+
+Commands, for each clean revision after `npm run build`:
+
+`node .agenttmp/image-cache-benchmark.cjs --runs 3 --output .benchmark-data/image-cache/<revision>`
+
+The common harness was compiled from 047bc65. Raw reports remain in
+`.benchmark-data/image-cache/b217cb6/report.json` and
+`.benchmark-data/image-cache/047bc65/report.json`. New runs can use
+`npm run benchmark:images -- --runs 3 --output <directory>`.
+
+Verification for 047bc65: 26 focused unit tests, two native cold-open/display
+tests and both mandatory audience-navigation declarations passed. Build,
+typecheck, changed-file lint, stats and registry audit passed (414 active tests).
+The full/release suites and macOS were not run. This follow-up commit only records
+measurements in Markdown; its contents cannot affect rendering or cache behavior.
