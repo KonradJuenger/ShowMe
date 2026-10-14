@@ -6,10 +6,11 @@ Implemented on `chatgpt/editor-audience-images`; integration into `main` remains
 
 - Opening queues encoded preparation for every slide, including hidden slides,
   nested sections and hidden layers, and deduplicates shared asset/dimension
-  requirements. A reusable worker pool reserves 25% of available logical CPUs
-  (at least two), allowing 15 workers on a 20-thread CPU. The existing 512 MiB
-  work admission budget can reduce concurrency for large images; the current
-  slide takes priority. Navigation changes priority
+  requirements. Browser workers reserve 25% of available logical CPUs (at least
+  two); native admission stays at two jobs below Sharp's default shared libuv
+  capacity. The existing 512 MiB work admission budget can reduce concurrency
+  for large images. Presentation requirements take priority over background
+  precaching; the current slide takes priority within that sequence. Navigation changes priority
   without rebuilding the plan. Readiness reads no longer reprioritize work.
 - The audience negotiates its actual integer physical viewport before mounting
   image views. Presenter, preparation and audience use that same profile.
@@ -23,7 +24,7 @@ Implemented on `chatgpt/editor-audience-images`; integration into `main` remains
   audience readiness. Outgoing pixels remain visible while an incoming target
   prepares. The next slide can finish both decodes before activation.
 - Native in-flight work deduplicates after source-size clamping. Browser cache
-  hits bypass resize admission and the persistent CPU-sized pool handles misses.
+  hits bypass resize admission and the persistent browser worker pool handles misses.
   Original-to-target Lanczos3, orientation, alpha and color handling remain intact.
 - Editor canvas, rail fallback rendering and native thumbnail capture use the
   shared audience profile. Canvas zoom changes display scale without creating
@@ -53,6 +54,13 @@ format changes, historical readers or flattened slide rendering were introduced.
 Motion, effects, video, transitions, editing and export use the canonical renderer.
 Arbitrary jumps can require decode of a cached PNG; the whole deck is not held as
 decoded/GPU-resident images. Initial cold preparation moves work to startup.
+
+Whole-deck cache status and presentation readiness have separate plans and
+completion promises. Present waits for visible layers in the actual presentation
+sequence. Hidden-slide/layer work still queues on open, but a pending or failed
+background-only image does not gate audience startup. Shared asset/dimension
+requirements prepare once and satisfy both plans. Closing, retrying and accepted
+revisions maintain both readiness scopes.
 
 ## Sidebar flicker
 

@@ -578,7 +578,7 @@ if (!presentationRole) window.addEventListener("message", event => {
       browserAudienceProfile = { width: profile.width, height: profile.height };
       browserImages.prioritize(request.documentId, presentation.slideIds[presentation.index ?? 0]);
       await browserImages.reconcile(request.documentId);
-      if (imageCachingEnabled) await browserImages.ready(request.documentId, true);
+      if (imageCachingEnabled) await browserImages.presentationReady(request.documentId, true);
       return browserAudienceProfile;
     }
     if (request.method !== "slide" || !request.slideId || !presentation.slideIds.includes(request.slideId)) throw new Error("Outside presentation slide");
@@ -669,7 +669,7 @@ export const browser: Platform = {
     if (presentationRole) return ownerImageRequest<ImageOutputProfile>({ method: "prepare", documentId, profile });
     browserAudienceProfile = profile;
     await browserImages.reconcile(documentId);
-    if (imageCachingEnabled) await browserImages.ready(documentId, true);
+    if (imageCachingEnabled) await browserImages.presentationReady(documentId, true);
     return profile;
   },
   async preparedSlideImages(documentId, slideId, profile) {

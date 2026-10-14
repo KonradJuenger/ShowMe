@@ -1,10 +1,10 @@
 import { Worker } from "node:worker_threads";
-import { availableParallelism } from "node:os";
-import { imageWorkerConcurrency } from "../src/core/imageWorkQueue";
 import type { ImageWorkerRequest } from "./imageWorker";
 import type { PreparedImage } from "../src/core/presentationImages";
 
-export const nativeImageConcurrency = imageWorkerConcurrency(availableParallelism());
+// Sharp jobs share libuv's process-wide pool (normally four threads). Keep
+// admission below that capacity so foreground work and filesystem IO retain room.
+export const nativeImageConcurrency = 2;
 
 /** Called only after CPU/memory admission; reuse workers across image jobs. */
 export class ImageProcessorPool {

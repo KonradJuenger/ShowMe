@@ -1,4 +1,4 @@
-/** Reserve a quarter of logical CPUs, with at least two left for interactive work. */
+/** CPU-worker policy (browser); native Sharp admission separately respects libuv. */
 export function imageWorkerConcurrency(logicalThreads: number | undefined): number {
   if (!logicalThreads || !Number.isFinite(logicalThreads) || logicalThreads < 1) return 2;
   const threads = Math.floor(logicalThreads);

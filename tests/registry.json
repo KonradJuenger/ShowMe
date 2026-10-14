@@ -8,7 +8,7 @@
     "runtime": "unit",
     "created": "2026-10-13",
     "lastReviewed": "2026-10-15",
-    "reason": "Canonical audience profiles and shared image results, slide readiness independent of unrelated deck preparation, stable navigation generations, original fallback, bounded residency and persistent comparable benchmark history; opening queues every slide and hidden-layer image without navigation, prioritizes the current slide and respects CPU headroom"
+    "reason": "Canonical audience profiles and shared image results, separate presentation and whole-deck readiness, pending/failed hidden images do not gate Present, both scopes follow replans and close; stable navigation generations, original fallback, bounded residency and comparable benchmark history; opening queues every image without navigation and prioritizes presentation work"
   },
   {
     "id": "presenter-audience-navigation",
@@ -701,7 +701,7 @@
     "runtime": "unit",
     "created": "2026-10-11",
     "lastReviewed": "2026-10-15",
-    "reason": "Dependency-aware invalidation, whole-deck deduplicated image planning and read-only navigation reuse, CPU-sized worker admission with interactive headroom, visible image priority and abandoned-slide demotion within the memory budget, explicit image retries, immutable metadata and narrow canonical render projections"
+    "reason": "Dependency-aware invalidation, whole-deck deduplicated image planning and read-only navigation reuse, browser CPU-sized admission with headroom, native two-job admission below default shared libuv capacity, foreground priority over waiting background jobs, abandoned-slide demotion and memory budget, explicit image retries, immutable metadata and narrow canonical render projections"
   },
   {
     "id": "persistence-lan-work",

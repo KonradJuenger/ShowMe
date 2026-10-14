@@ -149,6 +149,74 @@ it("the editor prepares its audience variant without waiting for unrelated deck 
   }
 });
 
+it("presentation readiness excludes pending hidden slides and failed hidden layers while whole-deck precaching continues", async () => {
+  const model = imageDocument(["a", "b", "c"]);
+  model.deck.slideMeta.slide2.hidden = true;
+  const hidden = structuredClone(model.slides.slide0.nodes[0].children[0]);
+  hidden.id = "hidden-image";
+  if (hidden.content?.type !== "image") throw new Error("Expected image fixture");
+  hidden.content.assetId = "d".repeat(64);
+  model.deck.layers.push({ ...model.deck.layers[0], id: "hidden-layer", hidden: true });
+  for (const slide of Object.values(model.slides)) {
+    slide.nodes.push({ type: "layer", id: "hidden-layer", children: slide.id === "slide0" ? [hidden] : [] });
+    for (const root of slide.nodes) for (const element of root.children) {
+      const content = element.content;
+      if (content?.type === "image" && content.transform.rule !== "free")
+        content.transform.intrinsicWidth = content.transform.intrinsicHeight = 64;
+    }
+  }
+  for (const template of Object.values(model.templates))
+    template.nodes.push({ type: "layer", id: "hidden-layer", children: [] });
+  let release!: () => void;
+  const prepare = vi.fn(async (_id: string, requirement: ImageRequirement) => {
+    if (requirement.assetId === "c".repeat(64)) await new Promise<void>(resolve => { release = resolve; });
+    if (requirement.assetId === "d".repeat(64)) throw new Error("Hidden layer failure");
+    return prepared(requirement);
+  });
+  const coordinator = new ImagePreparationCoordinator({
+    projection: (_id, slideId) => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides[slideId ?? "slide0"], templates: model.templates }),
+    profile: () => model.deck, prepare,
+  });
+  try {
+    await coordinator.reconcile(model.documentId);
+    expect(await coordinator.presentationReady(model.documentId)).toMatchObject({ total: 2, completed: 2, state: "ready", failures: [] });
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledTimes(4));
+    expect(coordinator.status(model.documentId)).toMatchObject({ total: 4, state: "preparing" });
+    release();
+    await expect(coordinator.ready(model.documentId)).rejects.toThrow("Hidden layer failure");
+    expect(await coordinator.presentationReady(model.documentId)).toMatchObject({ state: "ready", failures: [] });
+    expect(coordinator.status(model.documentId)).toMatchObject({ state: "failed", failures: [{ message: "Hidden layer failure" }] });
+  } finally {
+    release?.();
+    coordinator.close(model.documentId);
+  }
+});
+
+it("presentation waiters follow replans and closing settles both readiness scopes", async () => {
+  const model = imageDocument(["a"]);
+  const releases: Array<() => void> = [];
+  const coordinator = new ImagePreparationCoordinator({
+    projection: () => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides.slide0, templates: model.templates }),
+    profile: () => model.deck,
+    prepare: (_id, requirement) => new Promise(resolve => { releases.push(() => resolve(prepared(requirement))); }),
+  });
+  await coordinator.reconcile(model.documentId);
+  const waiter = coordinator.presentationReady(model.documentId);
+  await coordinator.reconcile(model.documentId, true);
+  releases.shift()!();
+  await vi.waitFor(() => expect(releases).toHaveLength(1));
+  releases.shift()!();
+  expect(await waiter).toMatchObject({ total: 1, completed: 1, state: "ready" });
+  await coordinator.reconcile(model.documentId, true);
+  const presentationClosed = expect(coordinator.presentationReady(model.documentId)).rejects.toThrow("unavailable");
+  const cacheClosed = expect(coordinator.ready(model.documentId)).rejects.toThrow("unavailable");
+  coordinator.close(model.documentId);
+  releases.shift()!();
+  await Promise.all([presentationClosed, cacheClosed]);
+});
+
 it("a throwing image job remains failed but does not block healthy slides or per-instance original fallback", async () => {
   const model = imageDocument(["a", "b"]);
   const coordinator = new ImagePreparationCoordinator({

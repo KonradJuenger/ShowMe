@@ -1224,7 +1224,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     measuredAudienceProfile = profile;
     imagePreparation.prioritize(id, runtime.state.slideIds[runtime.state.index ?? 0]);
     await imagePreparation.reconcile(id);
-    if (imageCachingEnabled) await imagePreparation.ready(id, true);
+    if (imageCachingEnabled) await imagePreparation.presentationReady(id, true);
     if (runtime.state?.deckId !== id) throw new Error("Audience session ended");
     for (const view of [editor, runtime.presenterConsoleWindow])
       if (view && !view.isDestroyed()) view.webContents.send("presentation-displays", runtime.displays());

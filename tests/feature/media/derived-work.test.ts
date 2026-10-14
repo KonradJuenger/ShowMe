@@ -9,6 +9,25 @@ import { createMediaElement } from "../../../src/core/media";
 import { ImagePreparationCoordinator } from "../../../src/core/imagePreparationCoordinator";
 import { DocumentRuntime } from "../../../src/core/documentRuntime";
 import { ImageWorkQueue, imageWorkerConcurrency } from "../../../src/core/imageWorkQueue";
+import { nativeImageConcurrency } from "../../../electron/imageProcessorPool";
+
+it("native image admission stays below libuv capacity and lets foreground work overtake waiting background jobs", async () => {
+  expect(nativeImageConcurrency).toBe(2);
+  const queue = new ImageWorkQueue(nativeImageConcurrency);
+  const releases: Array<() => void> = [], order: string[] = [];
+  const active = Array.from({ length: 2 }, () => queue.run(1, () => new Promise<void>(resolve => { releases.push(resolve); })));
+  await vi.waitFor(() => expect(releases).toHaveLength(2));
+  const background = queue.run(1, async () => { order.push("background"); });
+  const foreground = queue.run(1, async () => { order.push("foreground"); }, { priority: 3 });
+  try {
+    releases.shift()!();
+    await foreground;
+    expect(order[0]).toBe("foreground");
+  } finally {
+    for (const release of releases) release();
+    await Promise.all([...active, foreground, background]);
+  }
+});
 
 it("image worker sizing reserves CPU headroom and bounds admitted jobs with a safe minimum and fallback", async () => {
   expect(imageWorkerConcurrency(20)).toBe(15);
