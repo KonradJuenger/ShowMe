@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { newPresentationDocument } from "../../../src/core/document";
 import { createMediaElement } from "../../../src/core/media";
@@ -112,4 +115,62 @@ it("resident lookahead shares identical rasters, pins required output and drops 
     .toEqual(["slide1", "slide2", "slide0"]);
   expect(audienceImageWindow(model.deck, slides, model.deck.slideIds, 1, model.deck, undefined, budget))
     .toEqual(["slide1", "slide2", "slide0"]);
+});
+
+it("benchmark history preserves commit samples and separates incompatible rendering environments", async () => {
+  const modulePath = "../../../scripts/audience-benchmark-history.mjs";
+  const { recordAudienceBenchmark, renderAudienceHistory } = await import(
+    modulePath
+  );
+  const folder = await mkdtemp(
+    path.join(os.tmpdir(), "showme-audience-history-"),
+  );
+  try {
+    const report = {
+      schemaVersion: 2,
+      revision: "a".repeat(40),
+      branch: "test",
+      dirty: false,
+      createdAt: "2026-10-14T00:00:00Z",
+      runs: 3,
+      workload: { version: 2 },
+      environment: { cpu: "synthetic", width: 1920, height: 1080, dpr: 1 },
+      metrics: { taskCpuMs: 100 },
+      metricRanges: { taskCpuMs: { min: 95, max: 105 } },
+    };
+    const first = await recordAudienceBenchmark(report, folder);
+    const second = await recordAudienceBenchmark(
+      { ...report, revision: "b".repeat(40), metrics: { taskCpuMs: 80 } },
+      folder,
+    );
+    const exploratory = await recordAudienceBenchmark(
+      { ...report, dirty: true },
+      folder,
+    );
+    const other = await recordAudienceBenchmark(
+      { ...report, environment: { ...report.environment, dpr: 2 } },
+      folder,
+    );
+    expect(second.group).toBe(first.group);
+    expect(exploratory.group).toBe(first.group);
+    expect(other.group).not.toBe(first.group);
+    expect(second.machineId).toBe(first.machineId);
+    const records = await renderAudienceHistory(folder);
+    expect(records).toHaveLength(4);
+    expect(
+      records.map((record: { revision: string }) => record.revision),
+    ).toEqual([
+      report.revision,
+      "b".repeat(40),
+      report.revision,
+      report.revision,
+    ]);
+    expect(records[1].metrics.taskCpuMs).toBe(80);
+    expect(records[2].dirty).toBe(true);
+    expect(await readFile(path.join(folder, "history.html"), "utf8")).toContain(
+      "Include exploratory dirty working trees",
+    );
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
 });

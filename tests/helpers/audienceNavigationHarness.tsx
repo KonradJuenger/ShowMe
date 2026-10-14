@@ -16,6 +16,10 @@ import {
   type PreparedImage,
 } from "../../src/core/presentationImages";
 import type { PresenterState } from "../../src/platform/api";
+import {
+  populateAudienceStressScene,
+  AUDIENCE_STRESS_WORKLOAD,
+} from "./audienceStressScene";
 
 interface NavigationSnapshot {
   index: number | null;
@@ -24,6 +28,8 @@ interface NavigationSnapshot {
   pendingVariants: number;
   coldVariants: number;
   lateImageDecodes: number;
+  imageDecodes: number;
+  preparedVariants: number;
   requests: Array<{
     slide: number;
     assetId: string;
@@ -38,6 +44,7 @@ declare global {
       jump: (index: number) => Promise<void>;
       releaseImages: () => void;
       snapshot: () => NavigationSnapshot;
+      workload: typeof AUDIENCE_STRESS_WORKLOAD | null;
     };
   }
 }
@@ -46,7 +53,7 @@ declare global {
  * Early slides reuse a prepared raster. Slide 25 introduces a new photograph,
  * as in the reported deck, without depending on its assets or machine speed.
  */
-export function mountAudienceNavigationHarness() {
+export function mountAudienceNavigationHarness(stress = false) {
   const model = newPresentationDocument("Synthetic audience navigation");
   const first = model.slides[model.deck.slideIds[0]];
   const firstMeta = model.deck.slideMeta[first.id];
@@ -71,6 +78,7 @@ export function mountAudienceNavigationHarness() {
     });
     image.frame.width = image.frame.height = 600;
     slide.nodes[0].children = [image];
+    if (stress) populateAudienceStressScene(slide, index, image);
     model.slides[id] = slide;
     model.deck.slideMeta[id] = { ...firstMeta, name: `Slide ${index + 1}` };
     if (index !== 0) model.deck.slideIds.push(id);
@@ -83,7 +91,14 @@ export function mountAudienceNavigationHarness() {
     { deckId: model.deck.id, slideIds: model.deck.slideIds, index: 0 },
     model.deck,
     Date.now(),
-    undefined,
+    stress
+      ? Object.fromEntries(
+          model.deck.slideIds.map((id) => [
+            id,
+            [{ id: "stress-motion", duration: 3000 }],
+          ]),
+        )
+      : undefined,
     true,
   );
   const listeners = new Set<(value: PresenterState | null) => void>();
@@ -108,9 +123,11 @@ export function mountAudienceNavigationHarness() {
   const pending = new Map<string, () => void>();
   let coldVariants = 0;
   let lateImageDecodes = 0;
+  let imageDecodes = 0;
   const lateUrls = new Set<string>();
   const decode = HTMLImageElement.prototype.decode;
   HTMLImageElement.prototype.decode = function () {
+    imageDecodes++;
     if (lateUrls.has(this.src)) lateImageDecodes++;
     return decode.call(this);
   };
@@ -143,6 +160,23 @@ export function mountAudienceNavigationHarness() {
       context.fillStyle =
         requirement.assetId === lateAsset ? "#c94b32" : "#2165ba";
       context.fillRect(0, 0, canvas.width, canvas.height);
+      if (stress) {
+        const tint = Number.parseInt(requirement.assetId.slice(-2), 16);
+        const gradient = context.createLinearGradient(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+        gradient.addColorStop(0, `hsl(${tint * 3} 70% 40%)`);
+        gradient.addColorStop(1, `hsl(${tint * 3 + 90} 60% 75%)`);
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = "#ffffff66";
+        for (let y = 0; y < canvas.height; y += 16)
+          for (let x = 0; x < canvas.width; x += 16)
+            if ((x + y) % 32 === 0) context.fillRect(x, y, 8, 8);
+      }
       const image: PreparedImage = {
         assetId: requirement.assetId,
         hash,
@@ -155,7 +189,7 @@ export function mountAudienceNavigationHarness() {
         recipe: IMAGE_RECIPE,
         url: canvas.toDataURL(),
       };
-      if (requirement.assetId === lateAsset) {
+      if (requirement.assetId === lateAsset && !stress) {
         lateUrls.add(image.url);
         coldVariants++;
         variant = new Promise<PreparedImage>((resolve) => {
@@ -174,6 +208,7 @@ export function mountAudienceNavigationHarness() {
   };
   platform.releaseUrl = () => {};
   window.audienceNavigationHarness = {
+    workload: stress ? AUDIENCE_STRESS_WORKLOAD : null,
     jump: (index) => platform.presentationCommand({ type: "jump", index }),
     releaseImages: () => {
       // Complete any work already requested during the preceding slide's dwell.
@@ -187,6 +222,8 @@ export function mountAudienceNavigationHarness() {
       pendingVariants: pending.size,
       coldVariants,
       lateImageDecodes,
+      imageDecodes,
+      preparedVariants: variants.size,
       requests: [...requests],
     }),
   };

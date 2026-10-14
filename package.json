@@ -18,6 +18,7 @@
     "lint": "eslint src electron tests *.ts",
     "test": "node scripts/test-suite.mjs core",
     "benchmark:animation": "node scripts/benchmark-animation.mjs",
+    "benchmark:audience": "node scripts/benchmark-audience.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "desktop": "npm run build && electron .",
     "clean:reports": "node scripts/clean-reports.mjs",

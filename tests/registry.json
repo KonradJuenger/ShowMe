@@ -7,8 +7,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-13",
-    "lastReviewed": "2026-10-13",
-    "reason": "Canonical fractional output profiles, whole-deck shared image results, read-only readiness, stable navigation generations, explicit original outcomes, closed-waiter settlement and byte-admitted resident lookahead with shared rasters and pinned output; throwing cache jobs preserve failed diagnostics without blocking healthy slides or original fallback"
+    "lastReviewed": "2026-10-14",
+    "reason": "Canonical fractional output profiles, whole-deck shared image results, read-only readiness, stable navigation generations, explicit original outcomes, closed-waiter settlement and byte-admitted resident lookahead with shared rasters and pinned output; throwing cache jobs preserve failed diagnostics without blocking healthy slides or original fallback; persistent per-commit benchmark history retains observations and separates incompatible environments"
   },
   {
     "id": "presenter-audience-navigation",
@@ -18,8 +18,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-13",
-    "lastReviewed": "2026-10-13",
-    "reason": "Synthetic 30-slide audience reproduction: early shared rasters and warm revisits avoid image IO, while a late new image must prepare and decode during the preceding slide rather than block navigation; controlled IO and virtual time avoid machine-dependent performance thresholds"
+    "lastReviewed": "2026-10-14",
+    "reason": "Synthetic 30-slide audience reproduction: early shared rasters and warm revisits avoid image IO, while a late new image must prepare and decode during the preceding slide rather than block navigation; controlled IO and virtual time avoid machine-dependent performance thresholds; fixed dense real-clock scene with images, wrapped text, GLSL/CSS effects and motion, 58 navigation samples, live rendering and bounded residency checks, JSON performance distributions and controlled-machine baseline comparisons"
   },
   {
     "id": "editor-drag-snapping",

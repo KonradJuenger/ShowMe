@@ -39,8 +39,8 @@ UI redesign and architecture cleanup are separate tasks unless the request expli
 
 The repository is public. Keep experimental agent work isolated from `main`, while preserving the developer's fast local Codex workflow.
 
-Every contributor and agent must satisfy the required audience-navigation gate below
-before any commit or integration into `main`, including direct Codex commits.
+Every contributor and agent must satisfy the audience-navigation gate below
+for changes that can affect rendering, including direct Codex commits to `main`.
 
 ### ChatGPT
 
@@ -91,15 +91,20 @@ Do not run the complete ShowMe suite by default.
 ### Required audience-navigation gate for `main`
 
 `tests/feature/presenter/audience-navigation.spec.ts` is the highest-priority
-regression test and a required blocker for every commit to `main`.
+regression test and a required blocker for changes that can affect rendering.
 
-- Before creating any commit on `main` or integrating work by merge, squash,
+- For changes that can affect rendering, before creating any commit on `main` or integrating work by merge, squash,
   cherry-pick, rebase or pull, run this test against the exact proposed result
   based on the latest `main`. Verify integration candidates on an isolated branch
   or worktree before modifying `main`.
-- The requirement applies to every change, including unrelated features,
-  documentation and urgent fixes. A passing result from an earlier revision is
-  insufficient if the proposed result has changed.
+- Run it for renderer, media/cache, effects/shaders, text/font/layout, animation,
+  audience/presenter lifecycle, output sizing, and shared model/runtime changes
+  that may alter rendered output or its preparation. When impact is uncertain,
+  run the test. A previous revision's passing result is insufficient.
+- Documentation-only changes and simple cosmetic CSS changes that cannot affect
+  slide rendering, sizing, visibility, capture or performance are exempt. CSS
+  affecting those contracts still requires the gate. State the reason for an
+  exemption in the verification report.
 - Run `npm run test:feature -- presenter` and confirm that the audience-navigation
   test actually executed and passed. A focused invocation selecting this file is
   also valid. A failing, missing, skipped or unexecuted test blocks the commit,
@@ -112,6 +117,15 @@ regression test and a required blocker for every commit to `main`.
   quarantine, deprecate or delete this test to bypass the gate unless the
   developer explicitly changes this requirement.
 - Report the exact verification command and result before proceeding into `main`.
+- This file also contains the dense audience rendering stress test. Run both
+  declarations; preserve its images, text, GLSL/CSS effects, live motion and
+  bounded-residency checks. Do not reduce the workload to conceal a regression.
+- For changes that can affect rendering, record a repeated
+  `npm run benchmark:audience` report in the persistent commit history. Compare
+  with previous matching-machine/workload runs and report trends and individual
+  changes. Dirty runs are exploratory, not measurements of their parent commit.
+  Do not claim an improvement from a binary pass or mismatched environments. See
+  `docs/audience-rendering-benchmark.md` for commands and metric limits.
 
 For a normal task:
 

@@ -5,6 +5,7 @@ dist-electron/
 /release/
 coverage/
 test-results*/
+/.benchmark-data/
 playwright-report*/
 *.log
 /.agenttmp/

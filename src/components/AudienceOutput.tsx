@@ -283,7 +283,9 @@ function AudienceSlide({
         marginLeft: -record.deck.width / 2,
         marginTop: -record.deck.height / 2,
         transform: `scale(${scale})`,
-        visibility: held || (transition.visible && ready) ? "visible" : "hidden",
+        // Ancestor visibility is inherited by DOM shader input snapshots. Hide
+        // the composition with opacity so preparation still captures text pixels.
+        pointerEvents: held || (transition.visible && ready) ? "auto" : "none",
         zIndex: active && ready ? 2 : held || transition.outgoing ? 1 : 0,
         // Shader/text output can set visibility: visible on descendants. Keep
         // prepared slides mounted, but suppress the entire inactive composition.
