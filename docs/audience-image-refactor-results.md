@@ -74,7 +74,7 @@ derived cache. The original deck and asset bytes were not edited.
 
 Existing sampling tests cover native Lanczos output and browser fine detail,
 orientation and alpha; canonical native preview/PDF pixel checks also passed.
-The mandatory synthetic audience gate remains required for every main commit.
+The mandatory synthetic audience gate is required for changes that can affect rendering.
 macOS, packaged/release verification and physical multi-monitor testing were not
 run. No integration into main is authorized by these results.
 

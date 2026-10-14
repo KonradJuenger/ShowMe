@@ -3,6 +3,8 @@
 ShowMe is a desktop presentation editor for macOS and Windows.
 It uses web technologies and supports programmable visual effects, reusable presentation assets, and local presentation files.
 
+[Are we slow yet?](areweslowyet.md) tracks audience rendering benchmark statistics by commit.
+
 ![ShowMe editor with slide list, geometric shapes and element properties](docs/images/editor.png)
 
 ## Features
