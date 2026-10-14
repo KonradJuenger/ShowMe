@@ -1,11 +1,16 @@
 # Audience image refactor implementation
 
-Implemented on `chatgpt/audience-loading-reproduction`; `main` remains unchanged.
+Implemented on `chatgpt/editor-audience-images`; integration into `main` remains pending.
 
 ## Runtime behavior
 
-- Encoded preparation covers the complete visible presentation sequence and
-  deduplicates shared asset/dimension requirements. Navigation changes priority
+- Opening queues encoded preparation for every slide, including hidden slides,
+  nested sections and hidden layers, and deduplicates shared asset/dimension
+  requirements. Browser workers reserve 25% of available logical CPUs (at least
+  two); native admission stays at two jobs below Sharp's default shared libuv
+  capacity. The existing 512 MiB work admission budget can reduce concurrency
+  for large images. Presentation requirements take priority over background
+  precaching; the current slide takes priority within that sequence. Navigation changes priority
   without rebuilding the plan. Readiness reads no longer reprioritize work.
 - The audience negotiates its actual integer physical viewport before mounting
   image views. Presenter, preparation and audience use that same profile.
@@ -19,16 +24,43 @@ Implemented on `chatgpt/audience-loading-reproduction`; `main` remains unchanged
   audience readiness. Outgoing pixels remain visible while an incoming target
   prepares. The next slide can finish both decodes before activation.
 - Native in-flight work deduplicates after source-size clamping. Browser cache
-  hits bypass resize admission and a persistent two-worker pool handles misses.
+  hits bypass resize admission and the persistent browser worker pool handles misses.
   Original-to-target Lanczos3, orientation, alpha and color handling remain intact.
-- Editor canvas work has explicit lower-priority focus. An incomplete plan made
-  before an import is accepted cannot be retained as the completed canvas result.
+- Editor canvas, rail fallback rendering and native thumbnail capture use the
+  shared audience profile. Canvas zoom changes display scale without creating
+  separate image variants; audience output and accepted image geometry still
+  determine the exact required pixels. Editor sampling tiers and their prefetch
+  queue have been removed.
+- A visible editor slide can prepare or reuse its audience variants while
+  unrelated deck images are still preparing. Gesture deferral, decoded URL
+  ownership, original-image fallback and audience readiness remain intact.
+
+Settings now offers PNG (the default) or JPG at maximum quality for the shared
+image cache. Desktop JPEG encoding uses quality 100 with 4:4:4 chroma; browser
+encoding uses quality 1. Transparent sources always remain PNG, including a
+single transparent source pixel that could disappear during downsampling.
+Opaque images with an unused alpha channel may use JPG. Native high bit-depth
+sources remain PNG to preserve precision; unsupported browser sources keep the
+existing original-image fallback. Original assets are never rewritten.
+
+Encoding recipes and file extensions distinguish JPG and PNG at identical
+source/dimension keys. Existing current PNG entries keep their identity; JPG
+adds its own versioned recipe. Switching the preference invalidates displayed
+plans without deleting reusable variants. Both encodings participate in retained
+cache reuse, validation, explicit clearing and session cleanup.
 
 There is still one document authority and persistence path. No document/package
 format changes, historical readers or flattened slide rendering were introduced.
 Motion, effects, video, transitions, editing and export use the canonical renderer.
 Arbitrary jumps can require decode of a cached PNG; the whole deck is not held as
 decoded/GPU-resident images. Initial cold preparation moves work to startup.
+
+Whole-deck cache status and presentation readiness have separate plans and
+completion promises. Present waits for visible layers in the actual presentation
+sequence. Hidden-slide/layer work still queues on open, but a pending or failed
+background-only image does not gate audience startup. Shared asset/dimension
+requirements prepare once and satisfy both plans. Closing, retrying and accepted
+revisions maintain both readiness scopes.
 
 ## Sidebar flicker
 

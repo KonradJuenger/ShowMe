@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { platform } from "../platform";
 import type {
-  ImageRequestProfile,
-  ImageRequirement,
+  ImageOutputProfile,
   PreparedImage,
 } from "../core/presentationImages";
 import { useImageGeneration } from "./useImageGeneration";
@@ -15,9 +14,8 @@ export function usePreparedImage(
   elementId: string,
   assetId: string,
   enabled: boolean,
-  profile?: ImageRequestProfile,
+  profile?: ImageOutputProfile,
   deferUpdates = false,
-  canvasRequirement?: Pick<ImageRequirement, "assetId" | "width" | "height">,
   plan?: SlideImagePlan,
 ) {
   const [result, setResult] = useState<{
@@ -31,14 +29,10 @@ export function usePreparedImage(
   const planImages = plan?.images;
   const planKey = plan?.key;
   const displayedImage = useRef<PreparedImage | null>(null);
-  const displayedRequest = useRef<{
-    identity: string;
-    requirement: string;
-    invalidation: string;
-  } | null>(null);
   useLayoutEffect(() => {
     const nextUrl = result?.image?.url ?? null;
-    if (usingPlan && nextUrl && ownedUrl.current !== nextUrl) platform.retainUrl?.(nextUrl);
+    if (usingPlan && nextUrl && ownedUrl.current !== nextUrl)
+      platform.retainUrl?.(nextUrl);
     if (ownedUrl.current && ownedUrl.current !== nextUrl)
       platform.releaseUrl(ownedUrl.current);
     ownedUrl.current = nextUrl;
@@ -50,16 +44,7 @@ export function usePreparedImage(
     [],
   );
   const generation = useImageGeneration(documentId);
-  // Accepted-revision preparation generations do not invalidate canvas pixels.
-  // Explicit cache clears/settings changes are the suffix of this token.
-  const invalidation = generation.slice(generation.lastIndexOf(":") + 1);
-  const canvasAssetId = canvasRequirement?.assetId;
-  const canvasWidth = canvasRequirement?.width;
-  const canvasHeight = canvasRequirement?.height;
-  const requirementKey = canvasRequirement
-    ? `${canvasRequirement.assetId}:${canvasRequirement.width}x${canvasRequirement.height}`
-    : undefined;
-  const key = `${documentId}:${slideId}:${elementId}:${assetId}:${planKey ?? generation}:${profile?.width}:${profile?.height}:${profile?.sampling}:${requirementKey}`;
+  const key = `${documentId}:${slideId}:${elementId}:${assetId}:${planKey ?? generation}:${profile?.width}:${profile?.height}`;
   const identity = `${documentId}:${slideId}:${elementId}:${assetId}`;
   useEffect(() => {
     // A gesture keeps the displayed variant, including when an older request
@@ -67,32 +52,16 @@ export function usePreparedImage(
     if (!enabled || !documentId || !platform.preparedImage || deferUpdates)
       return;
     if (usingPlan && !planImages) return;
-    if (
-      profile?.sampling === "canvas" &&
-      canvasAssetId !== undefined &&
-      canvasWidth !== undefined &&
-      canvasHeight !== undefined &&
-      displayedImage.current &&
-      displayedRequest.current?.identity === identity &&
-      displayedRequest.current.requirement === requirementKey &&
-      displayedRequest.current.invalidation === invalidation
-    ) {
-      setResult({
-        id: identity,
-        key,
-        image: displayedImage.current,
-        settled: true,
-      });
-      return;
-    }
     let live = true;
     const resolve = async () => {
-      const image = usingPlan ? planImages![elementId] ?? null : await platform.preparedImage!(
-        documentId,
-        slideId,
-        elementId,
-        profile,
-      );
+      const image = usingPlan
+        ? (planImages![elementId] ?? null)
+        : await platform.preparedImage!(
+            documentId,
+            slideId,
+            elementId,
+            profile,
+          );
       if (image && live && displayedImage.current?.hash !== image.hash) {
         const probe = new Image();
         probe.crossOrigin = "anonymous";
@@ -113,22 +82,16 @@ export function usePreparedImage(
           return;
         }
         // A readiness update or profile change may resolve to identical pixels.
-        // Keep the decoded URL for both canvas and exact presentation profiles.
+        // Keep decoded pixels when a request resolves to the same variant.
         const current = displayedImage.current;
-        displayedRequest.current =
-          image &&
-          canvasAssetId !== undefined &&
-          canvasWidth !== undefined &&
-          canvasHeight !== undefined &&
-          requirementKey &&
-          image.assetId === canvasAssetId &&
-          image.width === Math.min(image.sourceWidth, canvasWidth) &&
-          image.height === Math.min(image.sourceHeight, canvasHeight)
-            ? { identity, requirement: requirementKey, invalidation }
-            : null;
         if (image && current?.hash === image.hash) {
           if (!usingPlan) platform.releaseUrl(image.url);
-          setResult({ id: identity, key, image: usingPlan ? image : current, settled: true });
+          setResult({
+            id: identity,
+            key,
+            image: usingPlan ? image : current,
+            settled: true,
+          });
           return;
         }
         displayedImage.current = image;
@@ -137,7 +100,6 @@ export function usePreparedImage(
       .catch(() => {
         if (live) {
           displayedImage.current = null;
-          displayedRequest.current = null;
           setResult({ id: identity, key, image: null, settled: true });
         }
       });
@@ -155,11 +117,6 @@ export function usePreparedImage(
     enabled,
     profile,
     deferUpdates,
-    canvasAssetId,
-    canvasWidth,
-    canvasHeight,
-    requirementKey,
-    invalidation,
     usingPlan,
     planImages,
   ]);
@@ -172,7 +129,10 @@ export function usePreparedImage(
         : undefined,
     checking: Boolean(
       available &&
-      ((usingPlan && !planImages) || result?.id !== identity || result.key !== key || !result.settled),
+      ((usingPlan && !planImages) ||
+        result?.id !== identity ||
+        result.key !== key ||
+        !result.settled),
     ),
   };
 }

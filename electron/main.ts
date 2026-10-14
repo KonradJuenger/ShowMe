@@ -5,13 +5,14 @@ import { EffectLibraryStorage } from "./effectLibrary";
 import { effectLibraryRequestSchema } from "../src/core/libraryEffects";
 import sharp from "sharp";
 import { ImageWorkQueue } from "../src/core/imageWorkQueue";
+import { nativeImageConcurrency } from "./imageProcessorPool";
 import { resolveSlide } from "../src/core/templates";
 import { randomUUID } from "node:crypto";
 import {
   audienceImageProfile as outputImageProfile,
   MAX_PREPARED_IMAGE_PIXELS,
-  type ImageRequestProfile,
   type ImageOutputProfile,
+  type ImageCacheFormat,
 } from "../src/core/presentationImages";
 import { ImagePreparationCoordinator } from "../src/core/imagePreparationCoordinator";
 import {
@@ -381,6 +382,7 @@ collaboration.subscribe(
 );
 
 let imageCachingEnabled = true;
+let imageCacheFormat: ImageCacheFormat = "png";
 let deleteImageCacheOnClose = true;
 let imageCacheFolder = "";
 const imageCacheSession = randomUUID();
@@ -398,6 +400,7 @@ const imageCache = new ImageVariantCache(
   path.join(__dirname, "imageWorker.cjs"),
   () => path.join(imageCacheFolder, "showme", "retained", "images"),
   () => !deleteImageCacheOnClose,
+  () => imageCacheFormat,
 );
 let measuredAudienceProfile: ImageOutputProfile | null = null;
 function imagePreparationProfile() {
@@ -412,6 +415,7 @@ function imagePreparationProfile() {
   return outputImageProfile(display.size.width, display.size.height, display.scaleFactor);
 }
 const imagePreparation = new ImagePreparationCoordinator({
+  concurrency: nativeImageConcurrency,
   slides: (id, slideIds) => {
     const document = collaboration.isGuest(id)
       ? collaboration.clientDocument()!
@@ -423,7 +427,7 @@ const imagePreparation = new ImagePreparationCoordinator({
       ? collaboration.projection(id, slideId)
       : documentRuntime(id).projection(id, slideId),
   profile: imagePreparationProfile,
-  prepare: async (id, requirement, priority = 0, canvas) =>
+  prepare: async (id, requirement, priority = 0) =>
     imageCache.prepare(
       collaboration.isGuest(id)
         ? await requireStorage().verifiedAssetPath(requirement.assetId)
@@ -436,7 +440,6 @@ const imagePreparation = new ImagePreparationCoordinator({
       requirement.width,
       requirement.height,
       priority,
-      canvas,
     ),
 });
 imagePreparation.subscribe((status) => {
@@ -1159,6 +1162,18 @@ const operations: Record<string, (...args: any[]) => any> = {
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
   getImageCachingEnabled: () => imageCachingEnabled,
+  getImageCacheFormat: () => imageCacheFormat,
+  async setImageCacheFormat(value: unknown) {
+    const format = z.enum(["png", "jpg"]).parse(value);
+    if (format === imageCacheFormat) return;
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.imageCacheFormat = format;
+    await writeSettings(app.getPath("userData"), settings);
+    imagePreparation.suspend();
+    imageCacheFormat = format;
+    if (imageCachingEnabled) imagePreparation.resume();
+    notifyImageCacheChanged();
+  },
   getDeleteImageCacheOnClose: () => deleteImageCacheOnClose,
   async setDeleteImageCacheOnClose(value: unknown) {
     const enabled = z.boolean().parse(value);
@@ -1209,24 +1224,20 @@ const operations: Record<string, (...args: any[]) => any> = {
     measuredAudienceProfile = profile;
     imagePreparation.prioritize(id, runtime.state.slideIds[runtime.state.index ?? 0]);
     await imagePreparation.reconcile(id);
-    if (imageCachingEnabled) await imagePreparation.ready(id, true);
+    if (imageCachingEnabled) await imagePreparation.presentationReady(id, true);
     if (runtime.state?.deckId !== id) throw new Error("Audience session ended");
     for (const view of [editor, runtime.presenterConsoleWindow])
       if (view && !view.isDestroyed()) view.webContents.send("presentation-displays", runtime.displays());
     return profile;
   },
-  async preparedSlideImages(documentId: string, slideId: string, outputProfile: unknown) {
+  async preparedSlideImages(documentId: string, slideId: string, outputProfile?: unknown) {
     if (!imageCachingEnabled) return {};
     const id = idSchema.parse(documentId);
     idSchema.parse(slideId);
-    const profile = z.object({ width: z.number().positive().max(100000), height: z.number().positive().max(100000),
-      sampling: z.literal("canvas").optional() }).strict().parse(outputProfile);
+    const profile = outputProfile === undefined ? imagePreparationProfile() : z.object({
+      width: z.number().positive().max(100000), height: z.number().positive().max(100000),
+    }).strict().parse(outputProfile);
     return imagePreparation.prepareSlide(id, slideId, profile, presentation?.state ? 0 : 1);
-  },
-  async prioritizeCanvasImages(documentId: string, slideId: string) {
-    if (idSchema.parse(documentId) !== activeDocumentId) throw new Error("Outside editor document");
-    await operations.renderProjection(documentId, idSchema.parse(slideId));
-    imageCache.prioritizeCanvas(documentId, slideId);
   },
   async preparedImage(
     documentId: string,
@@ -1238,14 +1249,13 @@ const operations: Record<string, (...args: any[]) => any> = {
     const id = idSchema.parse(documentId);
     idSchema.parse(slideId);
     idSchema.parse(elementId);
-    const profile: ImageRequestProfile =
+    const profile: ImageOutputProfile =
       outputProfile === undefined
         ? imagePreparationProfile()
         : z
             .object({
               width: z.number().positive().max(100000),
               height: z.number().positive().max(100000),
-              sampling: z.literal("canvas").optional(),
             })
             .strict()
             .parse(outputProfile);
@@ -2059,6 +2069,7 @@ void app.whenReady().then(async () => {
   }
   lifecycleMode = settings.libraryLifecycleMode ?? "managed";
   imageCachingEnabled = settings.imageCachingEnabled !== false;
+  imageCacheFormat = settings.imageCacheFormat ?? "png";
   deleteImageCacheOnClose = settings.deleteImageCacheOnClose !== false;
   imageCacheFolder =
     settings.imageCachePath && path.isAbsolute(settings.imageCachePath)
@@ -2210,10 +2221,11 @@ void app.whenReady().then(async () => {
       let base: string;
       let contentType: string;
       if (url.hostname === "presentation-image" && parts.length === 1) {
-        const hash = hashSchema.parse(parts[0].replace(/\.png$/, ""));
+        const match = /^([a-f0-9]{64})\.(png|jpg)$/.exec(parts[0]);
+        if (!match) throw new Error("Invalid prepared image URL");
         base = imageCache.root;
-        file = path.join(base, hash + ".png");
-        contentType = "image/png";
+        file = path.join(base, match[1] + "." + match[2]);
+        contentType = match[2] === "jpg" ? "image/jpeg" : "image/png";
       } else if (url.hostname === "asset" && parts.length === 2) {
         if (parts[1] === "preview") {
           file = currentStorage.previewPath(parts[0]);

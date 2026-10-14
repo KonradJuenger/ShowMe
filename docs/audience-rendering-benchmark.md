@@ -31,6 +31,37 @@ This benchmark uses the Vite development server and headless Chromium. Its
 relative results are useful within that runtime; they are not native Electron
 release performance numbers.
 
+## Native cold-open image cache measurements
+
+The native image benchmark uses the built Electron app and real Sharp work:
+
+```powershell
+npm run build
+npm run benchmark:images -- --runs 3 --output .benchmark-data/image-cache/current
+```
+
+Each run creates a separate temporary Library, user-data directory and empty
+derived cache. The workload is 24 visible 2048 × 1536 patterned PNG sources,
+one hidden-slide 6000 × 4000 source and another 6000 × 4000 source in a hidden
+layer. Fixture generation is excluded from timings. Source file data may already
+be in the OS file cache; this measures a cold derived cache, not a cold disk.
+
+The report records the source revision and dirty state, machine/runtime/output
+geometry, editor startup, all-visible-variants completion, Present startup while
+background work remains, and whole-deck completion. It samples Electron process
+CPU counters, main-process RSS, the sum of process working sets, main IPC response
+latency, and editor rAF gaps/long tasks before pressing Present. Summed working
+sets can count shared pages more than once; they are not unique physical memory
+or GPU memory. Sampling starts when the first window is available and can miss
+short peaks. GUI/window startup is included in app CPU and elapsed timings.
+
+Compare repeated runs from matching clean builds on the same machine and display
+setup. The runner compiles to `.agenttmp/image-cache-benchmark.cjs`; that same
+compiled measurement harness can measure an older build lacking this command.
+Keep raw JSON locally and summarize medians and ranges in `areweslowyet.md`.
+Native measurements and the synthetic audience renderer benchmark are separate
+workloads; neither establishes the other's performance.
+
 Capture a local baseline with three fresh browser runs:
 
 ```powershell

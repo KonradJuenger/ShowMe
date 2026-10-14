@@ -7,6 +7,7 @@ import { createMediaElement } from "../../../src/core/media";
 import { ImagePreparationCoordinator } from "../../../src/core/imagePreparationCoordinator";
 import { audienceImageProfile, IMAGE_RECIPE, imageIdentity, type ImageRequirement } from "../../../src/core/presentationImages";
 import { audienceImageWindow } from "../../../src/core/audienceImageWindow";
+import { imageWorkerConcurrency } from "../../../src/core/imageWorkQueue";
 
 function imageDocument(assets = ["a", "b", "b", "c"]) {
   const model = newPresentationDocument("Audience image contracts");
@@ -60,6 +61,160 @@ it("whole-deck results are shared, navigation keeps the generation and status re
   read.completed = 0;
   expect(coordinator.status(model.documentId)?.completed).toBe(3);
   coordinator.close(model.documentId);
+});
+
+it("opening queues all 100 slides and hidden-layer images without navigation and respects CPU headroom", async () => {
+  const model = imageDocument(Array.from({ length: 100 }, () => "a"));
+  for (const [index, slide] of Object.values(model.slides).entries()) {
+    const content = slide.nodes[0].children[0].content!;
+    if (content.type !== "image") throw new Error("Expected image fixture");
+    content.assetId = index.toString(16).padStart(64, "0");
+    if (content.transform.rule === "free") throw new Error("Expected fitted image fixture");
+    content.transform.intrinsicWidth = content.transform.intrinsicHeight = 64;
+  }
+  model.deck.slideMeta.slide99.hidden = true;
+  model.deck.slideMeta.slide98.section = "slide0";
+  const hidden = structuredClone(model.slides.slide0.nodes[0].children[0]);
+  hidden.id = "hidden-image";
+  if (hidden.content?.type !== "image") throw new Error("Expected hidden image fixture");
+  hidden.content.assetId = "f".repeat(64);
+  model.deck.layers.push({ ...model.deck.layers[0], id: "hidden-layer", hidden: true });
+  for (const slide of Object.values(model.slides))
+    slide.nodes.push({ type: "layer", id: "hidden-layer", children: slide.id === "slide0" ? [hidden] : [] });
+  for (const template of Object.values(model.templates))
+    template.nodes.push({ type: "layer", id: "hidden-layer", children: [] });
+  let running = 0, peak = 0;
+  const releases: Array<() => void> = [], started: string[] = [], loaded: string[][] = [];
+  const coordinator = new ImagePreparationCoordinator({
+    concurrency: imageWorkerConcurrency(20),
+    projection: (_id, slideId) => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides[slideId ?? "slide0"], templates: model.templates }),
+    slides: (_id, ids) => { loaded.push([...ids]); return ids.map(id => model.slides[id]); },
+    profile: () => model.deck,
+    prepare: (_id, requirement) => new Promise(resolve => {
+      started.push(requirement.assetId); peak = Math.max(peak, ++running);
+      releases.push(() => { running--; resolve(prepared(requirement)); });
+    }),
+  });
+  try {
+    coordinator.prioritize(model.documentId, "slide50");
+    await coordinator.reconcile(model.documentId);
+    expect(new Set(loaded[0])).toEqual(new Set(model.deck.slideIds));
+    expect(coordinator.status(model.documentId)).toMatchObject({ total: 101, state: "preparing" });
+    expect(started).toHaveLength(15);
+    expect(started[0]).toBe((50).toString(16).padStart(64, "0"));
+    while (coordinator.status(model.documentId)?.state !== "ready") {
+      await vi.waitFor(() => expect(releases.length > 0 || coordinator.status(model.documentId)?.state === "ready").toBe(true), { interval: 1 });
+      for (const release of releases.splice(0)) release();
+    }
+    expect(new Set(started).size).toBe(101);
+    expect(peak).toBe(15);
+    expect(coordinator.status(model.documentId)).toMatchObject({ total: 101, completed: 101, state: "ready" });
+    expect(coordinator.image(model.documentId, "slide99", "image")).not.toBeNull();
+    expect(coordinator.image(model.documentId, "slide0", "hidden-image")).not.toBeNull();
+    const rendered = await coordinator.prepareSlide(model.documentId, "slide0", model.deck);
+    expect(rendered["hidden-image"]).toBeUndefined();
+  } finally {
+    coordinator.close(model.documentId);
+    for (const release of releases.splice(0)) release();
+  }
+});
+
+it("the editor prepares its audience variant without waiting for unrelated deck images", async () => {
+  const model = imageDocument(["b", "a"]);
+  let finish!: () => void;
+  const prepare = vi.fn(async (_id: string, requirement: ImageRequirement) => {
+    if (requirement.assetId === "b".repeat(64)) await new Promise<void>(resolve => { finish = resolve; });
+    return prepared(requirement);
+  });
+  const coordinator = new ImagePreparationCoordinator({
+    projection: (_id, slideId) => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides[slideId ?? "slide0"], templates: model.templates }),
+    profile: () => model.deck,
+    prepare,
+  });
+  try {
+    await coordinator.reconcile(model.documentId);
+    await vi.waitFor(() => expect(coordinator.status(model.documentId)).toMatchObject({ state: "preparing", completed: 0 }));
+    let image: Awaited<ReturnType<typeof coordinator.prepareSlide>> | undefined;
+    const pending = coordinator.prepareSlide(model.documentId, "slide1", model.deck, 1).then(result => { image = result; });
+    await vi.waitFor(() => expect(image?.image?.assetId).toBe("a".repeat(64)));
+    expect(coordinator.status(model.documentId)?.state).toBe("preparing");
+    expect(prepare).toHaveBeenCalledTimes(2);
+    await pending;
+  } finally {
+    finish();
+    await coordinator.ready(model.documentId);
+    coordinator.close(model.documentId);
+  }
+});
+
+it("presentation readiness excludes pending hidden slides and failed hidden layers while whole-deck precaching continues", async () => {
+  const model = imageDocument(["a", "b", "c"]);
+  model.deck.slideMeta.slide2.hidden = true;
+  const hidden = structuredClone(model.slides.slide0.nodes[0].children[0]);
+  hidden.id = "hidden-image";
+  if (hidden.content?.type !== "image") throw new Error("Expected image fixture");
+  hidden.content.assetId = "d".repeat(64);
+  model.deck.layers.push({ ...model.deck.layers[0], id: "hidden-layer", hidden: true });
+  for (const slide of Object.values(model.slides)) {
+    slide.nodes.push({ type: "layer", id: "hidden-layer", children: slide.id === "slide0" ? [hidden] : [] });
+    for (const root of slide.nodes) for (const element of root.children) {
+      const content = element.content;
+      if (content?.type === "image" && content.transform.rule !== "free")
+        content.transform.intrinsicWidth = content.transform.intrinsicHeight = 64;
+    }
+  }
+  for (const template of Object.values(model.templates))
+    template.nodes.push({ type: "layer", id: "hidden-layer", children: [] });
+  let release!: () => void;
+  const prepare = vi.fn(async (_id: string, requirement: ImageRequirement) => {
+    if (requirement.assetId === "c".repeat(64)) await new Promise<void>(resolve => { release = resolve; });
+    if (requirement.assetId === "d".repeat(64)) throw new Error("Hidden layer failure");
+    return prepared(requirement);
+  });
+  const coordinator = new ImagePreparationCoordinator({
+    projection: (_id, slideId) => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides[slideId ?? "slide0"], templates: model.templates }),
+    profile: () => model.deck, prepare,
+  });
+  try {
+    await coordinator.reconcile(model.documentId);
+    expect(await coordinator.presentationReady(model.documentId)).toMatchObject({ total: 2, completed: 2, state: "ready", failures: [] });
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledTimes(4));
+    expect(coordinator.status(model.documentId)).toMatchObject({ total: 4, state: "preparing" });
+    release();
+    await expect(coordinator.ready(model.documentId)).rejects.toThrow("Hidden layer failure");
+    expect(await coordinator.presentationReady(model.documentId)).toMatchObject({ state: "ready", failures: [] });
+    expect(coordinator.status(model.documentId)).toMatchObject({ state: "failed", failures: [{ message: "Hidden layer failure" }] });
+  } finally {
+    release?.();
+    coordinator.close(model.documentId);
+  }
+});
+
+it("presentation waiters follow replans and closing settles both readiness scopes", async () => {
+  const model = imageDocument(["a"]);
+  const releases: Array<() => void> = [];
+  const coordinator = new ImagePreparationCoordinator({
+    projection: () => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides.slide0, templates: model.templates }),
+    profile: () => model.deck,
+    prepare: (_id, requirement) => new Promise(resolve => { releases.push(() => resolve(prepared(requirement))); }),
+  });
+  await coordinator.reconcile(model.documentId);
+  const waiter = coordinator.presentationReady(model.documentId);
+  await coordinator.reconcile(model.documentId, true);
+  releases.shift()!();
+  await vi.waitFor(() => expect(releases).toHaveLength(1));
+  releases.shift()!();
+  expect(await waiter).toMatchObject({ total: 1, completed: 1, state: "ready" });
+  await coordinator.reconcile(model.documentId, true);
+  const presentationClosed = expect(coordinator.presentationReady(model.documentId)).rejects.toThrow("unavailable");
+  const cacheClosed = expect(coordinator.ready(model.documentId)).rejects.toThrow("unavailable");
+  coordinator.close(model.documentId);
+  releases.shift()!();
+  await Promise.all([presentationClosed, cacheClosed]);
 });
 
 it("a throwing image job remains failed but does not block healthy slides or per-instance original fallback", async () => {

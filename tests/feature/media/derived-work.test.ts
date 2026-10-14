@@ -8,10 +8,57 @@ import { createBasicShape } from "../../../src/core/elementFactory";
 import { createMediaElement } from "../../../src/core/media";
 import { ImagePreparationCoordinator } from "../../../src/core/imagePreparationCoordinator";
 import { DocumentRuntime } from "../../../src/core/documentRuntime";
-import { ImageWorkQueue } from "../../../src/core/imageWorkQueue";
+import { ImageWorkQueue, imageWorkerConcurrency } from "../../../src/core/imageWorkQueue";
+import { nativeImageConcurrency } from "../../../electron/imageProcessorPool";
+
+it("native image admission stays below libuv capacity and lets foreground work overtake waiting background jobs", async () => {
+  expect(nativeImageConcurrency).toBe(2);
+  const queue = new ImageWorkQueue(nativeImageConcurrency);
+  const releases: Array<() => void> = [], order: string[] = [];
+  const active = Array.from({ length: 2 }, () => queue.run(1, () => new Promise<void>(resolve => { releases.push(resolve); })));
+  await vi.waitFor(() => expect(releases).toHaveLength(2));
+  const background = queue.run(1, async () => { order.push("background"); });
+  const foreground = queue.run(1, async () => { order.push("foreground"); }, { priority: 3 });
+  try {
+    releases.shift()!();
+    await foreground;
+    expect(order[0]).toBe("foreground");
+  } finally {
+    for (const release of releases) release();
+    await Promise.all([...active, foreground, background]);
+  }
+});
+
+it("image worker sizing reserves CPU headroom and bounds admitted jobs with a safe minimum and fallback", async () => {
+  expect(imageWorkerConcurrency(20)).toBe(15);
+  expect(imageWorkerConcurrency(8)).toBe(6);
+  expect(imageWorkerConcurrency(4)).toBe(2);
+  expect(imageWorkerConcurrency(2)).toBe(1);
+  expect(imageWorkerConcurrency(1)).toBe(1);
+  expect(imageWorkerConcurrency(undefined)).toBe(2);
+  expect(imageWorkerConcurrency(NaN)).toBe(2);
+  expect(imageWorkerConcurrency(Infinity)).toBe(2);
+  const queue = new ImageWorkQueue(imageWorkerConcurrency(20));
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  let started = 0, active = 0, peak = 0;
+  const jobs = Array.from({ length: 16 }, () => queue.run(1, async () => {
+    started++;
+    peak = Math.max(peak, ++active);
+    await hold;
+    active--;
+  }));
+  try {
+    await vi.waitFor(() => expect(started).toBe(15));
+  } finally {
+    release();
+    await Promise.all(jobs);
+  }
+  expect(peak).toBe(15);
+});
 
 it("visible image demand overtakes queued background work without exceeding the memory budget", async () => {
-  const queue = new ImageWorkQueue();
+  const queue = new ImageWorkQueue(imageWorkerConcurrency(20));
   const order: string[] = [];
   let finishFirst!: () => void;
   let finishVisible!: () => void;

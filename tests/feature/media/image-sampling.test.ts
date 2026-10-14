@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { newPresentationDocument } from "../../../src/core/document";
 import { createMediaElement } from "../../../src/core/media";
 import {
-  canvasImagePixels,
+  imagePixels,
   maximumElementScale,
   planPresentationImages,
 } from "../../../src/core/presentationImages";
@@ -32,40 +32,22 @@ function imageSlide() {
   return { deck: document.deck, slide, element };
 }
 
-it("canvas tiers ceil each dimension and preserve exact tier boundaries", () => {
-  expect(canvasImagePixels(1)).toBe(256);
-  expect(canvasImagePixels(255.1)).toBe(256);
-  expect(canvasImagePixels(256)).toBe(256);
-  expect(canvasImagePixels(256.01)).toBe(512);
-  expect(canvasImagePixels(768)).toBe(768);
+it("image dimensions round up to individual pixels without canvas tiers", () => {
+  expect(imagePixels(1)).toBe(1);
+  expect(imagePixels(255.1)).toBe(256);
+  expect(imagePixels(256)).toBe(256);
+  expect(imagePixels(256.01)).toBe(257);
+  expect(imagePixels(768)).toBe(768);
 });
 
-it("small canvas resizes reuse a tier while presentation retains exact requirements", () => {
+it("image geometry changes request the exact audience resolution", () => {
   const { deck, slide, element } = imageSlide();
   const output = { width: deck.width, height: deck.height };
-  const canvas = { ...output, sampling: "canvas" as const };
-  expect(planPresentationImages(deck, [slide], canvas)[0]).toMatchObject({
-    width: 768,
-    height: 768,
-  });
-  expect(planPresentationImages(deck, [slide], output)[0]).toMatchObject({
-    width: 600,
-    height: 600,
-  });
+  expect(planPresentationImages(deck, [slide], output)[0]).toMatchObject({ width: 600, height: 600 });
   element.frame.width = element.frame.height = 650;
-  expect(planPresentationImages(deck, [slide], canvas)[0]).toMatchObject({
-    width: 768,
-    height: 768,
-  });
-  expect(planPresentationImages(deck, [slide], output)[0]).toMatchObject({
-    width: 650,
-    height: 650,
-  });
+  expect(planPresentationImages(deck, [slide], output)[0]).toMatchObject({ width: 650, height: 650 });
   element.frame.width = element.frame.height = 769;
-  expect(planPresentationImages(deck, [slide], canvas)[0]).toMatchObject({
-    width: 1024,
-    height: 1024,
-  });
+  expect(planPresentationImages(deck, [slide], output)[0]).toMatchObject({ width: 769, height: 769 });
 });
 
 it("exact presentation sampling follows the output display resolution", () => {

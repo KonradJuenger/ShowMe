@@ -6,6 +6,7 @@ import { platform } from "../platform";
 import { formatExportWarnings } from "../export/shared";
 import { LibraryStorageSettings } from "./LibraryStorageSettings";
 import { NewPresentationDialog } from "./NewPresentationDialog";
+import type { ImageCacheFormat } from "../core/presentationImages";
 import type { MediaLibraryInfo } from "../platform/api";
 
 interface PresentationMenuProps {
@@ -47,6 +48,7 @@ export function PresentationMenu({
   const [position, setPosition] = useState<MenuPosition>({ top: 0, left: 0 });
   const settingsRef = useRef<HTMLElement>(null);
   const [imageCaching, setImageCaching] = useState(true);
+  const [imageCacheFormat, setImageCacheFormat] = useState<ImageCacheFormat>("png");
   const [deleteCacheOnClose, setDeleteCacheOnClose] = useState(true);
   const [cacheFolder, setCacheFolder] = useState<MediaLibraryInfo | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
@@ -133,13 +135,15 @@ export function PresentationMenu({
       platform.getImageCachingEnabled?.() ?? Promise.resolve(true),
       platform.getDeleteImageCacheOnClose?.() ?? Promise.resolve(true),
       platform.getImageCacheFolder?.() ?? Promise.resolve(null),
+      platform.getImageCacheFormat?.() ?? Promise.resolve<ImageCacheFormat>("png"),
     ])
-      .then(([info, enabled, deleteOnClose, folder]) => {
+      .then(([info, enabled, deleteOnClose, folder, format]) => {
         if (live) {
           setMediaLibrary(info);
           setImageCaching(enabled);
           setDeleteCacheOnClose(deleteOnClose);
           setCacheFolder(folder);
+          setImageCacheFormat(format);
         }
       })
       .catch(onError)
@@ -419,6 +423,19 @@ export function PresentationMenu({
                   void platform.setImageCachingEnabled?.(enabled).then(() => setImageCaching(enabled)).catch(onError).finally(() => setCacheBusy(false));
                 }} /> Enable image caching</label>
                 <p>Prepare whole images at the resolution needed by the editor, thumbnails and presentation. Originals retain all their detail.</p>
+                {platform.setImageCacheFormat && <>
+                  <label>Image cache format{" "}
+                    <select aria-label="Image cache format" value={imageCacheFormat} disabled={cacheBusy || settingsBusy} onChange={event => {
+                      const format = event.target.value as ImageCacheFormat;
+                      setCacheBusy(true);
+                      void platform.setImageCacheFormat!(format).then(() => setImageCacheFormat(format)).catch(onError).finally(() => setCacheBusy(false));
+                    }}>
+                      <option value="png">PNG (lossless)</option>
+                      <option value="jpg">JPG (maximum quality)</option>
+                    </select>
+                  </label>
+                  <p>JPG uses maximum quality. Images with transparency or high bit depth always use PNG. Originals are unchanged.</p>
+                </>}
                 {platform.setDeleteImageCacheOnClose && <label><input type="checkbox" checked={deleteCacheOnClose} disabled={cacheBusy || settingsBusy} onChange={event => {
                   const enabled = event.target.checked;
                   setCacheBusy(true);

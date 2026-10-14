@@ -2,17 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import sharp from "sharp";
 import { readyEditor } from "../../helpers/startup";
 
-declare global {
-  interface Window {
-    canvasImageChanges: string[];
-    canvasImageRequests: number;
-  }
-}
-
-test("small production canvas resizes neither request nor replace the displayed variant", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+async function importImage(page: Page) {
   await page.goto("/");
   await readyEditor(page);
   const buffer = await sharp({
@@ -27,7 +17,7 @@ test("small production canvas resizes neither request nor replace the displayed 
     .toBuffer();
   await page
     .getByTestId("import-files")
-    .setInputFiles({ name: "Resize.png", mimeType: "image/png", buffer });
+    .setInputFiles({ name: "Shared.png", mimeType: "image/png", buffer });
   const image = page
     .locator("[data-editor-stage] [data-media-asset-id] img")
     .first();
@@ -35,72 +25,136 @@ test("small production canvas resizes neither request nor replace the displayed 
   await expect(
     page.locator('[data-editor-stage] [data-media-loading="true"]'),
   ).toHaveCount(0);
-  const original = await image.getAttribute("src");
-  await image.evaluate((node) => {
-    window.canvasImageChanges = [];
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (
-          mutation.type === "attributes" &&
-          mutation.attributeName === "src" &&
-          mutation.target === node
-        )
-          window.canvasImageChanges.push("source changed");
-        if (!node.isConnected) window.canvasImageChanges.push("image removed");
-      }
-    });
-    observer.observe(document.querySelector("[data-editor-stage]")!, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ["src"],
-    });
-  });
-  await page.evaluate(async () => {
-    const path = "/src/platform/index.ts";
-    const { platform }: typeof import("../../../src/platform") = await import(
-      /* @vite-ignore */ path
+  return image;
+}
+
+test("editor reuses the audience variant and canvas zoom creates no additional image variants", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const image = await importImage(page);
+  const shared = await page.evaluate(async () => {
+    const { platform } = (await import(
+      "/src/platform/index.ts" as string
+    )) as typeof import("../../../src/platform");
+    const id = document
+      .querySelector("[data-editor]")!
+      .getAttribute("data-document-id")!;
+    const projection = await platform.documentProjection!(id);
+    const profile = await platform.audienceImageProfile!(id);
+    const editor = await platform.preparedSlideImages!(id, projection.slide.id);
+    const audience = await platform.preparedSlideImages!(
+      id,
+      projection.slide.id,
+      profile,
     );
-    const prepare = platform.preparedSlideImages!;
-    window.canvasImageRequests = 0;
-    platform.preparedSlideImages = (...args) => {
-      if (args[2]?.sampling === "canvas") window.canvasImageRequests++;
-      return prepare(...args);
+    const first = Object.keys(editor)[0];
+    const result = {
+      editor: editor[first],
+      audience: audience[first],
+      jobs: (await platform.presentationImageDiagnostics!()).jobs,
     };
+    for (const images of [editor, audience])
+      for (const url of new Set(
+        Object.values(images).flatMap((image) => (image ? [image.url] : [])),
+      ))
+        platform.releaseUrl(url);
+    return result;
   });
-  const handle = page.locator('[data-selection-handle="se"]');
-  const box = (await handle.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 2, box.y + box.height / 2 + 2, {
-    steps: 3,
-  });
-  await page.mouse.up();
+  expect(shared.editor).not.toBeNull();
+  expect(shared.editor!.hash).toBe(shared.audience!.hash);
+  await expect(image).toHaveAttribute("src", shared.editor!.url);
+  expect(
+    await image.evaluate((node: HTMLImageElement) => [
+      node.naturalWidth,
+      node.naturalHeight,
+    ]),
+  ).toEqual([shared.audience!.width, shared.audience!.height]);
+  const canvas = page.locator("[data-editor-stage] .slide-renderer");
+  const before = (await canvas.boundingBox())!.width;
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await expect
+    .poll(async () => (await canvas.boundingBox())!.width)
+    .not.toBe(before);
   await expect(
     page.locator('[data-editor-stage] [data-media-loading="true"]'),
   ).toHaveCount(0);
-  await expect(image).toHaveAttribute("src", original!);
-  expect(await page.evaluate(() => window.canvasImageRequests)).toBe(0);
-  expect(await page.evaluate(() => window.canvasImageChanges)).toEqual([]);
+  await expect(image).toHaveAttribute("src", shared.editor!.url);
+  expect(
+    await page.evaluate(async () => {
+      const { platform } = (await import(
+        "/src/platform/index.ts" as string
+      )) as typeof import("../../../src/platform");
+      return (await platform.presentationImageDiagnostics!()).jobs;
+    }),
+  ).toBe(shared.jobs);
 });
 
-async function harness(page: Page, canvasSampling = false) {
+test("editor follows audience output changes and shares its exact image dimensions", async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem("showme-image-cache-format", "jpg"));
+  const image = await importImage(page);
+  const popup = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Present", exact: true }).click();
+  const audience = await popup;
+  await audience.setViewportSize({ width: 1111, height: 777 });
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const { platform } = (await import(
+          "/src/platform/index.ts" as string
+        )) as typeof import("../../../src/platform");
+        const id = document
+          .querySelector("[data-editor]")!
+          .getAttribute("data-document-id")!;
+        return platform.audienceImageProfile!(id);
+      }),
+    )
+    .toEqual({ width: 1111, height: 777 });
+  const expected = await page.evaluate(async () => {
+    const { platform } = (await import(
+      "/src/platform/index.ts" as string
+    )) as typeof import("../../../src/platform");
+    const id = document
+      .querySelector("[data-editor]")!
+      .getAttribute("data-document-id")!;
+    const projection = await platform.documentProjection!(id);
+    const images = await platform.preparedSlideImages!(id, projection.slide.id);
+    const image = Object.values(images).find((image) => image)!;
+    const result = [image.width, image.height];
+    for (const url of new Set(
+      Object.values(images).flatMap((image) => (image ? [image.url] : [])),
+    ))
+      platform.releaseUrl(url);
+    return result;
+  });
+  const dimensions = (node: HTMLImageElement) => [
+    node.naturalWidth,
+    node.naturalHeight,
+  ];
+  await expect.poll(() => image.evaluate(dimensions)).toEqual(expected);
+  const audienceImage = audience
+    .locator("[data-active-slide] [data-media-asset-id] img")
+    .first();
+  await expect.poll(() => audienceImage.evaluate(dimensions)).toEqual(expected);
+});
+
+async function harness(page: Page) {
   await page.goto("/");
   await readyEditor(page);
-  await page.evaluate(async (canvasSampling) => {
+  await page.evaluate(async () => {
     const path = "/tests/helpers/preparedImageHarness.tsx";
     const {
       mountPreparedImageHarness,
     }: typeof import("../../helpers/preparedImageHarness") = await import(
       /* @vite-ignore */ path
     );
-    mountPreparedImageHarness(canvasSampling);
-  }, canvasSampling);
+    mountPreparedImageHarness();
+  });
   await expect(page.getByLabel("Requests")).toHaveText("1");
   await page.getByRole("button", { name: "Finish preparation" }).click();
-  await expect(page.getByLabel("Displayed resolution")).toHaveText(
-    canvasSampling ? "256" : "100",
-  );
+  await expect(page.getByLabel("Displayed resolution")).toHaveText("100");
 }
 
 test("resize retains the displayed image and requests the final resolution only after release", async ({
@@ -124,29 +178,6 @@ test("resize retains the displayed image and requests the final resolution only 
   await expect(page.getByLabel("Displayed URL releases")).toHaveText("0");
 });
 
-test("canvas reuses its decoded image within a tier and upgrades upwards across the boundary", async ({
-  page,
-}) => {
-  await harness(page, true);
-  const image = page.getByRole("img", { name: "Canvas image" });
-  const original = await image.getAttribute("src");
-  await page.getByRole("button", { name: "Begin resize" }).click();
-  await page.getByRole("button", { name: "Enlarge" }).click();
-  await page.getByRole("button", { name: "End resize" }).click();
-  await expect(page.getByLabel("Gesture")).toHaveText("idle");
-  await expect(page.getByLabel("Requests")).toHaveText("1");
-  await expect(page.getByLabel("Released images")).toHaveText("0");
-  await expect(page.getByLabel("Displayed resolution")).toHaveText("256");
-  await expect(image).toHaveAttribute("src", original!);
-  await page.getByRole("button", { name: "Begin resize" }).click();
-  await page.getByRole("button", { name: "Enlarge" }).click();
-  await page.getByRole("button", { name: "End resize" }).click();
-  await expect(page.getByLabel("Requests")).toHaveText("2");
-  await page.getByRole("button", { name: "Finish preparation" }).click();
-  await expect(page.getByLabel("Displayed resolution")).toHaveText("512");
-  await expect(image).not.toHaveAttribute("src", original!);
-});
-
 test("an in-flight upgrade cannot replace the displayed image during resize", async ({
   page,
 }) => {
@@ -161,18 +192,6 @@ test("an in-flight upgrade cannot replace the displayed image during resize", as
   await expect(page.getByLabel("Requests")).toHaveText("3");
   await page.getByRole("button", { name: "Finish preparation" }).click();
   await expect(page.getByLabel("Displayed resolution")).toHaveText("200");
-});
-
-test("explicit cache invalidation still rechecks a retained canvas tier", async ({
-  page,
-}) => {
-  await harness(page, true);
-  await page.getByRole("button", { name: "Clear cache" }).click();
-  await expect(page.getByLabel("Requests")).toHaveText("2");
-  await page.getByRole("button", { name: "Finish preparation" }).click();
-  await expect(page.getByLabel("Released images")).toHaveText("1");
-  await expect(page.getByLabel("Displayed URL releases")).toHaveText("0");
-  await expect(page.getByLabel("Displayed resolution")).toHaveText("256");
 });
 
 test("exact presentation rechecks retain identical decoded pixels and release only the redundant URL", async ({
@@ -204,4 +223,34 @@ test("exact presentation rechecks retain identical decoded pixels and release on
     source!,
   );
   await expect(page.getByLabel("Repeated decodes")).toHaveText("0");
+});
+
+test("image cache format setting changes displayed variants, reuses PNG on switching back and persists", async ({ page }) => {
+  const image = await importImage(page);
+  const mime = () => image.evaluate(async (node: HTMLImageElement) => (await fetch(node.src)).headers.get("content-type"));
+  await expect.poll(mime).toBe("image/png");
+  await page.getByRole("button", { name: "Presentation menu" }).click();
+  await page.getByRole("menuitem", { name: "Settings…", exact: true }).click();
+  const setting = page.getByRole("combobox", { name: "Image cache format" });
+  await expect(setting).toHaveValue("png");
+  await setting.selectOption("jpg");
+  await expect(setting).toHaveValue("jpg");
+  await expect.poll(mime).toBe("image/jpeg");
+  const jobs = await page.evaluate(async () => {
+    const { platform } = await import("/src/platform/index.ts" as string) as typeof import("../../../src/platform");
+    return (await platform.presentationImageDiagnostics!()).jobs;
+  });
+  await setting.selectOption("png");
+  await expect.poll(mime).toBe("image/png");
+  expect(await page.evaluate(async () => {
+    const { platform } = await import("/src/platform/index.ts" as string) as typeof import("../../../src/platform");
+    return (await platform.presentationImageDiagnostics!()).jobs;
+  })).toBe(jobs);
+  await setting.selectOption("jpg");
+  await expect.poll(mime).toBe("image/jpeg");
+  await page.reload();
+  await readyEditor(page);
+  await page.getByRole("button", { name: "Presentation menu" }).click();
+  await page.getByRole("menuitem", { name: "Settings…", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Image cache format" })).toHaveValue("jpg");
 });

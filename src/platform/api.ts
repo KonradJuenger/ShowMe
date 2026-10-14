@@ -186,17 +186,17 @@ export interface Platform {
     documentId: string,
     slideId: string,
     elementId: string,
-    profile?: import("../core/presentationImages").ImageRequestProfile,
+    profile?: import("../core/presentationImages").ImageOutputProfile,
   ): Promise<import("../core/presentationImages").PreparedImage | null>;
+  /** Omitted output uses the shared audience profile, independent of editor zoom. */
   preparedSlideImages?(
     documentId: string,
     slideId: string,
-    profile: import("../core/presentationImages").ImageRequestProfile,
+    profile?: import("../core/presentationImages").ImageOutputProfile,
   ): Promise<import("../core/presentationImages").PreparedSlideImages>;
   /** Audience-only preparation handshake; completes the current whole-deck plan. */
   prepareAudience?(documentId: string): Promise<import("../core/presentationImages").ImageOutputProfile>;
   audienceImageProfile?(documentId: string): Promise<import("../core/presentationImages").ImageOutputProfile>;
-  prioritizeCanvasImages?(documentId: string, slideId: string): Promise<void>;
   preparedAssetImage?(
     assetId: string,
     size: number,
@@ -205,6 +205,8 @@ export interface Platform {
   chooseImageCacheFolder?(): Promise<MediaLibraryInfo | null>;
   resetImageCacheFolder?(): Promise<MediaLibraryInfo>;
   getImageCachingEnabled?(): Promise<boolean>;
+  getImageCacheFormat?(): Promise<import("../core/presentationImages").ImageCacheFormat>;
+  setImageCacheFormat?(format: import("../core/presentationImages").ImageCacheFormat): Promise<void>;
   getDeleteImageCacheOnClose?(): Promise<boolean>;
   setDeleteImageCacheOnClose?(enabled: boolean): Promise<void>;
   setImageCachingEnabled?(enabled: boolean): Promise<void>;
