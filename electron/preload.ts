@@ -24,6 +24,8 @@ const methods = [
   "resetImageCacheFolder",
   "clearPresentationImages",
   "getImageCachingEnabled",
+  "getImageCacheFormat",
+  "setImageCacheFormat",
   "getDeleteImageCacheOnClose",
   "setDeleteImageCacheOnClose",
   "setImageCachingEnabled",

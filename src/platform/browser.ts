@@ -5,6 +5,8 @@ import { resolveSlide } from "../core/templates";
 import { ImageWorkQueue } from "../core/imageWorkQueue";
 import {
   imageDimensions,
+  imageExtension,
+  type ImageCacheFormat,
   audienceImageProfile as outputImageProfile,
   type ImageRequirement,
   type ImageOutputProfile,
@@ -203,6 +205,7 @@ function notifyBrowserImageCacheChanged() {
 }
 let imageCachingEnabled =
   localStorage.getItem("showme-image-caching") !== "false";
+let imageCacheFormat: ImageCacheFormat = localStorage.getItem("showme-image-cache-format") === "jpg" ? "jpg" : "png";
 const presentationRole = new URLSearchParams(location.search).get("present");
 let presentation: PresenterState | null = null;
 let browserAudienceProfile: ImageOutputProfile | null = null;
@@ -218,6 +221,14 @@ channel.onmessage = (event) => {
     browserRuntimes.delete(documentId);
     for (const listener of acceptedListeners)
       listener({ documentId, accepted });
+    return;
+  }
+  if (event.data?.type === "image-cache-format") {
+    if (event.data.format !== "png" && event.data.format !== "jpg") return;
+    browserImages.suspend();
+    imageCacheFormat = event.data.format;
+    if (imageCachingEnabled) browserImages.resume();
+    notifyBrowserImageCacheChanged();
     return;
   }
   if (event.data?.type === "image-cache-setting") {
@@ -463,7 +474,7 @@ async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0
   const generation = browserImageGeneration;
   const blob = await get<Blob>("blob/" + requirement.assetId);
   if (!blob) throw new Error("Image asset is missing");
-  const descriptor = await browserImageDescriptor(blob, requirement.assetId, requirement.size, requirement.width, requirement.height);
+  const descriptor = await browserImageDescriptor(blob, requirement.assetId, requirement.size, requirement.width, requirement.height, imageCacheFormat);
   if (!descriptor || generation !== browserImageGeneration || clearingBrowserImages) return null;
   const key = `${generation}:${descriptor.hash}`;
   const demand = Math.max(browserImageDemands.get(key) ?? 0, priority);
@@ -476,7 +487,7 @@ async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0
   const pending = navigator.locks.request("show-me-image-cache", { mode: "shared" }, () =>
     navigator.locks.request("show-me-image:" + descriptor.hash, async () => {
       if (generation !== browserImageGeneration || clearingBrowserImages) return null;
-      const cacheKey = browserImageKey(descriptor.hash);
+      const cacheKey = browserImageKey(descriptor.hash, descriptor.mime);
       const cached = await get<Blob>(cacheKey);
       if (cached && (validatedBrowserImages.has(cacheKey) || await validBrowserImage({ blob: cached, descriptor }, requirement.assetId))) {
         validatedBrowserImages.add(cacheKey);
@@ -488,7 +499,7 @@ async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0
         browserImageDiagnostics.jobs++;
         browserImageDiagnostics.pending++;
         let record: BrowserImageRecord | null;
-        try { record = await createBrowserImage(blob, requirement.assetId, requirement.size, descriptor.width, descriptor.height); }
+        try { record = await createBrowserImage(blob, requirement.assetId, requirement.size, descriptor.width, descriptor.height, imageExtension(descriptor.mime)); }
         finally { browserImageDiagnostics.pending--; }
         if (!record) { unsupportedBrowserImages.add(requirement.assetId); return null; }
         if (generation !== browserImageGeneration || clearingBrowserImages) return null;
@@ -580,7 +591,7 @@ const imageUrlHashes = new Map<string, string>();
 async function leaseBrowserImage(image: PreparedImage): Promise<PreparedImage> {
   let entry = imageUrls.get(image.hash);
   if (!entry) {
-    const blob = await get<Blob>(browserImageKey(image.hash));
+    const blob = await get<Blob>(browserImageKey(image.hash, image.mime));
     if (!blob) throw new Error("Prepared image disappeared");
     // Another request may have installed a lease while IndexedDB was loading.
     entry = imageUrls.get(image.hash);
@@ -620,6 +631,17 @@ export const browser: Platform = {
     };
   },
   getImageCachingEnabled: async () => imageCachingEnabled,
+  getImageCacheFormat: async () => imageCacheFormat,
+  async setImageCacheFormat(format) {
+    if (format !== "png" && format !== "jpg") throw new Error("Invalid image cache format");
+    if (format === imageCacheFormat) return;
+    localStorage.setItem("showme-image-cache-format", format);
+    browserImages.suspend();
+    imageCacheFormat = format;
+    if (imageCachingEnabled) browserImages.resume();
+    channel.postMessage({ type: "image-cache-format", format });
+    notifyBrowserImageCacheChanged();
+  },
   async setImageCachingEnabled(enabled) {
     localStorage.setItem("showme-image-caching", String(enabled));
     imageCachingEnabled = enabled;

@@ -11,6 +11,7 @@ import {
   audienceImageProfile as outputImageProfile,
   MAX_PREPARED_IMAGE_PIXELS,
   type ImageOutputProfile,
+  type ImageCacheFormat,
 } from "../src/core/presentationImages";
 import { ImagePreparationCoordinator } from "../src/core/imagePreparationCoordinator";
 import {
@@ -380,6 +381,7 @@ collaboration.subscribe(
 );
 
 let imageCachingEnabled = true;
+let imageCacheFormat: ImageCacheFormat = "png";
 let deleteImageCacheOnClose = true;
 let imageCacheFolder = "";
 const imageCacheSession = randomUUID();
@@ -397,6 +399,7 @@ const imageCache = new ImageVariantCache(
   path.join(__dirname, "imageWorker.cjs"),
   () => path.join(imageCacheFolder, "showme", "retained", "images"),
   () => !deleteImageCacheOnClose,
+  () => imageCacheFormat,
 );
 let measuredAudienceProfile: ImageOutputProfile | null = null;
 function imagePreparationProfile() {
@@ -1157,6 +1160,18 @@ const operations: Record<string, (...args: any[]) => any> = {
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
   getImageCachingEnabled: () => imageCachingEnabled,
+  getImageCacheFormat: () => imageCacheFormat,
+  async setImageCacheFormat(value: unknown) {
+    const format = z.enum(["png", "jpg"]).parse(value);
+    if (format === imageCacheFormat) return;
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.imageCacheFormat = format;
+    await writeSettings(app.getPath("userData"), settings);
+    imagePreparation.suspend();
+    imageCacheFormat = format;
+    if (imageCachingEnabled) imagePreparation.resume();
+    notifyImageCacheChanged();
+  },
   getDeleteImageCacheOnClose: () => deleteImageCacheOnClose,
   async setDeleteImageCacheOnClose(value: unknown) {
     const enabled = z.boolean().parse(value);
@@ -2052,6 +2067,7 @@ void app.whenReady().then(async () => {
   }
   lifecycleMode = settings.libraryLifecycleMode ?? "managed";
   imageCachingEnabled = settings.imageCachingEnabled !== false;
+  imageCacheFormat = settings.imageCacheFormat ?? "png";
   deleteImageCacheOnClose = settings.deleteImageCacheOnClose !== false;
   imageCacheFolder =
     settings.imageCachePath && path.isAbsolute(settings.imageCachePath)
@@ -2203,10 +2219,11 @@ void app.whenReady().then(async () => {
       let base: string;
       let contentType: string;
       if (url.hostname === "presentation-image" && parts.length === 1) {
-        const hash = hashSchema.parse(parts[0].replace(/\.png$/, ""));
+        const match = /^([a-f0-9]{64})\.(png|jpg)$/.exec(parts[0]);
+        if (!match) throw new Error("Invalid prepared image URL");
         base = imageCache.root;
-        file = path.join(base, hash + ".png");
-        contentType = "image/png";
+        file = path.join(base, match[1] + "." + match[2]);
+        contentType = match[2] === "jpg" ? "image/jpeg" : "image/png";
       } else if (url.hostname === "asset" && parts.length === 2) {
         if (parts[1] === "preview") {
           file = currentStorage.previewPath(parts[0]);

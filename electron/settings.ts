@@ -6,6 +6,7 @@ import { atomicWrite } from "./storage";
 const appSettingsSchema = z.object({
   storageWarningSeen: z.boolean().optional(),
   imageCachingEnabled: z.boolean().optional(),
+  imageCacheFormat: z.enum(["png", "jpg"]).optional(),
   deleteImageCacheOnClose: z.boolean().optional(),
   imageCachePath: z.string().nullable().optional(),
   mediaLibraryPath: z.string().nullable().optional(),

@@ -30,6 +30,20 @@ Implemented on `chatgpt/audience-loading-reproduction`; `main` remains unchanged
   unrelated deck images are still preparing. Gesture deferral, decoded URL
   ownership, original-image fallback and audience readiness remain intact.
 
+Settings now offers PNG (the default) or JPG at maximum quality for the shared
+image cache. Desktop JPEG encoding uses quality 100 with 4:4:4 chroma; browser
+encoding uses quality 1. Transparent sources always remain PNG, including a
+single transparent source pixel that could disappear during downsampling.
+Opaque images with an unused alpha channel may use JPG. Native high bit-depth
+sources remain PNG to preserve precision; unsupported browser sources keep the
+existing original-image fallback. Original assets are never rewritten.
+
+Encoding recipes and file extensions distinguish JPG and PNG at identical
+source/dimension keys. Existing current PNG entries keep their identity; JPG
+adds its own versioned recipe. Switching the preference invalidates displayed
+plans without deleting reusable variants. Both encodings participate in retained
+cache reuse, validation, explicit clearing and session cleanup.
+
 There is still one document authority and persistence path. No document/package
 format changes, historical readers or flattened slide rendering were introduced.
 Motion, effects, video, transitions, editing and export use the canonical renderer.

@@ -1,5 +1,6 @@
 import { parentPort } from "node:worker_threads";
 import { processPresentationImage } from "./imageProcessor";
+import type { ImageCacheFormat } from "../src/core/presentationImages";
 
 export interface ImageWorkerRequest {
   source: string;
@@ -8,10 +9,19 @@ export interface ImageWorkerRequest {
   output: string;
   width?: number;
   height?: number;
+  format?: ImageCacheFormat;
 }
 parentPort?.on(
   "message",
-  ({ source, assetId, size, output, width, height }: ImageWorkerRequest) => {
+  ({
+    source,
+    assetId,
+    size,
+    output,
+    width,
+    height,
+    format,
+  }: ImageWorkerRequest) => {
     void processPresentationImage(
       source,
       assetId,
@@ -19,6 +29,7 @@ parentPort?.on(
       output,
       width,
       height,
+      format,
     ).then(
       (result) => parentPort?.postMessage({ result }),
       (error) =>

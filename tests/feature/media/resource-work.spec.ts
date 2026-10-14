@@ -156,3 +156,33 @@ test("tiled image preparation preserves EXIF orientation, alpha and representati
   expect(samples.rotated.bottom[2]).toBeGreaterThan(245);
   expect(samples.rotated.bottom[0]).toBeLessThan(5);
 });
+
+test("browser JPG preference uses maximum quality and preserves even a single source transparency pixel as PNG", async ({ page }) => {
+  const rgba = Buffer.alloc(64 * 48 * 4, 255);
+  const opaque = await sharp(rgba, { raw: { width: 64, height: 48, channels: 4 } }).png().toBuffer();
+  rgba[3] = 0;
+  const alpha = await sharp(rgba, { raw: { width: 64, height: 48, channels: 4 } }).png().toBuffer();
+  await page.goto("/");
+  const results = await page.evaluate(async inputs => {
+    const { browserImageDescriptor, createBrowserImage, validBrowserImage } = await import("/src/platform/browserImageCache.ts" as string) as typeof import("../../../src/platform/browserImageCache");
+    const rows = [];
+    for (const input of inputs) {
+      const bytes = Uint8Array.from(atob(input), ch => ch.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "image/png" });
+      const id = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(byte => byte.toString(16).padStart(2, "0")).join("");
+      const descriptor = await browserImageDescriptor(blob, id, 32, 32, 24, "jpg");
+      const image = await createBrowserImage(blob, id, 32, 32, 24, "jpg");
+      const encoded = new Uint8Array(await image!.blob.arrayBuffer());
+      rows.push({ descriptor, image: image!.descriptor, mime: image!.blob.type, valid: await validBrowserImage(image!, id), bytes: Array.from(encoded) });
+    }
+    return rows;
+  }, [opaque.toString("base64"), alpha.toString("base64")]);
+  expect(results[0].descriptor?.mime).toBe("image/jpeg");
+  expect(results[0].mime).toBe("image/jpeg");
+  expect(results[0].descriptor?.hash).toBe(results[0].image.hash);
+  expect(await sharp(Buffer.from(results[0].bytes)).metadata()).toMatchObject({ format: "jpeg", chromaSubsampling: "4:4:4", width: 32, height: 24 });
+  expect(results[1].descriptor?.mime).toBe("image/png");
+  expect(results[1].mime).toBe("image/png");
+  expect(results[1].descriptor?.hash).toBe(results[1].image.hash);
+  expect(results.map(row => row.valid)).toEqual([true, true]);
+});

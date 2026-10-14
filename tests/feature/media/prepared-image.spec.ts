@@ -93,6 +93,7 @@ test("editor reuses the audience variant and canvas zoom creates no additional i
 test("editor follows audience output changes and shares its exact image dimensions", async ({
   page,
 }) => {
+  await page.addInitScript(() => localStorage.setItem("showme-image-cache-format", "jpg"));
   const image = await importImage(page);
   const popup = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Present", exact: true }).click();
@@ -222,4 +223,34 @@ test("exact presentation rechecks retain identical decoded pixels and release on
     source!,
   );
   await expect(page.getByLabel("Repeated decodes")).toHaveText("0");
+});
+
+test("image cache format setting changes displayed variants, reuses PNG on switching back and persists", async ({ page }) => {
+  const image = await importImage(page);
+  const mime = () => image.evaluate(async (node: HTMLImageElement) => (await fetch(node.src)).headers.get("content-type"));
+  await expect.poll(mime).toBe("image/png");
+  await page.getByRole("button", { name: "Presentation menu" }).click();
+  await page.getByRole("menuitem", { name: "Settings…", exact: true }).click();
+  const setting = page.getByRole("combobox", { name: "Image cache format" });
+  await expect(setting).toHaveValue("png");
+  await setting.selectOption("jpg");
+  await expect(setting).toHaveValue("jpg");
+  await expect.poll(mime).toBe("image/jpeg");
+  const jobs = await page.evaluate(async () => {
+    const { platform } = await import("/src/platform/index.ts" as string) as typeof import("../../../src/platform");
+    return (await platform.presentationImageDiagnostics!()).jobs;
+  });
+  await setting.selectOption("png");
+  await expect.poll(mime).toBe("image/png");
+  expect(await page.evaluate(async () => {
+    const { platform } = await import("/src/platform/index.ts" as string) as typeof import("../../../src/platform");
+    return (await platform.presentationImageDiagnostics!()).jobs;
+  })).toBe(jobs);
+  await setting.selectOption("jpg");
+  await expect.poll(mime).toBe("image/jpeg");
+  await page.reload();
+  await readyEditor(page);
+  await page.getByRole("button", { name: "Presentation menu" }).click();
+  await page.getByRole("menuitem", { name: "Settings…", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Image cache format" })).toHaveValue("jpg");
 });

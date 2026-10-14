@@ -205,6 +205,8 @@ export interface Platform {
   chooseImageCacheFolder?(): Promise<MediaLibraryInfo | null>;
   resetImageCacheFolder?(): Promise<MediaLibraryInfo>;
   getImageCachingEnabled?(): Promise<boolean>;
+  getImageCacheFormat?(): Promise<import("../core/presentationImages").ImageCacheFormat>;
+  setImageCacheFormat?(format: import("../core/presentationImages").ImageCacheFormat): Promise<void>;
   getDeleteImageCacheOnClose?(): Promise<boolean>;
   setDeleteImageCacheOnClose?(enabled: boolean): Promise<void>;
   setImageCachingEnabled?(enabled: boolean): Promise<void>;

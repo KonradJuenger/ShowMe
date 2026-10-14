@@ -249,8 +249,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-10",
-    "lastReviewed": "2026-10-14",
-    "reason": "Editor and audience share exact variants across canvas zoom and audience output changes; gesture deferral retains pixels, in-flight swaps wait for release and identical rechecks preserve decoded images and URL ownership"
+    "lastReviewed": "2026-10-15",
+    "reason": "Editor and audience share exact variants across canvas zoom and audience output changes; gesture deferral retains pixels, in-flight swaps wait for release and identical rechecks preserve decoded images and URL ownership; PNG/JPG preference, maximum JPEG quality, transparency preservation and encoding-specific cache identity/reuse"
   },
   {
     "id": "media-image-sampling",
@@ -722,8 +722,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Bounded 24 MP readbacks, orientation/alpha/fine-detail parity and actual Chromium player reuse with trim/audio/backwards activation"
+    "lastReviewed": "2026-10-15",
+    "reason": "Bounded 24 MP readbacks, orientation/alpha/fine-detail parity and actual Chromium player reuse with trim/audio/backwards activation; PNG/JPG preference, maximum JPEG quality, transparency preservation and encoding-specific cache identity/reuse"
   },
   {
     "id": "media-retained-images",
@@ -733,8 +733,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-13",
-    "reason": "Restart reuse, process-pinned cache safety, explicit clearing and constant-work quit release; exact Audience pixels come from one original-source resize, derived-source hash mismatches are rejected, and cold variants reuse workers after rejected source validation"
+    "lastReviewed": "2026-10-15",
+    "reason": "Restart reuse, process-pinned cache safety, explicit clearing and constant-work quit release; exact Audience pixels come from one original-source resize, derived-source hash mismatches are rejected, and cold variants reuse workers after rejected source validation; PNG/JPG preference, maximum JPEG quality, transparency preservation and encoding-specific cache identity/reuse"
   },
   {
     "id": "media-preview-native",
@@ -744,8 +744,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-14",
-    "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions"
+    "lastReviewed": "2026-10-15",
+    "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions; native format settings persist across restart, studio URLs serve matching encodings and transparent images remain PNG"
   },
   {
     "id": "presenter-image-readiness",

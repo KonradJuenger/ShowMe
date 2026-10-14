@@ -3,6 +3,21 @@ import { resolveMediaFrame, walkElements, type Element } from "./element";
 import { resolveMotion, resolveMotionValue } from "./motion";
 
 export const IMAGE_RECIPE = "png-lanczos3-tiled-source-sdr-v1";
+export const JPEG_IMAGE_RECIPE = "jpeg-q100-444-lanczos3-tiled-source-sdr-v1";
+export type ImageCacheFormat = "png" | "jpg";
+export type PreparedImageMime = "image/png" | "image/jpeg";
+
+export function imageRecipe(format: ImageCacheFormat) {
+  return format === "jpg" ? JPEG_IMAGE_RECIPE : IMAGE_RECIPE;
+}
+
+export function imageMime(format: ImageCacheFormat): PreparedImageMime {
+  return format === "jpg" ? "image/jpeg" : "image/png";
+}
+
+export function imageExtension(mime: PreparedImageMime): ImageCacheFormat {
+  return mime === "image/jpeg" ? "jpg" : "png";
+}
 // Generous allowance: almost twice an 8K frame (about 256 MiB of RGBA pixels).
 export const MAX_PREPARED_IMAGE_PIXELS = 64 * 1024 * 1024;
 
@@ -53,7 +68,7 @@ export interface PreparedImage {
   sourceHeight: number;
   width: number;
   height: number;
-  mime: "image/png";
+  mime: PreparedImageMime;
   recipe: string;
   url: string;
 }
@@ -279,6 +294,6 @@ export function imageDimensions(
     height: Math.max(1, Math.ceil(sourceHeight * ratio)),
   };
 }
-export function imageIdentity(assetId: string, width: number, height: number) {
-  return `${IMAGE_RECIPE}:${assetId}:${width}x${height}`;
+export function imageIdentity(assetId: string, width: number, height: number, format: ImageCacheFormat = "png") {
+  return `${imageRecipe(format)}:${assetId}:${width}x${height}`;
 }

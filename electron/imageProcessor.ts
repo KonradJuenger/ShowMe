@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import type { PreparedImage } from "../src/core/presentationImages";
 import {
-  IMAGE_RECIPE,
+  imageRecipe,
+  imageMime,
+  type ImageCacheFormat,
   canPrepareImage,
   imageDimensions,
   imageIdentity,
@@ -21,13 +23,17 @@ export async function processPresentationImage(
   output: string,
   targetWidth?: number,
   targetHeight?: number,
+  preferredFormat: ImageCacheFormat = "png",
 ): Promise<Omit<PreparedImage, "url"> | null> {
   if ((await fs.stat(source)).size > 256 * 1024 ** 2) return null;
   const bytes = await fs.readFile(source);
   if (createHash("sha256").update(bytes).digest("hex") !== assetId)
     throw new Error("Source image hash mismatch");
   if (animatedRaster(bytes)) return null;
-  const metadata = await sharp(bytes, { animated: true, limitInputPixels: MAX_PREPARED_IMAGE_PIXELS }).metadata();
+  const metadata = await sharp(bytes, {
+    animated: true,
+    limitInputPixels: MAX_PREPARED_IMAGE_PIXELS,
+  }).metadata();
   if ((metadata.pages ?? 1) > 1 || metadata.format === "svg") return null;
   if (!metadata.width || !metadata.height)
     throw new Error("Image dimensions unavailable");
@@ -38,30 +44,43 @@ export async function processPresentationImage(
   const width = targetWidth ?? fallback.width,
     height = targetHeight ?? fallback.height;
   if (!canPrepareImage(sourceWidth, sourceHeight, width, height)) return null;
-  // Colour conversion uses the input ICC profile. Tag the resulting SDR PNG.
+  const format =
+    preferredFormat === "jpg" &&
+    metadata.depth !== "ushort" &&
+    (!metadata.hasAlpha || (await sharp(bytes).stats()).isOpaque)
+      ? "jpg"
+      : "png";
+  // Colour conversion uses the input ICC profile. Tag the resulting SDR image.
   // rgb16 retains precision for high-bit-depth sources; EXIF is consumed once.
-  let pipeline = sharp(bytes, { limitInputPixels: MAX_PREPARED_IMAGE_PIXELS }).autoOrient().resize(width, height, {
-    kernel: sharp.kernel.lanczos3,
-    fastShrinkOnLoad: false,
-    fit: "fill",
-  });
+  let pipeline = sharp(bytes, { limitInputPixels: MAX_PREPARED_IMAGE_PIXELS })
+    .autoOrient()
+    .resize(width, height, {
+      kernel: sharp.kernel.lanczos3,
+      fastShrinkOnLoad: false,
+      fit: "fill",
+    });
   if (metadata.depth === "ushort") pipeline = pipeline.toColourspace("rgb16");
   pipeline = pipeline.withIccProfile("srgb");
-  await pipeline.png({ compressionLevel: 3, palette: false }).toFile(output);
+  if (format === "jpg")
+    await pipeline
+      .jpeg({ quality: 100, chromaSubsampling: "4:4:4", optimiseCoding: true })
+      .toFile(output);
+  else
+    await pipeline.png({ compressionLevel: 3, palette: false }).toFile(output);
   const actual = await sharp(output).metadata();
   if (metadata.depth === "ushort" && actual.depth !== "ushort")
     throw new Error("Image processor cannot preserve sample depth");
   return {
     assetId,
     hash: createHash("sha256")
-      .update(imageIdentity(assetId, width, height))
+      .update(imageIdentity(assetId, width, height, format))
       .digest("hex"),
     size,
     sourceWidth,
     sourceHeight,
     width,
     height,
-    mime: "image/png",
-    recipe: IMAGE_RECIPE,
+    mime: imageMime(format),
+    recipe: imageRecipe(format),
   };
 }
