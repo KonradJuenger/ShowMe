@@ -4,11 +4,8 @@ import type { EffectClockOrigins } from "../core/effectClocks";
 import { resolveVisualSlide } from "../core/templates";
 import { usePreparedImage } from "./usePreparedImage";
 import { useSlideImagePlan, type SlideImagePlan } from "./useSlideImagePlan";
-import { useCanvasImagePrefetch } from "./useCanvasImagePrefetch";
 import {
-  planPresentationImages,
-  type ImageRequestProfile,
-  type ImageRequirement,
+  type ImageOutputProfile,
 } from "../core/presentationImages";
 import type { MotionPreviewState } from "../core/motionPlayback";
 import { useMotionRuntime } from "./useMotionRuntime";
@@ -60,9 +57,8 @@ const emptyEffectResources: EffectResources = {};
 const ImageDocumentContext = createContext<{
   documentId: string;
   slideId: string;
-  profile?: ImageRequestProfile;
+  profile?: ImageOutputProfile;
   deferUpdates: boolean;
-  requirements?: Map<string, ImageRequirement>;
   plan?: SlideImagePlan;
 } | null>(null);
 
@@ -480,7 +476,6 @@ function MediaSurface({
     content.type === "image",
     imageDocument?.profile,
     imageDocument?.deferUpdates,
-    imageDocument?.requirements?.get(element.id),
     imageDocument?.plan,
   );
   const [failedPreparedUrl, setFailedPreparedUrl] = useState<string | null>(
@@ -907,7 +902,6 @@ export const SlideRenderer = memo(function SlideRenderer({
   imageProfile,
   renderScale = 1,
   renderProfile,
-  canvasImageSampling = false,
   deferImageUpdates = false,
   prepareVideo = false,
   effectClock,
@@ -923,10 +917,9 @@ export const SlideRenderer = memo(function SlideRenderer({
   editorOverflow?: boolean;
   motionState?: MotionPreviewState | null;
   preparedImages?: boolean;
-  imageProfile?: ImageRequestProfile;
+  imageProfile?: ImageOutputProfile;
   renderScale?: RenderScale;
   renderProfile?: SlideRenderProfile;
-  canvasImageSampling?: boolean;
   deferImageUpdates?: boolean;
   prepareVideo?: boolean;
   effectClock?: EffectClockOrigins;
@@ -982,41 +975,16 @@ export const SlideRenderer = memo(function SlideRenderer({
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
   const layers = new Map(deck.layers.map((layer) => [layer.id, layer]));
-  const plannedProfile = useMemo<ImageRequestProfile | undefined>(() => imageProfile ?? (output ? {
-    width: output.width, height: output.height, ...(canvasImageSampling ? { sampling: "canvas" as const } : {}),
-  } : undefined), [imageProfile, output, canvasImageSampling]);
-  const canvasRequirements = useMemo(() => canvasImageSampling && plannedProfile ? new Map(
-    planPresentationImages(deck, [slide], plannedProfile, true).flatMap(requirement => requirement.instances.map(({ elementId }) => [elementId, requirement] as const)),
-  ) : undefined, [canvasImageSampling, deck, slide, plannedProfile]);
-  const canvasSignature = canvasRequirements ? JSON.stringify([...canvasRequirements].map(([id, r]) => [id, r.assetId, r.width, r.height])) : undefined;
-  const imagePlan = useSlideImagePlan(slide, deck, plannedProfile, preparedImages, deferImageUpdates, canvasSignature);
-  const imageContext = useMemo(() => {
-    if (!preparedImages || !plannedProfile) return null;
-    const profile = plannedProfile;
-    return {
-      documentId: deck.id,
-      slideId: slide.id,
-      deferUpdates: deferImageUpdates,
-      profile,
-      requirements: canvasRequirements,
-      plan: imagePlan,
-    };
-  }, [
-    preparedImages,
-    plannedProfile,
-    deck,
-    slide,
-    canvasRequirements,
-    deferImageUpdates,
-    imagePlan,
-  ]);
-  useCanvasImagePrefetch(
-    root,
-    deck,
-    slide.id,
-    imageContext?.profile,
-    preparedImages && canvasImageSampling && !deferImageUpdates,
-  );
+  // Live editor and preview surfaces share the audience variants. Only explicit
+  // output profiles (audience negotiation and export) override that default.
+  const imagePlan = useSlideImagePlan(slide, deck, imageProfile, preparedImages, deferImageUpdates);
+  const imageContext = useMemo(() => preparedImages ? {
+    documentId: deck.id,
+    slideId: slide.id,
+    deferUpdates: deferImageUpdates,
+    profile: imageProfile,
+    plan: imagePlan,
+  } : null, [preparedImages, deck.id, slide.id, deferImageUpdates, imageProfile, imagePlan]);
   return (
     <EffectRenderContext.Provider value={effectRender}>
       <EffectResourcesContext.Provider

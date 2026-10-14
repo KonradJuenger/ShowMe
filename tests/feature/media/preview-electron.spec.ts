@@ -8,7 +8,7 @@ import { createBasicShape } from "../../../src/core/elementFactory";
 import { readyEditor } from "../../helpers/startup";
 import { imageIdentity, planPresentationImages } from "../../../src/core/presentationImages";
 
-test("native image thumbnails prepare their small derivative instead of falling back to full originals", async () => {
+test("native image thumbnails reuse audience variants without generating thumbnail image derivatives", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-image-preview-"));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined)) as Record<string, string>;
   const app = await electron.launch({ args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`], env });
@@ -31,10 +31,13 @@ test("native image thumbnails prepare their small derivative instead of falling 
     expect(await thumbnail!.evaluate(image => image instanceof HTMLImageElement && image.isConnected && image.complete && image.naturalWidth > 0),
       "The last decoded thumbnail stays visible during resource recapture").toBe(true);
     const profile = { width: 321, height: 181 };
-    const requirement = planPresentationImages(projection.deck, [projection.slide], profile)[0];
+    const audienceProfile = await page.evaluate(id => window.desktop!.audienceImageProfile!(id), projection.documentId);
+    const requirement = planPresentationImages(projection.deck, [projection.slide], audienceProfile)[0];
+    const jobs = await page.evaluate(async () => (await window.desktop!.presentationImageDiagnostics!()).jobs);
     const hash = createHash("sha256").update(imageIdentity(requirement.assetId, Math.min(4096, requirement.width), Math.min(2160, requirement.height))).digest("hex");
     const data = await page.evaluate(({ projection, profile }) => window.desktop!.capturePreview!(projection, profile.width, profile.height), { projection, profile });
     expect(data).toMatch(/^data:image\/png;base64,/);
+    expect(await page.evaluate(async () => (await window.desktop!.presentationImageDiagnostics!()).jobs)).toBe(jobs);
     const files = await readdir(path.join(folder, "user", "image-cache"), { recursive: true });
     expect(files.some((file) => path.basename(file) === hash + ".png")).toBe(true);
     const result = await sharp(Buffer.from(data!.split(",")[1], "base64")).raw().toBuffer({ resolveWithObject: true });

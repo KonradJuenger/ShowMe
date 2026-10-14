@@ -10,7 +10,6 @@ import { randomUUID } from "node:crypto";
 import {
   audienceImageProfile as outputImageProfile,
   MAX_PREPARED_IMAGE_PIXELS,
-  type ImageRequestProfile,
   type ImageOutputProfile,
 } from "../src/core/presentationImages";
 import { ImagePreparationCoordinator } from "../src/core/imagePreparationCoordinator";
@@ -423,7 +422,7 @@ const imagePreparation = new ImagePreparationCoordinator({
       ? collaboration.projection(id, slideId)
       : documentRuntime(id).projection(id, slideId),
   profile: imagePreparationProfile,
-  prepare: async (id, requirement, priority = 0, canvas) =>
+  prepare: async (id, requirement, priority = 0) =>
     imageCache.prepare(
       collaboration.isGuest(id)
         ? await requireStorage().verifiedAssetPath(requirement.assetId)
@@ -436,7 +435,6 @@ const imagePreparation = new ImagePreparationCoordinator({
       requirement.width,
       requirement.height,
       priority,
-      canvas,
     ),
 });
 imagePreparation.subscribe((status) => {
@@ -1215,18 +1213,14 @@ const operations: Record<string, (...args: any[]) => any> = {
       if (view && !view.isDestroyed()) view.webContents.send("presentation-displays", runtime.displays());
     return profile;
   },
-  async preparedSlideImages(documentId: string, slideId: string, outputProfile: unknown) {
+  async preparedSlideImages(documentId: string, slideId: string, outputProfile?: unknown) {
     if (!imageCachingEnabled) return {};
     const id = idSchema.parse(documentId);
     idSchema.parse(slideId);
-    const profile = z.object({ width: z.number().positive().max(100000), height: z.number().positive().max(100000),
-      sampling: z.literal("canvas").optional() }).strict().parse(outputProfile);
+    const profile = outputProfile === undefined ? imagePreparationProfile() : z.object({
+      width: z.number().positive().max(100000), height: z.number().positive().max(100000),
+    }).strict().parse(outputProfile);
     return imagePreparation.prepareSlide(id, slideId, profile, presentation?.state ? 0 : 1);
-  },
-  async prioritizeCanvasImages(documentId: string, slideId: string) {
-    if (idSchema.parse(documentId) !== activeDocumentId) throw new Error("Outside editor document");
-    await operations.renderProjection(documentId, idSchema.parse(slideId));
-    imageCache.prioritizeCanvas(documentId, slideId);
   },
   async preparedImage(
     documentId: string,
@@ -1238,14 +1232,13 @@ const operations: Record<string, (...args: any[]) => any> = {
     const id = idSchema.parse(documentId);
     idSchema.parse(slideId);
     idSchema.parse(elementId);
-    const profile: ImageRequestProfile =
+    const profile: ImageOutputProfile =
       outputProfile === undefined
         ? imagePreparationProfile()
         : z
             .object({
               width: z.number().positive().max(100000),
               height: z.number().positive().max(100000),
-              sampling: z.literal("canvas").optional(),
             })
             .strict()
             .parse(outputProfile);

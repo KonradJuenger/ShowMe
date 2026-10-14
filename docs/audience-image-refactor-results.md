@@ -21,8 +21,14 @@ Implemented on `chatgpt/audience-loading-reproduction`; `main` remains unchanged
 - Native in-flight work deduplicates after source-size clamping. Browser cache
   hits bypass resize admission and a persistent two-worker pool handles misses.
   Original-to-target Lanczos3, orientation, alpha and color handling remain intact.
-- Editor canvas work has explicit lower-priority focus. An incomplete plan made
-  before an import is accepted cannot be retained as the completed canvas result.
+- Editor canvas, rail fallback rendering and native thumbnail capture use the
+  shared audience profile. Canvas zoom changes display scale without creating
+  separate image variants; audience output and accepted image geometry still
+  determine the exact required pixels. Editor sampling tiers and their prefetch
+  queue have been removed.
+- A visible editor slide can prepare or reuse its audience variants while
+  unrelated deck images are still preparing. Gesture deferral, decoded URL
+  ownership, original-image fallback and audience readiness remain intact.
 
 There is still one document authority and persistence path. No document/package
 format changes, historical readers or flattened slide rendering were introduced.

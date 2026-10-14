@@ -1812,7 +1812,6 @@ export function EditorCanvasSurface({
           deck={deck}
           preparedImages
           renderScale={canvasScale}
-          canvasImageSampling
           deferImageUpdates={deferImageUpdates}
           editingTextId={textEditing?.editingId}
           editingMediaId={frameEditingId}

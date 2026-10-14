@@ -36,10 +36,6 @@ export function audienceImageProfile(width: number, height: number, pixelRatio: 
 }
 
 export type PreparedSlideImages = Record<string, PreparedImage | null>;
-/** Canvas sampling is disposable; audience and export profiles stay exact. */
-export interface ImageRequestProfile extends ImageOutputProfile {
-  sampling?: "canvas";
-}
 export interface ImageRequirement {
   assetId: string;
   size: number;
@@ -81,11 +77,6 @@ export function imagePixels(required: number) {
   if (!Number.isFinite(required) || required <= 0)
     throw new Error("Invalid image sampling requirement");
   return Math.max(1, Math.ceil(required));
-}
-
-/** Round upwards so a canvas variant never undersamples its requested size. */
-export function canvasImagePixels(required: number) {
-  return Math.ceil(imagePixels(required) / 256) * 256;
 }
 
 const scalePlans = new WeakMap<
@@ -191,7 +182,7 @@ export function maximumElementScale(
 export function planPresentationImages(
   deck: Deck,
   slides: readonly Slide[],
-  profile: ImageRequestProfile,
+  profile: ImageOutputProfile,
   includeHiddenSlides = false,
 ): ImageRequirement[] {
   if (
@@ -205,8 +196,7 @@ export function planPresentationImages(
     profile.height / deck.height,
   );
   const requirements = new Map<string, ImageRequirement>();
-  const pixels =
-    profile.sampling === "canvas" ? canvasImagePixels : imagePixels;
+  const pixels = imagePixels;
   for (const slide of slides) {
     if (!includeHiddenSlides && deck.slideMeta[slide.id]?.hidden) continue;
     const visit = (

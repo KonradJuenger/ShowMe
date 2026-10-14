@@ -7,7 +7,6 @@ import {
   type ImageReadiness,
   type ImageRequirement,
   type PreparedImage,
-  type ImageRequestProfile,
   type PreparedSlideImages,
 } from "./presentationImages";
 
@@ -26,7 +25,6 @@ interface Dependencies {
     documentId: string,
     requirement: ImageRequirement,
     priority?: number,
-    canvas?: string,
   ): Promise<PreparedImage | null>;
   profile(): ImageOutputProfile;
 }
@@ -162,23 +160,27 @@ export class ImagePreparationCoordinator {
   }
 
   /** One accepted slide/profile plan per bulk consumer, shared by all its images. */
-  async prepareSlide(documentId: string, slideId: string, profile: ImageRequestProfile, priority = 0): Promise<PreparedSlideImages> {
+  async prepareSlide(documentId: string, slideId: string, profile: ImageOutputProfile, priority = 0): Promise<PreparedSlideImages> {
     const projection = await this.dependencies.projection(documentId, slideId);
     const interest = this.documents.get(documentId);
-    if (!profile.sampling && interest && interest.slideIds.includes(slideId) &&
+    if (interest && interest.slideIds.includes(slideId) &&
         interest.status.epoch === projection.epoch && interest.status.revision === projection.revision &&
         interest.status.profile.width === profile.width && interest.status.profile.height === profile.height) {
-      await this.ready(documentId, true);
-      if (this.documents.get(documentId) !== interest) return this.prepareSlide(documentId, slideId, profile, priority);
-      return Object.fromEntries((interest.requirements.get(slideId) ?? []).flatMap(r => r.instances
-        .filter(i => i.slideId === slideId).map(i => [i.elementId, interest.images.get(`${slideId}:${i.elementId}`) ?? null])));
+      const requirements = interest.requirements.get(slideId);
+      // A visible editor slide must not wait for unrelated slides in the deck.
+      if (interest.status.state === "ready" || interest.status.state === "failed" ||
+          requirements?.every(r => r.instances.filter(i => i.slideId === slideId)
+            .every(i => interest.images.has(`${slideId}:${i.elementId}`)))) {
+        return Object.fromEntries((requirements ?? []).flatMap(r => r.instances
+          .filter(i => i.slideId === slideId).map(i => [i.elementId, interest.images.get(`${slideId}:${i.elementId}`) ?? null])));
+      }
     }
-    const key = `${documentId}:${projection.epoch}:${projection.revision}:${slideId}:${profile.width}x${profile.height}:${profile.sampling ?? "exact"}`;
+    const key = `${documentId}:${projection.epoch}:${projection.revision}:${slideId}:${profile.width}x${profile.height}`;
     let pending = this.slidePlans.get(key);
     if (!pending) {
       const slide = resolveVisualSlide(projection.deck, projection.slide, projection.templates ?? {}).slide;
       pending = Promise.all(planPresentationImages(projection.deck, [slide], profile, true).map(async requirement => {
-        const image = await this.dependencies.prepare(documentId, requirement, priority, profile.sampling === "canvas" ? `${documentId}:${slideId}` : undefined).catch(() => null);
+        const image = await this.dependencies.prepare(documentId, requirement, priority).catch(() => null);
         return requirement.instances.map(instance => [instance.elementId, image] as const);
       })).then(rows => Object.fromEntries(rows.flat()));
       this.slidePlans.set(key, pending);

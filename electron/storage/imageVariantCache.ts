@@ -51,23 +51,7 @@ export class ImageVariantCache {
     if (retained) await quarantine(retained, path.dirname(retained));
   }
   private pending = new Map<string, Promise<PreparedImage | null>>();
-  private demands = new Map<string, { priority: number; canvas?: string }>();
-  private activeCanvas: string | undefined;
-  prioritizeCanvas(documentId: string, slideId: string) {
-    this.activeCanvas = `${documentId}:${slideId}`;
-    this.work.setPriorities(
-      new Map(
-        [...this.demands].map(([key, demand]) => [key, this.priority(demand)]),
-      ),
-    );
-  }
-  private priority(demand: { priority: number; canvas?: string }) {
-    return demand.canvas &&
-      this.activeCanvas &&
-      demand.canvas !== this.activeCanvas
-      ? 0
-      : demand.priority;
-  }
+  private demands = new Map<string, number>();
   private generation = 0;
   private clearing: Promise<void> | null = null;
   private verified = new Map<
@@ -162,7 +146,6 @@ export class ImageVariantCache {
     targetWidth?: number,
     targetHeight?: number,
     priority = 0,
-    canvas?: string,
   ): Promise<PreparedImage | null> {
     hashSchema.parse(assetId);
     if (this.clearing || this.closing) return Promise.resolve(null);
@@ -189,14 +172,10 @@ export class ImageVariantCache {
       ":" +
       targetHeight;
     const prior = this.pending.get(key);
-    const existing = this.demands.get(key);
-    const demand =
-      existing && existing.priority > priority
-        ? existing
-        : { priority, canvas };
+    const demand = Math.max(this.demands.get(key) ?? 0, priority);
     this.demands.set(key, demand);
     if (prior) {
-      this.work.setPriorities(new Map([[key, this.priority(demand)]]));
+      this.work.setPriorities(new Map([[key, demand]]));
       return prior;
     }
     const job = this.generate(
@@ -288,7 +267,7 @@ export class ImageVariantCache {
         },
         {
           key,
-          priority: this.priority(this.demands.get(key) ?? { priority: 0 }),
+          priority: this.demands.get(key) ?? 0,
         },
       );
       if (!result) {

@@ -4,11 +4,10 @@ import { platform } from "../../src/platform";
 import { usePreparedImage } from "../../src/components/usePreparedImage";
 import {
   IMAGE_RECIPE,
-  canvasImagePixels,
   type PreparedImage,
 } from "../../src/core/presentationImages";
 
-export function mountPreparedImageHarness(canvasSampling = false) {
+export function mountPreparedImageHarness() {
   const host = document.createElement("main");
   document.body.replaceChildren(host);
   const requests = document.createElement("output");
@@ -33,14 +32,7 @@ export function mountPreparedImageHarness(canvasSampling = false) {
   };
   platform.preparedImage = (_document, _slide, _element, profile) => {
     requests.textContent = String(++count);
-    const width =
-      profile!.sampling === "canvas"
-        ? canvasImagePixels(profile!.width)
-        : profile!.width;
-    const height =
-      profile!.sampling === "canvas"
-        ? canvasImagePixels(profile!.height)
-        : profile!.height;
+    const { width, height } = profile!;
     return new Promise((resolve) => {
       pending.push(() => {
         const canvas = document.createElement("canvas");
@@ -71,7 +63,6 @@ export function mountPreparedImageHarness(canvasSampling = false) {
       () => ({
         width: size,
         height: size,
-        ...(canvasSampling ? { sampling: "canvas" as const } : {}),
       }),
       [size],
     );
@@ -83,13 +74,6 @@ export function mountPreparedImageHarness(canvasSampling = false) {
       true,
       profile,
       paused,
-      canvasSampling
-        ? {
-            assetId: "asset",
-            width: canvasImagePixels(size),
-            height: canvasImagePixels(size),
-          }
-        : undefined,
     );
     return (
       <>

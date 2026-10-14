@@ -14,10 +14,9 @@ export function installSlidePreviewPage() {
   const root = createRoot(host);
   window.clearSlidePreview = () => flushSync(() => root.render(null));
   window.composeSlidePreview = async (projection, width, height) => {
-    const imageProfile = { width, height };
-    const profile = { ...imageProfile, mode: "live" as const };
+    const profile = { width, height, mode: "live" as const };
     await platform.managedFonts?.(projection.documentId);
-    flushSync(() => root.render(<div style={{ width: projection.deck.width, height: projection.deck.height, transform: `scale(${width / projection.deck.width}, ${height / projection.deck.height})`, transformOrigin: "top left" }}><SlideRenderer slide={projection.slide} deck={projection.deck} templates={projection.templates} staticVideo preparedImages renderProfile={profile} imageProfile={imageProfile} /></div>));
+    flushSync(() => root.render(<div style={{ width: projection.deck.width, height: projection.deck.height, transform: `scale(${width / projection.deck.width}, ${height / projection.deck.height})`, transformOrigin: "top left" }}><SlideRenderer slide={projection.slide} deck={projection.deck} templates={projection.templates} staticVideo preparedImages renderProfile={profile} /></div>));
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 5000);
     try {

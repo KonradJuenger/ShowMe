@@ -13,14 +13,14 @@
     "document": 12,
     "editor": 83,
     "effects": 128,
-    "media": 46,
+    "media": 45,
     "motion": 46,
     "persistence": 54,
-    "presenter": 33
+    "presenter": 34
   },
   "byRuntime": {
-    "unit": 302,
-    "browser": 95,
+    "unit": 303,
+    "browser": 94,
     "electron": 5,
     "packaged": 1
   },

@@ -62,6 +62,35 @@ it("whole-deck results are shared, navigation keeps the generation and status re
   coordinator.close(model.documentId);
 });
 
+it("the editor prepares its audience variant without waiting for unrelated deck images", async () => {
+  const model = imageDocument(["b", "a"]);
+  let finish!: () => void;
+  const prepare = vi.fn(async (_id: string, requirement: ImageRequirement) => {
+    if (requirement.assetId === "b".repeat(64)) await new Promise<void>(resolve => { finish = resolve; });
+    return prepared(requirement);
+  });
+  const coordinator = new ImagePreparationCoordinator({
+    projection: (_id, slideId) => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides[slideId ?? "slide0"], templates: model.templates }),
+    profile: () => model.deck,
+    prepare,
+  });
+  try {
+    await coordinator.reconcile(model.documentId);
+    await vi.waitFor(() => expect(coordinator.status(model.documentId)).toMatchObject({ state: "preparing", completed: 0 }));
+    let image: Awaited<ReturnType<typeof coordinator.prepareSlide>> | undefined;
+    const pending = coordinator.prepareSlide(model.documentId, "slide1", model.deck, 1).then(result => { image = result; });
+    await vi.waitFor(() => expect(image?.image?.assetId).toBe("a".repeat(64)));
+    expect(coordinator.status(model.documentId)?.state).toBe("preparing");
+    expect(prepare).toHaveBeenCalledTimes(2);
+    await pending;
+  } finally {
+    finish();
+    await coordinator.ready(model.documentId);
+    coordinator.close(model.documentId);
+  }
+});
+
 it("a throwing image job remains failed but does not block healthy slides or per-instance original fallback", async () => {
   const model = imageDocument(["a", "b"]);
   const coordinator = new ImagePreparationCoordinator({

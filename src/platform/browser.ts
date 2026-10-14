@@ -8,7 +8,6 @@ import {
   audienceImageProfile as outputImageProfile,
   type ImageRequirement,
   type ImageOutputProfile,
-  type ImageRequestProfile,
   type PreparedImage,
   type PreparedSlideImages,
 } from "../core/presentationImages";
@@ -458,12 +457,8 @@ let clearingBrowserImages = false;
 const validatedBrowserImages = new Set<string>();
 const unsupportedBrowserImages = new Set<string>();
 const pendingBrowserImages = new Map<string, Promise<PreparedImage | null>>();
-const browserImageDemands = new Map<string, { priority: number; canvas?: string }>();
-let activeBrowserCanvas: string | undefined;
-function browserDemandPriority(demand: { priority: number; canvas?: string }) {
-  return demand.canvas && activeBrowserCanvas && demand.canvas !== activeBrowserCanvas ? 0 : demand.priority;
-}
-async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0, canvas?: string): Promise<PreparedImage | null> {
+const browserImageDemands = new Map<string, number>();
+async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0): Promise<PreparedImage | null> {
   if (clearingBrowserImages || unsupportedBrowserImages.has(requirement.assetId)) return null;
   const generation = browserImageGeneration;
   const blob = await get<Blob>("blob/" + requirement.assetId);
@@ -471,12 +466,11 @@ async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0
   const descriptor = await browserImageDescriptor(blob, requirement.assetId, requirement.size, requirement.width, requirement.height);
   if (!descriptor || generation !== browserImageGeneration || clearingBrowserImages) return null;
   const key = `${generation}:${descriptor.hash}`;
-  const priorDemand = browserImageDemands.get(key);
-  const demand = priorDemand && priorDemand.priority > priority ? priorDemand : { priority, canvas };
+  const demand = Math.max(browserImageDemands.get(key) ?? 0, priority);
   browserImageDemands.set(key, demand);
   const prior = pendingBrowserImages.get(key);
   if (prior) {
-    browserImageQueue.setPriorities(new Map([[key, browserDemandPriority(demand)]]));
+    browserImageQueue.setPriorities(new Map([[key, demand]]));
     return prior;
   }
   const pending = navigator.locks.request("show-me-image-cache", { mode: "shared" }, () =>
@@ -501,7 +495,7 @@ async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0
         await put(cacheKey, record.blob);
         validatedBrowserImages.add(cacheKey);
         return { ...record.descriptor, url: cacheKey };
-      }, { key, priority: browserDemandPriority(browserImageDemands.get(key) ?? demand) });
+      }, { key, priority: browserImageDemands.get(key) ?? demand });
     }),
   ).finally(() => { pendingBrowserImages.delete(key); browserImageDemands.delete(key); });
   pendingBrowserImages.set(key, pending);
@@ -515,7 +509,7 @@ const browserImages = new ImagePreparationCoordinator({
   projection: async (id, slideId) =>
     (await browserRuntime(id)).projection(id, slideId),
   profile: () => (presentation ? browserAudienceProfile : null) ?? outputImageProfile(screen.width, screen.height, devicePixelRatio),
-  prepare: (_id, requirement, priority, canvas) => prepareBrowserVariant(requirement, priority, canvas),
+  prepare: (_id, requirement, priority) => prepareBrowserVariant(requirement, priority),
 });
 if (!presentationRole) browserImages.subscribe(status => channel.postMessage({ type: "image-readiness", status }));
 if (!imageCachingEnabled) browserImages.suspend();
@@ -535,7 +529,7 @@ interface ImageOwnerRequest {
   method: "prepare" | "slide" | "profile";
   documentId: string;
   slideId?: string;
-  profile?: ImageRequestProfile;
+  profile?: ImageOutputProfile;
 }
 
 /** Image work uses the existing owning editor; popup roles never run competing queues. */
@@ -565,7 +559,7 @@ if (!presentationRole) window.addEventListener("message", event => {
     if (!presentation || request.documentId !== presentation.deckId) throw new Error("Outside presentation image session");
     if (request.method === "profile") return browserAudienceProfile ?? outputImageProfile(screen.width, screen.height, devicePixelRatio);
     const profile = request.profile;
-    if (!profile || ![profile.width, profile.height].every(v => Number.isFinite(v) && v > 0 && v <= 100000) || profile.sampling) throw new Error("Invalid audience profile");
+    if (!profile || ![profile.width, profile.height].every(v => Number.isFinite(v) && v > 0 && v <= 100000)) throw new Error("Invalid audience profile");
     if (request.method === "prepare") {
       if (requester !== popup) throw new Error("Unauthorized audience preparation");
       browserAudienceProfile = { width: profile.width, height: profile.height };
@@ -656,16 +650,11 @@ export const browser: Platform = {
   },
   async preparedSlideImages(documentId, slideId, profile) {
     if (!imageCachingEnabled) return {};
+    const output = profile ?? await browser.audienceImageProfile!(documentId);
     const images = presentationRole
-      ? await ownerImageRequest<PreparedSlideImages>({ method: "slide", documentId, slideId, profile })
-      : await browserImages.prepareSlide(documentId, slideId, profile, presentation ? 0 : 1);
+      ? await ownerImageRequest<PreparedSlideImages>({ method: "slide", documentId, slideId, profile: output })
+      : await browserImages.prepareSlide(documentId, slideId, output, presentation ? 0 : 1);
     return leaseSlideImages(images);
-  },
-  async prioritizeCanvasImages(documentId, slideId) {
-    if (presentationRole) throw new Error("Unauthorized canvas priority");
-    await (await browserRuntime(documentId)).projection(documentId, slideId);
-    activeBrowserCanvas = `${documentId}:${slideId}`;
-    browserImageQueue.setPriorities(new Map([...browserImageDemands].map(([key, demand]) => [key, browserDemandPriority(demand)])));
   },
   async preparedImage(documentId, slideId, elementId, profile) {
     if (!imageCachingEnabled) return null;

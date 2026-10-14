@@ -8,7 +8,7 @@
     "runtime": "unit",
     "created": "2026-10-13",
     "lastReviewed": "2026-10-14",
-    "reason": "Canonical fractional output profiles, whole-deck shared image results, read-only readiness, stable navigation generations, explicit original outcomes, closed-waiter settlement and byte-admitted resident lookahead with shared rasters and pinned output; throwing cache jobs preserve failed diagnostics without blocking healthy slides or original fallback; persistent per-commit benchmark history retains observations and separates incompatible environments"
+    "reason": "Canonical audience profiles and shared image results, slide readiness independent of unrelated deck preparation, stable navigation generations, original fallback, bounded residency and persistent comparable benchmark history"
   },
   {
     "id": "presenter-audience-navigation",
@@ -249,8 +249,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-10",
-    "lastReviewed": "2026-10-13",
-    "reason": "Production canvas resizes retain decoded tiers without cache requests, exact profiles retain identical decoded pixels on rechecks, in-flight swaps wait for release, URLs remain valid through DOM handoff, and explicit cache invalidation still rechecks"
+    "lastReviewed": "2026-10-14",
+    "reason": "Editor and audience share exact variants across canvas zoom and audience output changes; gesture deferral retains pixels, in-flight swaps wait for release and identical rechecks preserve decoded images and URL ownership"
   },
   {
     "id": "media-image-sampling",
@@ -260,8 +260,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-10",
-    "lastReviewed": "2026-10-12",
-    "reason": "Independent X/Y exact Audience demand, nested authored and Motion scale magnitudes, stage envelopes, easing overshoot and disposable canvas tiers"
+    "lastReviewed": "2026-10-14",
+    "reason": "Independent exact X/Y image demand, nested authored and Motion scales, stage envelopes and easing overshoot; no editor sampling tiers"
   },
   {
     "id": "motion-sampling",
@@ -744,8 +744,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-13",
-    "reason": "Canonical custom visual behavior in bounded native composition, small thumbnail derivatives instead of original raster fallback, overlay isolation, released surfaces and immutable revision; retained decoded sidebar thumbnail during resource invalidation"
+    "lastReviewed": "2026-10-14",
+    "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions"
   },
   {
     "id": "presenter-image-readiness",

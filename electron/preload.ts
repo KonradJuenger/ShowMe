@@ -18,7 +18,6 @@ const methods = [
   "preparedSlideImages",
   "prepareAudience",
   "audienceImageProfile",
-  "prioritizeCanvasImages",
   "preparedAssetImage",
   "getImageCacheFolder",
   "chooseImageCacheFolder",
