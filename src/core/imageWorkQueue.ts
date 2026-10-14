@@ -1,3 +1,10 @@
+/** Reserve a quarter of logical CPUs, with at least two left for interactive work. */
+export function imageWorkerConcurrency(logicalThreads: number | undefined): number {
+  if (!logicalThreads || !Number.isFinite(logicalThreads) || logicalThreads < 1) return 2;
+  const threads = Math.floor(logicalThreads);
+  return Math.max(1, threads - Math.max(2, Math.ceil(threads / 4)));
+}
+
 /** One admission limit for background preparation and visible image requests. */
 export class ImageWorkQueue {
   private active = 0;
@@ -8,6 +15,8 @@ export class ImageWorkQueue {
     priority: number;
     key?: string;
   }> = [];
+
+  constructor(private readonly concurrency = 2) {}
 
   async run<T>(
     bytes: number,
@@ -38,7 +47,7 @@ export class ImageWorkQueue {
 
   private pump() {
     this.waiting.sort((a, b) => b.priority - a.priority);
-    while (this.active < 2 && this.waiting.length) {
+    while (this.active < this.concurrency && this.waiting.length) {
       const priority = this.waiting[0].priority;
       const index = this.waiting.findIndex(
         (job) =>

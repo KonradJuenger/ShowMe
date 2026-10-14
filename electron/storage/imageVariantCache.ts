@@ -3,7 +3,7 @@ import { validPreparedImage } from "../../src/core/preparedImageValidation";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { ImageProcessorPool } from "../imageProcessorPool";
+import { ImageProcessorPool, nativeImageConcurrency } from "../imageProcessorPool";
 import sharp from "sharp";
 import { hashSchema } from "../../src/core/assets";
 import {
@@ -64,7 +64,7 @@ export class ImageVariantCache {
   private unsupportedSources = new Set<string>();
   private transparency = new Map<string, Promise<boolean>>();
   private metadata = new Map<string, ReturnType<typeof this.readMetadata>>();
-  private work = new ImageWorkQueue();
+  private work = new ImageWorkQueue(nativeImageConcurrency);
   private processors: ImageProcessorPool;
 
   private readMetadata(source: string) {

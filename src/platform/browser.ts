@@ -16,6 +16,7 @@ import {
 import { ImagePreparationCoordinator } from "../core/imagePreparationCoordinator";
 import {
   BROWSER_IMAGE_PREFIX,
+  browserImageConcurrency,
   validBrowserImage,
   browserImageKey,
   browserImageDescriptor,
@@ -462,7 +463,7 @@ const browserImageDiagnostics = {
   pending: 0,
   rssBytes: null,
 };
-const browserImageQueue = new ImageWorkQueue();
+const browserImageQueue = new ImageWorkQueue(browserImageConcurrency);
 let browserImageGeneration = 0;
 let clearingBrowserImages = false;
 const validatedBrowserImages = new Set<string>();
@@ -513,6 +514,7 @@ async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0
   return pending;
 }
 const browserImages = new ImagePreparationCoordinator({
+  concurrency: browserImageConcurrency,
   slides: async (id, slideIds) => {
     const document = (await browserRuntime(id)).authority.document;
     return slideIds.map((slideId) => resolveSlide(document, slideId).slide);
@@ -835,6 +837,7 @@ export const browser: Platform = {
       throw new Error("Unknown presentation");
     const id = location.slice("browser:".length);
     const record = await documentRecord(id);
+    prepareBrowserImages(id);
     return documentSummary(
       record.document,
       (record.revision ?? 0) !== (record.savedRevision ?? 0),

@@ -1,11 +1,15 @@
 # Audience image refactor implementation
 
-Implemented on `chatgpt/audience-loading-reproduction`; `main` remains unchanged.
+Implemented on `chatgpt/editor-audience-images`; integration into `main` remains pending.
 
 ## Runtime behavior
 
-- Encoded preparation covers the complete visible presentation sequence and
-  deduplicates shared asset/dimension requirements. Navigation changes priority
+- Opening queues encoded preparation for every slide, including hidden slides,
+  nested sections and hidden layers, and deduplicates shared asset/dimension
+  requirements. A reusable worker pool reserves 25% of available logical CPUs
+  (at least two), allowing 15 workers on a 20-thread CPU. The existing 512 MiB
+  work admission budget can reduce concurrency for large images; the current
+  slide takes priority. Navigation changes priority
   without rebuilding the plan. Readiness reads no longer reprioritize work.
 - The audience negotiates its actual integer physical viewport before mounting
   image views. Presenter, preparation and audience use that same profile.
@@ -19,7 +23,7 @@ Implemented on `chatgpt/audience-loading-reproduction`; `main` remains unchanged
   audience readiness. Outgoing pixels remain visible while an incoming target
   prepares. The next slide can finish both decodes before activation.
 - Native in-flight work deduplicates after source-size clamping. Browser cache
-  hits bypass resize admission and a persistent two-worker pool handles misses.
+  hits bypass resize admission and the persistent CPU-sized pool handles misses.
   Original-to-target Lanczos3, orientation, alpha and color handling remain intact.
 - Editor canvas, rail fallback rendering and native thumbnail capture use the
   shared audience profile. Canvas zoom changes display scale without creating

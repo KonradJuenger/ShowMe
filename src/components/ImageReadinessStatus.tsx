@@ -37,7 +37,7 @@ export function ImageReadinessStatus({
   if (!status || status.documentId !== documentId) return null;
   const label =
     status.state === "ready"
-      ? "Slide images cached"
+      ? "Presentation images cached"
       : status.state === "failed"
         ? `Image preparation failed · ${status.failures.length} images`
         : `Preparing images · ${status.completed}/${status.total}`;

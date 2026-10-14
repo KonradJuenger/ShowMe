@@ -11,6 +11,7 @@ import {
 } from "./presentationImages";
 
 interface Dependencies {
+  concurrency?: number;
   slides?(
     documentId: string,
     slideIds: readonly string[],
@@ -162,24 +163,24 @@ export class ImagePreparationCoordinator {
   /** One accepted slide/profile plan per bulk consumer, shared by all its images. */
   async prepareSlide(documentId: string, slideId: string, profile: ImageOutputProfile, priority = 0): Promise<PreparedSlideImages> {
     const projection = await this.dependencies.projection(documentId, slideId);
+    const slide = resolveVisualSlide(projection.deck, projection.slide, projection.templates ?? {}).slide;
+    const requirements = planPresentationImages(projection.deck, [slide], profile, true);
     const interest = this.documents.get(documentId);
     if (interest && interest.slideIds.includes(slideId) &&
         interest.status.epoch === projection.epoch && interest.status.revision === projection.revision &&
         interest.status.profile.width === profile.width && interest.status.profile.height === profile.height) {
-      const requirements = interest.requirements.get(slideId);
       // A visible editor slide must not wait for unrelated slides in the deck.
       if (interest.status.state === "ready" || interest.status.state === "failed" ||
-          requirements?.every(r => r.instances.filter(i => i.slideId === slideId)
+          requirements.every(r => r.instances.filter(i => i.slideId === slideId)
             .every(i => interest.images.has(`${slideId}:${i.elementId}`)))) {
-        return Object.fromEntries((requirements ?? []).flatMap(r => r.instances
+        return Object.fromEntries(requirements.flatMap(r => r.instances
           .filter(i => i.slideId === slideId).map(i => [i.elementId, interest.images.get(`${slideId}:${i.elementId}`) ?? null])));
       }
     }
     const key = `${documentId}:${projection.epoch}:${projection.revision}:${slideId}:${profile.width}x${profile.height}`;
     let pending = this.slidePlans.get(key);
     if (!pending) {
-      const slide = resolveVisualSlide(projection.deck, projection.slide, projection.templates ?? {}).slide;
-      pending = Promise.all(planPresentationImages(projection.deck, [slide], profile, true).map(async requirement => {
+      pending = Promise.all(requirements.map(async requirement => {
         const image = await this.dependencies.prepare(documentId, requirement, priority).catch(() => null);
         return requirement.instances.map(instance => [instance.elementId, image] as const);
       })).then(rows => Object.fromEntries(rows.flat()));
@@ -201,7 +202,11 @@ export class ImagePreparationCoordinator {
     const projection = await this.dependencies.projection(documentId);
     if (this.paused || this.requests.get(documentId) !== request) return;
     const profile = this.dependencies.profile();
-    const demand = getPresentationSlideIds(projection.deck);
+    const visible = getPresentationSlideIds(projection.deck);
+    const visibleIds = new Set(visible);
+    // Queue every slide on open, independent of rail visibility or presentation
+    // exclusion. Keep the visible sequence first so audience priorities stay intact.
+    const demand = [...visible, ...projection.deck.slideIds.filter(id => !visibleIds.has(id))];
     const previous = this.documents.get(documentId);
     if (
       !retry &&
@@ -262,14 +267,13 @@ export class ImagePreparationCoordinator {
         : [];
       for (const id of this.dependencies.slides ? [] : planIds) {
         if (!live()) return;
-        if (!projection.deck.slideMeta[id].hidden)
-          slides.push(
-            resolveVisualSlide(
-              projection.deck,
-              (await this.dependencies.projection(documentId, id)).slide,
-              projection.templates ?? {},
-            ).slide,
-          );
+        slides.push(
+          resolveVisualSlide(
+            projection.deck,
+            (await this.dependencies.projection(documentId, id)).slide,
+            projection.templates ?? {},
+          ).slide,
+        );
       }
       if (!live()) return;
       const latest = await this.dependencies.projection(documentId);
@@ -284,7 +288,7 @@ export class ImagePreparationCoordinator {
       for (const slide of slides)
         interest.requirements.set(
           slide.id,
-          planPresentationImages(projection.deck, [slide], profile),
+          planPresentationImages(projection.deck, [slide], profile, true, true),
         );
       const unique = new Map<string, ImageRequirement>();
       for (const requirement of [...interest.requirements.values()].flat()) {
@@ -423,7 +427,7 @@ export class ImagePreparationCoordinator {
           : 2;
     };
     this.queue.sort((a, b) => rank(a) - rank(b));
-    while (!this.paused && this.running < 2 && this.queue.length) {
+    while (!this.paused && this.running < (this.dependencies.concurrency ?? 2) && this.queue.length) {
       const index = this.queue.findIndex(
         (job) =>
           this.running === 0 ||

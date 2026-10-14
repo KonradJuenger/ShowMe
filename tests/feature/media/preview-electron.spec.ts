@@ -1,5 +1,5 @@
 import { expect, test, _electron as electron } from "@playwright/test";
-import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +7,68 @@ import sharp from "sharp";
 import { createBasicShape } from "../../../src/core/elementFactory";
 import { readyEditor } from "../../helpers/startup";
 import { imageIdentity, planPresentationImages } from "../../../src/core/presentationImages";
+import { newPresentationDocument } from "../../../src/core/document";
+import { createMediaElement } from "../../../src/core/media";
+import { DocumentStorage } from "../../../electron/storage";
+
+test("opening a cold presentation caches every slide before navigation and keeps readiness green on later slides", async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "showme-open-images-"));
+  const userData = path.join(folder, "user");
+  const storage = new DocumentStorage(path.join(userData, "assets"), path.join(folder, "fixture-cache"), "keep-all");
+  await storage.init();
+  const model = newPresentationDocument("Cold presentation");
+  const first = model.slides[model.deck.slideIds[0]], meta = model.deck.slideMeta[first.id];
+  model.deck.slideIds = [];
+  model.deck.slideMeta = {};
+  model.slides = {};
+  for (let index = 0; index < 20; index++) {
+    const bytes = await sharp({ create: { width: 64, height: 64, channels: 3,
+      background: { r: index * 10, g: 100, b: 200 } } }).png().toBuffer();
+    const asset = { ...await storage.importAssetData(`Image${index}.png`, bytes), width: 64, height: 64 };
+    await storage.updateAsset(asset);
+    const slide = { ...structuredClone(first), id: `slide${index}` };
+    slide.nodes[0].children = [createMediaElement("image", asset)];
+    model.deck.slideIds.push(slide.id);
+    model.deck.slideMeta[slide.id] = { ...meta, name: `Slide ${index + 1}`, hidden: index === 19 };
+    model.slides[slide.id] = slide;
+  }
+  const file = path.join(folder, "Cold presentation.sme");
+  await writeFile(file, JSON.stringify(model));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined)) as Record<string, string>;
+  const app = await electron.launch({ args: [path.resolve("."), file, `--user-data-dir=${userData}`], env });
+  try {
+    const page = await app.firstWindow();
+    await readyEditor(page);
+    await expect.poll(() => page.evaluate(id => window.desktop!.imageReadiness!(id), model.documentId))
+      .toMatchObject({ total: 20, completed: 20, state: "ready" });
+    await expect(page.locator(".readiness-indicator")).toHaveAttribute("data-state", "ready");
+    const before = await page.evaluate(() => window.desktop!.presentationImageDiagnostics!());
+    expect(before.jobs).toBe(20);
+    await page.evaluate(() => {
+      const states: Array<string | null> = [];
+      Object.assign(window, { observedImageStates: states });
+      const indicator = document.querySelector(".readiness-indicator")!;
+      new MutationObserver(() => states.push(indicator.getAttribute("data-state")))
+        .observe(indicator, { attributes: true, attributeFilter: ["data-state"] });
+    });
+    for (const index of [18, 8, 0]) {
+      await page.getByRole("tree", { name: "Slides", exact: true }).evaluate((tree, index) => {
+        tree.scrollTop = tree.scrollHeight * index / 20;
+      }, index);
+      await page.getByRole("button", { name: `Slide ${index + 1}`, exact: true }).click();
+      await expect(page.locator("[data-editor-stage] .slide-renderer")).toHaveAttribute("data-slide-id", `slide${index}`);
+      await expect.poll(() => page.locator("[data-editor-stage] img").first().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+    }
+    expect(await page.evaluate(() => window.desktop!.presentationImageDiagnostics!())).toMatchObject({ jobs: before.jobs });
+    expect(await page.evaluate(() => (window as unknown as { observedImageStates: string[] }).observedImageStates.every(state => state === "ready")))
+      .toBe(true);
+    await expect(page.locator(".readiness-indicator")).toHaveAttribute("data-state", "ready");
+  } finally {
+    await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await app.close().catch(() => {});
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 test("native cache format persists and serves opaque JPG while preserving transparent PNG", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-native-format-"));

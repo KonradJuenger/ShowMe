@@ -1,4 +1,5 @@
 import { validPreparedImage } from "../core/preparedImageValidation";
+import { imageWorkerConcurrency } from "../core/imageWorkQueue";
 import {
   imageRecipe,
   imageMime,
@@ -17,6 +18,7 @@ const sourceDimensions = new Map<
 >();
 
 export const BROWSER_IMAGE_PREFIX = "images/";
+export const browserImageConcurrency = imageWorkerConcurrency(navigator.hardwareConcurrency);
 export interface BrowserImageRecord {
   blob: Blob;
   descriptor: Omit<PreparedImage, "url">;
@@ -47,7 +49,7 @@ function createImageWorker() {
 async function acquireImageWorker() {
   const idle = idleImageWorkers.pop();
   if (idle) return idle;
-  if (imageWorkers.size < 2) return createImageWorker();
+  if (imageWorkers.size < browserImageConcurrency) return createImageWorker();
   return new Promise<Worker>((resolve, reject) =>
     imageWorkerWaiters.push({ resolve, reject }),
   );

@@ -199,6 +199,7 @@ export function planPresentationImages(
   slides: readonly Slide[],
   profile: ImageOutputProfile,
   includeHiddenSlides = false,
+  includeHiddenLayers = false,
 ): ImageRequirement[] {
   if (
     ![profile.width, profile.height].every(
@@ -274,7 +275,7 @@ export function planPresentationImages(
       }
     };
     for (const root of slide.nodes)
-      if (!deck.layers.find((layer) => layer.id === root.id)?.hidden)
+      if (includeHiddenLayers || !deck.layers.find((layer) => layer.id === root.id)?.hidden)
         visit(root.children, { x: 1, y: 1 });
   }
   return Array.from(requirements.values()).map((value) => ({

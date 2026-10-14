@@ -1,8 +1,12 @@
 import { Worker } from "node:worker_threads";
+import { availableParallelism } from "node:os";
+import { imageWorkerConcurrency } from "../src/core/imageWorkQueue";
 import type { ImageWorkerRequest } from "./imageWorker";
 import type { PreparedImage } from "../src/core/presentationImages";
 
-/** Called only after image-work admission; reuse the two bounded processing slots. */
+export const nativeImageConcurrency = imageWorkerConcurrency(availableParallelism());
+
+/** Called only after CPU/memory admission; reuse workers across image jobs. */
 export class ImageProcessorPool {
   private workers = new Set<Worker>();
   private idle: Worker[] = [];

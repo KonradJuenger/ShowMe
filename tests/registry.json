@@ -7,8 +7,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-13",
-    "lastReviewed": "2026-10-14",
-    "reason": "Canonical audience profiles and shared image results, slide readiness independent of unrelated deck preparation, stable navigation generations, original fallback, bounded residency and persistent comparable benchmark history"
+    "lastReviewed": "2026-10-15",
+    "reason": "Canonical audience profiles and shared image results, slide readiness independent of unrelated deck preparation, stable navigation generations, original fallback, bounded residency and persistent comparable benchmark history; opening queues every slide and hidden-layer image without navigation, prioritizes the current slide and respects CPU headroom"
   },
   {
     "id": "presenter-audience-navigation",
@@ -700,8 +700,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-13",
-    "reason": "Dependency-aware invalidation, whole-deck deduplicated image planning and read-only navigation reuse, visible image priority and abandoned-slide demotion within the memory budget, explicit image retries, immutable metadata and narrow canonical render projections"
+    "lastReviewed": "2026-10-15",
+    "reason": "Dependency-aware invalidation, whole-deck deduplicated image planning and read-only navigation reuse, CPU-sized worker admission with interactive headroom, visible image priority and abandoned-slide demotion within the memory budget, explicit image retries, immutable metadata and narrow canonical render projections"
   },
   {
     "id": "persistence-lan-work",
@@ -745,7 +745,7 @@
     "runtime": "electron",
     "created": "2026-10-12",
     "lastReviewed": "2026-10-15",
-    "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions; native format settings persist across restart, studio URLs serve matching encodings and transparent images remain PNG"
+    "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions; native format settings persist across restart, studio URLs serve matching encodings and transparent images remain PNG; opening a cold file caches all slides including hidden slides and later navigation keeps readiness green without new image jobs"
   },
   {
     "id": "presenter-image-readiness",

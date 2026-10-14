@@ -7,6 +7,7 @@ import { createMediaElement } from "../../../src/core/media";
 import { ImagePreparationCoordinator } from "../../../src/core/imagePreparationCoordinator";
 import { audienceImageProfile, IMAGE_RECIPE, imageIdentity, type ImageRequirement } from "../../../src/core/presentationImages";
 import { audienceImageWindow } from "../../../src/core/audienceImageWindow";
+import { imageWorkerConcurrency } from "../../../src/core/imageWorkQueue";
 
 function imageDocument(assets = ["a", "b", "b", "c"]) {
   const model = newPresentationDocument("Audience image contracts");
@@ -60,6 +61,63 @@ it("whole-deck results are shared, navigation keeps the generation and status re
   read.completed = 0;
   expect(coordinator.status(model.documentId)?.completed).toBe(3);
   coordinator.close(model.documentId);
+});
+
+it("opening queues all 100 slides and hidden-layer images without navigation and respects CPU headroom", async () => {
+  const model = imageDocument(Array.from({ length: 100 }, () => "a"));
+  for (const [index, slide] of Object.values(model.slides).entries()) {
+    const content = slide.nodes[0].children[0].content!;
+    if (content.type !== "image") throw new Error("Expected image fixture");
+    content.assetId = index.toString(16).padStart(64, "0");
+    if (content.transform.rule === "free") throw new Error("Expected fitted image fixture");
+    content.transform.intrinsicWidth = content.transform.intrinsicHeight = 64;
+  }
+  model.deck.slideMeta.slide99.hidden = true;
+  model.deck.slideMeta.slide98.section = "slide0";
+  const hidden = structuredClone(model.slides.slide0.nodes[0].children[0]);
+  hidden.id = "hidden-image";
+  if (hidden.content?.type !== "image") throw new Error("Expected hidden image fixture");
+  hidden.content.assetId = "f".repeat(64);
+  model.deck.layers.push({ ...model.deck.layers[0], id: "hidden-layer", hidden: true });
+  for (const slide of Object.values(model.slides))
+    slide.nodes.push({ type: "layer", id: "hidden-layer", children: slide.id === "slide0" ? [hidden] : [] });
+  for (const template of Object.values(model.templates))
+    template.nodes.push({ type: "layer", id: "hidden-layer", children: [] });
+  let running = 0, peak = 0;
+  const releases: Array<() => void> = [], started: string[] = [], loaded: string[][] = [];
+  const coordinator = new ImagePreparationCoordinator({
+    concurrency: imageWorkerConcurrency(20),
+    projection: (_id, slideId) => ({ documentId: model.documentId, epoch: "epoch", revision: 0, savedRevision: 0,
+      deck: model.deck, slide: model.slides[slideId ?? "slide0"], templates: model.templates }),
+    slides: (_id, ids) => { loaded.push([...ids]); return ids.map(id => model.slides[id]); },
+    profile: () => model.deck,
+    prepare: (_id, requirement) => new Promise(resolve => {
+      started.push(requirement.assetId); peak = Math.max(peak, ++running);
+      releases.push(() => { running--; resolve(prepared(requirement)); });
+    }),
+  });
+  try {
+    coordinator.prioritize(model.documentId, "slide50");
+    await coordinator.reconcile(model.documentId);
+    expect(new Set(loaded[0])).toEqual(new Set(model.deck.slideIds));
+    expect(coordinator.status(model.documentId)).toMatchObject({ total: 101, state: "preparing" });
+    expect(started).toHaveLength(15);
+    expect(started[0]).toBe((50).toString(16).padStart(64, "0"));
+    while (coordinator.status(model.documentId)?.state !== "ready") {
+      await vi.waitFor(() => expect(releases.length > 0 || coordinator.status(model.documentId)?.state === "ready").toBe(true), { interval: 1 });
+      for (const release of releases.splice(0)) release();
+    }
+    expect(new Set(started).size).toBe(101);
+    expect(peak).toBe(15);
+    expect(coordinator.status(model.documentId)).toMatchObject({ total: 101, completed: 101, state: "ready" });
+    expect(coordinator.image(model.documentId, "slide99", "image")).not.toBeNull();
+    expect(coordinator.image(model.documentId, "slide0", "hidden-image")).not.toBeNull();
+    const rendered = await coordinator.prepareSlide(model.documentId, "slide0", model.deck);
+    expect(rendered["hidden-image"]).toBeUndefined();
+  } finally {
+    coordinator.close(model.documentId);
+    for (const release of releases.splice(0)) release();
+  }
 });
 
 it("the editor prepares its audience variant without waiting for unrelated deck images", async () => {

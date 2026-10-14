@@ -5,6 +5,7 @@ import { EffectLibraryStorage } from "./effectLibrary";
 import { effectLibraryRequestSchema } from "../src/core/libraryEffects";
 import sharp from "sharp";
 import { ImageWorkQueue } from "../src/core/imageWorkQueue";
+import { nativeImageConcurrency } from "./imageProcessorPool";
 import { resolveSlide } from "../src/core/templates";
 import { randomUUID } from "node:crypto";
 import {
@@ -414,6 +415,7 @@ function imagePreparationProfile() {
   return outputImageProfile(display.size.width, display.size.height, display.scaleFactor);
 }
 const imagePreparation = new ImagePreparationCoordinator({
+  concurrency: nativeImageConcurrency,
   slides: (id, slideIds) => {
     const document = collaboration.isGuest(id)
       ? collaboration.clientDocument()!
