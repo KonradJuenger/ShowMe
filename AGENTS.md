@@ -124,6 +124,8 @@ regression test and a required blocker for changes that can affect rendering.
   `npm run benchmark:audience` report in the persistent commit history. Compare
   with previous matching-machine/workload runs and report trends and individual
   changes. Dirty runs are exploratory, not measurements of their parent commit.
+  Update `areweslowyet.md` with comparable clean-commit measurements so the
+  repository retains the trend alongside the local interactive history.
   Do not claim an improvement from a binary pass or mismatched environments. See
   `docs/audience-rendering-benchmark.md` for commands and metric limits.
 
