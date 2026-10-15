@@ -215,16 +215,12 @@ export function AssetLibrary({
           <span>{total}</span>
         </div>
         <div className="compact-actions asset-browser-actions">
-          {window.desktop && libInfo && (
+          {window.desktop && libInfo && platform.openMediaLibrary && (
             <button
-              aria-label="Choose media library folder"
-              title={`Media library: ${libInfo.path}\nChoose another folder`}
+              aria-label="Open media library folder"
+              title={`Media library: ${libInfo.path}\nOpen in Finder or Explorer`}
               onClick={() => {
-                void platform.chooseMediaLibrary().then((updated) => {
-                  if (!updated) return;
-                  setLibInfo(updated);
-                  reload();
-                });
+                void platform.openMediaLibrary?.();
               }}
             >
               <IconFolder />
