@@ -9,6 +9,13 @@ import {
 import { libraryEffectSchema } from "../src/core/libraryEffects";
 import { libraryPath } from "./libraryFilesystem";
 import {
+  libraryProtectionState,
+  moveLibraryProtection,
+  readLibraryProtection,
+  removeLibraryProtection,
+  setLibraryProtection,
+} from "./libraryProtection";
+import {
   managedFilename,
   assetIdFromFilename,
   libraryIndex,
@@ -114,6 +121,7 @@ export class NativeLibraryBrowser {
       const current = `${request.category}${request.folder ? "/" + request.folder : ""}`;
       const query = request.query.toLocaleLowerCase();
       await this.refresh();
+      const protectedPaths = await readLibraryProtection(this.root);
       const visit = async (relative: string) => {
         for (const entry of await fs.readdir(this.mediaPath(relative), {
           withFileTypes: true,
@@ -132,6 +140,8 @@ export class NativeLibraryBrowser {
                 kind: "folder",
                 category: request.category,
                 managed: false,
+                protection:
+                  libraryProtectionState(protectedPaths, child) ?? undefined,
               });
             await visit(child);
           } else if (
@@ -150,6 +160,8 @@ export class NativeLibraryBrowser {
               kind: "file",
               category: request.category,
               managed: !!id || request.category === "Effects",
+              protection:
+                libraryProtectionState(protectedPaths, child) ?? undefined,
               bytes: stat.size,
               signature: `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`,
             });
@@ -262,6 +274,17 @@ export class NativeLibraryBrowser {
     if (request.type === "import-files")
       throw new Error("Import requires the desktop file picker");
     const source = this.mediaPath(request.path);
+    if (request.type === "protect") {
+      const stat = await fs.lstat(source);
+      if ((!stat.isFile() && !stat.isDirectory()) || stat.isSymbolicLink())
+        throw new Error("Only Library files and folders can be protected");
+      await setLibraryProtection(
+        this.root,
+        request.path,
+        request.protected,
+      );
+      return result;
+    }
     if (request.type === "rename") {
       const hash = assetIdFromFilename(path.basename(source));
       if (hash && path.extname(request.name) !== path.extname(source))
@@ -278,6 +301,7 @@ export class NativeLibraryBrowser {
       if (request.path.split("/").length < 2)
         throw new Error("Cannot delete a category");
       await fs.rmdir(source);
+      await removeLibraryProtection(this.root, request.path);
     } else if (request.type === "move") {
       if (
         request.path.split("/").length < 2 ||
@@ -300,6 +324,11 @@ export class NativeLibraryBrowser {
         await fs.link(source, destination);
         await fs.unlink(source);
       } else await fs.rename(source, destination);
+      await moveLibraryProtection(
+        this.root,
+        request.path,
+        request.destination,
+      );
     } else if (request.type === "import") {
       result.asset = await this.importAsset(
         source,

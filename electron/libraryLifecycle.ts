@@ -1,4 +1,8 @@
 import { libraryPath, libraryWalk, libraryWalkSync } from "./libraryFilesystem";
+import {
+  libraryProtectionState,
+  readLibraryProtection,
+} from "./libraryProtection";
 import { createHash, randomUUID } from "node:crypto";
 import {
   promises as fs,
@@ -501,12 +505,18 @@ export class LibraryLifecycle {
       }
     };
     await visit(this.root);
+    const protectedPaths = await readLibraryProtection(this.libraryRoot);
     return {
       assetHashes,
       fontUsages: [...fontUsages.values()],
+      protectedPaths,
       presentations,
       fingerprint: digest(
-        (await fs.realpath(this.root)) + "\n" + fingerprints.sort().join("\n"),
+        (await fs.realpath(this.root)) +
+          "\n" +
+          fingerprints.sort().join("\n") +
+          "\nprotected:\n" +
+          [...protectedPaths].sort().join("\n"),
       ),
     };
   }
@@ -560,6 +570,9 @@ export class LibraryLifecycle {
   ) {
     const live = await this.protection.hashes();
     for (const hash of roots.assetHashes) live.add(hash);
+    for (const item of assets)
+      if (libraryProtectionState(roots.protectedPaths, item.relative))
+        live.add(item.hash);
     const allDocuments = this.openDocuments();
     for (const document of allDocuments)
       for (const hash of documentAssetIds(document)) live.add(hash);

@@ -44,6 +44,13 @@ export const libraryBrowserRequestSchema = z.discriminatedUnion("type", [
     .object({ type: z.literal("move"), path: relative, destination: relative })
     .strict(),
   z.object({ type: z.literal("remove-folder"), path: relative }).strict(),
+  z
+    .object({
+      type: z.literal("protect"),
+      path: relative,
+      protected: z.boolean(),
+    })
+    .strict(),
   z.object({ type: z.literal("reveal"), path: relative }).strict(),
   z.object({ type: z.literal("import"), path: relative }).strict(),
   z
@@ -63,6 +70,7 @@ export interface LibraryBrowserEntry {
   kind: "folder" | "file" | "trash";
   category?: LibraryCategory;
   managed: boolean;
+  protection?: "self" | "parent";
   bytes?: number;
   signature?: string;
   asset?: Asset;
