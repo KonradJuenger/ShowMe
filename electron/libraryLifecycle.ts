@@ -338,7 +338,7 @@ export class LibraryLifecycle {
     private readonly now: () => number = Date.now,
     private readonly mayCleanup: () => Promise<boolean> = async () => true,
   ) {
-    this.libraryRoot = path.join(this.root, "Library");
+    this.libraryRoot = path.join(this.root, "ShowMe Library");
   }
 
   private async validateBoundary() {
@@ -352,7 +352,7 @@ export class LibraryLifecycle {
     const canonicalLibrary = await fs.realpath(this.libraryRoot);
     const relative = path.relative(canonicalRoot, canonicalLibrary);
     if (
-      relative.toLowerCase() !== "library" ||
+      relative.toLowerCase() !== "showme library" ||
       path.isAbsolute(relative) ||
       relative.startsWith(`..${path.sep}`)
     )

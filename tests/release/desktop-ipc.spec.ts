@@ -23,7 +23,7 @@ test("production preload and IPC create and save a native current-format file", 
   const root = await mkdtemp(path.join(os.tmpdir(), "showme-ipc-"));
   const user = path.join(root, "user");
   const showMeRoot = path.join(root, "Studio Shared");
-  const media = path.join(showMeRoot, "Library");
+  const media = path.join(showMeRoot, "ShowMe Library");
   await mkdir(user);
   await mkdir(media, { recursive: true });
   await writeFile(
@@ -202,7 +202,7 @@ test("production preload and IPC create and save a native current-format file", 
       id,
     );
     const selectedRoot = path.join(root, "Selected Shared");
-    const selectedLibrary = path.join(selectedRoot, "Library");
+    const selectedLibrary = path.join(selectedRoot, "ShowMe Library");
     await mkdir(path.join(selectedLibrary, "images"), { recursive: true });
     await copyFile(
       path.join(media, "images", asset.filename),
@@ -380,7 +380,7 @@ test("startup clean cutover ignores legacy storage settings until a ShowMe root 
       presentationsFolderPath: oldPresentations,
       libraryLifecycleMode: "managed",
     });
-    await expect(access(path.join(selectedRoot, "Library"))).rejects.toThrow();
+    await expect(access(path.join(selectedRoot, "ShowMe Library"))).rejects.toThrow();
   } finally {
     await blocked.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await blocked.close().catch(() => {});
@@ -401,9 +401,9 @@ test("startup clean cutover ignores legacy storage settings until a ShowMe root 
       window.desktop!.getLibraryLifecycle!(),
     );
     expect(lifecycle.root).toBe(selectedRoot);
-    expect(lifecycle.library).toBe(path.join(selectedRoot, "Library"));
+    expect(lifecycle.library).toBe(path.join(selectedRoot, "ShowMe Library"));
     await expect(
-      access(path.join(selectedRoot, "Library")),
+      access(path.join(selectedRoot, "ShowMe Library")),
     ).resolves.toBeUndefined();
 
     const settings = JSON.parse(await readFile(settingsFile, "utf8"));
@@ -423,7 +423,7 @@ test("startup clean cutover ignores legacy storage settings until a ShowMe root 
     expect(deckAfter.size).toBe(deckBefore.size);
     expect(deckAfter.mtimeMs).toBe(deckBefore.mtimeMs);
     await expect(
-      access(path.join(selectedRoot, "Library", "legacy.bin")),
+      access(path.join(selectedRoot, "ShowMe Library", "legacy.bin")),
     ).rejects.toThrow();
     await expect(
       access(path.join(selectedRoot, "legacy.sme")),
@@ -441,7 +441,7 @@ test("startup clean cutover ignores legacy storage settings until a ShowMe root 
       window.desktop!.getLibraryLifecycle!(),
     );
     expect(lifecycle.root).toBe(selectedRoot);
-    expect(lifecycle.library).toBe(path.join(selectedRoot, "Library"));
+    expect(lifecycle.library).toBe(path.join(selectedRoot, "ShowMe Library"));
   } finally {
     await relaunched.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await relaunched.close().catch(() => {});

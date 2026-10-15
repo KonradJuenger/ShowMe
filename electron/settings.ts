@@ -50,7 +50,7 @@ export function defaultImageCachePath(userDataPath: string): string {
 }
 
 export function showMeLibraryPath(showMeRoot: string): string {
-  return path.join(path.resolve(showMeRoot), "Library");
+  return path.join(path.resolve(showMeRoot), "ShowMe Library");
 }
 
 function samePath(a: string, b: string) {
@@ -63,14 +63,15 @@ function samePath(a: string, b: string) {
 
 /**
  * Validate an explicitly selected ShowMe root and return its canonical path.
- * The root itself must already exist. The visible Library directory is created
+ * The root itself must already exist. The visible ShowMe Library directory is created
  * only when the user explicitly selects/configures that root.
  */
 export async function validateShowMeRoot(
   selected: string,
   { createLibrary = false }: { createLibrary?: boolean } = {},
 ): Promise<string> {
-  if (!path.isAbsolute(selected)) throw new Error("Choose an absolute ShowMe root");
+  if (!path.isAbsolute(selected))
+    throw new Error("Choose an absolute ShowMe root");
   const resolved = path.resolve(selected);
   const stat = await fs.stat(resolved);
   if (!stat.isDirectory()) throw new Error("Choose a ShowMe root directory");
@@ -82,15 +83,20 @@ export async function validateShowMeRoot(
     libraryStat = await fs.lstat(library);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      throw new Error("The ShowMe root does not contain a Library directory", {
-        cause: error,
-      });
+      throw new Error(
+        "The ShowMe root does not contain a ShowMe Library directory",
+        {
+          cause: error,
+        },
+      );
     throw error;
   }
   if (!libraryStat.isDirectory() || libraryStat.isSymbolicLink())
-    throw new Error("Library must be a real directory inside the ShowMe root");
+    throw new Error(
+      "ShowMe Library must be a real directory inside the ShowMe root",
+    );
   const canonicalLibrary = await fs.realpath(library);
-  if (!samePath(canonicalLibrary, path.join(root, "Library")))
-    throw new Error("Library must not escape the ShowMe root");
+  if (!samePath(canonicalLibrary, path.join(root, "ShowMe Library")))
+    throw new Error("ShowMe Library must not escape the ShowMe root");
   return root;
 }

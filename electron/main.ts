@@ -433,7 +433,7 @@ async function assertLocalCacheFolder(cacheFolder: string, library: string) {
   };
   if (inside(realLibrary, realCache) || inside(realCache, realLibrary))
     throw new Error(
-      "Choose an image cache folder outside Library/. Cache files are local to this computer.",
+      "Choose an image cache folder outside ShowMe Library/. Cache files are local to this computer.",
     );
 }
 async function changeImageCacheFolder(selected: string | null) {

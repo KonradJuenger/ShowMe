@@ -80,7 +80,9 @@ async function libraryFixture() {
 it("one ShowMe root owns the visible Library and recursive presentation scope", async () => {
   const fixture = await libraryFixture();
   expect(fixture.lifecycle.root).toBe(fixture.showMeRoot);
-  expect(fixture.lifecycle.libraryRoot).toBe(fixture.libraryRoot);
+  expect(fixture.lifecycle.libraryRoot).toBe(
+    path.join(fixture.showMeRoot, "ShowMe Library"),
+  );
 
   const nested = path.join(
     fixture.showMeRoot,
@@ -319,7 +321,7 @@ it("a new installation has no implicit root and requires explicit root setup", a
 
   expect(await readSettings(user)).toEqual({});
   await expect(validateShowMeRoot(selected)).rejects.toThrow(
-    "does not contain a Library directory",
+    "does not contain a ShowMe Library directory",
   );
   await expect(access(showMeLibraryPath(selected))).rejects.toThrow();
 

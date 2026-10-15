@@ -33,13 +33,13 @@ The model should stay simple because collaboration is still experimental. It sho
 
 A user selects one **ShowMe root folder** for Managed Library use.
 
-That root contains a normal visible `Library/` folder and may otherwise contain any user-defined folder structure.
+That root contains a normal visible `ShowMe Library/` folder and may otherwise contain any user-defined folder structure.
 
 Example:
 
 ```text
 Studio Shared/
-├── Library/
+├── ShowMe Library/
 │   ├── Images/
 │   ├── Video/
 │   ├── Fonts/
@@ -57,7 +57,7 @@ There is deliberately no required `Presentations/` directory.
 
 A presentation may live directly in the root or at any depth below it. The user's project structure remains the presentation structure.
 
-The `Library/` directory is not hidden internal storage. It is part of ShowMe's asset-library feature and should remain directly accessible to users through the filesystem and through ShowMe.
+The `ShowMe Library/` directory is not hidden internal storage. It is part of ShowMe's asset-library feature and should remain directly accessible to users through the filesystem and through ShowMe.
 
 ## Core invariant
 
@@ -76,7 +76,7 @@ D:\Studio\Shared\
 /Users/verena/Studio/Shared/
 ```
 
-What matters is that both computers sync the same root contents, including the visible `Library/` and all presentations that depend on it.
+What matters is that both computers sync the same root contents, including the visible `ShowMe Library/` and all presentations that depend on it.
 
 ## Required behavior
 
@@ -93,7 +93,7 @@ are replaced by the single ShowMe root.
 
 The root defines both:
 
-- the location of the visible `Library/`; and
+- the location of the visible `ShowMe Library/`; and
 - the complete presentation scope relevant to cleanup.
 
 There must not be a normal configuration in which the Managed Library and cleanup's presentation scope can point at unrelated filesystem locations.
@@ -214,7 +214,7 @@ Example:
 Before update:
 
 D:/Studio/
-├── Library/
+├── ShowMe Library/
 └── Presentations/
     ├── project-a.sme
     └── project-b.sme
@@ -235,7 +235,7 @@ The old independent folder configuration is not a supported legacy mode.
 Once this change is implemented:
 
 - the product model contains one ShowMe root;
-- old independent Library/Presentations settings are obsolete;
+- old independent ShowMe Library/Presentations settings are obsolete;
 - old values are not consulted during ordinary operation;
 - no adapter is retained to make the previous two-root model behave like the new one.
 
@@ -246,7 +246,7 @@ The old settings may exist in an older settings file, but their presence must no
 Automatic cleanup is disabled until all of the following are true:
 
 1. the user has selected the new ShowMe root;
-2. the required visible `Library/` exists within that root;
+2. the required visible `ShowMe Library/` exists within that root;
 3. ShowMe can perform a complete recursive presentation scan of the root.
 
 If setup is incomplete or the first scan fails, no assets are moved to Library Trash and no old trash is permanently deleted as part of that cleanup attempt.
@@ -296,4 +296,4 @@ The product model is successful when:
 6. Portable presentations remain available for cases that should not depend on a Managed Library.
 7. An existing installation cannot continue into Managed Library operation after the update without explicitly selecting the new root.
 8. Existing presentation and asset files are not modified merely because the app storage model changed.
-9. The implementation does not retain the old independent Library/Presentations model as a compatibility path.
+9. The implementation does not retain the old independent ShowMe Library/Presentations model as a compatibility path.

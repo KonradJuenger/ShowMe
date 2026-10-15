@@ -9,9 +9,9 @@ import {
 
 const descriptions: Record<LibraryLifecycleMode, string> = {
   managed:
-    "Store assets once in Library/ and share them between .sme presentations anywhere below the ShowMe root. Cleanup scans that complete root recursively. Unused assets move to Library Trash and are permanently deleted after 10 days.",
+    "Store assets once in ShowMe Library/ and share them between .sme presentations anywhere below the ShowMe root. Cleanup scans that complete root recursively. Unused assets move to Library Trash and are permanently deleted after 10 days.",
   "keep-all":
-    "Store and share assets in Library/ below the ShowMe root. Automatic cleanup is disabled, including permanent deletion of existing Library Trash.",
+    "Store and share assets in ShowMe Library/ below the ShowMe root. Automatic cleanup is disabled, including permanent deletion of existing Library Trash.",
   portable:
     "Use self-contained .smp packages instead of Managed Library dependencies. The selected ShowMe root and its Library remain untouched.",
 };
@@ -60,12 +60,12 @@ export function LibraryStorageSettings() {
       <details>
         <summary>Learn more about storage and portability</summary>
         <p>
-          The ShowMe root is the shared storage boundary. Its visible Library/
-          directory stores central assets, while .sme presentations that use
-          those assets can live anywhere recursively below the same root.
-          Cleanup scans the complete root before classifying assets as unused.
-          A portable .smp is the alternative when a presentation should be
-          self-contained or live elsewhere.
+          The ShowMe root is the shared storage boundary. Its visible ShowMe
+          Library/ directory stores central assets, while .sme presentations
+          that use those assets can live anywhere recursively below the same
+          root. Cleanup scans the complete root before classifying assets as
+          unused. A portable .smp is the alternative when a presentation should
+          be self-contained or live elsewhere.
         </p>
       </details>
 
@@ -106,9 +106,10 @@ export function LibraryStorageSettings() {
         {info.root}
       </div>
       <p>
-        Library/ lives directly inside this folder. Every .sme presentation that
-        depends on this Library must also live somewhere below this root.
-        Choosing another root does not move or merge any existing files.
+        ShowMe Library/ lives directly inside this folder. Every .sme
+        presentation that depends on this Library must also live somewhere below
+        this root. Choosing another root does not move or merge any existing
+        files.
       </p>
       <div className="settings-actions">
         <button

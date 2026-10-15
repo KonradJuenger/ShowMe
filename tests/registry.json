@@ -360,7 +360,7 @@
     "runtime": "electron",
     "created": "2026-10-09",
     "lastReviewed": "2026-10-15",
-    "reason": "Production preload/IPC uses one ShowMe root with visible Library/, recursive .sme scanning, explicit root switching, external native .sme rejection, open-native root-change blocking and explicit portable .smp Save As anywhere; startup clean cutover ignores legacy folder settings, persists only showMeRootPath, creates Library/ and leaves legacy files untouched; typed font IPC and experimental LAN collaboration controls remain covered"
+    "reason": "Production preload/IPC uses one ShowMe root with visible ShowMe Library/, recursive .sme scanning, explicit root switching, external native .sme rejection, open-native root-change blocking and explicit portable .smp Save As anywhere; startup clean cutover ignores legacy folder settings, persists only showMeRootPath, creates ShowMe Library/ and leaves legacy files untouched; typed font IPC and experimental LAN collaboration controls remain covered"
   },
   {
     "id": "packaged-startup",
@@ -767,7 +767,7 @@
     "runtime": "unit",
     "created": "2026-10-12",
     "lastReviewed": "2026-10-15",
-    "reason": "One ShowMe root owns visible Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching"
+    "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching"
   },
   {
     "id": "persistence-current-formats",
