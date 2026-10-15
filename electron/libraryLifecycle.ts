@@ -187,7 +187,7 @@ export function validateTrashDestination(root: string, item: LibraryTrashItem) {
   const parts = item.originalRelativePath.replaceAll("\\", "/").split("/");
   if (
     parts.length < 2 ||
-    !(item.kind === "effect"
+    !(("kind" in item && item.kind === "effect")
       ? parts[0] === "Effects" && parts.at(-1)!.endsWith(".txt")
       : MEDIA_FOLDERS.includes(parts[0] as (typeof MEDIA_FOLDERS)[number]) &&
         assetIdFromFilename(parts.at(-1)!) === item.hash)
@@ -239,7 +239,7 @@ export function restoreLibraryAsset(root: string, hash: string) {
     const item = libraryTrashSchema.parse(
       JSON.parse(readFileSync(metadata, "utf8")),
     );
-    if (item.kind === "effect" || item.hash !== hash) continue;
+    if (("kind" in item && item.kind === "effect") || item.hash !== hash) continue;
     validateTrashDestination(root, item);
     const source = path.join(
       dir,
@@ -664,7 +664,7 @@ export class LibraryLifecycle {
         }
       for (const item of trash) {
         const needsRestore =
-          restore && item.kind !== "effect" && live.has(item.hash);
+          restore && !("kind" in item) && live.has(item.hash);
         const needsExpiry =
           expire &&
           !live.has(item.hash) &&
@@ -682,7 +682,11 @@ export class LibraryLifecycle {
         otherBytes - assets.reduce((sum, item) => sum + item.bytes, 0),
       );
       for (const item of trash) {
-        if (!restore || item.kind === "effect" || !live.has(item.hash))
+        if (
+          !restore ||
+          ("kind" in item && item.kind === "effect") ||
+          !live.has(item.hash)
+        )
           continue;
         const destination = libraryPath(
           this.libraryRoot,
