@@ -21,8 +21,8 @@ jobs:
           SHOWME_TEST_FILES: '["tests/feature/persistence/library-lifecycle.test.ts","tests/feature/persistence/package-options.test.ts"]'
         run: npx vitest run
       - name: Persistence feature suite
-        run: npm run test:feature -- persistence
+        run: xvfb-run -a npm run test:feature -- persistence
       - name: Desktop IPC storage contract
         env:
           SHOWME_TEST_FILES: '["tests/release/desktop-ipc.spec.ts"]'
-        run: npx playwright test --config playwright.electron.config.ts
+        run: xvfb-run -a npx playwright test --config playwright.electron.config.ts
