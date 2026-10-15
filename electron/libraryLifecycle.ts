@@ -110,7 +110,7 @@ export function canonicalFilesystemPath(input: string): string {
   }
   return path.join(realpathSync(current), ...suffix);
 }
-export function isInsideLibrary(root: string, file: string): boolean {
+export function isInsideRoot(root: string, file: string): boolean {
   const relative = path.relative(
     canonicalFilesystemPath(root),
     canonicalFilesystemPath(file),
@@ -124,12 +124,11 @@ export function isInsideLibrary(root: string, file: string): boolean {
 }
 
 export function librarySavePath(
-  presentationsRoot: string,
+  showMeRoot: string,
   file: string,
   portable: boolean,
 ): string {
-  const ext =
-    portable || !isInsideLibrary(presentationsRoot, file) ? ".smp" : ".sme";
+  const ext = portable || !isInsideRoot(showMeRoot, file) ? ".smp" : ".sme";
   const current = path.extname(file);
   return /^(\.sme|\.smp)$/i.test(current)
     ? file.slice(0, -current.length) + ext
@@ -155,7 +154,7 @@ function validateTrashDestination(root: string, item: LibraryTrashItem) {
     parts.length !== 2 ||
     !MEDIA_FOLDERS.includes(parts[0] as (typeof MEDIA_FOLDERS)[number]) ||
     assetIdFromFilename(parts[1]) !== item.hash ||
-    !isInsideLibrary(root, path.join(root, item.originalRelativePath))
+    !isInsideRoot(root, path.join(root, item.originalRelativePath))
   )
     throw new Error("Invalid library trash destination");
 }
@@ -308,25 +307,43 @@ type TrashEntry = LibraryTrashItem & { directory: string; file: string };
 
 /** Full filesystem scans are authoritative. No reference counts or saved index. */
 export class LibraryLifecycle {
+  readonly libraryRoot: string;
+
   constructor(
     readonly root: string,
-    readonly presentationsRoot: string,
     private readonly openDocuments: () => PresentationDocument[],
     private readonly protection: LibraryOpenProtection,
     private readonly systemTrash: (file: string) => Promise<void>,
     private readonly now: () => number = Date.now,
     private readonly mayCleanup: () => Promise<boolean> = async () => true,
-  ) {}
+  ) {
+    this.libraryRoot = path.join(this.root, "Library");
+  }
 
   async init() {
+    const rootStat = await fs.lstat(this.root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
+      throw new Error("ShowMe root must be a real directory");
+    const libraryStat = await fs.lstat(this.libraryRoot);
+    if (!libraryStat.isDirectory() || libraryStat.isSymbolicLink())
+      throw new Error("Library must be a real directory inside the ShowMe root");
+    const canonicalRoot = await fs.realpath(this.root);
+    const canonicalLibrary = await fs.realpath(this.libraryRoot);
+    const relative = path.relative(canonicalRoot, canonicalLibrary);
+    if (
+      relative.toLowerCase() !== "library" ||
+      path.isAbsolute(relative) ||
+      relative.startsWith(`..${path.sep}`)
+    )
+      throw new Error("Library must not escape the ShowMe root");
     for (const folder of [...MEDIA_FOLDERS, "Effects", "Trash"])
-      await fs.mkdir(path.join(this.root, folder), { recursive: true });
+      await fs.mkdir(path.join(this.libraryRoot, folder), { recursive: true });
   }
 
   private async trashEntries(): Promise<TrashEntry[]> {
-    const directory = path.join(this.root, "Trash", "assets");
+    const directory = path.join(this.libraryRoot, "Trash", "assets");
     await fs.mkdir(directory, { recursive: true });
-    for (const folder of [path.join(this.root, "Trash"), directory])
+    for (const folder of [path.join(this.libraryRoot, "Trash"), directory])
       if ((await fs.lstat(folder)).isSymbolicLink())
         throw new Error("Unsafe Library Trash path");
     const items: TrashEntry[] = [];
@@ -341,10 +358,10 @@ export class LibraryLifecycle {
       const item = trashSchema.parse(
         JSON.parse(await fs.readFile(path.join(dir, "item.json"), "utf8")),
       );
-      validateTrashDestination(this.root, item);
+      validateTrashDestination(this.libraryRoot, item);
       const file = path.join(dir, path.basename(item.originalRelativePath));
       if (!existsSync(file)) {
-        if (existsSync(path.join(this.root, item.originalRelativePath))) {
+        if (existsSync(path.join(this.libraryRoot, item.originalRelativePath))) {
           await fs.unlink(path.join(dir, "item.json"));
           await fs.rmdir(dir);
           continue;
@@ -375,7 +392,7 @@ export class LibraryLifecycle {
       })) {
         const file = path.join(directory, entry.name);
         if (
-          path.resolve(directory) === path.resolve(this.root) &&
+          path.resolve(directory) === path.resolve(this.libraryRoot) &&
           entry.name.toLowerCase() === "trash"
         )
           continue;
@@ -406,13 +423,13 @@ export class LibraryLifecycle {
         } else throw new Error(`Cannot safely scan filesystem entry: ${file}`);
       }
     };
-    await visit(this.presentationsRoot);
+    await visit(this.root);
     return {
       assetHashes,
       fontUsages: [...fontUsages.values()],
       presentations,
       fingerprint: digest(
-        (await fs.realpath(this.presentationsRoot)) +
+        (await fs.realpath(this.root)) +
           "\n" +
           fingerprints.sort().join("\n"),
       ),
@@ -425,7 +442,10 @@ export class LibraryLifecycle {
       for (const entry of await fs.readdir(directory, {
         withFileTypes: true,
       })) {
-        if (directory === this.root && entry.name.toLowerCase() === "trash")
+        if (
+          path.resolve(directory) === path.resolve(this.libraryRoot) &&
+          entry.name.toLowerCase() === "trash"
+        )
           continue;
         if (entry.isDirectory() && entry.name.endsWith(".recovery.sme"))
           continue;
@@ -437,14 +457,14 @@ export class LibraryLifecycle {
         else throw new Error(`Cannot safely scan filesystem entry: ${file}`);
       }
     };
-    await visit(this.root);
+    await visit(this.libraryRoot);
     return bytes;
   }
 
   private async physicalAssets() {
     const assets: PhysicalAsset[] = [];
     for (const folder of MEDIA_FOLDERS) {
-      for (const entry of await fs.readdir(path.join(this.root, folder), {
+      for (const entry of await fs.readdir(path.join(this.libraryRoot, folder), {
         withFileTypes: true,
       })) {
         if (!entry.isFile()) continue;
@@ -542,7 +562,7 @@ export class LibraryLifecycle {
         for (const item of assets) {
           if (
             !live.has(item.hash) &&
-            (await hashManagedSource(path.join(this.root, item.relative))) !==
+            (await hashManagedSource(path.join(this.libraryRoot, item.relative))) !==
               item.hash
           )
             throw new Error(`Asset hash mismatch: ${item.relative}`);
@@ -568,7 +588,7 @@ export class LibraryLifecycle {
       );
       for (const item of trash) {
         if (!restore || !live.has(item.hash)) continue;
-        const destination = path.join(this.root, item.originalRelativePath);
+        const destination = path.join(this.libraryRoot, item.originalRelativePath);
         if (!existsSync(destination)) {
           await fs.rename(item.file, destination);
           await fs.unlink(path.join(item.directory, "item.json"));
@@ -587,11 +607,11 @@ export class LibraryLifecycle {
         // Recheck process drafts immediately before the move, including imports
         // that started while filesystem scanning was in progress.
         if ((await this.protection.hashes()).has(item.hash)) continue;
-        const source = path.join(this.root, item.relative);
+        const source = path.join(this.libraryRoot, item.relative);
         const stat = await fs.stat(source);
         if (stat.size !== item.bytes || stat.mtimeMs !== item.mtimeMs)
           throw new Error(`Asset changed during scan: ${source}`);
-        const directory = path.join(this.root, "Trash", "assets", randomUUID());
+        const directory = path.join(this.libraryRoot, "Trash", "assets", randomUUID());
         await fs.mkdir(directory);
         const metadata: LibraryTrashItem = {
           hash: item.hash,
