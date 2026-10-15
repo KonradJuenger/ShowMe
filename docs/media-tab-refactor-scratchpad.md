@@ -14,7 +14,7 @@ Refine the Media panel into one calm, content-first Library surface while preser
 
 - Rebuilt the PR on current `main`; the obsolete independent Media Library root setting was not restored.
 - Kept the current `main` preview language for images and video: borderless content, no card chrome around every item.
-- One Media panel now covers images, video, audio, fonts, effects and other files. Search + one compact type selector replace the previous Media/Effects tabs and category button rows.
+- One Media panel now covers images, video, audio, fonts, effects and other files. One compact type selector replaces the previous Media/Effects tabs and category button rows. Search was removed.
 - Management stays secondary. The default surface is content. Import, folder creation and Library reveal live in one overflow menu; item management appears only after requesting item actions.
 - Effects use a checkerboard-backed rendered thumbnail so transparent/spatial shader and CSS/JS output remains legible.
 - Image/video Library items can be dragged onto the canvas and are inserted at the drop position.
@@ -37,6 +37,11 @@ Refine the Media panel into one calm, content-first Library surface while preser
 - [x] Added persistent item/folder garbage-collection protection.
 - [x] Added regression coverage for unified browsing/inherited protection and collector-level protection.
 - [x] Reviewed the final PR diff against current `main`.
+- [x] Removed Search from the Media tab.
+- [x] Effect thumbnails are queued instead of being dropped when preview work is busy; failed/empty renderer previews are not permanently cached.
+- [x] Effects no longer expose the media-only Import action.
+- [x] Malformed Effect files are skipped when checking restore identity collisions.
+- [x] Native Library pagination now reuses one invalidated inventory snapshot instead of recursively rescanning for every page.
 
 ## Verification log
 
@@ -52,3 +57,15 @@ The test suite includes two new regression cases:
 - a protected folder keeps otherwise-unreferenced managed assets out of cleanup until protection is explicitly removed.
 
 No merge into `main` has been performed.
+
+
+## Follow-up review fixes
+
+After the initial UX pass, review found four correctness/performance issues. They are addressed on the branch:
+
+1. Effect thumbnails no longer return early at the shared preview limit. Effect work is serialized through the preview queue, while the UI only caches successful preview results.
+2. The Effects filter no longer exposes the generic media importer.
+3. Restoring a deleted Effect ignores unrelated malformed `.txt` Effect files while still rejecting a valid identity collision.
+4. `NativeLibraryBrowser` is now persistent per active Library root and owns a cached recursive inventory snapshot. Pagination filters/slices that snapshot. Inventory/protection mutations and external Library inventory notifications invalidate it.
+
+Regression coverage also checks that requesting another page does not perform another recursive directory walk and that a malformed Effect cannot block restoring an unrelated Effect.
