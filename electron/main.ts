@@ -1455,6 +1455,9 @@ const operations: Record<string, (...args: any[]) => any> = {
     return result;
   },
   getMediaLibrary: getMediaLibraryInfo,
+  async openMediaLibrary() {
+    await shell.openPath(requireStorage().assetRoot);
+  },
   getLibraryLifecycle,
   documentLibraryState,
   async moveDocumentIntoShowMeRoot(input: string) {
@@ -2002,7 +2005,7 @@ async function openFromMenu() {
 
 async function requireConfiguredShowMeRoot(
   settings: Awaited<ReturnType<typeof readSettings>>,
-): Promise<string> {
+): Promise<string | null> {
   if (settings.showMeRootPath) {
     try {
       return await validateShowMeRoot(settings.showMeRootPath);
@@ -2026,7 +2029,7 @@ async function requireConfiguredShowMeRoot(
     });
     if (intro.response !== 0) {
       app.quit();
-      throw new Error("ShowMe root setup was canceled");
+      return null;
     }
   }
   while (true) {
@@ -2036,7 +2039,7 @@ async function requireConfiguredShowMeRoot(
     });
     if (result.canceled || !result.filePaths[0]) {
       app.quit();
-      throw new Error("ShowMe root setup was canceled");
+      return null;
     }
     try {
       const root = await validateShowMeRoot(path.resolve(result.filePaths[0]), {
@@ -2075,7 +2078,9 @@ void app.whenReady().then(async () => {
       ? settings.imageCachePath
       : defaultImageCachePath(app.getPath("userData"));
   if (!imageCachingEnabled) imagePreparation.suspend();
-  showMeRoot = await requireConfiguredShowMeRoot(settings);
+  const configuredShowMeRoot = await requireConfiguredShowMeRoot(settings);
+  if (!configuredShowMeRoot) return;
+  showMeRoot = configuredShowMeRoot;
   const assetRoot = showMeLibraryPath(showMeRoot);
   storage = new DocumentStorage(
     assetRoot,
