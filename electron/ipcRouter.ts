@@ -265,7 +265,7 @@ export function registerIpcRouter({
           "createDocument",
           "openDocumentFile",
           "setLibraryLifecycleMode",
-          "moveDocumentToPresentationsFolder",
+          "moveDocumentIntoShowMeRoot",
           "saveDocumentAsPortable",
           "scanLibrary",
           "emptyOldLibraryTrash",
@@ -285,13 +285,10 @@ export function registerIpcRouter({
           "importAssets",
           "importDroppedPaths",
           "importAssetData",
-          "chooseMediaLibrary",
-          "choosePresentationsFolder",
-          "resetPresentationsFolder",
+          "chooseShowMeRoot",
           "chooseImageCacheFolder",
           "resetImageCacheFolder",
           "clearPresentationImages",
-          "resetMediaLibrary",
         ].includes(method)
       ) {
         const result = queue.then(() => operation(...args));
