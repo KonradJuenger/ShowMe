@@ -143,16 +143,13 @@ export interface Platform {
   getLibraryLifecycle?(): Promise<
     import("../core/libraryLifecycle").LibraryLifecycleInfo
   >;
-  choosePresentationsFolder?(): Promise<
+  chooseShowMeRoot?(): Promise<
     import("../core/libraryLifecycle").LibraryLifecycleInfo | null
-  >;
-  resetPresentationsFolder?(): Promise<
-    import("../core/libraryLifecycle").LibraryLifecycleInfo
   >;
   documentLibraryState?(
     documentId: string,
   ): Promise<{ displaced: boolean; location: string }>;
-  moveDocumentToPresentationsFolder?(
+  moveDocumentIntoShowMeRoot?(
     documentId: string,
   ): Promise<DocumentSummary | null>;
   saveDocumentAsPortable?(documentId: string): Promise<DocumentSummary | null>;
@@ -308,8 +305,7 @@ export interface Platform {
   collaborationStop?(): Promise<void>;
   isTest?: boolean;
   getMediaLibrary(): Promise<MediaLibraryInfo>;
-  chooseMediaLibrary(): Promise<MediaLibraryInfo | null>;
-  resetMediaLibrary(): Promise<MediaLibraryInfo>;
+  openMediaLibrary?(): Promise<void>;
   systemFonts?(): Promise<SystemFontFamily[]>;
   managedFonts?(documentId?: string): Promise<SystemFontFamily[]>;
   showContextMenu?(
