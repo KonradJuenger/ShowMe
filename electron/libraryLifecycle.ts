@@ -320,7 +320,7 @@ export class LibraryLifecycle {
     this.libraryRoot = path.join(this.root, "Library");
   }
 
-  async init() {
+  private async validateBoundary() {
     const rootStat = await fs.lstat(this.root);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
       throw new Error("ShowMe root must be a real directory");
@@ -336,6 +336,10 @@ export class LibraryLifecycle {
       relative.startsWith(`..${path.sep}`)
     )
       throw new Error("Library must not escape the ShowMe root");
+  }
+
+  async init() {
+    await this.validateBoundary();
     for (const folder of [...MEDIA_FOLDERS, "Effects", "Trash"])
       await fs.mkdir(path.join(this.libraryRoot, folder), { recursive: true });
   }
@@ -533,6 +537,7 @@ export class LibraryLifecycle {
     const lease = createServer((socket) => socket.destroy());
     let locked = false;
     try {
+      await this.validateBoundary();
       const canonicalRoot = await fs.realpath(this.root);
       const key =
         process.platform === "win32"
