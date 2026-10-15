@@ -217,7 +217,7 @@ export function AssetLibrary({
         <div className="compact-actions asset-browser-actions">
           {window.desktop && libInfo && platform.openMediaLibrary && (
             <button
-              aria-label="Open media library folder"
+              aria-label="Open Library folder"
               title={`Media library: ${libInfo.path}\nOpen in Finder or Explorer`}
               onClick={() => {
                 void platform.openMediaLibrary?.();
