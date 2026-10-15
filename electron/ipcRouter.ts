@@ -265,7 +265,7 @@ export function registerIpcRouter({
           "createDocument",
           "openDocumentFile",
           "setLibraryLifecycleMode",
-                          "scanLibrary",
+          "scanLibrary",
           "emptyOldLibraryTrash",
           "recoverUntitled",
           "saveDocumentToFile",
