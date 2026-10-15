@@ -19,6 +19,7 @@ import { createMediaElement } from "../../../src/core/media";
 import { insertElements } from "../../../src/core/editorCommands";
 import { StorageMedia } from "../../../electron/storage/media";
 import type { Asset } from "../../../src/core/assets";
+import { NativeLibraryBrowser } from "../../../electron/libraryBrowser";
 
 it("warm asset lookup and listing reuse inventory without directory enumeration", async () => {
   const { storage } = await storedDocument();
@@ -273,4 +274,71 @@ it("startup reconciles files copied into a Library after its inventory was cache
   } finally {
     media.dispose();
   }
+});
+
+
+it("unified native Library view keeps inherited cleanup protection", async () => {
+  const { storage, root } = await storedDocument();
+  const imageSource = path.join(root, "protected.png");
+  const videoSource = path.join(root, "clip.mp4");
+  await writeFile(imageSource, Buffer.from("protected-image"));
+  await writeFile(videoSource, Buffer.from("video"));
+  const image = await storage.importFile(imageSource, "album");
+  const video = await storage.importFile(videoSource, "clips");
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (id) => storage.libraryAssetMetadata(id),
+    (file, folder) => storage.importFile(file, folder),
+    async () => undefined,
+    () => {},
+  );
+
+  await browser.run({
+    type: "protect",
+    path: "images/album",
+    protected: true,
+  });
+
+  const all = await browser.run({
+    type: "list",
+    category: "all",
+    folder: "",
+    query: "",
+    all: true,
+    offset: 0,
+    limit: 100,
+  });
+  expect(all.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        category: "images",
+        asset: expect.objectContaining({ id: image.id }),
+        protection: "parent",
+      }),
+      expect.objectContaining({
+        category: "video",
+        asset: expect.objectContaining({ id: video.id }),
+        protection: undefined,
+      }),
+    ]),
+  );
+
+  const images = await browser.run({
+    type: "list",
+    category: "images",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(images.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: "images/album",
+        kind: "folder",
+        protection: "self",
+      }),
+    ]),
+  );
 });

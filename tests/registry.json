@@ -690,7 +690,7 @@
     "runtime": "unit",
     "created": "2026-10-11",
     "lastReviewed": "2026-10-15",
-    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered"
+    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering and inherited cleanup protection"
   },
   {
     "id": "media-derived-work",
