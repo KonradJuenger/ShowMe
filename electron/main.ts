@@ -189,27 +189,6 @@ async function getLibraryLifecycle() {
     library: requireStorage().assetRoot,
   };
 }
-async function documentLibraryState(id: string) {
-  await refreshLifecycleSettings();
-  const storage = requireStorage();
-  idSchema.parse(id);
-  if (collaboration.isGuest(id) || !storage.hasDocument(id))
-    return { displaced: false, location: "" };
-  const summary = storage.summary(idSchema.parse(id));
-  const dependent =
-    documentLibraryHashes(
-      storage.assetRoot,
-      storage.documentRuntime(id).authority.document,
-    ).length > 0;
-  return {
-    displaced:
-      dependent &&
-      !storage.isPackaged(id).packaged &&
-      Boolean(summary.location) &&
-      !isInsideRoot(showMeRoot, summary.location),
-    location: summary.location,
-  };
-}
 async function refreshLifecycleSettings() {
   const settings = await readSettings(app.getPath("userData"), {
     requireExisting: true,
@@ -590,6 +569,17 @@ async function chooseRecoveryAction(file: string) {
   return "saved" as const;
 }
 
+function assertPresentationInsideShowMeRoot(file: string) {
+  const resolved = path.resolve(file);
+  if (
+    path.extname(resolved).toLowerCase() === SHOWME_DOCUMENT_EXTENSION &&
+    !isInsideRoot(showMeRoot, resolved)
+  )
+    throw new Error(
+      "Native .sme presentations must live inside the selected ShowMe root. Move this file below the root or use a portable .smp package.",
+    );
+}
+
 async function openDocumentPath(file: string) {
   const resolved = path.resolve(file);
   const extension = path.extname(resolved).toLowerCase();
@@ -598,6 +588,7 @@ async function openDocumentPath(file: string) {
     extension !== SHOWME_PACKAGE_EXTENSION
   )
     throw new Error("Unsupported ShowMe file type");
+  assertPresentationInsideShowMeRoot(resolved);
   const document =
     extension === SHOWME_PACKAGE_EXTENSION
       ? await requireStorage().openPackage(resolved)
@@ -1271,8 +1262,10 @@ const operations: Record<string, (...args: any[]) => any> = {
   recoveryCandidate: (file: unknown) =>
     requireStorage().recoveryCandidate(z.string().min(1).parse(file)),
   async openDocumentFile(file: unknown, mode: unknown = "saved") {
+    const resolved = path.resolve(z.string().min(1).parse(file));
+    assertPresentationInsideShowMeRoot(resolved);
     const summary = await requireStorage().openDocument(
-      z.string().min(1).parse(file),
+      resolved,
       z.enum(["saved", "recover"]).parse(mode),
     );
     registerDocumentNotifications(summary.id);
@@ -1459,43 +1452,6 @@ const operations: Record<string, (...args: any[]) => any> = {
     await shell.openPath(requireStorage().assetRoot);
   },
   getLibraryLifecycle,
-  documentLibraryState,
-  async moveDocumentIntoShowMeRoot(input: string) {
-    const id = idSchema.parse(input);
-    if (collaboration.isGuest(id))
-      throw new Error("The host owns presentation files");
-    const storage = requireStorage();
-    const file = await chooseSavePath(storage.summary(id).name);
-    if (!file) return null;
-    if (!isInsideRoot(showMeRoot, file) || !file.endsWith(".sme"))
-      throw new Error("Choose a location inside the ShowMe root");
-    const original = await storage.assertNativeFileUnchanged(id);
-    const summary = await storage.saveDocument(id, file);
-    await rememberDocument(summary);
-    activateDocument(summary);
-    if (path.resolve(original.file) !== path.resolve(file)) {
-      if (
-        digest(await fs.readFile(original.file, "utf8")) !== original.revision
-      )
-        throw new Error(
-          "Saved the ShowMe root copy, but the original changed during the move and was kept.",
-        );
-      await shell.trashItem(original.file);
-    }
-    return summary;
-  },
-  async saveDocumentAsPortable(input: string) {
-    const id = idSchema.parse(input);
-    if (collaboration.isGuest(id))
-      throw new Error("The host owns presentation files");
-    const storage = requireStorage();
-    const file = await choosePackagePath(storage.summary(id).name);
-    if (!file) return null;
-    const summary = await storage.savePackageAs(id, file, false);
-    await rememberDocument(summary);
-    activateDocument(summary);
-    return summary;
-  },
   async setLibraryLifecycleMode(input: unknown) {
     const next = z.enum(["managed", "keep-all", "portable"]).parse(input);
     await refreshLifecycleSettings();
@@ -1558,6 +1514,20 @@ const operations: Record<string, (...args: any[]) => any> = {
       requireExisting: true,
     });
     const storage = requireStorage();
+    const blockingDocument = storage
+      .openDocuments()
+      .map((document) => storage.summary(document.documentId))
+      .find(
+        (summary) =>
+          Boolean(summary.location) &&
+          path.extname(summary.location).toLowerCase() ===
+            SHOWME_DOCUMENT_EXTENSION &&
+          !isInsideRoot(selected, summary.location),
+      );
+    if (blockingDocument)
+      throw new Error(
+        `Close “${blockingDocument.name}” or save it as a portable .smp before changing the ShowMe root.`,
+      );
     const previousLibrary = storage.assetRoot;
     await storage.setAssetRoot(library);
     settings.showMeRootPath = selected;
