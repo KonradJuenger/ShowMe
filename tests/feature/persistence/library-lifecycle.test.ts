@@ -11,7 +11,10 @@ import {
 import { createServer } from "node:net";
 import path from "node:path";
 import { storedDocument } from "../../helpers/storage";
-import { LibraryLifecycle } from "../../../electron/libraryLifecycle";
+import {
+  LibraryLifecycle,
+  assertShowMeRootChangeAllowed,
+} from "../../../electron/libraryLifecycle";
 import { createMediaElement } from "../../../src/core/media";
 import { LIBRARY_RETENTION_MS } from "../../../src/core/libraryLifecycle";
 import { digest } from "../../../electron/storage/io";
@@ -391,4 +394,29 @@ it("configured missing or malformed roots never become cleanup scopes", async ()
   await expect(readSettings(user, { requireExisting: true })).rejects.toThrow(
     "Could not read ShowMe settings",
   );
+});
+
+it("active host and guest collaboration states block ShowMe root changes", () => {
+  expect(() =>
+    assertShowMeRootChangeAllowed({
+      hosted: { sessionId: "host" },
+      clientStatus: "idle",
+    }),
+  ).toThrow(
+    "Stop hosting or leave the active collaboration session before changing the ShowMe root.",
+  );
+  expect(() =>
+    assertShowMeRootChangeAllowed({
+      hosted: null,
+      clientStatus: "connected",
+    }),
+  ).toThrow(
+    "Stop hosting or leave the active collaboration session before changing the ShowMe root.",
+  );
+  expect(() =>
+    assertShowMeRootChangeAllowed({
+      hosted: null,
+      clientStatus: "idle",
+    }),
+  ).not.toThrow();
 });
