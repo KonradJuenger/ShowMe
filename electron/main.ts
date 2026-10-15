@@ -1996,6 +1996,8 @@ async function requireConfiguredShowMeRoot(
         error instanceof Error ? error.message : String(error),
       );
     }
+  } else if (scriptedRoot === "__blocked__") {
+    return null;
   } else if (!scriptedRoot) {
     const intro = await dialog.showMessageBox({
       type: "info",
