@@ -189,7 +189,7 @@ export function NativeMediaLibrary({
     (page: number, reset = false) => {
       if (!platform.libraryBrowser || requested.current.has(page)) return;
       requested.current.add(page);
-      const current = ++generation.current;
+      const current = generation.current;
       const offset = page * PAGE_SIZE;
       const request =
         filter === "Trash"
@@ -206,7 +206,7 @@ export function NativeMediaLibrary({
       void platform
         .libraryBrowser(request)
         .then((result) => {
-          if (current < generation.current && !reset) return;
+          if (current !== generation.current) return;
           setPages((before) =>
             reset ? { [page]: result.entries } : { ...before, [page]: result.entries },
           );
@@ -214,7 +214,10 @@ export function NativeMediaLibrary({
           setFolders(result.folders);
           setError("");
         })
-        .catch((failure) => setError(String(failure)));
+        .catch((failure) => {
+          requested.current.delete(page);
+          setError(String(failure));
+        });
     },
     [filter, folder, query],
   );

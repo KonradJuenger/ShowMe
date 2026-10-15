@@ -124,7 +124,8 @@ export class NativeLibraryBrowser {
       const query = request.query.toLocaleLowerCase();
       await this.refresh();
       const protectedPaths = await readLibraryProtection(this.root);
-      const categories = unified ? LIBRARY_CATEGORIES : [request.category];
+      const categories: readonly LibraryCategory[] =
+        request.category === "all" ? LIBRARY_CATEGORIES : [request.category];
       const current = unified
         ? ""
         : `${request.category}${request.folder ? "/" + request.folder : ""}`;
