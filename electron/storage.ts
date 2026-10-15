@@ -688,19 +688,6 @@ export class DocumentStorage {
     });
   }
 
-  async assertNativeFileUnchanged(id: string) {
-    const { handle } = this.entry(id);
-    if (!handle.filePath || !handle.fileRevision)
-      throw new Error("This presentation has no saved native file");
-    if (
-      digest(await fs.readFile(handle.filePath, "utf8")) !== handle.fileRevision
-    )
-      throw new Error(
-        "This presentation changed on disk. Reopen it before moving to avoid removing external edits.",
-      );
-    return { file: handle.filePath, revision: handle.fileRevision };
-  }
-
   closeDocument(id: string) {
     this.entry(id);
     this.documents.delete(id);
