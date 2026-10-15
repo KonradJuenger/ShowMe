@@ -9,6 +9,7 @@ import {
   rm,
   access,
   stat,
+  symlink,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -277,6 +278,51 @@ test("production preload and IPC create and save a native current-format file", 
     );
     expect(portableCurrent!.location).toBe(portablePath);
     expect(await readFile(file, "utf8")).toContain(id);
+
+    // Reject unsafe candidates before the current Library or settings change.
+    const unsafeRoot = path.join(root, "Unsafe Shared");
+    const unsafeLibrary = path.join(unsafeRoot, "ShowMe Library");
+    await mkdir(unsafeLibrary, { recursive: true });
+    await symlink(
+      path.join(selectedLibrary, "images"),
+      path.join(unsafeLibrary, "images"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const beforeFailedSwitch = await readFile(settingsFile, "utf8");
+    const beforeLibrary = await page.evaluate(() =>
+      window.desktop!.getLibraryLifecycle!(),
+    );
+    const beforeAssets = await page.evaluate(() =>
+      window.desktop!.listAssets("", 0, 100),
+    );
+    await app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [folder],
+      });
+    }, unsafeRoot);
+    await expect(
+      page.evaluate(() => window.desktop!.chooseShowMeRoot!()),
+    ).rejects.toThrow("Unsafe Library directory: images");
+    expect(await readFile(settingsFile, "utf8")).toBe(beforeFailedSwitch);
+    expect(
+      await page.evaluate(() => window.desktop!.getLibraryLifecycle!()),
+    ).toEqual(beforeLibrary);
+    expect(
+      await page.evaluate(() => window.desktop!.getMediaLibrary()),
+    ).toMatchObject({ path: media });
+    expect(
+      await page.evaluate(() => window.desktop!.listAssets("", 0, 100)),
+    ).toEqual(beforeAssets);
+    expect(
+      (await page.evaluate(() => window.desktop!.scanLibrary!())).complete,
+    ).toBe(true);
+    await app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [folder],
+      });
+    }, selectedRoot);
 
     await page.getByRole("button", { name: "Presentation menu" }).click();
     await page

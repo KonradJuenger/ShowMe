@@ -134,11 +134,10 @@ let effectLibraryQueue = Promise.resolve();
 let lifecycleMode: LibraryLifecycleMode | null = null;
 let lifecycle: LibraryLifecycle | null = null;
 let showMeRoot = "";
-function configureLifecycle() {
+function createLibraryLifecycle(root = showMeRoot) {
   const storage = requireStorage();
-  const root = showMeRoot;
-  const libraryRoot = storage.assetRoot;
-  lifecycle = new LibraryLifecycle(
+  const libraryRoot = showMeLibraryPath(root);
+  return new LibraryLifecycle(
     root,
     () => {
       const remote = collaboration.clientDocument();
@@ -170,7 +169,7 @@ async function runLibraryScan(cleanup = false, expire = false) {
     throw new Error("Portable presentations do not use Library cleanup");
   if ((cleanup || expire) && lifecycleMode !== "managed")
     throw new Error("Automatic cleanup is disabled");
-  configureLifecycle();
+  lifecycle = createLibraryLifecycle();
   const result = await lifecycle!.scan(
     cleanup,
     expire,
@@ -1455,7 +1454,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     const next = z.enum(["managed", "keep-all", "portable"]).parse(input);
     await refreshLifecycleSettings();
     if (next === "managed" && lifecycleMode !== "managed") {
-      configureLifecycle();
+      lifecycle = createLibraryLifecycle();
       await lifecycle!.init();
       const analysis = await lifecycle!.scan(false, false, false);
       if (!analysis.complete) throw new Error(analysis.errors.join("\n"));
@@ -1477,7 +1476,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     await writeSettings(app.getPath("userData"), settings);
     await refreshLifecycleSettings();
     if (next !== "portable") {
-      configureLifecycle();
+      lifecycle = createLibraryLifecycle();
       await lifecycle!.init();
     }
     if (next === "managed") await runLibraryScan(true, true);
@@ -1528,6 +1527,10 @@ const operations: Record<string, (...args: any[]) => any> = {
       throw new Error(
         `Close “${blockingDocument.name}” or save it as a portable .smp before changing the ShowMe root.`,
       );
+    // Validate/create every managed directory before changing storage, watchers,
+    // protection leases or persisted settings. The candidate stays local until
+    // the switch commits; its init does not read documents or run cleanup.
+    await createLibraryLifecycle(selected).init();
     const previousLibrary = storage.assetRoot;
     await storage.setAssetRoot(library);
     settings.showMeRootPath = selected;
@@ -1538,8 +1541,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       throw error;
     }
     showMeRoot = selected;
-    configureLifecycle();
-    if (lifecycleMode !== "portable") await lifecycle!.init();
+    lifecycle = createLibraryLifecycle();
     imagePreparation.invalidate();
     return getLibraryLifecycle();
   },
@@ -2095,7 +2097,7 @@ void app.whenReady().then(async () => {
       editor.webContents.send("media-inventory-changed");
   };
   await storage.init();
-  configureLifecycle();
+  lifecycle = createLibraryLifecycle();
   if (lifecycleMode !== "portable") await lifecycle!.init();
 
   await assertLocalCacheFolder(imageCacheFolder, storage.assetRoot);

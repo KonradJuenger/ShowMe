@@ -360,7 +360,7 @@
     "runtime": "electron",
     "created": "2026-10-09",
     "lastReviewed": "2026-10-15",
-    "reason": "Production preload/IPC uses one ShowMe root with visible ShowMe Library/, recursive .sme scanning, explicit root switching, external native .sme rejection, open-native root-change blocking and explicit portable .smp Save As anywhere; startup clean cutover ignores legacy folder settings, persists only showMeRootPath, creates ShowMe Library/ and leaves legacy files untouched; live Explorer-style copies and removals update the mounted Media panel through production IPC; typed font IPC and experimental LAN collaboration controls remain covered"
+    "reason": "Production preload/IPC uses one ShowMe root with visible ShowMe Library/, recursive .sme scanning, explicit root switching, external native .sme rejection, open-native root-change blocking and explicit portable .smp Save As anywhere; startup clean cutover ignores legacy folder settings, persists only showMeRootPath, creates ShowMe Library/ and leaves legacy files untouched; unsafe candidate Library directories are rejected before storage/settings change, leaving the previous root usable; live Explorer-style copies and removals update the mounted Media panel through production IPC; typed font IPC and experimental LAN collaboration controls remain covered"
   },
   {
     "id": "packaged-startup",
