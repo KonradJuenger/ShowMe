@@ -43,7 +43,7 @@ export class StorageMedia {
 
   async init() {
     await fs.mkdir(this.assetRoot, { recursive: true });
-    for (const folder of MEDIA_FOLDERS)
+    for (const folder of [...MEDIA_FOLDERS, "Effects", "Trash"])
       await fs.mkdir(path.join(this.assetRoot, folder), { recursive: true });
     await fs.rm(path.join(this.assetRoot, ".showme", "catalog.json"), {
       force: true,
@@ -145,7 +145,7 @@ export class StorageMedia {
     );
     if (file && locator) {
       locator.filename = path.basename(file);
-      const folder = path.basename(path.dirname(file));
+      const folder = path.relative(this.assetRoot, file).split(path.sep)[0];
       locator.mediaType =
         folder === "images"
           ? "image"
@@ -186,8 +186,12 @@ export class StorageMedia {
     };
   }
 
-  async importFile(file: string, protect?: (hash: string) => void) {
-    return this.importSource(path.basename(file), file, protect);
+  async importFile(
+    file: string,
+    protect?: (hash: string) => void,
+    folder = "",
+  ) {
+    return this.importSource(path.basename(file), file, protect, folder);
   }
 
   async importBytes(
@@ -202,6 +206,7 @@ export class StorageMedia {
     originalBasename: string,
     source: string | Uint8Array,
     protect?: (hash: string) => void,
+    folder = "",
   ) {
     await this.ensureDerivedAssets();
     const type = mediaType(originalBasename);
@@ -210,6 +215,7 @@ export class StorageMedia {
       originalBasename,
       source,
       protect,
+      folder,
     );
     const { id } = imported;
     const existing = this.derivedAssets.get(id);
@@ -250,9 +256,9 @@ export class StorageMedia {
       id: parsed,
       filename: name,
       mediaType:
-        path.basename(path.dirname(file)) === "images"
+        path.relative(this.assetRoot, file).split(path.sep)[0] === "images"
           ? "image"
-          : path.basename(path.dirname(file)) === "video"
+          : path.relative(this.assetRoot, file).split(path.sep)[0] === "video"
             ? "video"
             : "other",
       ...type,

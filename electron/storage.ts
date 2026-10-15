@@ -1122,7 +1122,11 @@ export class DocumentStorage {
     return entry.localMedia;
   }
 
-  private async importSource(name: string, source: string | Uint8Array) {
+  private async importSource(
+    name: string,
+    source: string | Uint8Array,
+    folder = "",
+  ) {
     const entry = this.importDocumentId
       ? this.documents.get(this.importDocumentId)
       : undefined;
@@ -1134,7 +1138,7 @@ export class DocumentStorage {
       const local = await this.localMedia(entry);
       const asset =
         typeof source === "string"
-          ? await local.importFile(source)
+          ? await local.importFile(source, undefined, folder)
           : await local.importBytes(name, source);
       entry.packageAssets ??= new Map();
       entry.packageAssets.set(asset.id, {
@@ -1154,16 +1158,21 @@ export class DocumentStorage {
       restoreLibraryAsset(this.assetRoot, hash);
     };
     return typeof source === "string"
-      ? this.media.importFile(source, protect)
+      ? this.media.importFile(source, protect, folder)
       : this.media.importBytes(name, source, protect);
   }
 
-  async importFile(file: string) {
-    return this.importSource(path.basename(file), file);
+  async importFile(file: string, folder = "") {
+    return this.importSource(path.basename(file), file, folder);
   }
 
   async importAssetData(name: string, bytes: Uint8Array) {
     return this.importSource(name, bytes);
+  }
+
+  /** Inventory metadata only; insertion and byte consumers still verify assets. */
+  async libraryAssetMetadata(id: string): Promise<Asset> {
+    return this.media.asset(id);
   }
 
   async asset(id: string): Promise<Asset> {
