@@ -5,6 +5,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -175,6 +176,26 @@ it("changed presentations abort cleanup before any Library asset is moved", asyn
   await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
 });
 
+it("a managed Library directory escaping through a symlink blocks cleanup", async () => {
+  const fixture = await libraryFixture();
+  const effects = path.join(fixture.libraryRoot, "Effects");
+  const outside = path.join(fixture.root, "outside-effects");
+  await rm(effects, { recursive: true });
+  await mkdir(outside);
+  await symlink(
+    outside,
+    effects,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+
+  const result = await fixture.lifecycle.scan(true, true);
+  expect(result.complete).toBe(false);
+  expect(result.errors.join("\n")).toContain("Unsafe Library directory");
+  await expect(access(fixture.source)).resolves.toBeUndefined();
+  await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+  expect(fixture.deleteTrash).not.toHaveBeenCalled();
+});
+
 it("a referenced Trash asset is restored from a deeply nested presentation before expiry", async () => {
   const fixture = await libraryFixture();
   expect((await fixture.lifecycle.scan(true)).trash).toHaveLength(2);
@@ -284,6 +305,23 @@ it("collector locks preserve imports and exclude competing cleanup collectors", 
     if (tcpBound)
       await new Promise<void>((resolve) => tcp.close(() => resolve()));
   }
+});
+
+it("a new installation has no implicit root and requires explicit root setup", async () => {
+  const { root } = await storedDocument();
+  const user = path.join(root, "new-user");
+  const selected = path.join(root, "selected-root");
+  await mkdir(user);
+  await mkdir(selected);
+
+  expect(await readSettings(user)).toEqual({});
+  await expect(validateShowMeRoot(selected)).rejects.toThrow(
+    "does not contain a Library directory",
+  );
+  await expect(access(showMeLibraryPath(selected))).rejects.toThrow();
+
+  await validateShowMeRoot(selected, { createLibrary: true });
+  await expect(access(showMeLibraryPath(selected))).resolves.toBeUndefined();
 });
 
 it("old two-folder settings do not configure or infer the new ShowMe root", async () => {
