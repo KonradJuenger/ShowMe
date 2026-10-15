@@ -1,6 +1,6 @@
 # Collaboration-safe Library root
 
-Status: product specification, no implementation plan yet.
+Status: product specification. Product decisions are fixed; no implementation plan is included yet.
 
 ## Problem
 
@@ -17,7 +17,7 @@ The cleanup algorithm cannot solve this reliably while the Library and its autho
 
 ## Goal
 
-Define one shared filesystem boundary for a Managed Library and every presentation that is allowed to depend on it.
+Define one filesystem boundary for a Managed Library and every presentation that is allowed to depend on it.
 
 Within that boundary:
 
@@ -82,12 +82,21 @@ What matters is that both computers sync the same root contents, including the v
 
 ### Root selection
 
-Managed Library mode uses a single root selection rather than independently selecting:
+Managed Library mode uses a single root selection.
 
-- a Media Library folder; and
-- a Presentations folder.
+The current independent concepts of:
 
-The root defines both the Library location and the presentation scope relevant to cleanup.
+- Media Library folder; and
+- Presentations folder
+
+are replaced by the single ShowMe root.
+
+The root defines both:
+
+- the location of the visible `Library/`; and
+- the complete presentation scope relevant to cleanup.
+
+There must not be a normal configuration in which the Managed Library and cleanup's presentation scope can point at unrelated filesystem locations.
 
 ### Presentation placement
 
@@ -95,7 +104,7 @@ Any current-format `.sme` presentation below the selected root may reference tha
 
 No dedicated presentation directory or naming convention is required.
 
-A presentation outside the selected root must not silently depend on that root's Managed Library while still participating in automatic cleanup. ShowMe must make that state impossible or explicitly unsafe rather than allowing cleanup to proceed as if the reference scope were complete.
+A presentation outside the selected root must not silently depend on that root's Managed Library while automatic cleanup treats the root as complete. ShowMe must prevent that state or make the presentation portable instead of allowing an unsafe Managed Library dependency.
 
 Portable `.smp` files remain self-contained and are outside this Managed Library ownership rule.
 
@@ -141,11 +150,108 @@ Unused assets should continue to enter Library Trash before permanent deletion, 
 
 Collaboration does not create a second asset-storage model.
 
-For the experimental collaboration workflow, users are expected to share/sync the same ShowMe root using their existing filesystem-sync solution.
+For the experimental collaboration workflow, users are expected to share or sync the same ShowMe root using their existing filesystem-sync solution.
 
 A collaborator can map that shared root to a different absolute path on their own machine. ShowMe must reason about the selected local root boundary, not require identical machine paths.
 
 The important requirement is that the Library and every `.sme` file that can reference it are part of the same synced root.
+
+## Transition from the current storage model
+
+This change intentionally uses a clean cutover rather than a compatibility migration.
+
+The existing user base is small enough that preserving the old independent Library and Presentations settings would add more long-term complexity and risk than value.
+
+### New app release
+
+The new storage model ships as a normal new ShowMe app version.
+
+It does **not** require:
+
+- a new `.sme` document version;
+- a new `.smp` package version solely for this change; or
+- a new Library asset format.
+
+The change is to ShowMe's application storage configuration and cleanup authority, not to presentation content.
+
+### Forced root setup
+
+After updating, an installation that does not yet have the new ShowMe root configured must not silently infer one from the old settings.
+
+Before normal Managed Library use, ShowMe presents a blocking setup step asking the user to choose the new ShowMe root.
+
+Conceptually:
+
+```text
+ShowMe now uses one root folder for presentations and the Media Library.
+
+Choose the folder that contains, or should contain, your Library and all
+presentations that use it.
+
+[Choose ShowMe Root…]
+```
+
+There is no "continue with old folders" option.
+
+### No automatic filesystem migration
+
+ShowMe must not automatically:
+
+- move presentations;
+- move or merge the existing Library;
+- choose a common parent directory;
+- infer the root from the old Library path;
+- infer the root from the old Presentations path; or
+- keep using the old paths as fallback locations.
+
+Existing files remain untouched.
+
+If the user's current Library and presentations are already below one common directory, the user selects that directory as the new root.
+
+Example:
+
+```text
+Before update:
+
+D:/Studio/
+├── Library/
+└── Presentations/
+    ├── project-a.sme
+    └── project-b.sme
+
+After update:
+
+Choose ShowMe Root → D:/Studio/
+```
+
+No files need to move.
+
+If the existing Library and presentations live in unrelated locations, the user reorganizes them into one root before Managed Library operation can resume.
+
+### No legacy storage mode
+
+The old independent folder configuration is not a supported legacy mode.
+
+Once this change is implemented:
+
+- the product model contains one ShowMe root;
+- old independent Library/Presentations settings are obsolete;
+- old values are not consulted during ordinary operation;
+- no adapter is retained to make the previous two-root model behave like the new one.
+
+The old settings may exist in an older settings file, but their presence must not restore the old behavior.
+
+### Cleanup during cutover
+
+Automatic cleanup is disabled until all of the following are true:
+
+1. the user has selected the new ShowMe root;
+2. the required visible `Library/` exists within that root;
+3. ShowMe can perform a complete recursive presentation scan of the root.
+
+If setup is incomplete or the first scan fails, no assets are moved to Library Trash and no old trash is permanently deleted as part of that cleanup attempt.
+
+The transition must prefer retaining unused files over risking removal of referenced files.
 
 ## What this should prevent
 
@@ -159,6 +265,8 @@ The model must make the following failure impossible during normal Managed Libra
 
 With one shared root, asset X can only be eligible for cleanup after a complete scan of the same root that contains the presentation referencing it.
 
+The cutover also prevents an updated installation from accidentally continuing to use the unsafe two-root model simply because old settings remain on disk.
+
 ## What this is not
 
 This specification does not introduce:
@@ -170,7 +278,9 @@ This specification does not introduce:
 - mandatory project folders;
 - a mandatory `Presentations/` directory;
 - a hidden ShowMe workspace containing user media;
-- a new collaboration transport.
+- a new collaboration transport;
+- an automatic migration system for the old two-folder settings;
+- long-term compatibility with the old storage configuration.
 
 Those may be reconsidered if collaboration becomes a larger product area. They are not needed to remove the current cleanup hazard.
 
@@ -178,9 +288,12 @@ Those may be reconsidered if collaboration becomes a larger product area. They a
 
 The product model is successful when:
 
-1. A user can choose a shared project root once and use its visible Library across many presentations.
+1. A user can choose a project root once and use its visible Library across many presentations.
 2. Presentations may be organized freely anywhere below that root.
 3. Two collaborators cannot accidentally give cleanup different authoritative presentation scopes while sharing the same Managed Library.
 4. Automatic cleanup never deletes or trashes an asset based on a known-incomplete root scan.
 5. Existing Library benefits remain intact: centralized assets, deduplication, direct filesystem access, Trash review, and delayed permanent deletion.
 6. Portable presentations remain available for cases that should not depend on a Managed Library.
+7. An existing installation cannot continue into Managed Library operation after the update without explicitly selecting the new root.
+8. Existing presentation and asset files are not modified merely because the app storage model changed.
+9. The implementation does not retain the old independent Library/Presentations model as a compatibility path.
