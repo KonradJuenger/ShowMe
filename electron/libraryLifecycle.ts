@@ -123,13 +123,34 @@ export function isInsideRoot(root: string, file: string): boolean {
   );
 }
 
+export function assertShowMeRootChangeAllowed(status: {
+  hosted: unknown;
+  clientStatus:
+    | "idle"
+    | "connecting"
+    | "waiting"
+    | "connected"
+    | "rejected"
+    | "incompatible"
+    | "lost";
+}) {
+  if (status.hosted || status.clientStatus !== "idle")
+    throw new Error(
+      "Stop hosting or leave the active collaboration session before changing the ShowMe root.",
+    );
+}
+
 export function librarySavePath(
   showMeRoot: string,
   file: string,
   portable: boolean,
 ): string {
-  const ext = portable || !isInsideRoot(showMeRoot, file) ? ".smp" : ".sme";
   const current = path.extname(file);
+  const explicitPortable = current.toLowerCase() === ".smp";
+  const ext =
+    explicitPortable || portable || !isInsideRoot(showMeRoot, file)
+      ? ".smp"
+      : ".sme";
   return /^(\.sme|\.smp)$/i.test(current)
     ? file.slice(0, -current.length) + ext
     : file + ext;
