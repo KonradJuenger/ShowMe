@@ -338,18 +338,46 @@ export class LibraryLifecycle {
       throw new Error("Library must not escape the ShowMe root");
   }
 
+  private async libraryDirectory(relative: string, create = false) {
+    const directory = path.join(this.libraryRoot, relative);
+    if (create)
+      try {
+        await fs.lstat(directory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await fs.mkdir(directory);
+      }
+    const stat = await fs.lstat(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink())
+      throw new Error(`Unsafe Library directory: ${relative}`);
+    const canonicalLibrary = await fs.realpath(this.libraryRoot);
+    const canonicalDirectory = await fs.realpath(directory);
+    const inside = path.relative(canonicalLibrary, canonicalDirectory);
+    if (
+      inside === "" ||
+      inside === ".." ||
+      inside.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(inside)
+    )
+      throw new Error(`Library directory escapes the ShowMe root: ${relative}`);
+    return directory;
+  }
+
+  private async validateManagedDirectories() {
+    for (const folder of [...MEDIA_FOLDERS, "Effects", "Trash"])
+      await this.libraryDirectory(folder);
+    await this.libraryDirectory(path.join("Trash", "assets"));
+  }
+
   async init() {
     await this.validateBoundary();
     for (const folder of [...MEDIA_FOLDERS, "Effects", "Trash"])
-      await fs.mkdir(path.join(this.libraryRoot, folder), { recursive: true });
+      await this.libraryDirectory(folder, true);
+    await this.libraryDirectory(path.join("Trash", "assets"), true);
   }
 
   private async trashEntries(): Promise<TrashEntry[]> {
-    const directory = path.join(this.libraryRoot, "Trash", "assets");
-    await fs.mkdir(directory, { recursive: true });
-    for (const folder of [path.join(this.libraryRoot, "Trash"), directory])
-      if ((await fs.lstat(folder)).isSymbolicLink())
-        throw new Error("Unsafe Library Trash path");
+    const directory = await this.libraryDirectory(path.join("Trash", "assets"));
     const items: TrashEntry[] = [];
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink())
@@ -538,6 +566,7 @@ export class LibraryLifecycle {
     let locked = false;
     try {
       await this.validateBoundary();
+      await this.validateManagedDirectories();
       const canonicalRoot = await fs.realpath(this.root);
       const key =
         process.platform === "win32"
