@@ -196,29 +196,6 @@ export function PresentationMenu({
     void task().catch(onError);
   }
 
-  async function chooseMediaLibrary() {
-    setSettingsBusy(true);
-    try {
-      const next = await platform.chooseMediaLibrary();
-      if (next) setMediaLibrary(next);
-    } catch (error) {
-      onError(error);
-    } finally {
-      setSettingsBusy(false);
-    }
-  }
-
-  async function resetMediaLibrary() {
-    setSettingsBusy(true);
-    try {
-      setMediaLibrary(await platform.resetMediaLibrary());
-    } catch (error) {
-      onError(error);
-    } finally {
-      setSettingsBusy(false);
-    }
-  }
-
   const menu = open
     ? createPortal(
         <div
@@ -482,27 +459,6 @@ export function PresentationMenu({
                 >
                   {mediaLibrary?.path ??
                     (settingsBusy ? "Loading…" : "Unavailable")}
-                </div>
-                {mediaLibrary && !mediaLibrary.isDefault && (
-                  <p className="settings-default-path">
-                    Default: {mediaLibrary.defaultPath}
-                  </p>
-                )}
-                <div className="settings-actions">
-                  <button
-                    type="button"
-                    disabled={settingsBusy}
-                    onClick={() => void chooseMediaLibrary()}
-                  >
-                    Choose Folder…
-                  </button>
-                  <button
-                    type="button"
-                    disabled={settingsBusy || mediaLibrary?.isDefault}
-                    onClick={() => void resetMediaLibrary()}
-                  >
-                    Use Default
-                  </button>
                 </div>
               </div>)}
             </div>
