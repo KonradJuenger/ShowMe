@@ -84,8 +84,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Managed default, save format at the independent presentations-folder boundary, speaker note privacy and font portability"
+    "lastReviewed": "2026-10-15",
+    "reason": "Managed default and native .sme save format follow the ShowMe root boundary while external or explicit portable saves use .smp; speaker note privacy and font portability"
   },
   {
     "id": "editor-dimensions",
@@ -359,8 +359,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
-    "reason": "Production preload/IPC writes a native current-format file; typed font IPC rejects invalid or outside-document scope; collaboration defaults hidden and Settings explicitly enables experimental LAN controls; independent media/presentations folder pickers, settings persistence, recursive scanning, default native Save As and reset; real asset reference across separate folders, malformed settings blocking cleanup and folder-change displacement warning/move"
+    "lastReviewed": "2026-10-15",
+    "reason": "Production preload/IPC uses one ShowMe root with visible Library/, recursive .sme scanning, root switching, displaced-document resolution and portable .smp behavior; settings persist only the new root model; typed font IPC and experimental LAN collaboration controls remain covered"
   },
   {
     "id": "packaged-startup",
@@ -766,8 +766,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-12",
-    "reason": "Independent media and presentations settings, independent folder initialization, recursive current-format liveness, incomplete and changed scans blocking cleanup, draft protection, restoration and expiry; exclusive collector leases and Windows TCP contention isolation; malformed and missing settings blocking fallback cleanup scopes and initialization writes"
+    "lastReviewed": "2026-10-15",
+    "reason": "One ShowMe root owns visible Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root and explicit cutover moves no files"
   },
   {
     "id": "persistence-current-formats",
