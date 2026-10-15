@@ -9,11 +9,11 @@ import {
 
 const descriptions: Record<LibraryLifecycleMode, string> = {
   managed:
-    "Store assets once and share them between presentations. ShowMe scans .sme files recursively in your presentations folder. Unused assets move to Library Trash and are permanently deleted after 10 days.",
+    "Store assets once in Library/ and share them between .sme presentations anywhere below the ShowMe root. Cleanup scans that complete root recursively. Unused assets move to Library Trash and are permanently deleted after 10 days.",
   "keep-all":
-    "Store and share assets in the central Library. Automatic cleanup is disabled, including existing Library Trash. You can review those files yourself.",
+    "Store and share assets in Library/ below the ShowMe root. Automatic cleanup is disabled, including permanent deletion of existing Library Trash.",
   portable:
-    "Each presentation contains its own assets. New imports belong to the presentation and saves use portable .smp packages. Existing Library files remain untouched.",
+    "Use self-contained .smp packages instead of Managed Library dependencies. The selected ShowMe root and its Library remain untouched.",
 };
 const size = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
 
@@ -23,14 +23,15 @@ export function LibraryStorageSettings() {
   const [scan, setScan] = useState<LibraryScanResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
   useEffect(() => {
     let live = true;
     void platform
       .getLibraryLifecycle?.()
-      .then((info) => {
-        if (live) {
-          setInfo(info);
-          setChoice(info.mode ?? "managed");
+      .then((next) => {
+        if (live && next) {
+          setInfo(next);
+          setChoice(next.mode ?? "managed");
         }
       })
       .catch((error) => live && setError(String(error)));
@@ -38,7 +39,9 @@ export function LibraryStorageSettings() {
       live = false;
     };
   }, []);
+
   if (!platform.getLibraryLifecycle || !info) return null;
+
   const execute = async (task: () => Promise<void>) => {
     setBusy(true);
     setError("");
@@ -50,18 +53,22 @@ export function LibraryStorageSettings() {
       setBusy(false);
     }
   };
-  const content = (
+
+  return (
     <section className="settings-section" aria-label="Library and Storage">
       <h3>Library / Storage</h3>
       <details>
         <summary>Learn more about storage and portability</summary>
         <p>
-          .sme documents depend on Library assets and are not self-contained.
-          .smp packages are portable. Managed Library scans the presentations
-          folder and its subfolders when you run cleanup. Unused assets move to
-          Library Trash and are permanently deleted after 10 days.
+          The ShowMe root is the shared storage boundary. Its visible Library/
+          directory stores central assets, while .sme presentations that use
+          those assets can live anywhere recursively below the same root.
+          Cleanup scans the complete root before classifying assets as unused.
+          A portable .smp is the alternative when a presentation should be
+          self-contained or live elsewhere.
         </p>
       </details>
+
       <label>
         Library mode{" "}
         <select
@@ -93,128 +100,102 @@ export function LibraryStorageSettings() {
           {info.mode ? "Apply storage mode" : "Use this storage mode"}
         </button>
       )}
-      <p>Presentations folder</p>
-      <div
-        className="settings-path"
-        aria-label="Presentations folder"
-        title={info.presentations}
-      >
-        {info.presentations}
+
+      <p>ShowMe root</p>
+      <div className="settings-path" aria-label="ShowMe root" title={info.root}>
+        {info.root}
       </div>
       <p>
-        Default save location. Cleanup scans every .sme file in this folder and
-        its subfolders. Put all .sme files that use this media library here
-        before running cleanup. Choosing a folder does not move files.
+        Library/ lives directly inside this folder. Every .sme presentation that
+        depends on this Library must also live somewhere below this root.
+        Choosing another root does not move or merge any existing files.
       </p>
       <div className="settings-actions">
         <button
           disabled={busy}
           onClick={() =>
             void execute(async () => {
-              const next = await platform.choosePresentationsFolder!();
+              const next = await platform.chooseShowMeRoot!();
               if (next) {
                 setInfo(next);
+                setChoice(next.mode ?? "managed");
                 setScan(null);
               }
             })
           }
         >
-          Choose Presentations Folder…
+          Choose ShowMe Root…
         </button>
+      </div>
+
+      <p>Library folder</p>
+      <div
+        className="settings-path"
+        aria-label="Library folder"
+        title={info.library}
+      >
+        {info.library}
+      </div>
+      <p>
+        Library files remain directly accessible in Finder or Explorer. ShowMe
+        does not hide them in application data.
+      </p>
+      {platform.openMediaLibrary && (
         <button
-          disabled={busy || info.presentations === info.defaultPresentations}
+          disabled={busy}
           onClick={() =>
             void execute(async () => {
-              setInfo(await platform.resetPresentationsFolder!());
-              setScan(null);
+              await platform.openMediaLibrary!();
             })
           }
         >
-          Use Default Presentations Folder
+          Open Library Folder
         </button>
-      </div>
+      )}
+
       {info.mode !== "portable" && (
         <>
-          <p>Media library folder</p>
-          <div
-            className="settings-path"
-            aria-label="Media library folder"
-            title={info.root}
-          >
-            {info.root}
-          </div>
+          {info.mode === "managed" && (
+            <p>
+              Cleanup moves unused assets to Library Trash only after a complete
+              recursive scan of the ShowMe root. Trash becomes eligible for
+              permanent deletion after 10 days.
+            </p>
+          )}
           <div className="settings-actions">
             <button
               disabled={busy}
               onClick={() =>
-                void execute(async () => {
-                  if (await platform.chooseMediaLibrary()) {
-                    setInfo(await platform.getLibraryLifecycle!());
-                    setScan(null);
-                  }
-                })
+                void execute(async () => setScan(await platform.scanLibrary!()))
               }
             >
-              Choose Media Library Folder…
+              {info.mode === "managed"
+                ? "Scan Root & Clean Library"
+                : "Scan Root"}
             </button>
             <button
               disabled={busy}
               onClick={() =>
                 void execute(async () => {
-                  await platform.resetMediaLibrary();
-                  setInfo(await platform.getLibraryLifecycle!());
-                  setScan(null);
+                  await platform.reviewLibraryTrash!();
                 })
               }
             >
-              Use Default Media Library Folder
+              Review Trash
             </button>
-          </div>
-
-          {info.mode === "managed" && (
-            <p>
-              Move unused assets to Library Trash after a complete scan.
-              Permanently delete them after 10 days.
-            </p>
-          )}
-          {
-            <div className="settings-actions">
+            {info.mode === "managed" && (
               <button
                 disabled={busy}
                 onClick={() =>
                   void execute(async () =>
-                    setScan(await platform.scanLibrary!()),
+                    setScan(await platform.emptyOldLibraryTrash!()),
                   )
                 }
               >
-                {info.mode === "managed"
-                  ? "Scan Presentations & Clean Library"
-                  : "Scan Presentations"}
+                Empty old trash now
               </button>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void execute(async () => {
-                    await platform.reviewLibraryTrash!();
-                  })
-                }
-              >
-                Review Trash
-              </button>
-              {info.mode === "managed" && (
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void execute(async () =>
-                      setScan(await platform.emptyOldLibraryTrash!()),
-                    )
-                  }
-                >
-                  Empty old trash now
-                </button>
-              )}
-            </div>
-          }
+            )}
+          </div>
           {scan && (
             <div aria-live="polite">
               <p>
@@ -227,8 +208,8 @@ export function LibraryStorageSettings() {
                 pending: {size(scan.unusedBytes)} · Library Trash:{" "}
                 {size(scan.trashBytes)} · Other: {size(scan.otherBytes)}
               </p>
-              {scan.errors.map((error) => (
-                <p key={error}>{error}</p>
+              {scan.errors.map((scanError) => (
+                <p key={scanError}>{scanError}</p>
               ))}
               {scan.trash.length > 0 && (
                 <details>
@@ -252,8 +233,8 @@ export function LibraryStorageSettings() {
           )}
         </>
       )}
+
       {error && <p role="alert">{error}</p>}
     </section>
   );
-  return content;
 }
