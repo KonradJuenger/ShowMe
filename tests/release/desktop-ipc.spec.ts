@@ -20,15 +20,14 @@ import { createMediaElement } from "../../src/core/media";
 test("production preload and IPC create and save a native current-format file", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "showme-ipc-"));
   const user = path.join(root, "user");
-  const media = path.join(user, "assets");
-  const presentations = path.join(root, "presentations");
+  const showMeRoot = path.join(root, "Studio Shared");
+  const media = path.join(showMeRoot, "Library");
   await mkdir(user);
-  await mkdir(presentations);
+  await mkdir(media, { recursive: true });
   await writeFile(
     path.join(user, "settings.json"),
     JSON.stringify({
-      mediaLibraryPath: media,
-      presentationsFolderPath: presentations,
+      showMeRootPath: showMeRoot,
       libraryLifecycleMode: "keep-all",
       storageWarningSeen: true,
     }),
@@ -64,11 +63,11 @@ test("production preload and IPC create and save a native current-format file", 
       }),
     ).toBeVisible();
     await expect(
-      page.getByLabel("Media library folder", { exact: true }),
-    ).toHaveText(media);
+      page.getByLabel("ShowMe root", { exact: true }),
+    ).toHaveText(showMeRoot);
     await expect(
-      page.getByLabel("Presentations folder", { exact: true }),
-    ).toHaveText(presentations);
+      page.getByLabel("Library folder", { exact: true }),
+    ).toHaveText(media);
     await collaboration.check();
     await page.getByRole("button", { name: "Close settings" }).click();
     await expect(
@@ -77,9 +76,9 @@ test("production preload and IPC create and save a native current-format file", 
     const library = await page.evaluate(() =>
       window.desktop!.getLibraryLifecycle!(),
     );
-    expect(library.root).toBe(media);
-    expect(library.presentations).toBe(presentations);
-    const nested = path.join(presentations, "client", "project");
+    expect(library.root).toBe(showMeRoot);
+    expect(library.library).toBe(media);
+    const nested = path.join(showMeRoot, "client", "project", "deep");
     await mkdir(nested, { recursive: true });
     const file = path.join(nested, "Native.sme");
     const [asset] = await page.evaluate(() =>
@@ -189,7 +188,6 @@ test("production preload and IPC create and save a native current-format file", 
     ).toBe(1);
     const settingsFile = path.join(user, "settings.json");
     const settingsBeforeCorruption = await readFile(settingsFile, "utf8");
-    await mkdir(path.join(user, "Presentations"));
     await writeFile(settingsFile, "{");
     await expect(
       page.evaluate(() => window.desktop!.scanLibrary!()),
@@ -209,8 +207,13 @@ test("production preload and IPC create and save a native current-format file", 
       "data-document-id",
       id,
     );
-    const selectedPresentations = path.join(root, "selected-presentations");
-    await mkdir(selectedPresentations);
+    const selectedRoot = path.join(root, "Selected Shared");
+    const selectedLibrary = path.join(selectedRoot, "Library");
+    await mkdir(path.join(selectedLibrary, "images"), { recursive: true });
+    await copyFile(
+      path.join(media, "images", asset.filename),
+      path.join(selectedLibrary, "images", asset.filename),
+    );
     await app.evaluate(({ dialog }, folder) => {
       dialog.showOpenDialog = async () => ({
         canceled: false,
@@ -224,82 +227,74 @@ test("production preload and IPC create and save a native current-format file", 
         filePath: (options ?? (ownerOrOptions as SaveDialogOptions))
           .defaultPath!,
       });
-    }, selectedPresentations);
+    }, selectedRoot);
+
     await page.getByRole("button", { name: "Presentation menu" }).click();
     await page
       .getByRole("menuitem", { name: "Settings…", exact: true })
       .click();
     await page
-      .getByRole("button", {
-        name: "Choose Presentations Folder…",
-        exact: true,
-      })
+      .getByRole("button", { name: "Choose ShowMe Root…", exact: true })
       .click();
-    await expect(
-      page.getByLabel("Presentations folder", { exact: true }),
-    ).toHaveText(selectedPresentations);
+    await expect(page.getByLabel("ShowMe root", { exact: true })).toHaveText(
+      selectedRoot,
+    );
+    await expect(page.getByLabel("Library folder", { exact: true })).toHaveText(
+      selectedLibrary,
+    );
     const changed = await page.evaluate(() =>
       window.desktop!.getLibraryLifecycle!(),
     );
-    expect(changed!.root).toBe(media);
-    expect(changed!.presentations).toBe(selectedPresentations);
+    expect(changed!.root).toBe(selectedRoot);
+    expect(changed!.library).toBe(selectedLibrary);
+    expect(await readFile(file, "utf8")).toContain(id);
+    expect(
+      await readFile(path.join(media, "images", asset.filename)),
+    ).toEqual(
+      await readFile(path.join(selectedLibrary, "images", asset.filename)),
+    );
+
+    const persistedSettings = JSON.parse(
+      await readFile(path.join(user, "settings.json"), "utf8"),
+    );
+    expect(persistedSettings).toMatchObject({
+      showMeRootPath: selectedRoot,
+      libraryLifecycleMode: "keep-all",
+    });
+    expect(persistedSettings).not.toHaveProperty("mediaLibraryPath");
+    expect(persistedSettings).not.toHaveProperty("presentationsFolderPath");
+
     await page.getByRole("button", { name: "Close settings" }).click();
     const displaced = page.getByRole("complementary", {
-      name: "Presentation outside the presentations folder",
+      name: "Presentation outside the ShowMe root",
     });
     await expect(displaced).toBeVisible();
+    await expect(
+      displaced.getByRole("button", { name: "Continue temporarily" }),
+    ).toHaveCount(0);
     await displaced
-      .getByRole("button", { name: "Move to Presentations Folder" })
+      .getByRole("button", { name: "Move into ShowMe Root" })
       .click();
     await expect(displaced).toHaveCount(0);
-    const saved = await page.evaluate(
-      (id) => window.desktop!.saveDocumentAs!(id),
+
+    const moved = await page.evaluate(
+      (id) => window.desktop!.saveDocumentToFile!(id),
       id,
     );
-    expect(saved!.location).toBe(
-      path.join(selectedPresentations, "Native.sme"),
-    );
-    expect(JSON.parse(await readFile(saved!.location, "utf8")).documentId).toBe(
+    expect(moved.location).toBe(path.join(selectedRoot, "Native.sme"));
+    expect(JSON.parse(await readFile(moved.location, "utf8")).documentId).toBe(
       id,
     );
     expect(
-      JSON.parse(await readFile(path.join(user, "settings.json"), "utf8")),
-    ).toMatchObject({
-      mediaLibraryPath: media,
-      presentationsFolderPath: selectedPresentations,
-    });
-    const selectedMedia = path.join(root, "selected-media");
-    await mkdir(selectedMedia);
-    await mkdir(path.join(selectedMedia, "images"));
-    await copyFile(
-      path.join(media, "images", asset.filename),
-      path.join(selectedMedia, "images", asset.filename),
-    );
-    await app.evaluate(({ dialog }, folder) => {
-      dialog.showOpenDialog = async () => ({
-        canceled: false,
-        filePaths: [folder],
-      });
-    }, selectedMedia);
-    await page.evaluate(() => window.desktop!.chooseMediaLibrary());
-    const independent = await page.evaluate(() =>
-      window.desktop!.getLibraryLifecycle!(),
-    );
-    expect(independent.root).toBe(selectedMedia);
-    expect(independent.presentations).toBe(selectedPresentations);
+      (await page.evaluate(() => window.desktop!.scanLibrary!())).presentations,
+    ).toBe(1);
+
     const portable = await page.evaluate(async () => {
       await window.desktop!.setLibraryLifecycleMode!("portable");
       const created = await window.desktop!.createDocument("Portable");
       return window.desktop!.saveDocumentAs!(created!.id);
     });
-    expect(portable!.location).toBe(
-      path.join(selectedPresentations, "Portable.smp"),
-    );
-    const reset = await page.evaluate(() =>
-      window.desktop!.resetPresentationsFolder!(),
-    );
-    expect(reset.presentations).toBe(reset.defaultPresentations);
-    expect(reset.root).toBe(selectedMedia);
+    expect(portable!.location).toBe(path.join(selectedRoot, "Portable.smp"));
     expect(await page.evaluate(() => window.desktop!.isTest)).toBe(false);
   } finally {
     // This contract concerns IPC, not the unsaved-close confirmation dialog.
