@@ -14,7 +14,7 @@ import {
   isInsideRoot,
 } from "../../../electron/libraryLifecycle";
 
-it("Managed Library saves native documents only below the ShowMe root", async () => {
+it("Managed Library keeps explicit portable saves and redirects only unsafe native saves", async () => {
   const { storage, root } = await storedDocument();
   expect(storage.lifecycleMode).toBe("managed");
   const showMeRoot = path.join(root, "Studio Shared");
@@ -22,15 +22,18 @@ it("Managed Library saves native documents only below the ShowMe root", async ()
   const outside = path.join(root, "external", "deck.sme");
   expect(isInsideRoot(showMeRoot, inside)).toBe(true);
   expect(isInsideRoot(showMeRoot, outside)).toBe(false);
-  expect(librarySavePath(showMeRoot, inside, false)).toBe(
-    inside.replace(/\.smp$/, ".sme"),
-  );
+  expect(librarySavePath(showMeRoot, inside, false)).toBe(inside);
   expect(librarySavePath(showMeRoot, outside, false)).toBe(
     outside.replace(/\.sme$/, ".smp"),
   );
-  expect(librarySavePath(showMeRoot, inside, true)).toBe(
-    inside.replace(/\.smp$/, ".smp"),
-  );
+  expect(librarySavePath(showMeRoot, inside, true)).toBe(inside);
+  expect(
+    librarySavePath(
+      showMeRoot,
+      path.join(showMeRoot, "projects", "deck.sme"),
+      false,
+    ),
+  ).toBe(path.join(showMeRoot, "projects", "deck.sme"));
 });
 
 it("packages include notes by default and removal affects only the shared snapshot", async () => {
