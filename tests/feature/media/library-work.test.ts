@@ -10,7 +10,7 @@ import {
 } from "../../../electron/mediaLibrary";
 import { restoreLibraryAsset } from "../../../electron/libraryLifecycle";
 import { expect, it, vi } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { storedDocument } from "../../helpers/storage";
@@ -20,6 +20,8 @@ import { insertElements } from "../../../src/core/editorCommands";
 import { StorageMedia } from "../../../electron/storage/media";
 import type { Asset } from "../../../src/core/assets";
 import { NativeLibraryBrowser } from "../../../electron/libraryBrowser";
+import { EffectLibraryStorage } from "../../../electron/effectLibrary";
+import { blankEffect } from "../../../src/core/effectAuthoring";
 
 it("warm asset lookup and listing reuse inventory without directory enumeration", async () => {
   const { storage } = await storedDocument();
@@ -299,6 +301,7 @@ it("unified native Library view keeps inherited cleanup protection", async () =>
     protected: true,
   });
 
+  const directoryReads = vi.spyOn(nodeFs.promises, "readdir");
   const all = await browser.run({
     type: "list",
     category: "all",
@@ -308,6 +311,17 @@ it("unified native Library view keeps inherited cleanup protection", async () =>
     offset: 0,
     limit: 100,
   });
+  const readsAfterFirstPage = directoryReads.mock.calls.length;
+  await browser.run({
+    type: "list",
+    category: "all",
+    folder: "",
+    query: "",
+    all: true,
+    offset: 1,
+    limit: 1,
+  });
+  expect(directoryReads.mock.calls.length).toBe(readsAfterFirstPage);
   expect(all.entries).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -341,4 +355,49 @@ it("unified native Library view keeps inherited cleanup protection", async () =>
       }),
     ]),
   );
+  directoryReads.mockRestore();
+  browser.dispose();
+});
+
+it("restoring one Effect ignores unrelated malformed Effect files", async () => {
+  const { storage } = await storedDocument();
+  const effectsRoot = path.join(storage.assetRoot, "Effects");
+  const effects = new EffectLibraryStorage(effectsRoot);
+  const created = await effects.run({
+    type: "save",
+    definition: { ...blankEffect("shader"), name: "Recover Me" },
+  });
+  const asset = created.entries[0].asset;
+  await effects.run({
+    type: "delete",
+    id: asset.id,
+    revision: asset.revision,
+  });
+  await writeFile(path.join(effectsRoot, "broken.txt"), "{ definitely invalid");
+
+  const trashRoot = path.join(storage.assetRoot, "Trash", "assets");
+  const [trashFolder] = await readdir(trashRoot);
+  const trashDirectory = path.join(trashRoot, trashFolder);
+  const trashFiles = await readdir(trashDirectory);
+  const effectFile = trashFiles.find((name) => name !== "item.json");
+  expect(effectFile).toBeTruthy();
+
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (id) => storage.libraryAssetMetadata(id),
+    (file, folder) => storage.importFile(file, folder),
+    async () => undefined,
+    () => {},
+  );
+  await browser.run({
+    type: "restore",
+    path: `Trash/assets/${trashFolder}/${effectFile!}`,
+  });
+  expect((await readdir(effectsRoot)).some((name) => name !== "broken.txt")).toBe(
+    true,
+  );
+  expect(await readFile(path.join(effectsRoot, "broken.txt"), "utf8")).toContain(
+    "definitely invalid",
+  );
+  browser.dispose();
 });

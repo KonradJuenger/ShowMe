@@ -27,14 +27,14 @@ import {
 } from "./libraryLifecycle";
 import type { Asset } from "../src/core/assets";
 
+type LibraryInventorySnapshot = {
+  entries: LibraryBrowserResult["entries"];
+  folders: string[];
+};
+
 /** Native folder inventory; document asset identity remains owned by Storage. */
 export class NativeLibraryBrowser {
-  private inventory:
-    | Promise<{
-        entries: LibraryBrowserResult["entries"];
-        folders: string[];
-      }>
-    | null = null;
+  private inventory: Promise<LibraryInventorySnapshot> | null = null;
   private inventoryGeneration = 0;
   private unsubscribe?: () => void;
 
@@ -71,7 +71,7 @@ export class NativeLibraryBrowser {
     await libraryIndex(this.root)?.refresh();
   }
 
-  private async inventorySnapshot() {
+  private async inventorySnapshot(): Promise<LibraryInventorySnapshot> {
     if (this.inventory) return this.inventory;
     const generation = this.inventoryGeneration;
     const job = (async () => {
