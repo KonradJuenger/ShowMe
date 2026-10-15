@@ -289,7 +289,10 @@ test("production preload and IPC create and save a native current-format file", 
     const externalNative = path.join(root, "external.sme");
     await copyFile(file, externalNative);
     await expect(
-      page.evaluate((outside) => window.desktop!.openDocumentFile(outside), externalNative),
+      page.evaluate(
+        (outside) => window.desktop!.openDocumentFile!(outside),
+        externalNative,
+      ),
     ).rejects.toThrow("must live inside the selected ShowMe root");
 
     const nestedRootProject = path.join(selectedRoot, "project", "deep");
