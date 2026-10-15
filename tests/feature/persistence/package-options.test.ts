@@ -11,29 +11,29 @@ import { fontStorageService } from "../../../electron/fontIntegration";
 import { nonPortableFontFamilies } from "../../../src/core/fonts";
 import {
   librarySavePath,
-  isInsideLibrary,
+  isInsideRoot,
 } from "../../../electron/libraryLifecycle";
 
-it("Managed Library is the default and save format follows the separate presentations folder", async () => {
+it("Managed Library keeps explicit portable saves and redirects only unsafe native saves", async () => {
   const { storage, root } = await storedDocument();
   expect(storage.lifecycleMode).toBe("managed");
-  const presentations = path.join(root, "presentations");
-  const inside = path.join(presentations, "projects", "deck.smp");
-  expect(isInsideLibrary(presentations, inside)).toBe(true);
-  expect(librarySavePath(presentations, inside, false)).toBe(
-    inside.replace(/\.smp$/, ".sme"),
+  const showMeRoot = path.join(root, "Studio Shared");
+  const inside = path.join(showMeRoot, "projects", "deep", "deck.smp");
+  const outside = path.join(root, "external", "deck.sme");
+  expect(isInsideRoot(showMeRoot, inside)).toBe(true);
+  expect(isInsideRoot(showMeRoot, outside)).toBe(false);
+  expect(librarySavePath(showMeRoot, inside, false)).toBe(inside);
+  expect(librarySavePath(showMeRoot, outside, false)).toBe(
+    outside.replace(/\.sme$/, ".smp"),
   );
-  expect(
-    librarySavePath(presentations, path.join(root, "deck.sme"), false),
-  ).toBe(path.join(root, "deck.smp"));
+  expect(librarySavePath(showMeRoot, inside, true)).toBe(inside);
   expect(
     librarySavePath(
-      presentations,
-      path.join(storage.assetRoot, "deck.sme"),
+      showMeRoot,
+      path.join(showMeRoot, "projects", "deck.sme"),
       false,
     ),
-  ).toBe(path.join(storage.assetRoot, "deck.smp"));
-  expect(librarySavePath(presentations, inside, true)).toBe(inside);
+  ).toBe(path.join(showMeRoot, "projects", "deck.sme"));
 });
 
 it("packages include notes by default and removal affects only the shared snapshot", async () => {

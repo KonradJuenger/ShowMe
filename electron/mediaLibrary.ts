@@ -300,10 +300,11 @@ export class LibraryIndex {
               file: path.join(this.root, ...parts),
             });
           }
-          return;
         } catch {
           this.files.clear();
         }
+      // Cached metadata may predate files copied while ShowMe was closed.
+      // Reconcile once at startup; warm listings still reuse this inventory.
       await this.refresh();
     })());
   }

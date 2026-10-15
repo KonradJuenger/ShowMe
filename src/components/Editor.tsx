@@ -56,7 +56,6 @@ import {
   type SlideRailRow,
 } from "./editor/EditorSlideRail";
 import { EditorToolbar } from "./editor/EditorToolbar";
-import { DisplacedPresentationNotice } from "./DisplacedPresentationNotice";
 import { useSelectionActions } from "./editor/useSelectionActions";
 import { useLayerActions } from "./editor/useLayerActions";
 import {
@@ -1165,13 +1164,6 @@ export function Editor({
         onError={reportError}
       />
 
-      <DisplacedPresentationNotice
-        documentId={deckId}
-        settingsOpen={settingsOpen}
-        onMove={persistence.moveToPresentationsFolder}
-        onSavePortable={persistence.savePortable}
-        onError={reportError}
-      />
       <EditorToolbar
         onNewPresentation={onNewPresentation}
         onPresentationOpened={onPresentationOpened}

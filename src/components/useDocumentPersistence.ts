@@ -50,18 +50,6 @@ export function useDocumentPersistence({
     if (result) await refreshSavedProjection();
     return result ?? null;
   }, [deckId, flush, refreshSavedProjection]);
-  const moveToPresentationsFolder = useCallback(async () => {
-    await flush();
-    const result = await platform.moveDocumentToPresentationsFolder?.(deckId);
-    if (result) await refreshSavedProjection();
-    return result ?? null;
-  }, [deckId, flush, refreshSavedProjection]);
-  const savePortable = useCallback(async () => {
-    await flush();
-    const result = await platform.saveDocumentAsPortable?.(deckId);
-    if (result) await refreshSavedProjection();
-    return result ?? null;
-  }, [deckId, flush, refreshSavedProjection]);
 
   useEffect(() => {
     if (!platform.onFileCommand) return;
@@ -95,5 +83,5 @@ export function useDocumentPersistence({
     });
   }, [deckId, flush, onError, save, saveAs]);
 
-  return { save, saveAs, moveToPresentationsFolder, savePortable, flush };
+  return { save, saveAs, flush };
 }

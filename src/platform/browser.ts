@@ -812,12 +812,6 @@ export const browser: Platform = {
       defaultPath: "IndexedDB (Browser Storage)",
     };
   },
-  async chooseMediaLibrary() {
-    return null;
-  },
-  async resetMediaLibrary() {
-    return this.getMediaLibrary();
-  },
   async createDocument(name) {
     const document = newPresentationDocument(name);
     resetBrowserRuntime(document.documentId);

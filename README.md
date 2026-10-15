@@ -101,7 +101,7 @@ Fonts are normally not embedded. Typography may differ on another machine if the
 
 LAN collaboration is experimental. It is intended for trusted local networks and the connection is not encrypted.
 
-Collaboration synchronizes presentation edits, not media files. Each computer must have the same content-addressed assets in its ShowMe Library. Sync the Library separately, for example with Syncthing. Missing media is shown as a placeholder and updates when the asset becomes available locally.
+Collaboration synchronizes presentation edits, not filesystem contents. Sync the complete ShowMe root, including `ShowMe Library/` and every `.sme` presentation that uses it, for example with Syncthing. Each computer selects its local copy of that same root; absolute paths can differ. Keep native presentations anywhere below the root so Library cleanup scans the complete set. Missing media is shown as a placeholder and updates when the asset becomes available locally.
 
 ## Status
 

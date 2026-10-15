@@ -143,19 +143,9 @@ export interface Platform {
   getLibraryLifecycle?(): Promise<
     import("../core/libraryLifecycle").LibraryLifecycleInfo
   >;
-  choosePresentationsFolder?(): Promise<
+  chooseShowMeRoot?(): Promise<
     import("../core/libraryLifecycle").LibraryLifecycleInfo | null
   >;
-  resetPresentationsFolder?(): Promise<
-    import("../core/libraryLifecycle").LibraryLifecycleInfo
-  >;
-  documentLibraryState?(
-    documentId: string,
-  ): Promise<{ displaced: boolean; location: string }>;
-  moveDocumentToPresentationsFolder?(
-    documentId: string,
-  ): Promise<DocumentSummary | null>;
-  saveDocumentAsPortable?(documentId: string): Promise<DocumentSummary | null>;
   setLibraryLifecycleMode?(
     mode: import("../core/libraryLifecycle").LibraryLifecycleMode,
   ): Promise<import("../core/libraryLifecycle").LibraryLifecycleInfo>;
@@ -172,6 +162,7 @@ export interface Platform {
   }>;
   /** Null invalidates renderer cache choices after a global cache setting/clear. */
   onFontInventoryChanged?(callback: () => void): () => void;
+  onMediaInventoryChanged?(callback: () => void): () => void;
   onImageReadiness?(
     cb: (
       status: import("../core/presentationImages").ImageReadiness | null,
@@ -308,8 +299,7 @@ export interface Platform {
   collaborationStop?(): Promise<void>;
   isTest?: boolean;
   getMediaLibrary(): Promise<MediaLibraryInfo>;
-  chooseMediaLibrary(): Promise<MediaLibraryInfo | null>;
-  resetMediaLibrary(): Promise<MediaLibraryInfo>;
+  openMediaLibrary?(): Promise<void>;
   systemFonts?(): Promise<SystemFontFamily[]>;
   managedFonts?(documentId?: string): Promise<SystemFontFamily[]>;
   showContextMenu?(

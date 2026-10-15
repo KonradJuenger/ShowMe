@@ -7,9 +7,14 @@ import {
   readFile,
   copyFile,
   rm,
+  access,
+  stat,
+  symlink,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { managedFilename } from "../../electron/mediaLibrary";
 import { readyEditor } from "../helpers/startup";
 import {
   DOCUMENT_VERSION,
@@ -20,15 +25,14 @@ import { createMediaElement } from "../../src/core/media";
 test("production preload and IPC create and save a native current-format file", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "showme-ipc-"));
   const user = path.join(root, "user");
-  const media = path.join(user, "assets");
-  const presentations = path.join(root, "presentations");
+  const showMeRoot = path.join(root, "Studio Shared");
+  const media = path.join(showMeRoot, "ShowMe Library");
   await mkdir(user);
-  await mkdir(presentations);
+  await mkdir(media, { recursive: true });
   await writeFile(
     path.join(user, "settings.json"),
     JSON.stringify({
-      mediaLibraryPath: media,
-      presentationsFolderPath: presentations,
+      showMeRootPath: showMeRoot,
       libraryLifecycleMode: "keep-all",
       storageWarningSeen: true,
     }),
@@ -63,12 +67,12 @@ test("production preload and IPC create and save a native current-format file", 
         exact: false,
       }),
     ).toBeVisible();
-    await expect(
-      page.getByLabel("Media library folder", { exact: true }),
-    ).toHaveText(media);
-    await expect(
-      page.getByLabel("Presentations folder", { exact: true }),
-    ).toHaveText(presentations);
+    await expect(page.getByLabel("ShowMe root", { exact: true })).toHaveText(
+      showMeRoot,
+    );
+    await expect(page.getByLabel("Library folder", { exact: true })).toHaveText(
+      media,
+    );
     await collaboration.check();
     await page.getByRole("button", { name: "Close settings" }).click();
     await expect(
@@ -77,9 +81,9 @@ test("production preload and IPC create and save a native current-format file", 
     const library = await page.evaluate(() =>
       window.desktop!.getLibraryLifecycle!(),
     );
-    expect(library.root).toBe(media);
-    expect(library.presentations).toBe(presentations);
-    const nested = path.join(presentations, "client", "project");
+    expect(library.root).toBe(showMeRoot);
+    expect(library.library).toBe(media);
+    const nested = path.join(showMeRoot, "client", "project", "deep");
     await mkdir(nested, { recursive: true });
     const file = path.join(nested, "Native.sme");
     const [asset] = await page.evaluate(() =>
@@ -93,6 +97,30 @@ test("production preload and IPC create and save a native current-format file", 
         ),
       ]),
     );
+    await page
+      .getByRole("navigation", { name: "Sidebar modes" })
+      .getByRole("button", { name: "Media", exact: true })
+      .click();
+    const copiedBytes = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="blue"/></svg>',
+    );
+    const copiedId = createHash("sha256").update(copiedBytes).digest("hex");
+    const copiedFile = path.join(
+      media,
+      "images",
+      managedFilename("copied.svg", copiedId),
+    );
+    await expect(
+      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+    ).toHaveCount(0);
+    await writeFile(copiedFile, copiedBytes);
+    await expect(
+      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+    ).toBeVisible();
+    await rm(copiedFile);
+    await expect(
+      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+    ).toHaveCount(0);
     const element = createMediaElement("path-check-image", {
       ...asset,
       width: 32,
@@ -177,19 +205,10 @@ test("production preload and IPC create and save a native current-format file", 
       page.evaluate(() => window.desktop!.managedFonts!("invalid/id")),
     ).rejects.toThrow();
     expect(
-      (
-        await page.evaluate(
-          (id) => window.desktop!.documentLibraryState!(id),
-          id,
-        )
-      ).displaced,
-    ).toBe(false);
-    expect(
       (await page.evaluate(() => window.desktop!.scanLibrary!())).presentations,
     ).toBe(1);
     const settingsFile = path.join(user, "settings.json");
     const settingsBeforeCorruption = await readFile(settingsFile, "utf8");
-    await mkdir(path.join(user, "Presentations"));
     await writeFile(settingsFile, "{");
     await expect(
       page.evaluate(() => window.desktop!.scanLibrary!()),
@@ -209,8 +228,13 @@ test("production preload and IPC create and save a native current-format file", 
       "data-document-id",
       id,
     );
-    const selectedPresentations = path.join(root, "selected-presentations");
-    await mkdir(selectedPresentations);
+    const selectedRoot = path.join(root, "Selected Shared");
+    const selectedLibrary = path.join(selectedRoot, "ShowMe Library");
+    await mkdir(path.join(selectedLibrary, "images"), { recursive: true });
+    await copyFile(
+      path.join(media, "images", asset.filename),
+      path.join(selectedLibrary, "images", asset.filename),
+    );
     await app.evaluate(({ dialog }, folder) => {
       dialog.showOpenDialog = async () => ({
         canceled: false,
@@ -224,87 +248,276 @@ test("production preload and IPC create and save a native current-format file", 
         filePath: (options ?? (ownerOrOptions as SaveDialogOptions))
           .defaultPath!,
       });
-    }, selectedPresentations);
+    }, selectedRoot);
+
     await page.getByRole("button", { name: "Presentation menu" }).click();
     await page
       .getByRole("menuitem", { name: "Settings…", exact: true })
       .click();
     await page
-      .getByRole("button", {
-        name: "Choose Presentations Folder…",
-        exact: true,
-      })
+      .getByRole("button", { name: "Choose ShowMe Root…", exact: true })
       .click();
-    await expect(
-      page.getByLabel("Presentations folder", { exact: true }),
-    ).toHaveText(selectedPresentations);
-    const changed = await page.evaluate(() =>
-      window.desktop!.getLibraryLifecycle!(),
+    await expect(page.getByRole("alert")).toContainText(
+      "save it as a portable .smp before changing the ShowMe root",
     );
-    expect(changed!.root).toBe(media);
-    expect(changed!.presentations).toBe(selectedPresentations);
+    await expect(page.getByLabel("ShowMe root", { exact: true })).toHaveText(
+      showMeRoot,
+    );
     await page.getByRole("button", { name: "Close settings" }).click();
-    const displaced = page.getByRole("complementary", {
-      name: "Presentation outside the presentations folder",
-    });
-    await expect(displaced).toBeVisible();
-    await displaced
-      .getByRole("button", { name: "Move to Presentations Folder" })
-      .click();
-    await expect(displaced).toHaveCount(0);
-    const saved = await page.evaluate(
+
+    const portablePath = path.join(showMeRoot, "Native Portable.smp");
+    await app.evaluate(({ dialog }, destination) => {
+      dialog.showSaveDialog = async () => ({
+        canceled: false,
+        filePath: destination,
+      });
+    }, portablePath);
+    const portableCurrent = await page.evaluate(
       (id) => window.desktop!.saveDocumentAs!(id),
       id,
     );
-    expect(saved!.location).toBe(
-      path.join(selectedPresentations, "Native.sme"),
+    expect(portableCurrent!.location).toBe(portablePath);
+    expect(await readFile(file, "utf8")).toContain(id);
+
+    // Reject unsafe candidates before the current Library or settings change.
+    const unsafeRoot = path.join(root, "Unsafe Shared");
+    const unsafeLibrary = path.join(unsafeRoot, "ShowMe Library");
+    await mkdir(unsafeLibrary, { recursive: true });
+    await symlink(
+      path.join(selectedLibrary, "images"),
+      path.join(unsafeLibrary, "images"),
+      process.platform === "win32" ? "junction" : "dir",
     );
-    expect(JSON.parse(await readFile(saved!.location, "utf8")).documentId).toBe(
-      id,
+    const beforeFailedSwitch = await readFile(settingsFile, "utf8");
+    const beforeLibrary = await page.evaluate(() =>
+      window.desktop!.getLibraryLifecycle!(),
     );
-    expect(
-      JSON.parse(await readFile(path.join(user, "settings.json"), "utf8")),
-    ).toMatchObject({
-      mediaLibraryPath: media,
-      presentationsFolderPath: selectedPresentations,
-    });
-    const selectedMedia = path.join(root, "selected-media");
-    await mkdir(selectedMedia);
-    await mkdir(path.join(selectedMedia, "images"));
-    await copyFile(
-      path.join(media, "images", asset.filename),
-      path.join(selectedMedia, "images", asset.filename),
+    const beforeAssets = await page.evaluate(() =>
+      window.desktop!.listAssets("", 0, 100),
     );
     await app.evaluate(({ dialog }, folder) => {
       dialog.showOpenDialog = async () => ({
         canceled: false,
         filePaths: [folder],
       });
-    }, selectedMedia);
-    await page.evaluate(() => window.desktop!.chooseMediaLibrary());
-    const independent = await page.evaluate(() =>
+    }, unsafeRoot);
+    await expect(
+      page.evaluate(() => window.desktop!.chooseShowMeRoot!()),
+    ).rejects.toThrow("Unsafe Library directory: images");
+    expect(await readFile(settingsFile, "utf8")).toBe(beforeFailedSwitch);
+    expect(
+      await page.evaluate(() => window.desktop!.getLibraryLifecycle!()),
+    ).toEqual(beforeLibrary);
+    expect(
+      await page.evaluate(() => window.desktop!.getMediaLibrary()),
+    ).toMatchObject({ path: media });
+    expect(
+      await page.evaluate(() => window.desktop!.listAssets("", 0, 100)),
+    ).toEqual(beforeAssets);
+    expect(
+      (await page.evaluate(() => window.desktop!.scanLibrary!())).complete,
+    ).toBe(true);
+    await app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [folder],
+      });
+    }, selectedRoot);
+
+    await page.getByRole("button", { name: "Presentation menu" }).click();
+    await page
+      .getByRole("menuitem", { name: "Settings…", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Choose ShowMe Root…", exact: true })
+      .click();
+    await expect(page.getByLabel("ShowMe root", { exact: true })).toHaveText(
+      selectedRoot,
+    );
+    await expect(page.getByLabel("Library folder", { exact: true })).toHaveText(
+      selectedLibrary,
+    );
+    const changed = await page.evaluate(() =>
       window.desktop!.getLibraryLifecycle!(),
     );
-    expect(independent.root).toBe(selectedMedia);
-    expect(independent.presentations).toBe(selectedPresentations);
+    expect(changed!.root).toBe(selectedRoot);
+    expect(changed!.library).toBe(selectedLibrary);
+
+    const persistedSettings = JSON.parse(
+      await readFile(path.join(user, "settings.json"), "utf8"),
+    );
+    expect(persistedSettings).toMatchObject({
+      showMeRootPath: selectedRoot,
+      libraryLifecycleMode: "keep-all",
+    });
+    expect(persistedSettings).not.toHaveProperty("mediaLibraryPath");
+    expect(persistedSettings).not.toHaveProperty("presentationsFolderPath");
+    expect(await readFile(file, "utf8")).toContain(id);
+    expect(await readFile(path.join(media, "images", asset.filename))).toEqual(
+      await readFile(path.join(selectedLibrary, "images", asset.filename)),
+    );
+    await page.getByRole("button", { name: "Close settings" }).click();
+
+    const externalNative = path.join(root, "external.sme");
+    await copyFile(file, externalNative);
+    await expect(
+      page.evaluate(
+        (outside) => window.desktop!.openDocumentFile!(outside),
+        externalNative,
+      ),
+    ).rejects.toThrow("must live inside the selected ShowMe root");
+
+    const nestedRootProject = path.join(selectedRoot, "project", "deep");
+    await mkdir(nestedRootProject, { recursive: true });
+    const rootNative = path.join(nestedRootProject, "Root Native.sme");
+    const rootNativeSummary = await page.evaluate(async (destination) => {
+      const desktop = window.desktop!;
+      const created = await desktop.createDocument("Root Native");
+      return desktop.saveDocumentToFile!(created!.id, destination);
+    }, rootNative);
+    expect(rootNativeSummary.location).toBe(rootNative);
+    expect(
+      (await page.evaluate(() => window.desktop!.scanLibrary!())).presentations,
+    ).toBe(1);
+
+    await page.evaluate(() =>
+      window.desktop!.setLibraryLifecycleMode!("portable"),
+    );
     const portable = await page.evaluate(async () => {
-      await window.desktop!.setLibraryLifecycleMode!("portable");
       const created = await window.desktop!.createDocument("Portable");
       return window.desktop!.saveDocumentAs!(created!.id);
     });
-    expect(portable!.location).toBe(
-      path.join(selectedPresentations, "Portable.smp"),
-    );
-    const reset = await page.evaluate(() =>
-      window.desktop!.resetPresentationsFolder!(),
-    );
-    expect(reset.presentations).toBe(reset.defaultPresentations);
-    expect(reset.root).toBe(selectedMedia);
+    expect(portable!.location.endsWith(".smp")).toBe(true);
     expect(await page.evaluate(() => window.desktop!.isTest)).toBe(false);
   } finally {
     // This contract concerns IPC, not the unsaved-close confirmation dialog.
     await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await app.close().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("startup clean cutover ignores legacy storage settings until a ShowMe root is explicitly selected", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "showme-cutover-"));
+  const user = path.join(root, "user");
+  const oldMedia = path.join(root, "old-media");
+  const oldPresentations = path.join(root, "old-presentations");
+  const selectedRoot = path.join(root, "selected-root");
+  const oldAsset = path.join(oldMedia, "legacy.bin");
+  const oldDeck = path.join(oldPresentations, "legacy.sme");
+  await mkdir(user);
+  await mkdir(oldMedia);
+  await mkdir(oldPresentations);
+  await mkdir(selectedRoot);
+  await writeFile(oldAsset, "legacy asset");
+  await writeFile(oldDeck, "legacy presentation");
+  const assetBefore = await stat(oldAsset);
+  const deckBefore = await stat(oldDeck);
+  const settingsFile = path.join(user, "settings.json");
+  await writeFile(
+    settingsFile,
+    JSON.stringify({
+      mediaLibraryPath: oldMedia,
+      presentationsFolderPath: oldPresentations,
+      libraryLifecycleMode: "managed",
+    }),
+  );
+  const baseEnv = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key, value]) =>
+        ![
+          "SHOWME_DOCUMENT_DIR",
+          "ELECTRON_RUN_AS_NODE",
+          "SHOWME_TESTING",
+          "SHOWME_TEST_ROOT_SELECTION",
+        ].includes(key) && value !== undefined,
+    ),
+  ) as Record<string, string>;
+  const args = [path.resolve("."), `--user-data-dir=${user}`];
+
+  const blocked = await electron.launch({
+    args,
+    env: {
+      ...baseEnv,
+      SHOWME_TESTING: "1",
+      SHOWME_TEST_ROOT_SELECTION: "__blocked__",
+    },
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await blocked.windows()).toHaveLength(0);
+    expect(JSON.parse(await readFile(settingsFile, "utf8"))).toMatchObject({
+      mediaLibraryPath: oldMedia,
+      presentationsFolderPath: oldPresentations,
+      libraryLifecycleMode: "managed",
+    });
+    await expect(
+      access(path.join(selectedRoot, "ShowMe Library")),
+    ).rejects.toThrow();
+  } finally {
+    await blocked.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await blocked.close().catch(() => {});
+  }
+
+  const configured = await electron.launch({
+    args,
+    env: {
+      ...baseEnv,
+      SHOWME_TESTING: "1",
+      SHOWME_TEST_ROOT_SELECTION: selectedRoot,
+    },
+  });
+  try {
+    const page = await configured.firstWindow();
+    await readyEditor(page);
+    const lifecycle = await page.evaluate(() =>
+      window.desktop!.getLibraryLifecycle!(),
+    );
+    expect(lifecycle.root).toBe(selectedRoot);
+    expect(lifecycle.library).toBe(path.join(selectedRoot, "ShowMe Library"));
+    await expect(
+      access(path.join(selectedRoot, "ShowMe Library")),
+    ).resolves.toBeUndefined();
+
+    const settings = JSON.parse(await readFile(settingsFile, "utf8"));
+    expect(settings).toMatchObject({
+      showMeRootPath: selectedRoot,
+      libraryLifecycleMode: "managed",
+    });
+    expect(settings).not.toHaveProperty("mediaLibraryPath");
+    expect(settings).not.toHaveProperty("presentationsFolderPath");
+
+    expect(await readFile(oldAsset, "utf8")).toBe("legacy asset");
+    expect(await readFile(oldDeck, "utf8")).toBe("legacy presentation");
+    const assetAfter = await stat(oldAsset);
+    const deckAfter = await stat(oldDeck);
+    expect(assetAfter.size).toBe(assetBefore.size);
+    expect(assetAfter.mtimeMs).toBe(assetBefore.mtimeMs);
+    expect(deckAfter.size).toBe(deckBefore.size);
+    expect(deckAfter.mtimeMs).toBe(deckBefore.mtimeMs);
+    await expect(
+      access(path.join(selectedRoot, "ShowMe Library", "legacy.bin")),
+    ).rejects.toThrow();
+    await expect(
+      access(path.join(selectedRoot, "legacy.sme")),
+    ).rejects.toThrow();
+  } finally {
+    await configured.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await configured.close().catch(() => {});
+  }
+
+  const relaunched = await electron.launch({ args, env: baseEnv });
+  try {
+    const page = await relaunched.firstWindow();
+    await readyEditor(page);
+    const lifecycle = await page.evaluate(() =>
+      window.desktop!.getLibraryLifecycle!(),
+    );
+    expect(lifecycle.root).toBe(selectedRoot);
+    expect(lifecycle.library).toBe(path.join(selectedRoot, "ShowMe Library"));
+  } finally {
+    await relaunched.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await relaunched.close().catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
 });

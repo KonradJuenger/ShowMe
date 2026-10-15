@@ -3,11 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 const methods = [
   "effectLibrary",
   "getLibraryLifecycle",
-  "choosePresentationsFolder",
-  "resetPresentationsFolder",
-  "documentLibraryState",
-  "moveDocumentToPresentationsFolder",
-  "saveDocumentAsPortable",
+  "chooseShowMeRoot",
   "setLibraryLifecycleMode",
   "scanLibrary",
   "emptyOldLibraryTrash",
@@ -60,8 +56,7 @@ const methods = [
   "collaborationLeave",
   "collaborationStop",
   "getMediaLibrary",
-  "chooseMediaLibrary",
-  "resetMediaLibrary",
+  "openMediaLibrary",
   "managedFonts",
   "showContextMenu",
   "closeContextMenu",
@@ -144,6 +139,12 @@ contextBridge.exposeInMainWorld("desktop", {
     return true;
   },
   releaseUrl: () => {},
+  onMediaInventoryChanged: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on("media-inventory-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("media-inventory-changed", listener);
+  },
   onFontInventoryChanged: (cb: () => void) => {
     const listener = () => cb();
     ipcRenderer.on("font-inventory-changed", listener);

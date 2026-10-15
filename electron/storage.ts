@@ -51,7 +51,7 @@ import type { LibraryLifecycleMode } from "../src/core/libraryLifecycle";
 import {
   LibraryOpenProtection,
   restoreLibraryAsset,
-  isInsideLibrary,
+  isInsideRoot,
   documentLibraryHashes,
   documentFontUsages,
 } from "./libraryLifecycle";
@@ -219,6 +219,7 @@ export class DocumentStorage {
     this.recoveryRoot = path.join(path.dirname(this.cacheRoot), "recovery");
     this.media = new StorageMedia(assetRoot, this.cacheRoot);
     this.media.onChanged = (change) => {
+      this.onMediaInventoryChanged?.();
       if (
         !change.ids ||
         change.ids.some((id) =>
@@ -262,6 +263,7 @@ export class DocumentStorage {
   }
 
   onFontInventoryChanged?: () => void;
+  onMediaInventoryChanged?: () => void;
 
   async init() {
     if (this.lifecycleMode !== "portable") await this.media.init();
@@ -291,6 +293,7 @@ export class DocumentStorage {
       ),
     ]);
     await previousProtection.dispose();
+    this.onMediaInventoryChanged?.();
   }
 
   private async lastSavedAt(file: string) {
@@ -688,19 +691,6 @@ export class DocumentStorage {
     });
   }
 
-  async assertNativeFileUnchanged(id: string) {
-    const { handle } = this.entry(id);
-    if (!handle.filePath || !handle.fileRevision)
-      throw new Error("This presentation has no saved native file");
-    if (
-      digest(await fs.readFile(handle.filePath, "utf8")) !== handle.fileRevision
-    )
-      throw new Error(
-        "This presentation changed on disk. Reopen it before moving to avoid removing external edits.",
-      );
-    return { file: handle.filePath, revision: handle.fileRevision };
-  }
-
   closeDocument(id: string) {
     this.entry(id);
     this.documents.delete(id);
@@ -1035,7 +1025,7 @@ export class DocumentStorage {
       )
         throw error;
     }
-    if (file && !isInsideLibrary(this.assetRoot, file)) return file;
+    if (file && !isInsideRoot(this.assetRoot, file)) return file;
     await this.verifiedAssetPath(id);
     return this.assetPathForDocument(documentId, id);
   }
