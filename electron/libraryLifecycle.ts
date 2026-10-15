@@ -471,7 +471,7 @@ export class LibraryLifecycle {
         const hash = assetIdFromFilename(entry.name);
         if (!hash) continue;
         const relative = path.join(folder, entry.name);
-        const stat = await fs.stat(path.join(this.root, relative));
+        const stat = await fs.stat(path.join(this.libraryRoot, relative));
         assets.push({
           hash,
           relative,
