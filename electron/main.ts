@@ -54,7 +54,6 @@ import { walkElements } from "../src/core/element";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { DocumentStorage, atomicWrite } from "./storage";
-import { digest } from "./storage/io";
 import { CollaborationService } from "./collaboration/session";
 import { lanInterfaces, selectedLanAddress } from "./collaboration/security";
 import { resolveOriginalAsset } from "./assetServing";
@@ -93,7 +92,6 @@ import {
   LibraryLifecycle,
   librarySavePath,
   isInsideRoot,
-  documentLibraryHashes,
 } from "./libraryLifecycle";
 import type { LibraryLifecycleMode } from "../src/core/libraryLifecycle";
 import { registerIpcRouter } from "./ipcRouter";
