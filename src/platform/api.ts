@@ -146,13 +146,6 @@ export interface Platform {
   chooseShowMeRoot?(): Promise<
     import("../core/libraryLifecycle").LibraryLifecycleInfo | null
   >;
-  documentLibraryState?(
-    documentId: string,
-  ): Promise<{ displaced: boolean; location: string }>;
-  moveDocumentIntoShowMeRoot?(
-    documentId: string,
-  ): Promise<DocumentSummary | null>;
-  saveDocumentAsPortable?(documentId: string): Promise<DocumentSummary | null>;
   setLibraryLifecycleMode?(
     mode: import("../core/libraryLifecycle").LibraryLifecycleMode,
   ): Promise<import("../core/libraryLifecycle").LibraryLifecycleInfo>;
