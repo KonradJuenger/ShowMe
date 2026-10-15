@@ -360,7 +360,7 @@
     "runtime": "electron",
     "created": "2026-10-09",
     "lastReviewed": "2026-10-15",
-    "reason": "Production preload/IPC uses one ShowMe root with visible Library/, recursive .sme scanning, root switching, displaced-document resolution and portable .smp behavior; settings persist only the new root model; typed font IPC and experimental LAN collaboration controls remain covered"
+    "reason": "Production preload/IPC uses one ShowMe root with visible Library/, recursive .sme scanning, explicit root switching, external native .sme rejection, open-native root-change blocking and portable .smp escape behavior; settings persist only the new root model; typed font IPC and experimental LAN collaboration controls remain covered"
   },
   {
     "id": "packaged-startup",
