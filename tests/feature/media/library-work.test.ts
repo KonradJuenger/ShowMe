@@ -17,6 +17,7 @@ import { storedDocument } from "../../helpers/storage";
 import { libraryIndex, managedFilename } from "../../../electron/mediaLibrary";
 import { createMediaElement } from "../../../src/core/media";
 import { insertElements } from "../../../src/core/editorCommands";
+import { StorageMedia } from "../../../electron/storage/media";
 import type { Asset } from "../../../src/core/assets";
 
 it("warm asset lookup and listing reuse inventory without directory enumeration", async () => {
@@ -214,8 +215,10 @@ it("a referenced missing Library asset invalidates the open document when it arr
 
 it("an unrelated Library arrival does not invalidate an open document", async () => {
   const { storage } = await storedDocument(),
-    changed = vi.fn();
+    changed = vi.fn(),
+    inventoryChanged = vi.fn();
   storage.onResourcesChanged = changed;
+  storage.onMediaInventoryChanged = inventoryChanged;
   const bytes = Buffer.from("unused"),
     id = createHash("sha256").update(bytes).digest("hex");
   await writeFile(
@@ -224,4 +227,50 @@ it("an unrelated Library arrival does not invalidate an open document", async ()
   );
   await libraryIndex(storage.assetRoot)!.refresh();
   expect(changed).not.toHaveBeenCalled();
+  expect(inventoryChanged).toHaveBeenCalled();
+  expect(
+    (await storage.listAssets("", 0, 100)).items.map((item) => item.id),
+  ).toContain(id);
+});
+
+it("startup reconciles files copied into a Library after its inventory was cached", async () => {
+  const { root } = await storedDocument();
+  const assetRoot = path.join(root, "copied-library"),
+    cacheRoot = path.join(root, "copied-cache"),
+    bytes = Buffer.from("copied while ShowMe was closed"),
+    id = createHash("sha256").update(bytes).digest("hex"),
+    staleId = "a".repeat(64);
+  await mkdir(path.join(assetRoot, "images"), { recursive: true });
+  await mkdir(path.join(cacheRoot, "library-index"), { recursive: true });
+  await writeFile(
+    path.join(assetRoot, "images", managedFilename("copied.png", id)),
+    bytes,
+  );
+  await writeFile(
+    path.join(
+      cacheRoot,
+      "library-index",
+      createHash("sha256").update(assetRoot).digest("hex") + ".json",
+    ),
+    JSON.stringify({
+      version: 1,
+      root: assetRoot,
+      files: [
+        {
+          id: staleId,
+          file: "images/" + managedFilename("missing.png", staleId),
+          signature: "stale",
+        },
+      ],
+    }),
+  );
+  const media = new StorageMedia(assetRoot, cacheRoot);
+  try {
+    await media.init();
+    const listed = await media.listAssets("", 0, 100);
+    expect(listed.items.map((item) => item.id)).toEqual([id]);
+    expect(libraryIndex(assetRoot)!.diagnostics().hashedBytes).toBe(0);
+  } finally {
+    media.dispose();
+  }
 });

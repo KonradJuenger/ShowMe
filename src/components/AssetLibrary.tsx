@@ -160,6 +160,12 @@ export function AssetLibrary({
     setTotal(0);
     setCounts({ images: 0, videos: 0 });
     const g = generation.current;
+    void platform
+      .getMediaLibrary()
+      .then((info) => {
+        if (g === generation.current) setLibInfo(info);
+      })
+      .catch(() => {});
     void platform.listAssets("", 0, PAGE_SIZE).then((result) => {
       if (g !== generation.current) return;
       requested.current.add(0);
@@ -170,14 +176,13 @@ export function AssetLibrary({
   }, []);
 
   useEffect(() => {
-    void platform
-      .getMediaLibrary()
-      .then(setLibInfo)
-      .catch(() => {});
-  }, [refresh]);
-
-  useEffect(() => {
+    const pendingRequests = generation;
+    const unsubscribe = platform.onMediaInventoryChanged?.(reload);
     reload();
+    return () => {
+      pendingRequests.current++;
+      unsubscribe?.();
+    };
   }, [refresh, reload]);
 
   useLayoutEffect(() => {

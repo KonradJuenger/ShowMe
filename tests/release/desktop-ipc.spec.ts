@@ -12,6 +12,8 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { managedFilename } from "../../electron/mediaLibrary";
 import { readyEditor } from "../helpers/startup";
 import {
   DOCUMENT_VERSION,
@@ -64,12 +66,12 @@ test("production preload and IPC create and save a native current-format file", 
         exact: false,
       }),
     ).toBeVisible();
-    await expect(
-      page.getByLabel("ShowMe root", { exact: true }),
-    ).toHaveText(showMeRoot);
-    await expect(
-      page.getByLabel("Library folder", { exact: true }),
-    ).toHaveText(media);
+    await expect(page.getByLabel("ShowMe root", { exact: true })).toHaveText(
+      showMeRoot,
+    );
+    await expect(page.getByLabel("Library folder", { exact: true })).toHaveText(
+      media,
+    );
     await collaboration.check();
     await page.getByRole("button", { name: "Close settings" }).click();
     await expect(
@@ -94,6 +96,30 @@ test("production preload and IPC create and save a native current-format file", 
         ),
       ]),
     );
+    await page
+      .getByRole("navigation", { name: "Sidebar modes" })
+      .getByRole("button", { name: "Media", exact: true })
+      .click();
+    const copiedBytes = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="blue"/></svg>',
+    );
+    const copiedId = createHash("sha256").update(copiedBytes).digest("hex");
+    const copiedFile = path.join(
+      media,
+      "images",
+      managedFilename("copied.svg", copiedId),
+    );
+    await expect(
+      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+    ).toHaveCount(0);
+    await writeFile(copiedFile, copiedBytes);
+    await expect(
+      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+    ).toBeVisible();
+    await rm(copiedFile);
+    await expect(
+      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+    ).toHaveCount(0);
     const element = createMediaElement("path-check-image", {
       ...asset,
       width: 32,
@@ -281,9 +307,7 @@ test("production preload and IPC create and save a native current-format file", 
     expect(persistedSettings).not.toHaveProperty("mediaLibraryPath");
     expect(persistedSettings).not.toHaveProperty("presentationsFolderPath");
     expect(await readFile(file, "utf8")).toContain(id);
-    expect(
-      await readFile(path.join(media, "images", asset.filename)),
-    ).toEqual(
+    expect(await readFile(path.join(media, "images", asset.filename))).toEqual(
       await readFile(path.join(selectedLibrary, "images", asset.filename)),
     );
     await page.getByRole("button", { name: "Close settings" }).click();
@@ -310,7 +334,9 @@ test("production preload and IPC create and save a native current-format file", 
       (await page.evaluate(() => window.desktop!.scanLibrary!())).presentations,
     ).toBe(1);
 
-    await page.evaluate(() => window.desktop!.setLibraryLifecycleMode!("portable"));
+    await page.evaluate(() =>
+      window.desktop!.setLibraryLifecycleMode!("portable"),
+    );
     const portable = await page.evaluate(async () => {
       const created = await window.desktop!.createDocument("Portable");
       return window.desktop!.saveDocumentAs!(created!.id);
@@ -324,7 +350,6 @@ test("production preload and IPC create and save a native current-format file", 
     await rm(root, { recursive: true, force: true });
   }
 });
-
 
 test("startup clean cutover ignores legacy storage settings until a ShowMe root is explicitly selected", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "showme-cutover-"));
@@ -380,7 +405,9 @@ test("startup clean cutover ignores legacy storage settings until a ShowMe root 
       presentationsFolderPath: oldPresentations,
       libraryLifecycleMode: "managed",
     });
-    await expect(access(path.join(selectedRoot, "ShowMe Library"))).rejects.toThrow();
+    await expect(
+      access(path.join(selectedRoot, "ShowMe Library")),
+    ).rejects.toThrow();
   } finally {
     await blocked.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await blocked.close().catch(() => {});

@@ -162,6 +162,7 @@ export interface Platform {
   }>;
   /** Null invalidates renderer cache choices after a global cache setting/clear. */
   onFontInventoryChanged?(callback: () => void): () => void;
+  onMediaInventoryChanged?(callback: () => void): () => void;
   onImageReadiness?(
     cb: (
       status: import("../core/presentationImages").ImageReadiness | null,

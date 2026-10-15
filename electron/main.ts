@@ -2090,6 +2090,10 @@ void app.whenReady().then(async () => {
         for (const documentId of ids)
           window.webContents.send("document-invalidated", { documentId });
   };
+  storage.onMediaInventoryChanged = () => {
+    if (editor && !editor.isDestroyed())
+      editor.webContents.send("media-inventory-changed");
+  };
   await storage.init();
   configureLifecycle();
   if (lifecycleMode !== "portable") await lifecycle!.init();

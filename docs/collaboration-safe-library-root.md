@@ -1,6 +1,6 @@
 # Collaboration-safe Library root
 
-Status: product specification. Product decisions are fixed; no implementation plan is included yet.
+Status: implemented on `chatgpt/shared-library-root`; see PR #13. The requirements below remain the product contract.
 
 ## Problem
 
@@ -119,6 +119,8 @@ It must continue to be possible for users to:
 - understand that media is stored centrally and shared between presentations;
 - review Library Trash.
 
+Files copied into or removed from the Library outside ShowMe update the open Media panel. Startup reconciles the cached inventory with the filesystem so copies made while ShowMe was closed also appear.
+
 The collaboration-safe model must not turn the Library into hidden application data.
 
 ### Cleanup scope
@@ -142,7 +144,7 @@ Examples include:
 - a presentation cannot be parsed sufficiently to determine its asset references;
 - the filesystem scan is otherwise incomplete or inconsistent.
 
-An incomplete scan means no destructive cleanup for that scan.
+An incomplete scan means no destructive cleanup for that scan. Cleanup revalidates the presentation tree immediately before moving assets or expiring Trash. If a later scan check fails, assets moved by that scan are restored without overwriting files that arrived in the meantime. If the filesystem prevents restoration, the payload remains in Library Trash and the error is reported.
 
 Unused assets should continue to enter Library Trash before permanent deletion, preserving the existing retention model rather than deleting files immediately.
 

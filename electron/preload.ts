@@ -139,6 +139,12 @@ contextBridge.exposeInMainWorld("desktop", {
     return true;
   },
   releaseUrl: () => {},
+  onMediaInventoryChanged: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on("media-inventory-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("media-inventory-changed", listener);
+  },
   onFontInventoryChanged: (cb: () => void) => {
     const listener = () => cb();
     ipcRenderer.on("font-inventory-changed", listener);

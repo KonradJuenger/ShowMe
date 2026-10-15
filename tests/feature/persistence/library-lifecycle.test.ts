@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
+import { promises as fs } from "node:fs";
 import { storedDocument } from "../../helpers/storage";
 import {
   LibraryLifecycle,
@@ -139,24 +140,135 @@ it("a malformed nested .sme anywhere below the root blocks moves and expiry", as
 
 it("an unavailable ShowMe root prevents cleanup instead of creating a new scope", async () => {
   const fixture = await libraryFixture();
-  const unavailable = fixture.showMeRoot + "-offline";
-  await import("node:fs/promises").then(({ rename }) =>
-    rename(fixture.showMeRoot, unavailable),
-  );
+  // A watched directory cannot reliably be renamed on Windows. Model the
+  // unavailable filesystem at its boundary instead of fighting watcher handles.
+  const unavailable = vi
+    .spyOn(fs, "lstat")
+    .mockRejectedValueOnce(
+      Object.assign(new Error("Root unavailable"), { code: "ENOENT" }),
+    );
+  const mkdirCalls = vi.spyOn(fs, "mkdir");
+  try {
+    const result = await fixture.lifecycle.scan(true, true);
+    expect(unavailable).toHaveBeenCalledWith(fixture.showMeRoot);
+    expect(result.complete).toBe(false);
+    expect(result.errors).toEqual(["Root unavailable"]);
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+    expect(mkdirCalls).not.toHaveBeenCalled();
+    await expect(access(fixture.source)).resolves.toBeUndefined();
+    await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+  } finally {
+    unavailable.mockRestore();
+    mkdirCalls.mockRestore();
+  }
+});
 
-  const result = await fixture.lifecycle.scan(true, true);
+it("an incomplete tree arriving during cleanup checks blocks all moves", async () => {
+  const fixture = await libraryFixture();
+  const lifecycle = new LibraryLifecycle(
+    fixture.showMeRoot,
+    () => [],
+    fixture.storage.openProtection,
+    fixture.deleteTrash,
+    Date.now,
+    async () => {
+      await writeFile(path.join(fixture.showMeRoot, "incoming.sme"), "{");
+      return true;
+    },
+  );
+  const result = await lifecycle.scan(true, true);
+  expect(result.complete).toBe(false);
+  expect(result.errors).toHaveLength(1);
+  await expect(access(fixture.source)).resolves.toBeUndefined();
+  await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+  expect(
+    await fs.readdir(path.join(fixture.libraryRoot, "Trash", "assets")),
+  ).toEqual([]);
+  expect(fixture.deleteTrash).not.toHaveBeenCalled();
+});
+
+it("a presentation arriving after a move rolls back this scan's Trash moves", async () => {
+  const fixture = await libraryFixture();
+  const rename = fs.rename.bind(fs);
+  const moving = vi
+    .spyOn(fs, "rename")
+    .mockImplementation(async (source, destination) => {
+      await rename(source, destination);
+      if (source === fixture.source || source === fixture.unusedSource)
+        await writeFile(
+          path.join(fixture.showMeRoot, "incoming.sme"),
+          JSON.stringify(fixture.document),
+        );
+    });
+  try {
+    const result = await fixture.lifecycle.scan(true);
+    expect(result.complete).toBe(false);
+    expect(result.errors).toEqual([
+      "Presentations changed during Library scan; retry",
+    ]);
+    await expect(access(fixture.source)).resolves.toBeUndefined();
+    await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+    expect(
+      await fs.readdir(path.join(fixture.libraryRoot, "Trash", "assets")),
+    ).toEqual([]);
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+  } finally {
+    moving.mockRestore();
+  }
+});
+
+it("an incomplete tree arriving at the expiry gate preserves aged Trash", async () => {
+  const fixture = await libraryFixture();
+  const initial = await fixture.lifecycle.scan(true);
+  expect(initial.complete).toBe(true);
+  fixture.ageTrash();
+  const lifecycle = new LibraryLifecycle(
+    fixture.showMeRoot,
+    () => [],
+    fixture.storage.openProtection,
+    fixture.deleteTrash,
+    () => Date.now() + LIBRARY_RETENTION_MS * 2,
+    async () => {
+      await writeFile(path.join(fixture.showMeRoot, "incoming.sme"), "{");
+      return true;
+    },
+  );
+  const result = await lifecycle.scan(false, true);
   expect(result.complete).toBe(false);
   expect(result.errors).toHaveLength(1);
   expect(fixture.deleteTrash).not.toHaveBeenCalled();
-  await expect(access(fixture.showMeRoot)).rejects.toThrow();
-  await expect(
-    access(
-      path.join(
-        unavailable,
-        path.relative(fixture.showMeRoot, fixture.unusedSource),
-      ),
-    ),
-  ).resolves.toBeUndefined();
+  expect(
+    await fs.readdir(path.join(fixture.libraryRoot, "Trash", "assets")),
+  ).toHaveLength(2);
+});
+
+it("rollback preserves an arriving replacement and retains the original payload in Trash", async () => {
+  const fixture = await libraryFixture();
+  const rename = fs.rename.bind(fs);
+  let original: string | undefined;
+  const moving = vi
+    .spyOn(fs, "rename")
+    .mockImplementation(async (source, destination) => {
+      await rename(source, destination);
+      if (source === fixture.source) {
+        original = String(destination);
+        await writeFile(fixture.source, "arriving replacement");
+        await writeFile(path.join(fixture.showMeRoot, "incoming.sme"), "{");
+      }
+    });
+  try {
+    const result = await fixture.lifecycle.scan(true);
+    expect(result.complete).toBe(false);
+    expect(
+      result.errors.some((error) => error.includes("Could not restore")),
+    ).toBe(true);
+    expect(await readFile(fixture.source, "utf8")).toBe("arriving replacement");
+    expect(original).toBeDefined();
+    expect(await readFile(original!)).toEqual(Buffer.from([1, 2, 3]));
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+  } finally {
+    moving.mockRestore();
+  }
 });
 
 it("changed presentations abort cleanup before any Library asset is moved", async () => {
@@ -362,10 +474,12 @@ it("explicit root setup creates only Library and never moves old filesystem cont
   const canonical = await validateShowMeRoot(selected, { createLibrary: true });
   expect(canonical).toBe(await realpath(selected));
   await expect(access(showMeLibraryPath(selected))).resolves.toBeUndefined();
-  expect(await readFile(path.join(oldMedia, "asset.bin"), "utf8")).toBe("asset");
-  expect(
-    await readFile(path.join(oldPresentations, "deck.sme"), "utf8"),
-  ).toBe("presentation");
+  expect(await readFile(path.join(oldMedia, "asset.bin"), "utf8")).toBe(
+    "asset",
+  );
+  expect(await readFile(path.join(oldPresentations, "deck.sme"), "utf8")).toBe(
+    "presentation",
+  );
 });
 
 it("configured missing or malformed roots never become cleanup scopes", async () => {

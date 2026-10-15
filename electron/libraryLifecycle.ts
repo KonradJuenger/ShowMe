@@ -14,6 +14,7 @@ import {
   openSync,
   readSync,
   closeSync,
+  constants,
 } from "node:fs";
 import path from "node:path";
 import { createServer } from "node:net";
@@ -347,7 +348,9 @@ export class LibraryLifecycle {
       throw new Error("ShowMe root must be a real directory");
     const libraryStat = await fs.lstat(this.libraryRoot);
     if (!libraryStat.isDirectory() || libraryStat.isSymbolicLink())
-      throw new Error("Library must be a real directory inside the ShowMe root");
+      throw new Error(
+        "Library must be a real directory inside the ShowMe root",
+      );
     const canonicalRoot = await fs.realpath(this.root);
     const canonicalLibrary = await fs.realpath(this.libraryRoot);
     const relative = path.relative(canonicalRoot, canonicalLibrary);
@@ -414,7 +417,9 @@ export class LibraryLifecycle {
       validateTrashDestination(this.libraryRoot, item);
       const file = path.join(dir, path.basename(item.originalRelativePath));
       if (!existsSync(file)) {
-        if (existsSync(path.join(this.libraryRoot, item.originalRelativePath))) {
+        if (
+          existsSync(path.join(this.libraryRoot, item.originalRelativePath))
+        ) {
           await fs.unlink(path.join(dir, "item.json"));
           await fs.rmdir(dir);
           continue;
@@ -482,9 +487,7 @@ export class LibraryLifecycle {
       fontUsages: [...fontUsages.values()],
       presentations,
       fingerprint: digest(
-        (await fs.realpath(this.root)) +
-          "\n" +
-          fingerprints.sort().join("\n"),
+        (await fs.realpath(this.root)) + "\n" + fingerprints.sort().join("\n"),
       ),
     };
   }
@@ -517,9 +520,12 @@ export class LibraryLifecycle {
   private async physicalAssets() {
     const assets: PhysicalAsset[] = [];
     for (const folder of MEDIA_FOLDERS) {
-      for (const entry of await fs.readdir(path.join(this.libraryRoot, folder), {
-        withFileTypes: true,
-      })) {
+      for (const entry of await fs.readdir(
+        path.join(this.libraryRoot, folder),
+        {
+          withFileTypes: true,
+        },
+      )) {
         if (!entry.isFile()) continue;
         const hash = assetIdFromFilename(entry.name);
         if (!hash) continue;
@@ -585,6 +591,7 @@ export class LibraryLifecycle {
     // Other hosts retain the exclusive loopback lease; collisions fail closed.
     const lease = createServer((socket) => socket.destroy());
     let locked = false;
+    const moved: TrashEntry[] = [];
     try {
       await this.validateBoundary();
       await this.validateManagedDirectories();
@@ -607,6 +614,12 @@ export class LibraryLifecycle {
       locked = true;
       const roots = await this.readRoots();
       const { fingerprint } = roots;
+      const assertUnchanged = async () => {
+        await this.validateBoundary();
+        await this.validateManagedDirectories();
+        if ((await this.readRoots()).fingerprint !== fingerprint)
+          throw new Error("Presentations changed during Library scan; retry");
+      };
       const otherBytes = await this.libraryBytes();
       const assets = await this.physicalAssets();
       let trash = await this.trashEntries();
@@ -617,8 +630,9 @@ export class LibraryLifecycle {
         for (const item of assets) {
           if (
             !live.has(item.hash) &&
-            (await hashManagedSource(path.join(this.libraryRoot, item.relative))) !==
-              item.hash
+            (await hashManagedSource(
+              path.join(this.libraryRoot, item.relative),
+            )) !== item.hash
           )
             throw new Error(`Asset hash mismatch: ${item.relative}`);
         }
@@ -634,8 +648,7 @@ export class LibraryLifecycle {
         )
           throw new Error(`Trash hash mismatch: ${item.hash}`);
       }
-      if ((await this.readRoots()).fingerprint !== fingerprint)
-        throw new Error("Presentations changed during Library scan; retry");
+      await assertUnchanged();
       result.presentations = roots.presentations;
       result.otherBytes = Math.max(
         0,
@@ -643,7 +656,10 @@ export class LibraryLifecycle {
       );
       for (const item of trash) {
         if (!restore || !live.has(item.hash)) continue;
-        const destination = path.join(this.libraryRoot, item.originalRelativePath);
+        const destination = path.join(
+          this.libraryRoot,
+          item.originalRelativePath,
+        );
         if (!existsSync(destination)) {
           await fs.rename(item.file, destination);
           await fs.unlink(path.join(item.directory, "item.json"));
@@ -666,7 +682,12 @@ export class LibraryLifecycle {
         const stat = await fs.stat(source);
         if (stat.size !== item.bytes || stat.mtimeMs !== item.mtimeMs)
           throw new Error(`Asset changed during scan: ${source}`);
-        const directory = path.join(this.libraryRoot, "Trash", "assets", randomUUID());
+        const directory = path.join(
+          this.libraryRoot,
+          "Trash",
+          "assets",
+          randomUUID(),
+        );
         await fs.mkdir(directory);
         const metadata: LibraryTrashItem = {
           hash: item.hash,
@@ -674,22 +695,35 @@ export class LibraryLifecycle {
           originalRelativePath: item.relative,
           bytes: item.bytes,
         };
-        await atomicWrite(
-          path.join(directory, "item.json"),
-          JSON.stringify(metadata, null, 2),
-        );
-        if (
-          (await this.protection.hashes()).has(item.hash) ||
-          !(await this.mayCleanup())
-        )
-          continue;
-        await fs.rename(source, path.join(directory, path.basename(source)));
+        const file = path.join(directory, path.basename(source));
+        try {
+          await atomicWrite(
+            path.join(directory, "item.json"),
+            JSON.stringify(metadata, null, 2),
+          );
+          if (
+            (await this.protection.hashes()).has(item.hash) ||
+            !(await this.mayCleanup())
+          )
+            continue;
+          // Settings/protection checks can yield while a sync client changes the
+          // tree. Validate after those checks, immediately before moving bytes.
+          await assertUnchanged();
+          await fs.rename(source, file);
+          moved.push({ ...metadata, directory, file });
+        } finally {
+          if (!existsSync(file)) {
+            await fs.rm(path.join(directory, "item.json"), { force: true });
+            await fs.rmdir(directory);
+          }
+        }
       }
+      // Even cleanup without expiry must detect arrivals during the move phase.
+      await assertUnchanged();
       trash = await this.trashEntries();
       if (expire) {
         // A fresh complete scan is required even for aged items.
-        if ((await this.readRoots()).fingerprint !== fingerprint)
-          throw new Error("Presentations changed during Library scan; retry");
+        await assertUnchanged();
         for (const item of trash) {
           if (
             live.has(item.hash) ||
@@ -699,8 +733,10 @@ export class LibraryLifecycle {
           if (
             this.now() - Date.parse(item.trashedAt) >= LIBRARY_RETENTION_MS &&
             (await this.mayCleanup())
-          )
+          ) {
+            await assertUnchanged();
             await this.systemTrash(item.directory);
+          }
         }
         trash = await this.trashEntries();
       }
@@ -716,11 +752,44 @@ export class LibraryLifecycle {
           result.referencedBytes += item.bytes;
         else result.unusedBytes += item.bytes;
       }
+      await assertUnchanged();
       result.complete = true;
     } catch (error) {
       result.errors.push(
         error instanceof Error ? error.message : String(error),
       );
+      // A late scan failure must not leave this scan's assets classified as
+      // unused. Restore only our own moves and never overwrite arriving bytes.
+      for (const item of moved.reverse()) {
+        try {
+          await this.validateBoundary();
+          await this.validateManagedDirectories();
+          const destination = path.join(
+            this.libraryRoot,
+            item.originalRelativePath,
+          );
+          try {
+            await fs.copyFile(item.file, destination, constants.COPYFILE_EXCL);
+          } catch (restoreError) {
+            if (
+              (restoreError as NodeJS.ErrnoException).code !== "EEXIST" ||
+              (await hashManagedSource(destination)) !== item.hash
+            )
+              throw restoreError;
+          }
+          await fs.unlink(item.file);
+          await fs.unlink(path.join(item.directory, "item.json"));
+          await fs.rmdir(item.directory);
+        } catch (restoreError) {
+          result.errors.push(
+            `Could not restore ${item.hash} from Library Trash: ${
+              restoreError instanceof Error
+                ? restoreError.message
+                : String(restoreError)
+            }`,
+          );
+        }
+      }
     } finally {
       if (locked)
         await new Promise<void>((resolve) => lease.close(() => resolve()));

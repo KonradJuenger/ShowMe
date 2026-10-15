@@ -219,6 +219,7 @@ export class DocumentStorage {
     this.recoveryRoot = path.join(path.dirname(this.cacheRoot), "recovery");
     this.media = new StorageMedia(assetRoot, this.cacheRoot);
     this.media.onChanged = (change) => {
+      this.onMediaInventoryChanged?.();
       if (
         !change.ids ||
         change.ids.some((id) =>
@@ -262,6 +263,7 @@ export class DocumentStorage {
   }
 
   onFontInventoryChanged?: () => void;
+  onMediaInventoryChanged?: () => void;
 
   async init() {
     if (this.lifecycleMode !== "portable") await this.media.init();
@@ -291,6 +293,7 @@ export class DocumentStorage {
       ),
     ]);
     await previousProtection.dispose();
+    this.onMediaInventoryChanged?.();
   }
 
   private async lastSavedAt(file: string) {
