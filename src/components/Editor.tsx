@@ -1168,7 +1168,7 @@ export function Editor({
       <DisplacedPresentationNotice
         documentId={deckId}
         settingsOpen={settingsOpen}
-        onMove={persistence.moveToPresentationsFolder}
+        onMove={persistence.moveIntoShowMeRoot}
         onSavePortable={persistence.savePortable}
         onError={reportError}
       />
