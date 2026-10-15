@@ -1557,9 +1557,16 @@ const operations: Record<string, (...args: any[]) => any> = {
     const settings = await readSettings(app.getPath("userData"), {
       requireExisting: true,
     });
-    await requireStorage().setAssetRoot(library);
+    const storage = requireStorage();
+    const previousLibrary = storage.assetRoot;
+    await storage.setAssetRoot(library);
     settings.showMeRootPath = selected;
-    await writeSettings(app.getPath("userData"), settings);
+    try {
+      await writeSettings(app.getPath("userData"), settings);
+    } catch (error) {
+      await storage.setAssetRoot(previousLibrary);
+      throw error;
+    }
     showMeRoot = selected;
     configureLifecycle();
     if (lifecycleMode !== "portable") await lifecycle!.init();
