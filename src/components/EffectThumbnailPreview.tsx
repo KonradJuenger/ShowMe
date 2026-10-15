@@ -36,8 +36,12 @@ export function EffectThumbnailPreview({
         width: 280,
         height: 140,
         overflow: "hidden",
-        background: "#245684",
-        color: "white",
+        backgroundColor: "#f1f1ef",
+        backgroundImage:
+          "linear-gradient(45deg, #d8d8d5 25%, transparent 25%), linear-gradient(-45deg, #d8d8d5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d8d8d5 75%), linear-gradient(-45deg, transparent 75%, #d8d8d5 75%)",
+        backgroundSize: "20px 20px",
+        backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+        color: "#20201d",
         font: "700 28px sans-serif",
       }}
     >

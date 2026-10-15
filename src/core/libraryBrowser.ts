@@ -12,12 +12,13 @@ export const LIBRARY_CATEGORIES = [
 ] as const;
 export type LibraryCategory = (typeof LIBRARY_CATEGORIES)[number];
 const category = z.enum(LIBRARY_CATEGORIES);
+const categoryFilter = z.union([category, z.literal("all")]);
 const relative = effectFolderSchema.refine((value) => value.length > 0);
 export const libraryBrowserRequestSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("list"),
-      category,
+      category: categoryFilter,
       folder: effectFolderSchema,
       query: z.string().max(500),
       all: z.boolean(),
@@ -77,6 +78,7 @@ export interface LibraryBrowserEntry {
   originalPath?: string;
   trashedAt?: string;
   error?: string;
+  effect?: import("./libraryEffects").LibraryEffectAsset;
 }
 export interface LibraryBrowserResult {
   entries: LibraryBrowserEntry[];

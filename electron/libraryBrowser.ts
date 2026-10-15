@@ -118,11 +118,18 @@ export class NativeLibraryBrowser {
       return result;
     }
     if (request.type === "list") {
-      const current = `${request.category}${request.folder ? "/" + request.folder : ""}`;
+      const unified = request.category === "all";
+      if (unified && request.folder)
+        throw new Error("The unified Library view does not enter folders");
       const query = request.query.toLocaleLowerCase();
       await this.refresh();
       const protectedPaths = await readLibraryProtection(this.root);
-      const visit = async (relative: string) => {
+      const categories = unified ? LIBRARY_CATEGORIES : [request.category];
+      const current = unified
+        ? ""
+        : `${request.category}${request.folder ? "/" + request.folder : ""}`;
+
+      const visit = async (relative: string, category: LibraryCategory) => {
         for (const entry of await fs.readdir(this.mediaPath(relative), {
           withFileTypes: true,
         })) {
@@ -131,56 +138,77 @@ export class NativeLibraryBrowser {
           if (entry.isDirectory()) {
             result.folders.push(child);
             if (
-              (!query && !request.all && relative === current) ||
-              (!!query && child.toLocaleLowerCase().includes(query))
+              !unified &&
+              ((!query && relative === current) ||
+                (!!query && child.toLocaleLowerCase().includes(query)))
             )
               result.entries.push({
                 path: child,
                 name: entry.name,
                 kind: "folder",
-                category: request.category,
+                category,
                 managed: false,
                 protection:
                   libraryProtectionState(protectedPaths, child) ?? undefined,
               });
-            await visit(child);
-          } else if (
-            entry.isFile() &&
-            (request.all || query || relative === current) &&
-            (!query || child.toLocaleLowerCase().includes(query))
-          ) {
-            const id = assetIdFromFilename(entry.name);
-            const stat = await fs.stat(this.mediaPath(child));
-            result.entries.push({
-              path: child,
-              name: id
-                ? entry.name.slice(0, entry.name.lastIndexOf("__")) +
-                  path.extname(entry.name)
-                : entry.name,
-              kind: "file",
-              category: request.category,
-              managed: !!id || request.category === "Effects",
-              protection:
-                libraryProtectionState(protectedPaths, child) ?? undefined,
-              bytes: stat.size,
-              signature: `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`,
-            });
+            await visit(child, category);
+            continue;
           }
+          if (!entry.isFile()) continue;
+          const visible =
+            unified ||
+            !!query ||
+            request.all ||
+            path.posix.dirname(child) === current;
+          if (
+            !visible ||
+            (query && !child.toLocaleLowerCase().includes(query))
+          )
+            continue;
+          const id = assetIdFromFilename(entry.name);
+          const stat = await fs.stat(this.mediaPath(child));
+          let effect;
+          let name = id
+            ? entry.name.slice(0, entry.name.lastIndexOf("__")) +
+              path.extname(entry.name)
+            : entry.name;
+          if (category === "Effects" && entry.name.endsWith(".txt"))
+            try {
+              effect = libraryEffectSchema.parse(
+                JSON.parse(await fs.readFile(this.mediaPath(child), "utf8")),
+              );
+              name = effect.definition.name;
+            } catch {
+              // Invalid effects stay visible as files so they can be revealed.
+            }
+          result.entries.push({
+            path: child,
+            name,
+            kind: "file",
+            category,
+            managed: !!id || category === "Effects",
+            protection:
+              category === "Effects"
+                ? undefined
+                : (libraryProtectionState(protectedPaths, child) ?? undefined),
+            bytes: stat.size,
+            signature: `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`,
+            effect,
+          });
         }
       };
-      await visit(request.category);
-      result.entries = result.entries.filter(
-        (entry) => request.all || entry.path.startsWith(current + "/"),
-      );
-      result.entries = result.entries.filter((entry) =>
-        entry.kind === "folder"
-          ? !!query ||
-            (entry.path.startsWith(current + "/") &&
-              entry.path.split("/").length === current.split("/").length + 1)
-          : request.all ||
-            !!query ||
-            path.posix.dirname(entry.path) === current,
-      );
+
+      for (const category of categories) await visit(category, category);
+      if (!unified)
+        result.entries = result.entries.filter((entry) =>
+          entry.kind === "folder"
+            ? !!query ||
+              (entry.path.startsWith(current + "/") &&
+                entry.path.split("/").length === current.split("/").length + 1)
+            : request.all ||
+              !!query ||
+              path.posix.dirname(entry.path) === current,
+        );
       result.entries.sort(
         (a, b) =>
           Number(b.kind === "folder") - Number(a.kind === "folder") ||
@@ -200,7 +228,7 @@ export class NativeLibraryBrowser {
             try {
               entry.asset = await this.asset(id);
             } catch {
-              /* Noninsertable files stay browsable. */
+              // Noninsertable files stay browsable.
             }
         }),
       );
