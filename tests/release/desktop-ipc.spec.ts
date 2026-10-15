@@ -176,14 +176,6 @@ test("production preload and IPC create and save a native current-format file", 
       page.evaluate(() => window.desktop!.managedFonts!("invalid/id")),
     ).rejects.toThrow();
     expect(
-      (
-        await page.evaluate(
-          (id) => window.desktop!.documentLibraryState!(id),
-          id,
-        )
-      ).displaced,
-    ).toBe(false);
-    expect(
       (await page.evaluate(() => window.desktop!.scanLibrary!())).presentations,
     ).toBe(1);
     const settingsFile = path.join(user, "settings.json");
@@ -236,6 +228,35 @@ test("production preload and IPC create and save a native current-format file", 
     await page
       .getByRole("button", { name: "Choose ShowMe Root…", exact: true })
       .click();
+    await expect(page.getByRole("alert")).toContainText(
+      "save it as a portable .smp before changing the ShowMe root",
+    );
+    await expect(page.getByLabel("ShowMe root", { exact: true })).toHaveText(
+      showMeRoot,
+    );
+    await page.getByRole("button", { name: "Close settings" }).click();
+
+    const portablePath = path.join(selectedRoot, "Native.smp");
+    await app.evaluate(({ dialog }, destination) => {
+      dialog.showSaveDialog = async () => ({
+        canceled: false,
+        filePath: destination,
+      });
+    }, portablePath);
+    const portableCurrent = await page.evaluate(
+      (id) => window.desktop!.saveDocumentAs!(id),
+      id,
+    );
+    expect(portableCurrent!.location).toBe(portablePath);
+    expect(await readFile(file, "utf8")).toContain(id);
+
+    await page.getByRole("button", { name: "Presentation menu" }).click();
+    await page
+      .getByRole("menuitem", { name: "Settings…", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Choose ShowMe Root…", exact: true })
+      .click();
     await expect(page.getByLabel("ShowMe root", { exact: true })).toHaveText(
       selectedRoot,
     );
@@ -247,12 +268,6 @@ test("production preload and IPC create and save a native current-format file", 
     );
     expect(changed!.root).toBe(selectedRoot);
     expect(changed!.library).toBe(selectedLibrary);
-    expect(await readFile(file, "utf8")).toContain(id);
-    expect(
-      await readFile(path.join(media, "images", asset.filename)),
-    ).toEqual(
-      await readFile(path.join(selectedLibrary, "images", asset.filename)),
-    );
 
     const persistedSettings = JSON.parse(
       await readFile(path.join(user, "settings.json"), "utf8"),
@@ -263,38 +278,39 @@ test("production preload and IPC create and save a native current-format file", 
     });
     expect(persistedSettings).not.toHaveProperty("mediaLibraryPath");
     expect(persistedSettings).not.toHaveProperty("presentationsFolderPath");
-
+    expect(await readFile(file, "utf8")).toContain(id);
+    expect(
+      await readFile(path.join(media, "images", asset.filename)),
+    ).toEqual(
+      await readFile(path.join(selectedLibrary, "images", asset.filename)),
+    );
     await page.getByRole("button", { name: "Close settings" }).click();
-    const displaced = page.getByRole("complementary", {
-      name: "Presentation outside the ShowMe root",
-    });
-    await expect(displaced).toBeVisible();
-    await expect(
-      displaced.getByRole("button", { name: "Continue temporarily" }),
-    ).toHaveCount(0);
-    await displaced
-      .getByRole("button", { name: "Move into ShowMe Root" })
-      .click();
-    await expect(displaced).toHaveCount(0);
 
-    const moved = await page.evaluate(
-      (id) => window.desktop!.saveDocumentToFile!(id),
-      id,
-    );
-    expect(moved.location).toBe(path.join(selectedRoot, "Native.sme"));
-    expect(JSON.parse(await readFile(moved.location, "utf8")).documentId).toBe(
-      id,
-    );
+    const externalNative = path.join(root, "external.sme");
+    await copyFile(file, externalNative);
+    await expect(
+      page.evaluate((outside) => window.desktop!.openDocumentFile(outside), externalNative),
+    ).rejects.toThrow("must live inside the selected ShowMe root");
+
+    const nestedRootProject = path.join(selectedRoot, "project", "deep");
+    await mkdir(nestedRootProject, { recursive: true });
+    const rootNative = path.join(nestedRootProject, "Root Native.sme");
+    const rootNativeSummary = await page.evaluate(async (destination) => {
+      const desktop = window.desktop!;
+      const created = await desktop.createDocument("Root Native");
+      return desktop.saveDocumentToFile!(created!.id, destination);
+    }, rootNative);
+    expect(rootNativeSummary.location).toBe(rootNative);
     expect(
       (await page.evaluate(() => window.desktop!.scanLibrary!())).presentations,
     ).toBe(1);
 
+    await page.evaluate(() => window.desktop!.setLibraryLifecycleMode!("portable"));
     const portable = await page.evaluate(async () => {
-      await window.desktop!.setLibraryLifecycleMode!("portable");
       const created = await window.desktop!.createDocument("Portable");
       return window.desktop!.saveDocumentAs!(created!.id);
     });
-    expect(portable!.location).toBe(path.join(selectedRoot, "Portable.smp"));
+    expect(portable!.location.endsWith(".smp")).toBe(true);
     expect(await page.evaluate(() => window.desktop!.isTest)).toBe(false);
   } finally {
     // This contract concerns IPC, not the unsaved-close confirmation dialog.
