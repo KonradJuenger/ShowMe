@@ -1,5 +1,4 @@
-import { EffectLibraryPanel } from "./EffectLibraryPanel";
-import type { EditorSnapshot } from "../core/editorCommands";
+import { NativeMediaLibrary } from "./NativeMediaLibrary";
 import {
   useCallback,
   useEffect,
@@ -21,8 +20,6 @@ const ASSET_GRID_GAP = 8;
 const ASSET_LIST_PADDING = 2;
 const ASSET_ROW_HORIZONTAL_PADDING = 2;
 const ASSET_ROW_VERTICAL_PADDING = 4;
-const ASSET_THUMB_WIDTH = 1;
-const ASSET_THUMB_HEIGHT = 1;
 const SECTION_HEADING_HEIGHT = 30;
 const DEFAULT_LIST_WIDTH = 300;
 
@@ -32,7 +29,7 @@ const ASSET_LAYOUT_STYLE = {
   "--asset-list-padding": `${ASSET_LIST_PADDING}px`,
   "--asset-row-x-padding": `${ASSET_ROW_HORIZONTAL_PADDING}px`,
   "--asset-row-y-padding": `${ASSET_ROW_VERTICAL_PADDING}px`,
-  "--asset-thumb-aspect": `${ASSET_THUMB_WIDTH} / ${ASSET_THUMB_HEIGHT}`,
+  "--asset-thumb-aspect": "1 / 1",
 } as CSSProperties;
 
 type AssetBrowserRow =
@@ -80,11 +77,7 @@ function assetGridRowHeight(width: number) {
       ASSET_ROW_HORIZONTAL_PADDING * 2 -
       ASSET_GRID_GAP * (ASSET_COLUMNS - 1),
   );
-  const columnWidth = gridWidth / ASSET_COLUMNS;
-  return (
-    (columnWidth * ASSET_THUMB_HEIGHT) / ASSET_THUMB_WIDTH +
-    ASSET_ROW_VERTICAL_PADDING * 2
-  );
+  return gridWidth / ASSET_COLUMNS + ASSET_ROW_VERTICAL_PADDING * 2;
 }
 
 function Tile({
@@ -92,7 +85,7 @@ function Tile({
   onInsert,
 }: {
   asset: Asset;
-  onInsert: (a: Asset) => void;
+  onInsert: (asset: Asset) => void;
 }) {
   const url = useAssetUrl(asset.id, true);
   const name = asset.names[0];
@@ -104,9 +97,9 @@ function Tile({
       data-asset-type={asset.type}
       aria-label={`Insert ${name}`}
       draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "copy";
-        e.dataTransfer.setData(
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData(
           "application/show-me-asset",
           JSON.stringify(asset),
         );
@@ -132,15 +125,17 @@ export function AssetLibrary({
   onInsert,
   onClose,
   onImport,
-  snapshot,
 }: {
   refresh: number;
-  snapshot?: EditorSnapshot;
-  onInsert: (a: Asset) => void;
+  snapshot?: unknown;
+  onInsert: (asset: Asset) => void;
   onClose?: () => void;
   onImport?: () => void;
 }) {
-  const [tab, setTab] = useState("media");
+  const canBrowseNative = Boolean(window.desktop && platform.libraryBrowser);
+  const [nativeLibrary, setNativeLibrary] = useState<boolean | null>(
+    canBrowseNative ? null : false,
+  );
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<AssetPage["counts"]>({
     images: 0,
@@ -153,21 +148,40 @@ export function AssetLibrary({
   const requested = useRef(new Set<number>());
   const generation = useRef(0);
 
-  const reload = useCallback(() => {
+  useEffect(() => {
+    if (!canBrowseNative || !platform.getLibraryLifecycle) {
+      setNativeLibrary(false);
+      return;
+    }
+    let active = true;
+    void platform
+      .getLibraryLifecycle()
+      .then((state) => {
+        if (active) setNativeLibrary(state.mode !== "portable");
+      })
+      .catch(() => {
+        if (active) setNativeLibrary(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canBrowseNative]);
+
+  const reloadFallback = useCallback(() => {
     generation.current++;
     requested.current.clear();
     setPages({});
     setTotal(0);
     setCounts({ images: 0, videos: 0 });
-    const g = generation.current;
+    const current = generation.current;
     void platform
       .getMediaLibrary()
       .then((info) => {
-        if (g === generation.current) setLibInfo(info);
+        if (current === generation.current) setLibInfo(info);
       })
       .catch(() => {});
     void platform.listAssets("", 0, PAGE_SIZE).then((result) => {
-      if (g !== generation.current) return;
+      if (current !== generation.current) return;
       requested.current.add(0);
       setPages({ 0: result.items });
       setTotal(result.total);
@@ -176,32 +190,33 @@ export function AssetLibrary({
   }, []);
 
   useEffect(() => {
-    const pendingRequests = generation;
-    const unsubscribe = platform.onMediaInventoryChanged?.(reload);
-    reload();
+    if (nativeLibrary !== false) return;
+    const pending = generation;
+    const unsubscribe = platform.onMediaInventoryChanged?.(reloadFallback);
+    reloadFallback();
     return () => {
-      pendingRequests.current++;
+      pending.current++;
       unsubscribe?.();
     };
-  }, [refresh, reload]);
+  }, [nativeLibrary, refresh, reloadFallback]);
 
   useLayoutEffect(() => {
     const node = listHost.current;
-    if (!node) return;
+    if (!node || nativeLibrary !== false) return;
     const measure = () => setListWidth(Math.max(1, node.clientWidth));
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     measure();
     return () => observer.disconnect();
-  }, [tab, total]);
+  }, [nativeLibrary, total]);
 
   const request = useCallback((page: number) => {
     if (requested.current.has(page)) return;
     requested.current.add(page);
-    const g = generation.current;
+    const current = generation.current;
     void platform.listAssets("", page * PAGE_SIZE, PAGE_SIZE).then((result) => {
-      if (g === generation.current)
-        setPages((current) => ({ ...current, [page]: result.items }));
+      if (current === generation.current)
+        setPages((before) => ({ ...before, [page]: result.items }));
     });
   }, []);
 
@@ -217,58 +232,44 @@ export function AssetLibrary({
       <header className="asset-browser-header">
         <div className="asset-browser-title">
           <strong>Media</strong>
-          <span>{total}</span>
+          {nativeLibrary === false && <span>{total}</span>}
         </div>
         <div className="compact-actions asset-browser-actions">
-          {window.desktop && libInfo && platform.openMediaLibrary && (
-            <button
-              aria-label="Open Library folder"
-              title={`Media library: ${libInfo.path}\nOpen in Finder or Explorer`}
-              onClick={() => {
-                void platform.openMediaLibrary?.();
-              }}
-            >
-              <IconFolder />
-            </button>
-          )}
-          {onImport && (
-            <button
-              aria-label="Import media"
-              title="Import media"
-              onClick={onImport}
-            >
+          {nativeLibrary === false &&
+            window.desktop &&
+            libInfo &&
+            platform.openMediaLibrary && (
+              <button
+                aria-label="Open Library folder"
+                title={`Media library: ${libInfo.path}\nOpen in Finder or Explorer`}
+                onClick={() => void platform.openMediaLibrary?.()}
+              >
+                <IconFolder />
+              </button>
+            )}
+          {nativeLibrary === false && onImport && (
+            <button aria-label="Import media" title="Import media" onClick={onImport}>
               <IconPlus />
             </button>
           )}
           {onClose && (
-            <button
-              aria-label="Close media browser"
-              title="Close"
-              onClick={onClose}
-            >
+            <button aria-label="Close media browser" title="Close" onClick={onClose}>
               <IconClose />
             </button>
           )}
         </div>
       </header>
-      {snapshot && (
-        <nav aria-label="Library categories">
-          <button
-            aria-pressed={tab === "media"}
-            onClick={() => setTab("media")}
-          >
-            Media
-          </button>
-          <button
-            aria-pressed={tab === "effects"}
-            onClick={() => setTab("effects")}
-          >
-            Effects
-          </button>
-        </nav>
-      )}
-      {tab === "effects" && snapshot ? (
-        <EffectLibraryPanel snapshot={snapshot} />
+
+      {nativeLibrary === null ? (
+        <div className="empty-library">
+          <span>Loading Library…</span>
+        </div>
+      ) : nativeLibrary ? (
+        <NativeMediaLibrary
+          refresh={refresh}
+          onInsert={onInsert}
+          onImport={onImport}
+        />
       ) : total === 0 ? (
         <div className="empty-library">
           <p>No media yet</p>
@@ -300,10 +301,7 @@ export function AssetLibrary({
                   </div>
                 );
               return (
-                <div
-                  className="asset-grid-row"
-                  data-asset-category={row.category}
-                >
+                <div className="asset-grid-row" data-asset-category={row.category}>
                   {Array.from({ length: row.count }, (_, column) => {
                     const index = row.startIndex + column;
                     const page = Math.floor(index / PAGE_SIZE);
@@ -336,8 +334,8 @@ function AssetCell({
 }: {
   index: number;
   asset?: Asset;
-  request: (p: number) => void;
-  onInsert: (a: Asset) => void;
+  request: (page: number) => void;
+  onInsert: (asset: Asset) => void;
 }) {
   useEffect(() => {
     if (!asset) request(Math.floor(index / PAGE_SIZE));
