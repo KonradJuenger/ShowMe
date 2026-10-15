@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { hashManagedSource } from "./mediaLibrary";
+import { libraryPath } from "./libraryFilesystem";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "./storage/io";
@@ -133,9 +136,30 @@ export class EffectLibraryStorage {
           );
           if (old && old !== destination) await fs.rename(old, destination);
         }
-      } else if (request.type === "delete")
-        await fs.unlink(this.files.get(request.id)!);
-      else if (request.type === "folder") await this.directory(request.folder);
+      } else if (request.type === "delete") {
+        const source = this.files.get(request.id)!;
+        const root = path.dirname(this.root);
+        const relative = `Trash/assets/${randomUUID()}`;
+        const directory = libraryPath(root, relative, true);
+        await fs.mkdir(directory);
+        const metadata = {
+          version: 1,
+          kind: "effect",
+          hash: await hashManagedSource(source),
+          trashedAt: new Date().toISOString(),
+          originalRelativePath: path
+            .relative(root, source)
+            .split(path.sep)
+            .join("/"),
+          bytes: (await fs.stat(source)).size,
+        };
+        await this.write(
+          path.join(directory, "item.json"),
+          JSON.stringify(metadata, null, 2),
+        );
+        await fs.rename(source, path.join(directory, path.basename(source)));
+      } else if (request.type === "folder")
+        await this.directory(request.folder);
       return next;
     } finally {
       await lock.close();
