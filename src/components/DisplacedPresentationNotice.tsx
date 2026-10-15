@@ -44,20 +44,18 @@ export function DisplacedPresentationNotice({
   return (
     <aside
       className="library-displaced-notice"
-      aria-label="Presentation outside the presentations folder"
+      aria-label="Presentation outside the ShowMe root"
     >
       <p>
-        This presentation uses assets from the ShowMe Library but is outside the
-        presentations folder scanned for cleanup.
+        This .sme presentation uses assets from the ShowMe Library but is outside
+        the ShowMe root. Move it into the root or save it as a self-contained
+        .smp package.
       </p>
       <button disabled={busy} onClick={() => void act(onMove)}>
-        Move to Presentations Folder
+        Move into ShowMe Root
       </button>
       <button disabled={busy} onClick={() => void act(onSavePortable)}>
         Save as Portable .smp
-      </button>
-      <button disabled={busy} onClick={() => setDisplaced(false)}>
-        Continue temporarily
       </button>
     </aside>
   );
