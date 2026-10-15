@@ -74,6 +74,8 @@ const methods = [
   "packageMediaState",
   "saveMediaAs",
   "requestClose",
+  "libraryBrowser",
+  "effectThumbnail",
   "listAssets",
   "getAsset",
   "importAssets",

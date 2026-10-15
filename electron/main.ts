@@ -1,13 +1,20 @@
+import { effectDefinitionSchema } from "../src/core/effects";
+import { NativeLibraryBrowser } from "./libraryBrowser";
+import { libraryBrowserRequestSchema } from "../src/core/libraryBrowser";
+import { importManagedFile, mediaFolder, libraryIndex } from "./mediaLibrary";
 import { presentationMotionStages } from "../src/core/documentRuntime";
 import { acceptedImpact } from "../src/core/documentImpact";
 import { fontStorageService } from "./fontIntegration";
 import { EffectLibraryStorage } from "./effectLibrary";
-import { effectLibraryRequestSchema } from "../src/core/libraryEffects";
+import {
+  effectLibraryRequestSchema,
+  libraryEffectSchema,
+} from "../src/core/libraryEffects";
 import sharp from "sharp";
 import { ImageWorkQueue } from "../src/core/imageWorkQueue";
 import { nativeImageConcurrency } from "./imageProcessorPool";
 import { resolveSlide } from "../src/core/templates";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   audienceImageProfile as outputImageProfile,
   MAX_PREPARED_IMAGE_PIXELS,
@@ -1120,6 +1127,35 @@ let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
 
+async function compositionWindow(width: number, height: number) {
+  if (!previewWindow || previewWindow.isDestroyed()) {
+    previewWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width,
+      height,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+      },
+    });
+    secure(previewWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await previewWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await previewWindow.loadFile(path.join(__dirname, "../dist/index.html"), {
+        query: { slidePreview: "1" },
+      });
+  }
+  previewWindow.setContentSize(width, height);
+  return previewWindow;
+}
+
 const operations: Record<string, (...args: any[]) => any> = {
   managedFonts: (documentId?: string) =>
     requireStorage().managedFonts(documentId),
@@ -1654,6 +1690,85 @@ const operations: Record<string, (...args: any[]) => any> = {
           `Slide transfer asset failed hash verification: ${assetId}`,
         );
     }),
+  async libraryBrowser(raw: unknown) {
+    await refreshLifecycleSettings();
+    if (lifecycleMode === "portable")
+      throw new Error("Native Library folders are unavailable in Portable mode");
+    const request = libraryBrowserRequestSchema.parse(raw);
+    const storage = requireStorage();
+    const browser = new NativeLibraryBrowser(
+      storage.assetRoot,
+      (id) => storage.libraryAssetMetadata(id),
+      (file, folder) => storage.importFile(file, folder),
+      async (file) => {
+        const id = /__([a-f0-9]{64})/.exec(path.basename(file))?.[1];
+        if (id && /\.(mp4|webm)$/i.test(file)) {
+          try {
+            const data = await fs.readFile(storage.previewPath(id));
+            return `data:image/jpeg;base64,${data.toString("base64")}`;
+          } catch {}
+        }
+        if (
+          /\.txt$/i.test(file) &&
+          (file.includes(`${path.sep}Effects${path.sep}`) ||
+            file.includes(`${path.sep}Trash${path.sep}`))
+        ) {
+          try {
+            const effect = libraryEffectSchema.parse(
+              JSON.parse(await fs.readFile(file, "utf8")),
+            );
+            return (
+              (await operations.effectThumbnail(effect.definition)) ?? undefined
+            );
+          } catch {
+            return undefined;
+          }
+        }
+        if (/\.(ttf|otf|woff2?)$/i.test(file)) {
+          if ((await fs.stat(file)).size > 32 * 1024 ** 2) return undefined;
+          return `data:font/ttf;base64,${(await fs.readFile(file)).toString("base64")}`;
+        }
+        if (!/\.(png|jpe?g|webp|gif|svg)$/i.test(file)) return undefined;
+        const data = await sharp(file, {
+          limitInputPixels: MAX_PREPARED_IMAGE_PIXELS,
+        })
+          .rotate()
+          .resize(320, 180, { fit: "inside", withoutEnlargement: true })
+          .png()
+          .toBuffer();
+        return `data:image/png;base64,${data.toString("base64")}`;
+      },
+      (file) => shell.showItemInFolder(file),
+    );
+    if (request.type === "import-files") {
+      const selected = await dialog.showOpenDialog(editor!, {
+        properties: ["openFile", "multiSelections"],
+      });
+      if (!selected.canceled)
+        for (const source of selected.filePaths) {
+          if (mediaFolder(source) !== request.category)
+            throw new Error("Select files belonging to the current category");
+          await importManagedFile(
+            storage.assetRoot,
+            path.basename(source),
+            source,
+            (hash) => storage.openProtection.protect([hash]),
+            request.folder,
+          );
+        }
+      await libraryIndex(storage.assetRoot)?.refresh();
+      return browser.run({
+        type: "list",
+        category: request.category,
+        folder: request.folder,
+        query: "",
+        all: false,
+        offset: 0,
+        limit: 100,
+      });
+    }
+    return browser.run(request);
+  },
   listAssets: (query, offset, limit) =>
     requireStorage().listAssets(
       String(query),
@@ -1792,6 +1907,54 @@ const operations: Record<string, (...args: any[]) => any> = {
   updateAsset: (asset) => requireStorage().updateAsset(asset),
   storePreview: (id, data) =>
     requireStorage().storePreview(id, new Uint8Array(data)),
+  async effectThumbnail(raw: unknown) {
+    const definition = effectDefinitionSchema.parse(raw);
+    const key = createHash("sha256")
+      .update(JSON.stringify([2, definition, 280, 140, 1, 0.5, 42]))
+      .digest("hex");
+    const file = path.join(
+      requireStorage().cacheRoot,
+      "effect-thumbnails",
+      key + ".png",
+    );
+    try {
+      return `data:image/png;base64,${(await fs.readFile(file)).toString("base64")}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (pendingPreviews >= 8) return null;
+    pendingPreviews++;
+    const task = previewQueue.then(async () => {
+      const window = await compositionWindow(280, 140);
+      try {
+        const ready = await window.webContents.executeJavaScript(
+          "window.composeEffectThumbnail(" + JSON.stringify(definition) + ")",
+        );
+        if (!ready) return null;
+        const image = await window.webContents.capturePage(undefined, {
+          stayHidden: true,
+        });
+        const data = image
+          .resize({ width: 280, height: 140, quality: "best" })
+          .toPNG();
+        await atomicWrite(file, data);
+        return `data:image/png;base64,${data.toString("base64")}`;
+      } finally {
+        await window.webContents
+          .executeJavaScript("window.clearSlidePreview()")
+          .catch(() => {});
+      }
+    });
+    previewQueue = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      return await task;
+    } finally {
+      pendingPreviews--;
+    }
+  },
   capturePreview(
     projection: import("../src/core/documentProjection").DocumentProjection,
     width: unknown,

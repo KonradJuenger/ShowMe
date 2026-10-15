@@ -17,6 +17,12 @@ if (parameters.has("slidePreview")) {
     installSlidePreviewPage();
     return window.composeSlidePreview!(...args);
   };
+  window.composeEffectThumbnail = async (...args) => {
+    const { installSlidePreviewPage } =
+      await import("./components/SlidePreviewPage");
+    installSlidePreviewPage();
+    return window.composeEffectThumbnail!(...args);
+  };
 } else {
   const Page = parameters.has("exportPdf")
     ? (await import("./export/pdf/ExportPage")).ExportPage
