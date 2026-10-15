@@ -83,19 +83,17 @@ import {
   writeSlideTransferDescriptor,
 } from "./slideTransfer";
 import {
-  defaultMediaLibraryPath,
-  defaultPresentationsFolderPath,
-  initializePresentationsFolder,
   defaultImageCachePath,
   readSettings,
+  showMeLibraryPath,
+  validateShowMeRoot,
   writeSettings,
 } from "./settings";
 import {
   LibraryLifecycle,
   librarySavePath,
-  isInsideLibrary,
+  isInsideRoot,
   documentLibraryHashes,
-  canonicalFilesystemPath,
 } from "./libraryLifecycle";
 import type { LibraryLifecycleMode } from "../src/core/libraryLifecycle";
 import { registerIpcRouter } from "./ipcRouter";
@@ -136,22 +134,21 @@ let closeRequestPending = false;
 let effectLibraryQueue = Promise.resolve();
 let lifecycleMode: LibraryLifecycleMode | null = null;
 let lifecycle: LibraryLifecycle | null = null;
-let presentationsFolder = "";
+let showMeRoot = "";
 function configureLifecycle() {
   const storage = requireStorage();
-  const root = storage.assetRoot;
-  const presentationsRoot = presentationsFolder;
+  const root = showMeRoot;
+  const libraryRoot = storage.assetRoot;
   lifecycle = new LibraryLifecycle(
     root,
-    presentationsRoot,
     () => {
       const remote = collaboration.clientDocument();
       return [...storage.openDocuments(), ...(remote ? [remote] : [])];
     },
     storage.openProtection,
     async (file) => {
-      const trashRoot = path.join(root, "Trash", "assets");
-      if (!isInsideLibrary(trashRoot, file))
+      const trashRoot = path.join(libraryRoot, "Trash", "assets");
+      if (!isInsideRoot(trashRoot, file))
         throw new Error("Unsafe Library Trash deletion");
       await fs.rm(file, { recursive: true, force: true });
     },
@@ -160,16 +157,11 @@ function configureLifecycle() {
       const settings = await readSettings(app.getPath("userData"), {
         requireExisting: true,
       });
-      const currentRoot =
-        settings.mediaLibraryPath ??
-        defaultMediaLibraryPath(app.getPath("userData"));
       return (
         (settings.libraryLifecycleMode ?? "managed") === "managed" &&
-        path.resolve(currentRoot) === path.resolve(root) &&
-        path.resolve(
-          settings.presentationsFolderPath ??
-            defaultPresentationsFolderPath(app.getPath("userData")),
-        ) === path.resolve(presentationsRoot)
+        Boolean(settings.showMeRootPath) &&
+        path.resolve(settings.showMeRootPath!) === path.resolve(root) &&
+        path.resolve(showMeLibraryPath(root)) === path.resolve(libraryRoot)
       );
     },
   );
@@ -193,31 +185,9 @@ async function getLibraryLifecycle() {
   await refreshLifecycleSettings();
   return {
     mode: lifecycleMode,
-    root: requireStorage().assetRoot,
-    presentations: presentationsFolder,
-    defaultPresentations: defaultPresentationsFolderPath(
-      app.getPath("userData"),
-    ),
+    root: showMeRoot,
+    library: requireStorage().assetRoot,
   };
-}
-async function setPresentationsFolder(selected: string | null) {
-  const folder =
-    selected ?? defaultPresentationsFolderPath(app.getPath("userData"));
-  const trash = path.join(requireStorage().assetRoot, "Trash");
-  if (
-    canonicalFilesystemPath(folder) === canonicalFilesystemPath(trash) ||
-    isInsideLibrary(trash, folder)
-  )
-    throw new Error("The presentations folder cannot be inside Library Trash");
-  if (!(await fs.stat(folder)).isDirectory())
-    throw new Error("Choose a presentations directory");
-  const settings = await readSettings(app.getPath("userData"), {
-    requireExisting: true,
-  });
-  settings.presentationsFolderPath = selected;
-  await writeSettings(app.getPath("userData"), settings);
-  await refreshLifecycleSettings();
-  configureLifecycle();
 }
 async function documentLibraryState(id: string) {
   await refreshLifecycleSettings();
@@ -236,7 +206,7 @@ async function documentLibraryState(id: string) {
       dependent &&
       !storage.isPackaged(id).packaged &&
       Boolean(summary.location) &&
-      !isInsideLibrary(presentationsFolder, summary.location),
+      !isInsideRoot(showMeRoot, summary.location),
     location: summary.location,
   };
 }
@@ -244,10 +214,16 @@ async function refreshLifecycleSettings() {
   const settings = await readSettings(app.getPath("userData"), {
     requireExisting: true,
   });
+  if (!settings.showMeRootPath)
+    throw new Error("ShowMe root is not configured");
+  const configuredRoot = await validateShowMeRoot(settings.showMeRootPath);
+  if (
+    path.resolve(showMeLibraryPath(configuredRoot)) !==
+    path.resolve(requireStorage().assetRoot)
+  )
+    throw new Error("ShowMe root changed outside the app; choose it again");
+  showMeRoot = configuredRoot;
   lifecycleMode = settings.libraryLifecycleMode ?? "managed";
-  presentationsFolder =
-    settings.presentationsFolderPath ??
-    defaultPresentationsFolderPath(app.getPath("userData"));
   requireStorage().lifecycleMode = lifecycleMode ?? "managed";
 }
 
@@ -699,15 +675,15 @@ async function chooseSavePath(name: string) {
   const testExtension =
     portable ||
     (testDirectory &&
-      !isInsideLibrary(presentationsFolder, path.join(testDirectory, name)))
+      !isInsideRoot(showMeRoot, path.join(testDirectory, name)))
       ? ".smp"
       : ".sme";
   const testPath = await nextTestPath(name, testExtension);
-  if (testPath) return librarySavePath(presentationsFolder, testPath, portable);
+  if (testPath) return librarySavePath(showMeRoot, testPath, portable);
   const result = await dialog.showSaveDialog(editor!, {
     title: "Save presentation — .sme or portable .smp",
     defaultPath: path.join(
-      presentationsFolder,
+      showMeRoot,
       safeFileName(name) + (portable ? ".smp" : ".sme"),
     ),
     filters: [
@@ -719,7 +695,7 @@ async function chooseSavePath(name: string) {
   });
   if (result.canceled || !result.filePath) return null;
   const target = librarySavePath(
-    presentationsFolder,
+    showMeRoot,
     result.filePath,
     portable,
   );
@@ -728,8 +704,8 @@ async function chooseSavePath(name: string) {
       type: "info",
       message: `Save as ${path.basename(target)}`,
       detail: target.endsWith(".smp")
-        ? "Presentations saved outside the presentations folder use a self-contained .smp package."
-        : "Presentations saved inside the presentations folder use a .sme document with assets stored in the Library.",
+        ? "Presentations saved outside the ShowMe root use a self-contained .smp package."
+        : "Presentations saved inside the ShowMe root use a .sme document with assets stored in the Library.",
       buttons: ["Continue", "Cancel"],
       defaultId: 0,
       cancelId: 1,
@@ -741,7 +717,7 @@ async function chooseSavePath(name: string) {
         type: "question",
         message: `Replace ${path.basename(target)}?`,
         detail:
-          "The destination uses a portable .smp package outside the presentations folder and a .sme document inside it.",
+          "The destination uses a portable .smp package outside the ShowMe root and a .sme document inside it.",
         buttons: ["Replace", "Cancel"],
         defaultId: 1,
         cancelId: 1,
@@ -761,7 +737,7 @@ async function choosePackagePath(name: string) {
   const result = await dialog.showSaveDialog(editor!, {
     title: "Export ShowMe presentation",
     defaultPath: path.join(
-      presentationsFolder,
+      showMeRoot,
       safeFileName(name) + SHOWME_PACKAGE_EXTENSION,
     ),
     filters: [{ name: "ShowMe Packaged Presentation", extensions: ["smp"] }],
@@ -848,9 +824,7 @@ app.on("open-file", (event, file) => {
 
 async function getMediaLibraryInfo() {
   const current = requireStorage().assetRoot;
-  const def = defaultMediaLibraryPath(app.getPath("userData"));
-  const isDefault = path.resolve(current) === path.resolve(def);
-  return { path: current, isDefault, defaultPath: def };
+  return { path: current, isDefault: true, defaultPath: current };
 }
 
 async function explainStorageAndFonts(id: string, portable: boolean) {
@@ -863,7 +837,7 @@ async function explainStorageAndFonts(id: string, portable: boolean) {
       type: "info",
       message: "Library documents and portable packages",
       detail:
-        ".sme documents are not self-contained: their assets live in the Managed Library. .smp packages are portable. Cleanup scans .sme files recursively in the presentations folder; unused assets go to Library Trash and may be permanently deleted after 10 days. Find this explanation again in Settings → Library / Storage.",
+        ".sme documents are not self-contained: their assets live in the Managed Library. .smp packages are portable. Cleanup scans .sme files recursively below the selected ShowMe root; unused assets go to Library Trash and may be permanently deleted after 10 days. Find this explanation again in Settings → Library / Storage.",
     });
     settings.storageWarningSeen = true;
     await writeSettings(app.getPath("userData"), settings);
@@ -1322,7 +1296,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       destination === undefined
         ? undefined
         : librarySavePath(
-            presentationsFolder,
+            showMeRoot,
             z.string().min(1).parse(destination),
             lifecycleMode === "portable",
           ),
@@ -1483,15 +1457,15 @@ const operations: Record<string, (...args: any[]) => any> = {
   getMediaLibrary: getMediaLibraryInfo,
   getLibraryLifecycle,
   documentLibraryState,
-  async moveDocumentToPresentationsFolder(input: string) {
+  async moveDocumentIntoShowMeRoot(input: string) {
     const id = idSchema.parse(input);
     if (collaboration.isGuest(id))
       throw new Error("The host owns presentation files");
     const storage = requireStorage();
     const file = await chooseSavePath(storage.summary(id).name);
     if (!file) return null;
-    if (!isInsideLibrary(presentationsFolder, file) || !file.endsWith(".sme"))
-      throw new Error("Choose a location inside the presentations folder");
+    if (!isInsideRoot(showMeRoot, file) || !file.endsWith(".sme"))
+      throw new Error("Choose a location inside the ShowMe root");
     const original = await storage.assertNativeFileUnchanged(id);
     const summary = await storage.saveDocument(id, file);
     await rememberDocument(summary);
@@ -1501,7 +1475,7 @@ const operations: Record<string, (...args: any[]) => any> = {
         digest(await fs.readFile(original.file, "utf8")) !== original.revision
       )
         throw new Error(
-          "Saved the presentations folder copy, but the original changed during the move and was kept.",
+          "Saved the ShowMe root copy, but the original changed during the move and was kept.",
         );
       await shell.trashItem(original.file);
     }
@@ -1531,7 +1505,7 @@ const operations: Record<string, (...args: any[]) => any> = {
         type: "question",
         title: "Enable Managed Library",
         message: "Enable automatic unused asset cleanup?",
-        detail: `${(analysis.unusedBytes / 1_000_000).toFixed(1)} MB is currently unreferenced. Unused assets will move to Library Trash, then system trash after 10 days. All .sme files in the presentations folder and its subfolders are scanned.`,
+        detail: `${(analysis.unusedBytes / 1_000_000).toFixed(1)} MB is currently unreferenced. Unused assets will move to Library Trash, then system trash after 10 days. All .sme files below the ShowMe root are scanned recursively.`,
         buttons: ["Enable and clean up", "Cancel"],
         defaultId: 1,
         cancelId: 1,
@@ -1565,58 +1539,29 @@ const operations: Record<string, (...args: any[]) => any> = {
   async reviewLibraryTrash() {
     await shell.openPath(path.join(requireStorage().assetRoot, "Trash"));
   },
-  async choosePresentationsFolder() {
+  async chooseShowMeRoot() {
     const result = await dialog.showOpenDialog(editor!, {
-      title: "Select Presentations Folder",
-      defaultPath: presentationsFolder,
+      title: "Select ShowMe Root",
+      defaultPath: showMeRoot,
       properties: ["openDirectory", "createDirectory"],
     });
     if (result.canceled || !result.filePaths[0]) return null;
-    await setPresentationsFolder(path.resolve(result.filePaths[0]));
-    return getLibraryLifecycle();
-  },
-  async resetPresentationsFolder() {
-    const folder = defaultPresentationsFolderPath(app.getPath("userData"));
-    await fs.mkdir(folder, { recursive: true });
-    await setPresentationsFolder(null);
-    return getLibraryLifecycle();
-  },
-  async chooseMediaLibrary() {
-    const result = await dialog.showOpenDialog(editor!, {
-      title: "Select Media Library Directory",
-      properties: ["openDirectory", "createDirectory"],
+    const selected = await validateShowMeRoot(path.resolve(result.filePaths[0]), {
+      createLibrary: true,
     });
-    if (result.canceled || !result.filePaths[0]) return null;
-    const selected = path.resolve(result.filePaths[0]);
+    const library = showMeLibraryPath(selected);
+    await assertLocalCacheFolder(imageCacheFolder, library);
     const settings = await readSettings(app.getPath("userData"), {
       requireExisting: true,
     });
-    await fs.mkdir(selected, { recursive: true });
-    await assertLocalCacheFolder(imageCacheFolder, selected);
-    if (lifecycleMode === "portable")
-      throw new Error("Enable a central Library first");
-    settings.mediaLibraryPath = selected;
-    await requireStorage().setAssetRoot(selected);
+    await requireStorage().setAssetRoot(library);
+    settings.showMeRootPath = selected;
     await writeSettings(app.getPath("userData"), settings);
+    showMeRoot = selected;
     configureLifecycle();
-    await lifecycle!.init();
+    if (lifecycleMode !== "portable") await lifecycle!.init();
     imagePreparation.invalidate();
-    return getMediaLibraryInfo();
-  },
-  async resetMediaLibrary() {
-    const settings = await readSettings(app.getPath("userData"), {
-      requireExisting: true,
-    });
-    const def = defaultMediaLibraryPath(app.getPath("userData"));
-    await fs.mkdir(def, { recursive: true });
-    await assertLocalCacheFolder(imageCacheFolder, def);
-    settings.mediaLibraryPath = null;
-    await requireStorage().setAssetRoot(def);
-    await writeSettings(app.getPath("userData"), settings);
-    configureLifecycle();
-    await lifecycle!.init();
-    imagePreparation.invalidate();
-    return getMediaLibraryInfo();
+    return getLibraryLifecycle();
   },
   async createDocument(name: string) {
     const document = await requireStorage().createDocument(
@@ -2055,6 +2000,60 @@ async function openFromMenu() {
   openInNewEditorWindow(file);
 }
 
+async function requireConfiguredShowMeRoot(
+  settings: Awaited<ReturnType<typeof readSettings>>,
+): Promise<string> {
+  if (settings.showMeRootPath) {
+    try {
+      return await validateShowMeRoot(settings.showMeRootPath);
+    } catch (error) {
+      dialog.showErrorBox(
+        "ShowMe root unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  } else {
+    const intro = await dialog.showMessageBox({
+      type: "info",
+      title: "Choose ShowMe Root",
+      message:
+        "ShowMe now uses one root folder for presentations and the Media Library.",
+      detail:
+        "Choose the folder that contains, or should contain, your Library and all presentations that use it. Existing files will not be moved.",
+      buttons: ["Choose ShowMe Root…", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (intro.response !== 0) {
+      app.quit();
+      throw new Error("ShowMe root setup was canceled");
+    }
+  }
+  while (true) {
+    const result = await dialog.showOpenDialog({
+      title: "Choose ShowMe Root",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) {
+      app.quit();
+      throw new Error("ShowMe root setup was canceled");
+    }
+    try {
+      const root = await validateShowMeRoot(path.resolve(result.filePaths[0]), {
+        createLibrary: true,
+      });
+      settings.showMeRootPath = root;
+      await writeSettings(app.getPath("userData"), settings);
+      return root;
+    } catch (error) {
+      dialog.showErrorBox(
+        "Invalid ShowMe root",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+}
+
 void app.whenReady().then(async () => {
   let settings: Awaited<ReturnType<typeof readSettings>>;
   try {
@@ -2076,14 +2075,8 @@ void app.whenReady().then(async () => {
       ? settings.imageCachePath
       : defaultImageCachePath(app.getPath("userData"));
   if (!imageCachingEnabled) imagePreparation.suspend();
-  const assetRoot =
-    settings.mediaLibraryPath && path.isAbsolute(settings.mediaLibraryPath)
-      ? settings.mediaLibraryPath
-      : defaultMediaLibraryPath(app.getPath("userData"));
-  presentationsFolder = await initializePresentationsFolder(
-    app.getPath("userData"),
-    settings,
-  );
+  showMeRoot = await requireConfiguredShowMeRoot(settings);
+  const assetRoot = showMeLibraryPath(showMeRoot);
   storage = new DocumentStorage(
     assetRoot,
     path.join(app.getPath("userData"), "cache"),
