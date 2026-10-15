@@ -443,7 +443,7 @@ function imageCacheFolderInfo() {
 async function assertLocalCacheFolder(cacheFolder: string, library: string) {
   await fs.mkdir(cacheFolder, { recursive: true });
   const realCache = await fs.realpath(cacheFolder);
-  const realLibrary = canonicalFilesystemPath(library);
+  const realLibrary = await fs.realpath(library);
   const inside = (parent: string, child: string) => {
     const relative = path.relative(parent, child);
     return (
@@ -455,7 +455,7 @@ async function assertLocalCacheFolder(cacheFolder: string, library: string) {
   };
   if (inside(realLibrary, realCache) || inside(realCache, realLibrary))
     throw new Error(
-      "Choose an image cache folder outside the media library. Cache files are local to this computer.",
+      "Choose an image cache folder outside Library/. Cache files are local to this computer.",
     );
 }
 async function changeImageCacheFolder(selected: string | null) {
