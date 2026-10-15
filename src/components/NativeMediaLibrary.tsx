@@ -364,6 +364,18 @@ export function NativeMediaLibrary({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
+        <select
+          className="native-library-filter"
+          aria-label="Media type filter"
+          value={filter}
+          onChange={(event) => chooseFilter(event.target.value as Filter)}
+        >
+          {FILTERS.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.label}
+            </option>
+          ))}
+        </select>
         <details className="native-library-actions">
           <summary aria-label="Library actions" title="Library actions">
             <IconMore />
@@ -396,18 +408,6 @@ export function NativeMediaLibrary({
         </details>
       </div>
 
-      <nav className="native-library-filters" aria-label="Media filters">
-        {FILTERS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            aria-pressed={filter === item.id}
-            onClick={() => chooseFilter(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
 
       {folder && currentCategory && (
         <nav className="native-library-breadcrumbs" aria-label="Current folder">
