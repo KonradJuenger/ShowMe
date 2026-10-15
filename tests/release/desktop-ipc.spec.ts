@@ -7,6 +7,8 @@ import {
   readFile,
   copyFile,
   rm,
+  access,
+  stat,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -236,7 +238,7 @@ test("production preload and IPC create and save a native current-format file", 
     );
     await page.getByRole("button", { name: "Close settings" }).click();
 
-    const portablePath = path.join(selectedRoot, "Native.smp");
+    const portablePath = path.join(showMeRoot, "Native Portable.smp");
     await app.evaluate(({ dialog }, destination) => {
       dialog.showSaveDialog = async () => ({
         canceled: false,
@@ -319,6 +321,123 @@ test("production preload and IPC create and save a native current-format file", 
     // This contract concerns IPC, not the unsaved-close confirmation dialog.
     await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await app.close().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("startup clean cutover ignores legacy storage settings until a ShowMe root is explicitly selected", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "showme-cutover-"));
+  const user = path.join(root, "user");
+  const oldMedia = path.join(root, "old-media");
+  const oldPresentations = path.join(root, "old-presentations");
+  const selectedRoot = path.join(root, "selected-root");
+  const oldAsset = path.join(oldMedia, "legacy.bin");
+  const oldDeck = path.join(oldPresentations, "legacy.sme");
+  await mkdir(user);
+  await mkdir(oldMedia);
+  await mkdir(oldPresentations);
+  await mkdir(selectedRoot);
+  await writeFile(oldAsset, "legacy asset");
+  await writeFile(oldDeck, "legacy presentation");
+  const assetBefore = await stat(oldAsset);
+  const deckBefore = await stat(oldDeck);
+  const settingsFile = path.join(user, "settings.json");
+  await writeFile(
+    settingsFile,
+    JSON.stringify({
+      mediaLibraryPath: oldMedia,
+      presentationsFolderPath: oldPresentations,
+      libraryLifecycleMode: "managed",
+    }),
+  );
+  const baseEnv = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key, value]) =>
+        ![
+          "SHOWME_DOCUMENT_DIR",
+          "ELECTRON_RUN_AS_NODE",
+          "SHOWME_TESTING",
+          "SHOWME_TEST_ROOT_SELECTION",
+        ].includes(key) && value !== undefined,
+    ),
+  ) as Record<string, string>;
+  const args = [path.resolve("."), `--user-data-dir=${user}`];
+
+  const blocked = await electron.launch({ args, env: baseEnv });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await blocked.windows()).toHaveLength(0);
+    expect(JSON.parse(await readFile(settingsFile, "utf8"))).toMatchObject({
+      mediaLibraryPath: oldMedia,
+      presentationsFolderPath: oldPresentations,
+      libraryLifecycleMode: "managed",
+    });
+    await expect(access(path.join(selectedRoot, "Library"))).rejects.toThrow();
+  } finally {
+    await blocked.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await blocked.close().catch(() => {});
+  }
+
+  const configured = await electron.launch({
+    args,
+    env: {
+      ...baseEnv,
+      SHOWME_TESTING: "1",
+      SHOWME_TEST_ROOT_SELECTION: selectedRoot,
+    },
+  });
+  try {
+    const page = await configured.firstWindow();
+    await readyEditor(page);
+    const lifecycle = await page.evaluate(() =>
+      window.desktop!.getLibraryLifecycle!(),
+    );
+    expect(lifecycle.root).toBe(selectedRoot);
+    expect(lifecycle.library).toBe(path.join(selectedRoot, "Library"));
+    await expect(
+      access(path.join(selectedRoot, "Library")),
+    ).resolves.toBeUndefined();
+
+    const settings = JSON.parse(await readFile(settingsFile, "utf8"));
+    expect(settings).toMatchObject({
+      showMeRootPath: selectedRoot,
+      libraryLifecycleMode: "managed",
+    });
+    expect(settings).not.toHaveProperty("mediaLibraryPath");
+    expect(settings).not.toHaveProperty("presentationsFolderPath");
+
+    expect(await readFile(oldAsset, "utf8")).toBe("legacy asset");
+    expect(await readFile(oldDeck, "utf8")).toBe("legacy presentation");
+    const assetAfter = await stat(oldAsset);
+    const deckAfter = await stat(oldDeck);
+    expect(assetAfter.size).toBe(assetBefore.size);
+    expect(assetAfter.mtimeMs).toBe(assetBefore.mtimeMs);
+    expect(deckAfter.size).toBe(deckBefore.size);
+    expect(deckAfter.mtimeMs).toBe(deckBefore.mtimeMs);
+    await expect(
+      access(path.join(selectedRoot, "Library", "legacy.bin")),
+    ).rejects.toThrow();
+    await expect(
+      access(path.join(selectedRoot, "legacy.sme")),
+    ).rejects.toThrow();
+  } finally {
+    await configured.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await configured.close().catch(() => {});
+  }
+
+  const relaunched = await electron.launch({ args, env: baseEnv });
+  try {
+    const page = await relaunched.firstWindow();
+    await readyEditor(page);
+    const lifecycle = await page.evaluate(() =>
+      window.desktop!.getLibraryLifecycle!(),
+    );
+    expect(lifecycle.root).toBe(selectedRoot);
+    expect(lifecycle.library).toBe(path.join(selectedRoot, "Library"));
+  } finally {
+    await relaunched.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await relaunched.close().catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
 });
