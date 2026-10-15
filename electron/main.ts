@@ -90,6 +90,7 @@ import {
 } from "./settings";
 import {
   LibraryLifecycle,
+  assertShowMeRootChangeAllowed,
   librarySavePath,
   isInsideRoot,
 } from "./libraryLifecycle";
@@ -1497,6 +1498,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     await shell.openPath(path.join(requireStorage().assetRoot, "Trash"));
   },
   async chooseShowMeRoot() {
+    assertShowMeRootChangeAllowed(collaboration.status());
     const result = await dialog.showOpenDialog(editor!, {
       title: "Select ShowMe Root",
       defaultPath: showMeRoot,
@@ -1981,6 +1983,10 @@ async function openFromMenu() {
 async function requireConfiguredShowMeRoot(
   settings: Awaited<ReturnType<typeof readSettings>>,
 ): Promise<string | null> {
+  const scriptedRoot =
+    process.env.SHOWME_TESTING === "1"
+      ? process.env.SHOWME_TEST_ROOT_SELECTION
+      : undefined;
   if (settings.showMeRootPath) {
     try {
       return await validateShowMeRoot(settings.showMeRootPath);
@@ -1990,7 +1996,7 @@ async function requireConfiguredShowMeRoot(
         error instanceof Error ? error.message : String(error),
       );
     }
-  } else {
+  } else if (!scriptedRoot) {
     const intro = await dialog.showMessageBox({
       type: "info",
       title: "Choose ShowMe Root",
@@ -2008,10 +2014,12 @@ async function requireConfiguredShowMeRoot(
     }
   }
   while (true) {
-    const result = await dialog.showOpenDialog({
-      title: "Choose ShowMe Root",
-      properties: ["openDirectory", "createDirectory"],
-    });
+    const result = scriptedRoot
+      ? { canceled: false, filePaths: [scriptedRoot] }
+      : await dialog.showOpenDialog({
+          title: "Choose ShowMe Root",
+          properties: ["openDirectory", "createDirectory"],
+        });
     if (result.canceled || !result.filePaths[0]) {
       app.quit();
       return null;
