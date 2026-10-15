@@ -364,7 +364,14 @@ test("startup clean cutover ignores legacy storage settings until a ShowMe root 
   ) as Record<string, string>;
   const args = [path.resolve("."), `--user-data-dir=${user}`];
 
-  const blocked = await electron.launch({ args, env: baseEnv });
+  const blocked = await electron.launch({
+    args,
+    env: {
+      ...baseEnv,
+      SHOWME_TESTING: "1",
+      SHOWME_TEST_ROOT_SELECTION: "__blocked__",
+    },
+  });
   try {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(await blocked.windows()).toHaveLength(0);
