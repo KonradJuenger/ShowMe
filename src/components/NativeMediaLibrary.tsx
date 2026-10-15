@@ -74,8 +74,14 @@ function EntryPreview({ entry }: { entry: LibraryBrowserEntry }) {
     if (!job) {
       job = platform
         .libraryBrowser({ type: "preview", path: entry.path })
-        .then((result) => result.preview)
-        .catch(() => undefined);
+        .then((result) => {
+          if (!result.preview) previewCache.delete(key);
+          return result.preview;
+        })
+        .catch(() => {
+          previewCache.delete(key);
+          return undefined;
+        });
       previewCache.set(key, job);
       if (previewCache.size > 240)
         previewCache.delete(previewCache.keys().next().value!);
@@ -170,7 +176,6 @@ export function NativeMediaLibrary({
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [folder, setFolder] = useState("");
-  const [query, setQuery] = useState("");
   const [pages, setPages] = useState<Record<number, LibraryBrowserEntry[]>>({});
   const [total, setTotal] = useState(0);
   const [folders, setFolders] = useState<string[]>([]);
@@ -198,7 +203,7 @@ export function NativeMediaLibrary({
               type: "list",
               category: filter,
               folder: filter === "all" ? "" : folder,
-              query,
+              query: "",
               all: filter === "all",
               offset,
               limit: PAGE_SIZE,
@@ -219,7 +224,7 @@ export function NativeMediaLibrary({
           setError(String(failure));
         });
     },
-    [filter, folder, query],
+    [filter, folder],
   );
 
   const reload = useCallback(() => {
@@ -233,9 +238,8 @@ export function NativeMediaLibrary({
   }, [requestPage]);
 
   useEffect(() => {
-    const timer = setTimeout(reload, query ? 120 : 0);
-    return () => clearTimeout(timer);
-  }, [filter, folder, query, refresh, reload]);
+    reload();
+  }, [filter, folder, refresh, reload]);
 
   useEffect(() => {
     const off = platform.onMediaInventoryChanged?.(reload);
@@ -285,22 +289,16 @@ export function NativeMediaLibrary({
     if (entry.kind !== "folder" || !entry.category) return;
     setFilter(entry.category);
     setFolder(categoryFolder(entry.path));
-    setQuery("");
   };
 
   const chooseFilter = (next: Filter) => {
     setFilter(next);
     setFolder("");
-    setQuery("");
   };
 
   const importHere = () => {
-    if (
-      filter !== "all" &&
-      filter !== "Trash" &&
-      filter !== "Effects" &&
-      platform.libraryBrowser
-    ) {
+    if (filter === "Effects" || filter === "Trash") return;
+    if (filter !== "all" && platform.libraryBrowser) {
       void mutate({ type: "import-files", category: filter, folder });
       return;
     }
@@ -357,13 +355,6 @@ export function NativeMediaLibrary({
   return (
     <div className="native-library" ref={host}>
       <div className="native-library-topbar">
-        <input
-          type="search"
-          aria-label="Search Library"
-          placeholder="Search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
         <select
           className="native-library-filter"
           aria-label="Media type filter"
@@ -381,11 +372,13 @@ export function NativeMediaLibrary({
             <IconMore />
           </summary>
           <div className="native-library-menu" role="menu">
-            {(onImport || (currentCategory && currentCategory !== "Effects")) && (
-              <button type="button" role="menuitem" onClick={importHere}>
-                Import…
-              </button>
-            )}
+            {filter !== "Effects" &&
+              filter !== "Trash" &&
+              (onImport || currentCategory) && (
+                <button type="button" role="menuitem" onClick={importHere}>
+                  Import…
+                </button>
+              )}
             {currentCategory && (
               <button
                 type="button"
@@ -581,7 +574,7 @@ export function NativeMediaLibrary({
 
       {total === 0 && !error ? (
         <div className="empty-library native-library-empty">
-          <p>{query ? "No matches" : filter === "Trash" ? "Trash is empty" : "Nothing here yet"}</p>
+          <p>{filter === "Trash" ? "Trash is empty" : "Nothing here yet"}</p>
           <span>
             {filter === "all"
               ? "Import media or create folders from the Library menu."

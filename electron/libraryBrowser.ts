@@ -29,6 +29,15 @@ import type { Asset } from "../src/core/assets";
 
 /** Native folder inventory; document asset identity remains owned by Storage. */
 export class NativeLibraryBrowser {
+  private inventory:
+    | Promise<{
+        entries: LibraryBrowserResult["entries"];
+        folders: string[];
+      }>
+    | null = null;
+  private inventoryGeneration = 0;
+  private unsubscribe?: () => void;
+
   constructor(
     readonly root: string,
     private readonly asset: (id: string) => Promise<Asset>,
@@ -38,7 +47,20 @@ export class NativeLibraryBrowser {
     ) => Promise<Asset>,
     private readonly preview: (file: string) => Promise<string | undefined>,
     private readonly reveal: (file: string) => void,
-  ) {}
+  ) {
+    this.unsubscribe = libraryIndex(this.root)?.subscribe(() => this.invalidate());
+  }
+
+  dispose() {
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    this.inventory = null;
+  }
+
+  invalidate() {
+    this.inventoryGeneration++;
+    this.inventory = null;
+  }
 
   private mediaPath(relative: string) {
     if (!LIBRARY_CATEGORIES.includes(relative.split("/")[0] as LibraryCategory))
@@ -47,6 +69,92 @@ export class NativeLibraryBrowser {
   }
   private async refresh() {
     await libraryIndex(this.root)?.refresh();
+  }
+
+  private async inventorySnapshot() {
+    if (this.inventory) return this.inventory;
+    const generation = this.inventoryGeneration;
+    const job = (async () => {
+      await this.refresh();
+      const protectedPaths = await readLibraryProtection(this.root);
+      const entries: LibraryBrowserResult["entries"] = [];
+      const folders: string[] = [];
+
+      const visit = async (relative: string, category: LibraryCategory) => {
+        for (const entry of await fs.readdir(this.mediaPath(relative), {
+          withFileTypes: true,
+        })) {
+          const child = `${relative}/${entry.name}`;
+          this.mediaPath(child);
+          if (entry.isDirectory()) {
+            folders.push(child);
+            entries.push({
+              path: child,
+              name: entry.name,
+              kind: "folder",
+              category,
+              managed: false,
+              protection:
+                libraryProtectionState(protectedPaths, child) ?? undefined,
+            });
+            await visit(child, category);
+            continue;
+          }
+          if (!entry.isFile()) continue;
+          const id = assetIdFromFilename(entry.name);
+          const stat = await fs.stat(this.mediaPath(child));
+          let effect;
+          let name = id
+            ? entry.name.slice(0, entry.name.lastIndexOf("__")) +
+              path.extname(entry.name)
+            : entry.name;
+          if (category === "Effects" && entry.name.endsWith(".txt"))
+            try {
+              effect = libraryEffectSchema.parse(
+                JSON.parse(await fs.readFile(this.mediaPath(child), "utf8")),
+              );
+              name = effect.definition.name;
+            } catch {
+              // Invalid effects remain visible and revealable.
+            }
+          entries.push({
+            path: child,
+            name,
+            kind: "file",
+            category,
+            managed: !!id || category === "Effects",
+            protection:
+              category === "Effects"
+                ? undefined
+                : (libraryProtectionState(protectedPaths, child) ?? undefined),
+            bytes: stat.size,
+            signature: `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`,
+            effect,
+          });
+        }
+      };
+
+      for (const category of LIBRARY_CATEGORIES) await visit(category, category);
+      entries.sort(
+        (a, b) =>
+          Number(b.kind === "folder") - Number(a.kind === "folder") ||
+          a.name.localeCompare(b.name) ||
+          a.path.localeCompare(b.path),
+      );
+      return { entries, folders };
+    })();
+    this.inventory = job;
+    try {
+      const snapshot = await job;
+      if (generation !== this.inventoryGeneration) {
+        if (this.inventory === job) this.inventory = null;
+        return this.inventorySnapshot();
+      }
+      return snapshot;
+    } catch (error) {
+      if (this.inventory === job) this.inventory = null;
+      throw error;
+    }
   }
 
   async run(raw: unknown): Promise<LibraryBrowserResult> {
@@ -121,101 +229,40 @@ export class NativeLibraryBrowser {
       const unified = request.category === "all";
       if (unified && request.folder)
         throw new Error("The unified Library view does not enter folders");
+      const snapshot = await this.inventorySnapshot();
       const query = request.query.toLocaleLowerCase();
-      await this.refresh();
-      const protectedPaths = await readLibraryProtection(this.root);
-      const categories: readonly LibraryCategory[] =
-        request.category === "all" ? LIBRARY_CATEGORIES : [request.category];
       const current = unified
         ? ""
         : `${request.category}${request.folder ? "/" + request.folder : ""}`;
 
-      const visit = async (relative: string, category: LibraryCategory) => {
-        for (const entry of await fs.readdir(this.mediaPath(relative), {
-          withFileTypes: true,
-        })) {
-          const child = `${relative}/${entry.name}`;
-          this.mediaPath(child);
-          if (entry.isDirectory()) {
-            result.folders.push(child);
-            if (
-              !unified &&
-              ((!query && relative === current) ||
-                (!!query && child.toLocaleLowerCase().includes(query)))
-            )
-              result.entries.push({
-                path: child,
-                name: entry.name,
-                kind: "folder",
-                category,
-                managed: false,
-                protection:
-                  libraryProtectionState(protectedPaths, child) ?? undefined,
-              });
-            await visit(child, category);
-            continue;
-          }
-          if (!entry.isFile()) continue;
-          const visible =
-            unified ||
-            !!query ||
-            request.all ||
-            path.posix.dirname(child) === current;
-          if (
-            !visible ||
-            (query && !child.toLocaleLowerCase().includes(query))
-          )
-            continue;
-          const id = assetIdFromFilename(entry.name);
-          const stat = await fs.stat(this.mediaPath(child));
-          let effect;
-          let name = id
-            ? entry.name.slice(0, entry.name.lastIndexOf("__")) +
-              path.extname(entry.name)
-            : entry.name;
-          if (category === "Effects" && entry.name.endsWith(".txt"))
-            try {
-              effect = libraryEffectSchema.parse(
-                JSON.parse(await fs.readFile(this.mediaPath(child), "utf8")),
-              );
-              name = effect.definition.name;
-            } catch {
-              // Invalid effects stay visible as files so they can be revealed.
-            }
-          result.entries.push({
-            path: child,
-            name,
-            kind: "file",
-            category,
-            managed: !!id || category === "Effects",
-            protection:
-              category === "Effects"
-                ? undefined
-                : (libraryProtectionState(protectedPaths, child) ?? undefined),
-            bytes: stat.size,
-            signature: `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`,
-            effect,
-          });
-        }
-      };
+      result.folders =
+        request.category === "all"
+          ? [...snapshot.folders]
+          : snapshot.folders.filter((folder) =>
+              folder.startsWith(request.category + "/"),
+            );
 
-      for (const category of categories) await visit(category, category);
-      if (!unified)
-        result.entries = result.entries.filter((entry) =>
-          entry.kind === "folder"
-            ? !!query ||
-              (entry.path.startsWith(current + "/") &&
-                entry.path.split("/").length === current.split("/").length + 1)
-            : request.all ||
-              !!query ||
-              path.posix.dirname(entry.path) === current,
-        );
-      result.entries.sort(
-        (a, b) =>
-          Number(b.kind === "folder") - Number(a.kind === "folder") ||
-          a.name.localeCompare(b.name) ||
-          a.path.localeCompare(b.path),
-      );
+      result.entries = snapshot.entries
+        .filter((entry) => {
+          if (!entry.category) return false;
+          if (!unified && entry.category !== request.category) return false;
+          if (query && !entry.path.toLocaleLowerCase().includes(query))
+            return false;
+          if (unified) return entry.kind === "file";
+          if (entry.kind === "folder")
+            return query
+              ? true
+              : entry.path.startsWith(current + "/") &&
+                  entry.path.split("/").length ===
+                    current.split("/").length + 1;
+          return (
+            request.all ||
+            !!query ||
+            path.posix.dirname(entry.path) === current
+          );
+        })
+        .map((entry) => ({ ...entry }));
+
       result.total = result.entries.length;
       result.entries = result.entries.slice(
         request.offset,
@@ -278,9 +325,15 @@ export class NativeLibraryBrowser {
         const { libraryWalk } = await import("./libraryFilesystem");
         for (const relative of await libraryWalk(this.root, "Effects")) {
           if (!relative.endsWith(".txt")) continue;
-          const existing = libraryEffectSchema.parse(
-            JSON.parse(await fs.readFile(this.mediaPath(relative), "utf8")),
-          );
+          let existing;
+          try {
+            existing = libraryEffectSchema.parse(
+              JSON.parse(await fs.readFile(this.mediaPath(relative), "utf8")),
+            );
+          } catch {
+            // Malformed hand-edited effects do not block restoring another effect.
+            continue;
+          }
           if (existing.id === effect.id)
             throw new Error(
               "An effect with this identity already exists; keep the Trash copy for review",
@@ -312,6 +365,7 @@ export class NativeLibraryBrowser {
         request.path,
         request.protected,
       );
+      this.invalidate();
       return result;
     }
     if (request.type === "rename") {
@@ -364,6 +418,7 @@ export class NativeLibraryBrowser {
         path.posix.dirname(request.path).split("/").slice(1).join("/"),
       );
     }
+    this.invalidate();
     await this.refresh();
     return result;
   }

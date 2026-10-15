@@ -9,19 +9,8 @@
 .native-library-topbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-}
-
-.native-library-topbar input[type="search"] {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--km-border-subtle, #d8d8d5);
-  border-radius: 6px;
-  background: var(--km-bg-surface, #fff);
-  color: var(--km-text-primary, #2d2d29);
-  font: inherit;
 }
 
 .native-library-actions {
@@ -72,7 +61,7 @@
 
 .native-library-filter {
   flex: 0 0 auto;
-  width: 76px;
+  width: 92px;
   height: 28px;
   padding: 0 20px 0 7px;
   border: 1px solid transparent;

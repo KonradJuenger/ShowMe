@@ -1126,6 +1126,60 @@ let previewWindow: BrowserWindow | null = null;
 let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
+let nativeLibraryBrowser: NativeLibraryBrowser | null = null;
+
+function activeNativeLibraryBrowser() {
+  const storage = requireStorage();
+  if (nativeLibraryBrowser?.root === storage.assetRoot)
+    return nativeLibraryBrowser;
+  nativeLibraryBrowser?.dispose();
+  nativeLibraryBrowser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (id) => requireStorage().libraryAssetMetadata(id),
+    (file, folder) => requireStorage().importFile(file, folder),
+    async (file) => {
+      const currentStorage = requireStorage();
+      const id = /__([a-f0-9]{64})/.exec(path.basename(file))?.[1];
+      if (id && /\.(mp4|webm)$/i.test(file)) {
+        try {
+          const data = await fs.readFile(currentStorage.previewPath(id));
+          return `data:image/jpeg;base64,${data.toString("base64")}`;
+        } catch {}
+      }
+      if (
+        /\.txt$/i.test(file) &&
+        (file.includes(`${path.sep}Effects${path.sep}`) ||
+          file.includes(`${path.sep}Trash${path.sep}`))
+      ) {
+        try {
+          const effect = libraryEffectSchema.parse(
+            JSON.parse(await fs.readFile(file, "utf8")),
+          );
+          return (
+            (await operations.effectThumbnail(effect.definition)) ?? undefined
+          );
+        } catch {
+          return undefined;
+        }
+      }
+      if (/\.(ttf|otf|woff2?)$/i.test(file)) {
+        if ((await fs.stat(file)).size > 32 * 1024 ** 2) return undefined;
+        return `data:font/ttf;base64,${(await fs.readFile(file)).toString("base64")}`;
+      }
+      if (!/\.(png|jpe?g|webp|gif|svg)$/i.test(file)) return undefined;
+      const data = await sharp(file, {
+        limitInputPixels: MAX_PREPARED_IMAGE_PIXELS,
+      })
+        .rotate()
+        .resize(320, 180, { fit: "inside", withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      return `data:image/png;base64,${data.toString("base64")}`;
+    },
+    (file) => shell.showItemInFolder(file),
+  );
+  return nativeLibraryBrowser;
+}
 
 async function compositionWindow(width: number, height: number) {
   if (!previewWindow || previewWindow.isDestroyed()) {
@@ -1696,50 +1750,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       throw new Error("Native Library folders are unavailable in Portable mode");
     const request = libraryBrowserRequestSchema.parse(raw);
     const storage = requireStorage();
-    const browser = new NativeLibraryBrowser(
-      storage.assetRoot,
-      (id) => storage.libraryAssetMetadata(id),
-      (file, folder) => storage.importFile(file, folder),
-      async (file) => {
-        const id = /__([a-f0-9]{64})/.exec(path.basename(file))?.[1];
-        if (id && /\.(mp4|webm)$/i.test(file)) {
-          try {
-            const data = await fs.readFile(storage.previewPath(id));
-            return `data:image/jpeg;base64,${data.toString("base64")}`;
-          } catch {}
-        }
-        if (
-          /\.txt$/i.test(file) &&
-          (file.includes(`${path.sep}Effects${path.sep}`) ||
-            file.includes(`${path.sep}Trash${path.sep}`))
-        ) {
-          try {
-            const effect = libraryEffectSchema.parse(
-              JSON.parse(await fs.readFile(file, "utf8")),
-            );
-            return (
-              (await operations.effectThumbnail(effect.definition)) ?? undefined
-            );
-          } catch {
-            return undefined;
-          }
-        }
-        if (/\.(ttf|otf|woff2?)$/i.test(file)) {
-          if ((await fs.stat(file)).size > 32 * 1024 ** 2) return undefined;
-          return `data:font/ttf;base64,${(await fs.readFile(file)).toString("base64")}`;
-        }
-        if (!/\.(png|jpe?g|webp|gif|svg)$/i.test(file)) return undefined;
-        const data = await sharp(file, {
-          limitInputPixels: MAX_PREPARED_IMAGE_PIXELS,
-        })
-          .rotate()
-          .resize(320, 180, { fit: "inside", withoutEnlargement: true })
-          .png()
-          .toBuffer();
-        return `data:image/png;base64,${data.toString("base64")}`;
-      },
-      (file) => shell.showItemInFolder(file),
-    );
+    const browser = activeNativeLibraryBrowser();
     if (request.type === "import-files") {
       const selected = await dialog.showOpenDialog(editor!, {
         properties: ["openFile", "multiSelections"],
@@ -1756,6 +1767,7 @@ const operations: Record<string, (...args: any[]) => any> = {
             request.folder,
           );
         }
+      browser.invalidate();
       await libraryIndex(storage.assetRoot)?.refresh();
       return browser.run({
         type: "list",
@@ -1922,8 +1934,6 @@ const operations: Record<string, (...args: any[]) => any> = {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    if (pendingPreviews >= 8) return null;
-    pendingPreviews++;
     const task = previewQueue.then(async () => {
       const window = await compositionWindow(280, 140);
       try {
@@ -1949,11 +1959,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       () => undefined,
       () => undefined,
     );
-    try {
-      return await task;
-    } finally {
-      pendingPreviews--;
-    }
+    return task;
   },
   capturePreview(
     projection: import("../src/core/documentProjection").DocumentProjection,
