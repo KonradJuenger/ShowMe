@@ -19,6 +19,8 @@ import {
 import { createMediaElement } from "../../../src/core/media";
 import { LIBRARY_RETENTION_MS } from "../../../src/core/libraryLifecycle";
 import { digest } from "../../../electron/storage/io";
+import { managedFilename } from "../../../electron/mediaLibrary";
+import { setLibraryProtection } from "../../../electron/libraryProtection";
 import {
   readSettings,
   showMeLibraryPath,
@@ -535,4 +537,29 @@ it("active host and guest collaboration states block ShowMe root changes", () =>
       clientStatus: "idle",
     }),
   ).not.toThrow();
+});
+
+
+it("persistent folder protection excludes descendants from Library cleanup", async () => {
+  const fixture = await libraryFixture();
+  const folder = path.join(fixture.libraryRoot, "images", "keepers");
+  const bytes = Buffer.from("keep this asset");
+  const hash = digest(bytes);
+  const file = path.join(folder, managedFilename("protected.png", hash));
+  await mkdir(folder, { recursive: true });
+  await writeFile(file, bytes);
+  await setLibraryProtection(fixture.libraryRoot, "images/keepers", true);
+
+  const protectedScan = await fixture.lifecycle.scan(true);
+  expect(protectedScan.complete, protectedScan.errors.join("\n")).toBe(true);
+  expect(protectedScan.trash.map((item) => item.hash)).not.toContain(hash);
+  await expect(access(file)).resolves.toBeUndefined();
+
+  await setLibraryProtection(fixture.libraryRoot, "images/keepers", false);
+  const collectibleScan = await fixture.lifecycle.scan(true);
+  expect(collectibleScan.complete, collectibleScan.errors.join("\n")).toBe(
+    true,
+  );
+  expect(collectibleScan.trash.map((item) => item.hash)).toContain(hash);
+  await expect(access(file)).rejects.toThrow();
 });
