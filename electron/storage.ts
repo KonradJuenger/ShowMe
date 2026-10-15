@@ -51,7 +51,7 @@ import type { LibraryLifecycleMode } from "../src/core/libraryLifecycle";
 import {
   LibraryOpenProtection,
   restoreLibraryAsset,
-  isInsideLibrary,
+  isInsideRoot,
   documentLibraryHashes,
   documentFontUsages,
 } from "./libraryLifecycle";
@@ -1035,7 +1035,7 @@ export class DocumentStorage {
       )
         throw error;
     }
-    if (file && !isInsideLibrary(this.assetRoot, file)) return file;
+    if (file && !isInsideRoot(this.assetRoot, file)) return file;
     await this.verifiedAssetPath(id);
     return this.assetPathForDocument(documentId, id);
   }
