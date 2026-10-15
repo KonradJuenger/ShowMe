@@ -19,6 +19,7 @@ import {
 } from "react";
 import { findElement, getChildren, resolveEditableScope } from "../core/scene";
 import { isMediaContent } from "../core/media";
+import { assetSchema } from "../core/assets";
 import { defaultDragSnapSettings } from "../core/dragSnapping";
 import {
   frameCssTransform,
@@ -1277,15 +1278,76 @@ export function Editor({
           className="stage"
           data-testid="stage"
           onDragOver={(event) => {
-            if (event.dataTransfer.types.includes("Files"))
+            if (
+              event.dataTransfer.types.includes("Files") ||
+              event.dataTransfer.types.includes("application/show-me-asset") ||
+              event.dataTransfer.types.includes(
+                "application/show-me-library-entry",
+              )
+            ) {
               event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+            }
           }}
           onDrop={(event) => {
             const files = Array.from(event.dataTransfer.files);
-            if (!files.length) return;
+            const assetPayload = event.dataTransfer.getData(
+              "application/show-me-asset",
+            );
+            const libraryPayload = event.dataTransfer.getData(
+              "application/show-me-library-entry",
+            );
+            if (!files.length && !assetPayload && !libraryPayload) return;
             event.preventDefault();
             event.stopPropagation();
-            void mediaActions.importFiles(files).catch(reportError);
+
+            const rect = stage.current?.getBoundingClientRect();
+            const current = controller.snapshotRef.current;
+            const insertionPoint = rect
+              ? {
+                  x:
+                    (current?.deck.width ?? 1920) / 2 +
+                    (event.clientX -
+                      (rect.left + rect.width / 2) -
+                      pan.x) /
+                      Math.max(scale, 1e-9),
+                  y:
+                    (current?.deck.height ?? 1080) / 2 +
+                    (event.clientY -
+                      (rect.top + rect.height / 2) -
+                      pan.y) /
+                      Math.max(scale, 1e-9),
+                }
+              : getInsertionWorldPoint();
+
+            if (assetPayload) {
+              try {
+                const asset = assetSchema.parse(JSON.parse(assetPayload));
+                void mediaActions
+                  .insertAsset(asset, insertionPoint)
+                  .catch(reportError);
+              } catch (error) {
+                reportError(error);
+              }
+              return;
+            }
+            if (libraryPayload && platform.libraryBrowser) {
+              void (async () => {
+                const value = JSON.parse(libraryPayload) as { path?: unknown };
+                if (typeof value.path !== "string")
+                  throw new Error("Invalid Library drag payload");
+                const result = await platform.libraryBrowser!({
+                  type: "import",
+                  path: value.path,
+                });
+                if (!result.asset)
+                  throw new Error("Library item cannot be inserted");
+                await mediaActions.insertAsset(result.asset, insertionPoint);
+              })().catch(reportError);
+              return;
+            }
+            if (files.length)
+              void mediaActions.importFiles(files).catch(reportError);
           }}
           onPointerDownCapture={beginPan}
           onPointerMove={updatePan}
