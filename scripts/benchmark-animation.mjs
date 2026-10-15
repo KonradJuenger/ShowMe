@@ -56,10 +56,11 @@ try {
     const settings = await readFile(settingsPath, "utf8")
       .then(JSON.parse)
       .catch(() => ({}));
-    const library =
-      settings.mediaLibraryPath ??
-      path.join(path.dirname(settingsPath), "assets");
-    const isolatedLibrary = path.join(root, "library");
+    if (!settings.showMeRootPath)
+      throw new Error("ShowMe root is not configured for this benchmark");
+    const library = path.join(settings.showMeRootPath, "Library");
+    const isolatedRoot = path.join(root, "ShowMe Root");
+    const isolatedLibrary = path.join(isolatedRoot, "Library");
     const assets = new Set();
     const visit = (elements) => {
       for (const element of elements) {
@@ -86,10 +87,15 @@ try {
     }
     await writeFile(
       path.join(root, "user", "settings.json"),
-      JSON.stringify({ mediaLibraryPath: isolatedLibrary, imageCachingEnabled: cacheEnabled }),
+      JSON.stringify({
+        showMeRootPath: isolatedRoot,
+        imageCachingEnabled: cacheEnabled,
+      }),
     );
   }
-  const copy = path.join(root, path.basename(file));
+  const isolatedRoot = path.join(root, "ShowMe Root");
+  await mkdir(path.join(isolatedRoot, "Library"), { recursive: true });
+  const copy = path.join(isolatedRoot, path.basename(file));
   await writeFile(copy, sourceBytes);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
