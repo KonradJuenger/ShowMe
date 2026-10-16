@@ -8,16 +8,11 @@ import {
 } from "../src/core/libraryBrowser";
 import { libraryEffectSchema } from "../src/core/libraryEffects";
 import { libraryPath } from "./libraryFilesystem";
-import {
-  libraryProtectionState,
-  moveLibraryProtection,
-  readLibraryProtection,
-  removeLibraryProtection,
-  setLibraryProtection,
-} from "./libraryProtection";
+import { setLibraryProtection } from "./libraryProtection";
 import {
   managedFilename,
   assetIdFromFilename,
+  isManagedFilenameProtected,
   libraryIndex,
   hashManagedSource,
 } from "./mediaLibrary";
@@ -76,11 +71,15 @@ export class NativeLibraryBrowser {
     const generation = this.inventoryGeneration;
     const job = (async () => {
       await this.refresh();
-      const protectedPaths = await readLibraryProtection(this.root);
       const entries: LibraryBrowserResult["entries"] = [];
       const folders: string[] = [];
 
-      const visit = async (relative: string, category: LibraryCategory) => {
+      const visit = async (
+        relative: string,
+        category: LibraryCategory,
+      ): Promise<{ managed: number; protected: number }> => {
+        let managed = 0;
+        let protectedCount = 0;
         for (const entry of await fs.readdir(this.mediaPath(relative), {
           withFileTypes: true,
         })) {
@@ -88,20 +87,34 @@ export class NativeLibraryBrowser {
           this.mediaPath(child);
           if (entry.isDirectory()) {
             folders.push(child);
-            entries.push({
+            const folderEntry: LibraryBrowserResult["entries"][number] = {
               path: child,
               name: entry.name,
               kind: "folder",
               category,
               managed: false,
-              protection:
-                libraryProtectionState(protectedPaths, child) ?? undefined,
-            });
-            await visit(child, category);
+            };
+            entries.push(folderEntry);
+            const descendants = await visit(child, category);
+            if (descendants.managed > 0)
+              folderEntry.protection =
+                descendants.protected === descendants.managed
+                  ? "self"
+                  : descendants.protected > 0
+                    ? "mixed"
+                    : undefined;
+            managed += descendants.managed;
+            protectedCount += descendants.protected;
             continue;
           }
           if (!entry.isFile()) continue;
           const id = assetIdFromFilename(entry.name);
+          const protectedFromCleanup =
+            Boolean(id) && isManagedFilenameProtected(entry.name);
+          if (id) {
+            managed++;
+            if (protectedFromCleanup) protectedCount++;
+          }
           const stat = await fs.stat(this.mediaPath(child));
           let effect;
           let name = id
@@ -123,15 +136,13 @@ export class NativeLibraryBrowser {
             kind: "file",
             category,
             managed: !!id || category === "Effects",
-            protection:
-              category === "Effects"
-                ? undefined
-                : (libraryProtectionState(protectedPaths, child) ?? undefined),
+            protection: protectedFromCleanup ? "self" : undefined,
             bytes: stat.size,
             signature: `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`,
             effect,
           });
         }
+        return { managed, protected: protectedCount };
       };
 
       for (const category of LIBRARY_CATEGORIES) await visit(category, category);
@@ -373,7 +384,13 @@ export class NativeLibraryBrowser {
       const hash = assetIdFromFilename(path.basename(source));
       if (hash && path.extname(request.name) !== path.extname(source))
         throw new Error("Keep the file extension when renaming media");
-      const name = hash ? managedFilename(request.name, hash) : request.name;
+      const name = hash
+        ? managedFilename(
+            request.name,
+            hash,
+            isManagedFilenameProtected(path.basename(source)),
+          )
+        : request.name;
       return this.run({
         type: "move",
         path: request.path,
@@ -385,7 +402,6 @@ export class NativeLibraryBrowser {
       if (request.path.split("/").length < 2)
         throw new Error("Cannot delete a category");
       await fs.rmdir(source);
-      await removeLibraryProtection(this.root, request.path);
     } else if (request.type === "move") {
       if (
         request.path.split("/").length < 2 ||
@@ -404,15 +420,16 @@ export class NativeLibraryBrowser {
       const hash = assetIdFromFilename(path.basename(source));
       if (hash && assetIdFromFilename(path.basename(destination)) !== hash)
         throw new Error("Renaming must preserve the asset hash");
+      if (
+        hash &&
+        isManagedFilenameProtected(path.basename(source)) !==
+          isManagedFilenameProtected(path.basename(destination))
+      )
+        throw new Error("Move must preserve cleanup protection");
       if ((await fs.lstat(source)).isFile()) {
         await fs.link(source, destination);
         await fs.unlink(source);
       } else await fs.rename(source, destination);
-      await moveLibraryProtection(
-        this.root,
-        request.path,
-        request.destination,
-      );
     } else if (request.type === "import") {
       result.asset = await this.importAsset(
         source,
