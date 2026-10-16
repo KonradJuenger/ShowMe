@@ -158,6 +158,7 @@ export function NativeMediaLibrary({
   const [total, setTotal] = useState(0);
   const [folders, setFolders] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [mutationError, setMutationError] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
     () => new Set(),
   );
@@ -205,6 +206,7 @@ export function NativeMediaLibrary({
           setError("");
         })
         .catch((failure) => {
+          if (current !== generation.current) return;
           requested.current.delete(page);
           setError(String(failure));
         });
@@ -247,11 +249,15 @@ export function NativeMediaLibrary({
       request: Parameters<NonNullable<typeof platform.libraryBrowser>>[0],
     ) => {
       if (!platform.libraryBrowser) return;
+      setMutationError("");
       try {
-        await platform.libraryBrowser(request);
-        reload();
+        const result = await platform.libraryBrowser(request);
+        if (result.reconciliationError)
+          setMutationError(result.reconciliationError);
       } catch (failure) {
-        setError(String(failure));
+        setMutationError(String(failure));
+      } finally {
+        reload();
       }
     },
     [reload],
@@ -264,16 +270,17 @@ export function NativeMediaLibrary({
       >,
     ) => {
       if (!platform.libraryBrowser) return;
-      let changed = false;
+      setMutationError("");
       try {
         for (const request of requests) {
-          await platform.libraryBrowser(request);
-          changed = true;
+          const result = await platform.libraryBrowser(request);
+          if (result.reconciliationError)
+            setMutationError(result.reconciliationError);
         }
       } catch (failure) {
-        setError(String(failure));
+        setMutationError(String(failure));
       } finally {
-        if (changed) reload();
+        reload();
       }
     },
     [reload],
@@ -673,9 +680,9 @@ export function NativeMediaLibrary({
         </div>
       )}
 
-      {error && (
+      {(mutationError || error) && (
         <div className="native-library-error" role="alert">
-          {error}
+          {mutationError || error}
         </div>
       )}
 

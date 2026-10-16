@@ -8,7 +8,13 @@ import {
   type LibraryCategory,
 } from "../src/core/libraryBrowser";
 import { libraryEffectSchema } from "../src/core/libraryEffects";
-import { libraryPath } from "./libraryFilesystem";
+import {
+  libraryPath,
+  libraryMutationPath,
+  observeLibrary,
+  LibraryObservationChanged,
+  LibraryDirectoryObservation,
+} from "./libraryFilesystem";
 import { setLibraryProtection } from "./libraryProtection";
 import {
   managedFilename,
@@ -28,7 +34,7 @@ type LibraryInventorySnapshot = {
   folders: string[];
 };
 
-/** Native folder inventory; document asset identity remains owned by Storage. */
+/** Disposable process-local view of the filesystem; never persisted or used as asset identity. */
 export class NativeLibraryBrowser {
   private inventory: Promise<LibraryInventorySnapshot> | null = null;
   private inventoryGeneration = 0;
@@ -44,7 +50,9 @@ export class NativeLibraryBrowser {
     private readonly preview: (file: string) => Promise<string | undefined>,
     private readonly reveal: (file: string) => void,
   ) {
-    this.unsubscribe = libraryIndex(this.root)?.subscribe(() => this.invalidate());
+    this.unsubscribe = libraryIndex(this.root)?.subscribe(() =>
+      this.invalidate(),
+    );
   }
 
   dispose() {
@@ -67,11 +75,28 @@ export class NativeLibraryBrowser {
     await libraryIndex(this.root)?.refresh();
   }
 
+  /** A refresh error cannot undo a completed filesystem mutation. */
+  async reconcileAfterMutation(): Promise<string | undefined> {
+    this.invalidate();
+    try {
+      await this.refresh();
+    } catch (error) {
+      libraryIndex(this.root)?.requestReconciliation();
+      if (error instanceof LibraryObservationChanged) return;
+      console.error(
+        "Library mutation completed but reconciliation failed",
+        error,
+      );
+      return `Library changed successfully, but refresh failed: ${String(error)}`;
+    }
+  }
+
   private async inventorySnapshot(): Promise<LibraryInventorySnapshot> {
     if (this.inventory) return this.inventory;
-    const generation = this.inventoryGeneration;
-    const job = (async () => {
+    const job = observeLibrary(async () => {
       await this.refresh();
+      const generation = this.inventoryGeneration;
+      const observation = new LibraryDirectoryObservation(this.root);
       const entries: LibraryBrowserResult["entries"] = [];
       const folders: string[] = [];
 
@@ -81,9 +106,7 @@ export class NativeLibraryBrowser {
       ): Promise<{ managed: number; protected: number }> => {
         let managed = 0;
         let protectedCount = 0;
-        for (const entry of await fs.readdir(this.mediaPath(relative), {
-          withFileTypes: true,
-        })) {
+        for (const entry of await observation.read(relative)) {
           const child = `${relative}/${entry.name}`;
           this.mediaPath(child);
           if (entry.isDirectory()) {
@@ -128,7 +151,12 @@ export class NativeLibraryBrowser {
                 JSON.parse(await fs.readFile(this.mediaPath(child), "utf8")),
               );
               name = effect.definition.name;
-            } catch {
+            } catch (error) {
+              if (
+                !(error instanceof SyntaxError) &&
+                !(error instanceof Error && error.name === "ZodError")
+              )
+                throw error;
               // Invalid effects remain visible and revealable.
             }
           entries.push({
@@ -146,25 +174,26 @@ export class NativeLibraryBrowser {
         return { managed, protected: protectedCount };
       };
 
-      for (const category of LIBRARY_CATEGORIES) await visit(category, category);
+      for (const category of LIBRARY_CATEGORIES)
+        await visit(category, category);
       entries.sort(
         (a, b) =>
           Number(b.kind === "folder") - Number(a.kind === "folder") ||
           a.name.localeCompare(b.name) ||
           a.path.localeCompare(b.path),
       );
+      await observation.assertUnchanged();
+      if (generation !== this.inventoryGeneration)
+        throw new LibraryObservationChanged();
       return { entries, folders };
-    })();
+    });
     this.inventory = job;
     try {
-      const snapshot = await job;
-      if (generation !== this.inventoryGeneration) {
-        if (this.inventory === job) this.inventory = null;
-        return this.inventorySnapshot();
-      }
-      return snapshot;
+      return await job;
     } catch (error) {
       if (this.inventory === job) this.inventory = null;
+      if (error instanceof LibraryObservationChanged)
+        libraryIndex(this.root)?.requestReconciliation();
       throw error;
     }
   }
@@ -250,9 +279,7 @@ export class NativeLibraryBrowser {
       result.folders =
         request.category === "all"
           ? snapshot.folders.filter((folder) =>
-              isVisibleLibraryCategory(
-                folder.split("/")[0] as LibraryCategory,
-              ),
+              isVisibleLibraryCategory(folder.split("/")[0] as LibraryCategory),
             )
           : snapshot.folders.filter((folder) =>
               folder.startsWith(request.category + "/"),
@@ -274,9 +301,7 @@ export class NativeLibraryBrowser {
                   entry.path.split("/").length ===
                     current.split("/").length + 1;
           return (
-            request.all ||
-            !!query ||
-            path.posix.dirname(entry.path) === current
+            request.all || !!query || path.posix.dirname(entry.path) === current
           );
         })
         .map((entry) => ({ ...entry }));
@@ -364,12 +389,14 @@ export class NativeLibraryBrowser {
         true,
       );
       // Hard-link publication preserves a conflicting destination and the Trash copy.
-      await fs.link(file, destination);
-      await fs.unlink(file);
-      await fs.unlink(metadata);
-      await fs.rmdir(directory);
-      this.invalidate();
-      await this.refresh();
+      try {
+        await fs.link(file, destination);
+        await fs.unlink(file);
+        await fs.unlink(metadata);
+        await fs.rmdir(directory);
+      } finally {
+        result.reconciliationError = await this.reconcileAfterMutation();
+      }
       return result;
     }
     if (request.type === "import-files")
@@ -380,18 +407,12 @@ export class NativeLibraryBrowser {
       if ((!stat.isFile() && !stat.isDirectory()) || stat.isSymbolicLink())
         throw new Error("Only Library files and folders can be protected");
       try {
-        await setLibraryProtection(
-          this.root,
-          request.path,
-          request.protected,
-        );
+        await setLibraryProtection(this.root, request.path, request.protected);
       } catch (error) {
-        this.invalidate();
-        await this.refresh().catch(() => undefined);
+        await this.reconcileAfterMutation();
         throw error;
       }
-      this.invalidate();
-      await this.refresh();
+      result.reconciliationError = await this.reconcileAfterMutation();
       return result;
     }
     if (request.type === "rename") {
@@ -411,47 +432,54 @@ export class NativeLibraryBrowser {
         destination: `${path.posix.dirname(request.path)}/${name}`,
       });
     }
-    if (request.type === "mkdir") await fs.mkdir(source, { recursive: true });
-    else if (request.type === "remove-folder") {
-      if (request.path.split("/").length < 2)
-        throw new Error("Cannot delete a category");
-      await fs.rmdir(source);
-    } else if (request.type === "move") {
-      if (
-        request.path.split("/").length < 2 ||
-        request.destination.split("/").length < 2 ||
-        request.path.split("/")[0] !== request.destination.split("/")[0]
-      )
-        throw new Error("Move within the same category");
-      const destination = libraryPath(this.root, request.destination, true);
-      try {
-        await fs.lstat(destination);
-        throw new Error("Destination already exists");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    try {
+      if (request.type === "mkdir") {
+        if (request.path.split("/").length < 2)
+          throw new Error("Cannot create a category");
+        libraryMutationPath(this.root, request.path);
+        await fs.mkdir(source, { recursive: true });
+      } else if (request.type === "remove-folder") {
+        if (request.path.split("/").length < 2)
+          throw new Error("Cannot delete a category");
+        await fs.rmdir(source);
+      } else if (request.type === "move") {
+        if (
+          request.path.split("/").length < 2 ||
+          request.destination.split("/").length < 2 ||
+          request.path.split("/")[0] !== request.destination.split("/")[0]
+        )
+          throw new Error("Move within the same category");
+        const destination = libraryPath(this.root, request.destination, true);
+        try {
+          await fs.lstat(destination);
+          throw new Error("Destination already exists");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        // Native directories retain their complete subtree. Renaming a managed file retains its hash.
+        const hash = assetIdFromFilename(path.basename(source));
+        if (hash && assetIdFromFilename(path.basename(destination)) !== hash)
+          throw new Error("Renaming must preserve the asset hash");
+        if (
+          hash &&
+          isManagedFilenameProtected(path.basename(source)) !==
+            isManagedFilenameProtected(path.basename(destination))
+        )
+          throw new Error("Move must preserve cleanup protection");
+        if ((await fs.lstat(source)).isFile()) {
+          await fs.link(source, destination);
+          await fs.unlink(source);
+        } else await fs.rename(source, destination);
+      } else if (request.type === "import") {
+        result.asset = await this.importAsset(
+          source,
+          path.posix.dirname(request.path).split("/").slice(1).join("/"),
+        );
       }
-      // Native directories retain their complete subtree. Renaming a managed file retains its hash.
-      const hash = assetIdFromFilename(path.basename(source));
-      if (hash && assetIdFromFilename(path.basename(destination)) !== hash)
-        throw new Error("Renaming must preserve the asset hash");
-      if (
-        hash &&
-        isManagedFilenameProtected(path.basename(source)) !==
-          isManagedFilenameProtected(path.basename(destination))
-      )
-        throw new Error("Move must preserve cleanup protection");
-      if ((await fs.lstat(source)).isFile()) {
-        await fs.link(source, destination);
-        await fs.unlink(source);
-      } else await fs.rename(source, destination);
-    } else if (request.type === "import") {
-      result.asset = await this.importAsset(
-        source,
-        path.posix.dirname(request.path).split("/").slice(1).join("/"),
-      );
+    } finally {
+      // A failed unlink/late batch conflict may still have changed the tree.
+      result.reconciliationError = await this.reconcileAfterMutation();
     }
-    this.invalidate();
-    await this.refresh();
     return result;
   }
 }

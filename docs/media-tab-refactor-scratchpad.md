@@ -119,7 +119,7 @@ Cleanup protection is now filesystem-native and sync-safe. There is no persisten
 - Protecting a folder recursively applies that rename to the managed files currently inside it. The folder itself stores no state and protection is not inherited by files added later.
 - Folder UI protection is derived from its current descendants: fully protected or mixed.
 - Rename and move operations preserve the protection marker.
-- GC reads protection directly from the filename and treats protected asset hashes as live.
+- GC reads protection directly from each physical filename. Only that copy is protected; presentation/open-draft references remain hash-wide.
 - Protected filenames are included in the cleanup scan fingerprint so a protection change during cleanup aborts the scan rather than racing collection.
 - Filename transitions use non-overwriting hard-link publication. An existing destination is accepted only when its bytes match the encoded hash.
 - The pre-release `.showme/protected.json` mechanism is no longer authoritative and stale copies are removed during Library initialization.
@@ -242,3 +242,43 @@ Local verification of the follow-up:
 - Temporary Chromium component checks: grid height/scrolling, borderless full-width tiles, keyboard focus, tap toggling, selection count, batch move payloads, Done/Escape, insertion safety and navigation reset passed.
 - Temporary isolated Electron checks: Images is the default, All is absent, a generated red video displays a decoded red first frame, and source/content/backdrop shader thumbnails are 280 × 280.
 - The audience-navigation gate was not rerun for this local follow-up. This is a task-branch update, not a commit or integration into main; the earlier gate result above applies only to its stated candidate.
+
+## Filesystem authority and concurrent reconciliation — 2026-10-16
+
+The durable Library contract is the physical directory tree, managed SHA-256 filenames, and physical `~p` markers. `LibraryIndex` is a disposable machine-local metadata cache; `NativeLibraryBrowser` is a disposable process-local inventory. Neither cache defines asset identity, document locations, or a compatibility format. Missing, malformed, or replaced caches reconstruct from the filesystem. A startup observation that fails can be attempted again.
+
+### Observation and mutations
+
+- Index and browser builds discard incomplete observations and retry up to three times for disappearing entries (`ENOENT`) or changed generations/directory fingerprints. Directory identity and modification signatures are checked before publication, including moves after a file was statted and before watcher delivery. Known nested-directory disappearance is retried rather than silently publishing an incomplete category.
+- Permissions, unsafe symlinks, wrong directory/file structure, and other filesystem failures remain errors. Malformed effect JSON remains visible; its filesystem read failures are distinguished from JSON/schema validation failures.
+- A successful physical mutation stays successful if reconciliation fails. Transient exhaustion requests a deferred reconciliation; a nontransient refresh failure is returned as a separate `reconciliationError` and stays visible in the panel. Deferred scans have bounded attempts and do not schedule themselves forever; later watcher/UI/poll hints can retry.
+- Browser inventories invalidate after successful and partially failed move, restore, protection and import operations. A failed unlink can leave two physical copies; both appear on the next read. No successful filesystem publication is rolled back by these mutation handlers. Existing GC rollback/fingerprint safety remains intact.
+- Single and batch UI actions reload in `finally`, including a first operation with partial physical success. Refresh warnings do not stop subsequent moves. Errors from outdated page requests cannot replace the current generation's state; mutation errors survive successful reloads.
+
+### Protection, names, and immutable media
+
+- Confirmed and removed the GC bug that added protected hashes to the global live set. A `~p` filename now protects just that physical copy. An unprotected duplicate remains collectible; document/open-presentation/draft references still protect every copy by hash. Filename-protection changes still participate in the complete cleanup fingerprint and abort unsafe collection.
+- Folder protection remains a bulk rename over current descendants. Later arrivals remain unprotected, moves preserve the marker, partial conflicts expose mixed state, and no shared sidecar or inherited folder policy is introduced.
+- Mutation destinations use existing Windows-safe path validation (empty/dot components, separators, illegal/control characters, reserved device names, trailing spaces/periods), including superscript device-number aliases. Creation, rename and move reject sibling spellings that collide after NFC normalization and case folding. Imports apply the same check to organizational folders. Exact existing spellings remain usable; paths are not stored as asset identity.
+- Inventory metadata remains deliberately unverified and inexpensive. Managed-looking filenames, renamed/conflicted copies and partial sync payloads never establish trustworthy bytes: insertion/presentation consumption verifies SHA-256 against a physical signature. Malformed/conflicted files remain browsable, and completing a partial payload makes the matching hash available after reconciliation.
+- Document `filename` remains display/fallback metadata. Moving into nested folders and changing `~p` preserve the SHA-256 reference. No document, package or synced metadata schema changes. `.smp` still flattens organizational folders into top-level media directories, strips `~p`, and preserves bytes/hashes.
+
+### Regression coverage and follow-ups
+
+`tests/feature/media/library-reconciliation.test.ts` deterministically covers disappearing files during index/browser scans, a two-move batch overlapping an older scan, post-stat relocation before watcher delivery, bounded retries, startup recovery, separate refresh errors, partial move visibility, portable naming/collisions, sync-byte rejection, and reconstruction with malformed/deleted caches. Lifecycle coverage adds duplicate-copy protection versus document references and protection changes at the final cleanup gate. Existing partial-folder-protection and flattened-package tests remain active.
+
+Intentionally deferred: a dedicated sync-conflict inspection/repair UI and remediation for externally created nonportable or normalization-colliding trees. Current boundary errors remain visible; ShowMe does not rewrite external bytes or invent conflict identities. No startup performance project, benchmarks, cache format commitment, or historical-format readers are included.
+
+Final local verification of the complete hardening candidate (no subsequent product/test changes):
+
+- `npm run typecheck`: passed.
+- `npm run lint`: passed with zero errors and two pre-existing unused-variable warnings (`compositionWindow` and the unused `setLibraryProtection` import in `library-work.test.ts`).
+- `npm run test:stats`: passed; committed composition statistics updated.
+- `npm run test:audit`: passed, 443 active declarations in 73 groups.
+- `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-reconciliation.test.ts","tests/feature/media/library-work.test.ts","tests/feature/persistence/library-lifecycle.test.ts","tests/feature/persistence/package-options.test.ts"]'; npx vitest run`: 49 passed across four files.
+- `npm test`: 15 passed across two core files.
+- `npx playwright install chromium`: completed successfully.
+- `$env:SHOWME_TEST_FILES = '["tests/feature/presenter/audience-navigation.spec.ts"]'; npx playwright test tests/feature/presenter/audience-navigation.spec.ts`: 2 passed, 0 skipped (55.6s). Both the dense animated rendering stress declaration and late-image advance-preparation declaration executed and passed against the final product/test candidate.
+- `git diff --check`: passed.
+
+No full/release suite, build/package, manual Windows/macOS sync exercise, or separate performance benchmark was run for this pass. Presenter gate timings are correctness evidence, not a comparable performance claim. The work stays on PR #11's existing branch; main is not modified or merged.

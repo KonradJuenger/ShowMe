@@ -1,7 +1,7 @@
 import { effectDefinitionSchema } from "../src/core/effects";
 import { NativeLibraryBrowser } from "./libraryBrowser";
 import { libraryBrowserRequestSchema } from "../src/core/libraryBrowser";
-import { importManagedFile, mediaFolder, libraryIndex } from "./mediaLibrary";
+import { importManagedFile, mediaFolder } from "./mediaLibrary";
 import { presentationMotionStages } from "../src/core/documentRuntime";
 import { acceptedImpact } from "../src/core/documentImpact";
 import { fontStorageService } from "./fontIntegration";
@@ -1814,29 +1814,25 @@ const operations: Record<string, (...args: any[]) => any> = {
       const selected = await dialog.showOpenDialog(editor!, {
         properties: ["openFile", "multiSelections"],
       });
-      if (!selected.canceled)
-        for (const source of selected.filePaths) {
-          if (mediaFolder(source) !== request.category)
-            throw new Error("Select files belonging to the current category");
-          await importManagedFile(
-            storage.assetRoot,
-            path.basename(source),
-            source,
-            (hash) => storage.openProtection.protect([hash]),
-            request.folder,
-          );
-        }
-      browser.invalidate();
-      await libraryIndex(storage.assetRoot)?.refresh();
-      return browser.run({
-        type: "list",
-        category: request.category,
-        folder: request.folder,
-        query: "",
-        all: false,
-        offset: 0,
-        limit: 100,
-      });
+      try {
+        if (!selected.canceled)
+          for (const source of selected.filePaths) {
+            if (mediaFolder(source) !== request.category)
+              throw new Error("Select files belonging to the current category");
+            await importManagedFile(
+              storage.assetRoot,
+              path.basename(source),
+              source,
+              (hash) => storage.openProtection.protect([hash]),
+              request.folder,
+            );
+          }
+      } catch (error) {
+        await browser.reconcileAfterMutation();
+        throw error;
+      }
+      const reconciliationError = await browser.reconcileAfterMutation();
+      return { entries: [], total: 0, folders: [], reconciliationError };
     }
     return browser.run(request);
   },

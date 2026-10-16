@@ -103,6 +103,8 @@ export interface LibraryBrowserResult {
   folders: string[];
   asset?: Asset;
   preview?: string;
+  /** Mutation succeeded; a separate, nontransient reconciliation error remains visible. */
+  reconciliationError?: string;
 }
 
 

@@ -581,3 +581,57 @@ it("folder protection renames current managed contents and excludes them from cl
   expect(collectibleScan.trash.map((item) => item.hash)).toContain(hash);
   await expect(access(file)).rejects.toThrow();
 });
+
+it("filename protection retains only its physical copy while document references retain every duplicate", async () => {
+  const fixture = await libraryFixture();
+  const bytes = Buffer.from("duplicate immutable content");
+  const hash = digest(bytes);
+  const protectedRelative = `images/a/${managedFilename("copy.png", hash, true)}`;
+  const ordinaryRelative = `images/b/${managedFilename("copy.png", hash)}`;
+  const protectedFile = path.join(fixture.libraryRoot, protectedRelative);
+  const ordinaryFile = path.join(fixture.libraryRoot, ordinaryRelative);
+  await mkdir(path.dirname(protectedFile), { recursive: true });
+  await mkdir(path.dirname(ordinaryFile), { recursive: true });
+  await writeFile(protectedFile, bytes);
+  await writeFile(ordinaryFile, bytes);
+  const collected = await fixture.lifecycle.scan(true);
+  expect(collected.complete, collected.errors.join("\n")).toBe(true);
+  expect(collected.trash.filter((item) => item.hash === hash).map((item) => item.originalRelativePath)).toEqual([ordinaryRelative]);
+  await expect(access(protectedFile)).resolves.toBeUndefined();
+  await expect(access(ordinaryFile)).rejects.toThrow();
+
+  // A presentation reference still protects all physical copies by content ID.
+  await writeFile(ordinaryFile, bytes);
+  const document = structuredClone(fixture.document);
+  document.slides[document.deck.slideIds[0]].nodes[0].children.push(
+    createMediaElement("duplicate-reference", { ...fixture.asset, id: hash, filename: managedFilename("copy.png", hash), bytes: bytes.length, width: 32, height: 32 }),
+  );
+  await writeFile(path.join(fixture.showMeRoot, "references.sme"), JSON.stringify(document));
+  const referenced = await fixture.lifecycle.scan(true);
+  expect(referenced.complete, referenced.errors.join("\n")).toBe(true);
+  await expect(access(protectedFile)).resolves.toBeUndefined();
+  await expect(access(ordinaryFile)).resolves.toBeUndefined();
+});
+
+it("a protection rename at the cleanup gate invalidates the fingerprint before collection", async () => {
+  const fixture = await libraryFixture();
+  let checks = 0;
+  const lifecycle = new LibraryLifecycle(
+    fixture.showMeRoot,
+    () => [],
+    fixture.storage.openProtection,
+    fixture.deleteTrash,
+    Date.now,
+    async () => {
+      if (++checks === 2) {
+        await setLibraryProtection(fixture.libraryRoot, `images/${path.basename(fixture.unusedSource)}`, true);
+      }
+      return true;
+    },
+  );
+  const result = await lifecycle.scan(true);
+  expect(result.complete).toBe(false);
+  expect(result.errors).toContain("Presentations changed during Library scan; retry");
+  await expect(access(path.join(fixture.libraryRoot, "images", managedFilename("unused.png", fixture.unused.id, true)))).resolves.toBeUndefined();
+  await expect(access(fixture.source)).resolves.toBeUndefined();
+});

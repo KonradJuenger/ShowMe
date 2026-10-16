@@ -1,4 +1,11 @@
-import { libraryPath, libraryWalk, libraryWalkSync } from "./libraryFilesystem";
+import {
+  libraryPath,
+  libraryWalk,
+  libraryWalkSync,
+  observeLibrary,
+  LibraryObservationChanged,
+  LibraryDirectoryObservation,
+} from "./libraryFilesystem";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { atomicWrite } from "./storage/io";
@@ -77,8 +84,7 @@ export function setManagedFilenameProtected(
   const id = assetIdFromFilename(filename);
   if (!id) throw new Error("Not a managed asset filename");
   const ext = path.extname(filename);
-  const readable =
-    filename.slice(0, filename.lastIndexOf("__")) + ext;
+  const readable = filename.slice(0, filename.lastIndexOf("__")) + ext;
   return managedFilename(readable, id, protectedFromCleanup);
 }
 
@@ -212,7 +218,11 @@ export async function ensureLibraryIndex(root: string, cacheRoot?: string) {
 }
 const signatureOf = (stat: import("node:fs").BigIntStats) =>
   [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
-/** Disposable metadata inventory. Content is verified only when consumed. */
+/**
+ * Disposable machine-local metadata cache, never a Library compatibility format.
+ * Filesystem reconciliation must work with a missing/replaced cache. Filename
+ * hashes are candidates only; byte consumers must verify immutable content.
+ */
 export class LibraryIndex {
   readonly files = new Map<string, LibraryFile>();
   private alternatives = new Map<string, LibraryFile[]>();
@@ -229,6 +239,7 @@ export class LibraryIndex {
   private watchers: FSWatcher[] = [];
   private listeners = new Set<(change: LibraryChange) => void>();
   private pending: Promise<void> | null = null;
+  private generation = 0;
   private initialization: Promise<void> | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private poll: ReturnType<typeof setInterval> | undefined;
@@ -267,7 +278,9 @@ export class LibraryIndex {
     }
     const match =
       name &&
-      /^(.*)-(\d{3})(-italic)?__([a-f0-9]{64})(?:~p)?\.(ttf|otf|woff2?)$/i.exec(name);
+      /^(.*)-(\d{3})(-italic)?__([a-f0-9]{64})(?:~p)?\.(ttf|otf|woff2?)$/i.exec(
+        name,
+      );
     if (!match) return;
     const key = this.fontKey({
       family: match[1],
@@ -337,7 +350,10 @@ export class LibraryIndex {
           this.files.clear();
         }
       await this.refresh();
-    })());
+    })().catch((error) => {
+      this.initialization = null;
+      throw error;
+    }));
   }
   subscribe(listener: (change: LibraryChange) => void) {
     this.listeners.add(listener);
@@ -356,6 +372,7 @@ export class LibraryIndex {
             path.join(this.root, folder),
             { persistent: false, recursive: true },
             (_event, name) => {
+              this.generation++;
               if (
                 !name ||
                 folder === "Trash" ||
@@ -400,6 +417,7 @@ export class LibraryIndex {
     if (indexes.get(this.root) === this) indexes.delete(this.root);
   }
   register(id: string, file: string) {
+    this.generation++;
     const signature = signatureOf(statSync(file, { bigint: true }));
     const entry = { id, file, signature };
     this.files.set(id, entry);
@@ -502,9 +520,12 @@ export class LibraryIndex {
     if (this.disposed || this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void this.flushChanges().catch((error) =>
-        console.error("Library reconciliation failed", error),
-      );
+      void this.flushChanges().catch((error) => {
+        // Three attempts per observation; further watcher/UI/poll hints can
+        // retry, but continuous churn must not create a self-scheduling loop.
+        if (!(error instanceof LibraryObservationChanged))
+          console.error("Library reconciliation failed", error);
+      });
     }, 150);
     this.timer.unref();
   }
@@ -534,7 +555,8 @@ export class LibraryIndex {
           ),
           entry,
         ]);
-      } catch {
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         if (this.files.get(id)?.file === file) this.files.delete(id);
         this.alternatives.set(
           id,
@@ -558,27 +580,39 @@ export class LibraryIndex {
   }
   refresh(): Promise<void> {
     if (this.disposed) return Promise.resolve();
-    return (this.pending ??= this.rebuild().finally(() => {
+    this.generation++;
+    return (this.pending ??= observeLibrary(() =>
+      this.rebuild(this.generation),
+    ).finally(() => {
       this.pending = null;
     }));
   }
-  private async rebuild() {
+  /** Watcher/UI hints only; a later completed filesystem scan owns the result. */
+  requestReconciliation() {
+    this.generation++;
+    this.broad = true;
+    this.schedule();
+  }
+  private async rebuild(generation: number) {
     this.scans++;
+    const observation = new LibraryDirectoryObservation(this.root);
     const next = new Map<string, LibraryFile>();
     const alternatives = new Map<string, LibraryFile[]>();
     for (const folder of MEDIA_FOLDERS) {
-      let entries: string[];
       try {
-        entries = await libraryWalk(this.root, folder);
+        await fs.lstat(libraryPath(this.root, folder));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
+      const entries = await libraryWalk(this.root, folder, observation);
       for (const relative of entries) {
         const id = assetIdFromFilename(path.basename(relative));
         if (!id) continue;
         const file = libraryPath(this.root, relative);
         const stat = await fs.lstat(file, { bigint: true });
+        if (!stat.isFile() || stat.isSymbolicLink())
+          throw new Error(`Unsafe Library asset: ${relative}`);
         const entry = { id, file, signature: signatureOf(stat) };
         if (!next.has(id)) next.set(id, entry);
         alternatives.set(id, [...(alternatives.get(id) ?? []), entry]);
@@ -592,8 +626,13 @@ export class LibraryIndex {
     const trashRoot = path.join(this.root, "Trash", "assets");
     for (const dir of await fs
       .readdir(trashRoot, { withFileTypes: true })
-      .catch(() => [])) {
-      if (!dir.isDirectory() || dir.isSymbolicLink()) continue;
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      })) {
+      if (dir.isSymbolicLink())
+        throw new Error("Unsafe Library Trash symbolic link");
+      if (!dir.isDirectory()) continue;
       try {
         const item = JSON.parse(
           await fs.readFile(
@@ -616,11 +655,18 @@ export class LibraryIndex {
           signature: signatureOf(stat),
         });
         trashFiles.set(id, name);
-      } catch {
+      } catch (error) {
+        if (
+          (error as NodeJS.ErrnoException).code &&
+          (error as NodeJS.ErrnoException).code !== "ENOENT"
+        )
+          throw error;
         /* incomplete external entry */
       }
     }
+    await observation.assertUnchanged();
     if (this.disposed) return;
+    if (generation !== this.generation) throw new LibraryObservationChanged();
     const changed = new Set<string>();
     for (const [id, entry] of next)
       if (

@@ -693,6 +693,17 @@
     "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering hides internal font resources from the visible Media surface while retaining the internal font category, and covers filename-encoded cleanup protection; Trash selections are excluded from folder organization; cached native Library pagination avoids repeated filesystem walks; partial protection failures expose the immediate mixed filesystem state; malformed Effect files do not block unrelated Trash restoration"
   },
   {
+    "id": "media-library-reconciliation",
+    "path": "tests/feature/media/library-reconciliation.test.ts",
+    "area": "media",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-16",
+    "lastReviewed": "2026-10-16",
+    "reason": "Deterministic disappearing-entry and post-stat relocation recovery, coherent bounded inventories, two-move batch progress, separate refresh errors, partial move visibility without rollback, portable folder names and Unicode/case collisions, immutable sync-file verification, and reconstruction without local caches"
+  },
+  {
     "id": "media-derived-work",
     "path": "tests/feature/media/derived-work.test.ts",
     "area": "media",
@@ -766,8 +777,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-15",
-    "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching; filename-encoded protection survives cleanup; folder protection bulk-renames current managed contents without creating inherited policy"
+    "lastReviewed": "2026-10-16",
+    "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching; filename-encoded protection survives cleanup; folder protection bulk-renames current managed contents without creating inherited policy; filename protection is physical-copy-specific while document references retain all duplicate hashes; protection renames invalidate the cleanup fingerprint before collection"
   },
   {
     "id": "persistence-current-formats",

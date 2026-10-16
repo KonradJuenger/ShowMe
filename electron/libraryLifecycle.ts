@@ -184,7 +184,7 @@ export function validateTrashDestination(root: string, item: LibraryTrashItem) {
   const parts = item.originalRelativePath.replaceAll("\\", "/").split("/");
   if (
     parts.length < 2 ||
-    !(("kind" in item && item.kind === "effect")
+    !("kind" in item && item.kind === "effect"
       ? parts[0] === "Effects" && parts.at(-1)!.endsWith(".txt")
       : MEDIA_FOLDERS.includes(parts[0] as (typeof MEDIA_FOLDERS)[number]) &&
         assetIdFromFilename(parts.at(-1)!) === item.hash)
@@ -236,7 +236,8 @@ export function restoreLibraryAsset(root: string, hash: string) {
     const item = libraryTrashSchema.parse(
       JSON.parse(readFileSync(metadata, "utf8")),
     );
-    if (("kind" in item && item.kind === "effect") || item.hash !== hash) continue;
+    if (("kind" in item && item.kind === "effect") || item.hash !== hash)
+      continue;
     validateTrashDestination(root, item);
     const source = path.join(
       dir,
@@ -583,8 +584,8 @@ export class LibraryLifecycle {
   ) {
     const live = await this.protection.hashes();
     for (const hash of roots.assetHashes) live.add(hash);
-    for (const item of assets)
-      if (item.protectedFromCleanup) live.add(item.hash);
+    // Document/draft references are hash-wide. Filename protection belongs
+    // only to that physical copy and must never enter this hash-wide set.
     const allDocuments = this.openDocuments();
     for (const document of allDocuments)
       for (const hash of documentAssetIds(document)) live.add(hash);
@@ -667,6 +668,7 @@ export class LibraryLifecycle {
       if (cleanup)
         for (const item of assets) {
           if (
+            !item.protectedFromCleanup &&
             !live.has(item.hash) &&
             (await hashManagedSource(
               libraryPath(this.libraryRoot, item.relative),
@@ -714,7 +716,7 @@ export class LibraryLifecycle {
         // If both copies exist, keep the redundant trash copy for user review.
       }
       for (const item of assets) {
-        if (live.has(item.hash)) {
+        if (item.protectedFromCleanup || live.has(item.hash)) {
           result.referencedBytes += item.bytes;
           continue;
         }
@@ -793,7 +795,11 @@ export class LibraryLifecycle {
       result.unusedBytes = 0;
       const currentProtection = await this.protection.hashes();
       for (const item of await this.physicalAssets()) {
-        if (live.has(item.hash) || currentProtection.has(item.hash))
+        if (
+          item.protectedFromCleanup ||
+          live.has(item.hash) ||
+          currentProtection.has(item.hash)
+        )
           result.referencedBytes += item.bytes;
         else result.unusedBytes += item.bytes;
       }
