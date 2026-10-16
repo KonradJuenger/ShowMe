@@ -185,3 +185,38 @@ Passed:
   - `a late slide with a new image is prepared during the preceding slide instead of blocking audience navigation`
 
 Both audience-navigation declarations executed and passed. The temporary CI instrumentation was then removed and the repository's standard Development workflow restored.
+
+
+## Visible Media surface excludes fonts
+
+Fonts remain an internal managed Library resource because ShowMe still needs them for font resolution, portability checks and package/font workflows. They are no longer presented as Media Library items.
+
+- The visible Media type selector no longer contains a Fonts option.
+- The unified All view excludes the internal `fonts` category and its folders.
+- Font preview/loading UI was removed from the Media Library component.
+- The internal `fonts` Library category and storage/indexing contracts remain available to font-specific infrastructure.
+- No font storage or package schema was changed.
+
+Regression coverage verifies that an internally managed font is absent from the unified visible Library while a direct internal `fonts` inventory request still sees it.
+
+## Final verification after package, Trash, protection and font-surface fixes
+
+Product/test candidate `ca94c48cb0df48b0940a39777d481e0d594f0bc0` was checked by the PR runner using an explicit checkout of that SHA.
+
+Passed:
+
+- `npm run typecheck`
+- `npm run lint`
+- `npm run test:stats`
+- `git diff --exit-code tests/stats.json`
+- `npm run test:audit`
+- focused `tests/feature/media/library-work.test.ts`: 14 passed
+- focused `tests/feature/persistence/package-options.test.ts`: 4 passed
+- `npm test`: 15 passed across 2 core files
+- mandatory audience-navigation gate:
+  - `audience stress benchmark renders dense animated slides and reports comparable performance`
+  - `a late slide with a new image is prepared during the preceding slide instead of blocking audience navigation`
+
+Both audience declarations executed and passed: 2 passed, 0 skipped.
+
+The temporary verification workflow checked out the candidate SHA explicitly and was then restored to the repository's standard Development checks.
