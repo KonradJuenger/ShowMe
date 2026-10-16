@@ -192,7 +192,9 @@ export function NativeMediaLibrary({
   } | null>(null);
   const [editMode, setEditMode] = useState<EditMode>(null);
   const [editValue, setEditValue] = useState("");
-  const [newFolder, setNewFolder] = useState(false);
+  const [newFolderMode, setNewFolderMode] = useState<
+    "empty" | "selection" | null
+  >(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [width, setWidth] = useState(300);
   const host = useRef<HTMLDivElement>(null);
@@ -536,7 +538,7 @@ export function NativeMediaLibrary({
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => setNewFolder(true)}
+                onClick={() => setNewFolderMode("empty")}
               >
                 New Folder…
               </button>
@@ -575,20 +577,31 @@ export function NativeMediaLibrary({
         </nav>
       )}
 
-      {newFolder && folderCreationCategory && (
+      {newFolderMode && folderCreationCategory && (
         <form
           className="native-library-inline-form"
           onSubmit={(event) => {
             event.preventDefault();
             const name = newFolderName.trim();
             if (!name) return;
-            void mutate({
-              type: "mkdir",
-              path: `${folderCreationCategory}${
-                currentCategory && folder ? "/" + folder : ""
-              }/${name}`,
-            });
-            setNewFolder(false);
+            const destination = `${folderCreationCategory}${
+              currentCategory && folder ? "/" + folder : ""
+            }/${name}`;
+            if (
+              newFolderMode === "selection" &&
+              selectionCategory === folderCreationCategory &&
+              selectedEntries.length > 0
+            )
+              void mutateMany([
+                { type: "mkdir", path: destination },
+                ...selectedEntries.map((entry) => ({
+                  type: "move" as const,
+                  path: entry.path,
+                  destination: `${destination}/${basename(entry.path)}`,
+                })),
+              ]);
+            else void mutate({ type: "mkdir", path: destination });
+            setNewFolderMode(null);
             setNewFolderName("");
           }}
         >
@@ -600,7 +613,7 @@ export function NativeMediaLibrary({
             placeholder="Folder name"
           />
           <button type="submit">Create</button>
-          <button type="button" onClick={() => setNewFolder(false)}>
+          <button type="button" onClick={() => setNewFolderMode(null)}>
             Cancel
           </button>
         </form>
@@ -678,9 +691,9 @@ export function NativeMediaLibrary({
                   {folderCreationCategory && (
                     <button
                       type="button"
-                      onClick={() => setNewFolder(true)}
+                      onClick={() => setNewFolderMode("selection")}
                     >
-                      New Folder…
+                      New Folder with Selection…
                     </button>
                   )}
                 </>
@@ -747,9 +760,9 @@ export function NativeMediaLibrary({
                   {folderCreationCategory && (
                     <button
                       type="button"
-                      onClick={() => setNewFolder(true)}
+                      onClick={() => setNewFolderMode("selection")}
                     >
-                      New Folder…
+                      New Folder with Selection…
                     </button>
                   )}
                   {selected.kind === "folder" && (
@@ -901,10 +914,8 @@ function LibraryCell({
         className="native-library-tile"
         aria-label={
           entry.kind === "folder"
-            ? `Open ${entry.name}`
-            : insertable
-              ? `Insert ${entry.name}`
-              : `Select ${entry.name}`
+            ? `Select folder ${entry.name}`
+            : `Select ${entry.name}`
         }
         draggable={insertable}
         onDragStart={(event) => startLibraryDrag(event, entry)}
