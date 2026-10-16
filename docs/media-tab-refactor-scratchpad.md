@@ -67,5 +67,11 @@ After the initial UX pass, review found four correctness/performance issues. The
 2. The Effects filter no longer exposes the generic media importer.
 3. Restoring a deleted Effect ignores unrelated malformed `.txt` Effect files while still rejecting a valid identity collision.
 4. `NativeLibraryBrowser` is now persistent per active Library root and owns a cached recursive inventory snapshot. Pagination filters/slices that snapshot. Inventory/protection mutations and external Library inventory notifications invalidate it.
+5. Effect restore and Effect Library save/move/delete/folder mutations now invalidate the native Library inventory synchronously. Correctness no longer depends on filesystem watcher timing.
+6. Effect thumbnail rendering no longer shares the slide-preview queue. It uses a dedicated hidden compositor and a separate serialized queue with at most eight admitted requests. New Effect captures yield while slide-preview work is pending, so Library scrolling cannot put a long Effect backlog ahead of slide thumbnails.
 
-Regression coverage also checks that requesting another page does not perform another recursive directory walk and that a malformed Effect cannot block restoring an unrelated Effect.
+Regression coverage also checks that requesting another page does not perform another recursive directory walk, that a malformed Effect cannot block restoring an unrelated Effect, and that a prewarmed cached Effect inventory sees a restored Effect immediately.
+
+Follow-up code heads:
+- `8c791ef5f5974ad06d8f39287aad1e8f32f1dcf9`: synchronous Effect inventory invalidation; Development checks green.
+- `8666f3c9a60ca6b12d728a4627c3ab0e4e387288`: isolated bounded low-priority Effect preview queue; Development checks green.
