@@ -556,10 +556,20 @@ it("folder protection renames current managed contents and excludes them from cl
 
   await expect(access(file)).rejects.toThrow();
   await expect(access(protectedFile)).resolves.toBeUndefined();
+
+  // Folder protection is a bulk operation, not inherited policy. A file that
+  // arrives later stays unprotected until explicitly protected itself.
+  const laterBytes = Buffer.from("arrived after folder protection");
+  const laterHash = digest(laterBytes);
+  const laterFile = path.join(folder, managedFilename("later.png", laterHash));
+  await writeFile(laterFile, laterBytes);
+
   const protectedScan = await fixture.lifecycle.scan(true);
   expect(protectedScan.complete, protectedScan.errors.join("\n")).toBe(true);
   expect(protectedScan.trash.map((item) => item.hash)).not.toContain(hash);
+  expect(protectedScan.trash.map((item) => item.hash)).toContain(laterHash);
   await expect(access(protectedFile)).resolves.toBeUndefined();
+  await expect(access(laterFile)).rejects.toThrow();
 
   await setLibraryProtection(fixture.libraryRoot, "images/keepers", false);
   await expect(access(protectedFile)).rejects.toThrow();
