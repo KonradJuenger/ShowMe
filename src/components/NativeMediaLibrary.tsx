@@ -8,11 +8,11 @@ import {
   type DragEvent,
 } from "react";
 import { platform } from "../platform";
+import { organizationalLibraryCategory } from "../core/libraryBrowser";
 import type {
   LibraryBrowserEntry,
   LibraryBrowserResult,
   LibraryCategory,
-  organizationalLibraryCategory,
 } from "../core/libraryBrowser";
 import type { Asset } from "../core/assets";
 import { IconClose, IconFolder, IconLock, IconMore } from "./AppIcons";
