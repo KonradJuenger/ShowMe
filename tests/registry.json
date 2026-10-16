@@ -690,7 +690,7 @@
     "runtime": "unit",
     "created": "2026-10-11",
     "lastReviewed": "2026-10-15",
-    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering and inherited cleanup protection; cached native Library pagination avoids repeated filesystem walks and malformed Effect files do not block unrelated Trash restoration"
+    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering and filename-encoded cleanup protection; cached native Library pagination avoids repeated filesystem walks and malformed Effect files do not block unrelated Trash restoration"
   },
   {
     "id": "media-derived-work",
@@ -767,7 +767,7 @@
     "runtime": "unit",
     "created": "2026-10-12",
     "lastReviewed": "2026-10-15",
-    "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching; persistent folder protection excludes descendant media from cleanup until explicitly released"
+    "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching; filename-encoded protection survives cleanup; folder protection bulk-renames current managed contents without creating inherited policy"
   },
   {
     "id": "persistence-current-formats",
