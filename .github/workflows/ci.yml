@@ -11,9 +11,11 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ca94c48cb0df48b0940a39777d481e0d594f0bc0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
@@ -21,5 +23,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run test:stats
+      - run: git diff --exit-code tests/stats.json
       - run: npm run test:audit
+      - run: SHOWME_TEST_FILES='["tests/feature/media/library-work.test.ts"]' npx vitest run
+      - run: SHOWME_TEST_FILES='["tests/feature/persistence/package-options.test.ts"]' npx vitest run
       - run: npm test
+      - run: npx playwright install chromium
+      - run: SHOWME_TEST_FILES='["tests/feature/presenter/audience-navigation.spec.ts"]' npx playwright test --config playwright.config.ts
