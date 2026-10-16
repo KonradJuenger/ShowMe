@@ -220,3 +220,25 @@ Passed:
 Both audience declarations executed and passed: 2 passed, 0 skipped.
 
 The temporary verification workflow checked out the candidate SHA explicitly and was then restored to the repository's standard Development checks.
+
+## Local UX follow-up — 2026-10-16
+
+These decisions supersede the earlier All-view and desktop multiselection descriptions above:
+
+- Media opens on Images. The type selector offers Images, Video, Audio, Effects, Other and Trash; All has been removed from the UI. Internal inventory APIs remain unchanged.
+- The native grid container uses flex layout so the contained virtual list receives a nonzero height. Native tiles override inspector button padding, borders and tinted backgrounds so previews fill each tile.
+- Select enters a phone-style selection mode: taps toggle circular checkmarks and update a selected count. Done, Escape or changing category/folder clears the selection. Marquee and modifier-based range selection have been removed.
+- Selection mode disables dragging and double-click insertion/folder navigation. Ordinary browsing retains dragging, double-click insertion and folder navigation.
+- Move to Folder and New Folder with Selection retain the existing same-category, non-Trash eligibility rule. Rename and item-level Show in Folder have been removed; the Library-level Show Library Folder action remains.
+- Managed video tiles capture the first frame through the existing video-poster path with at most two concurrent library captures, instead of depending on a previously stored poster.
+- Native effect thumbnails, including content/backdrop samples, are square at 280 × 280. Their derived cache key has changed so rectangular cached thumbnails are not reused. The Effect Editor's existing sample dimensions remain the default.
+- No document, package, asset-identity or persistence format was changed. Startup/cache contention was diagnosed separately and is not fixed by these UX changes.
+
+Local verification of the follow-up:
+
+- `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-work.test.ts"]'; npx vitest run tests/feature/media/library-work.test.ts`: 14 passed.
+- `npm run typecheck` and `npm run build`: passed.
+- Focused ESLint on the three edited TSX components and `electron/main.ts`: no errors; one existing unused `compositionWindow` warning in `electron/main.ts`.
+- Temporary Chromium component checks: grid height/scrolling, borderless full-width tiles, keyboard focus, tap toggling, selection count, batch move payloads, Done/Escape, insertion safety and navigation reset passed.
+- Temporary isolated Electron checks: Images is the default, All is absent, a generated red video displays a decoded red first frame, and source/content/backdrop shader thumbnails are 280 × 280.
+- The audience-navigation gate was not rerun for this local follow-up. This is a task-branch update, not a commit or integration into main; the earlier gate result above applies only to its stated candidate.

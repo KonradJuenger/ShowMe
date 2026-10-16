@@ -1981,7 +1981,7 @@ const operations: Record<string, (...args: any[]) => any> = {
   async effectThumbnail(raw: unknown) {
     const definition = effectDefinitionSchema.parse(raw);
     const key = createHash("sha256")
-      .update(JSON.stringify([2, definition, 280, 140, 1, 0.5, 42]))
+      .update(JSON.stringify([3, definition, 280, 280, 1, 0.5, 42]))
       .digest("hex");
     const file = path.join(
       requireStorage().cacheRoot,
@@ -2005,7 +2005,7 @@ const operations: Record<string, (...args: any[]) => any> = {
           // They use a separate compositor window, so queued effects can never
           // sit ahead of slide captures on the presentation preview queue.
           await waitForSlidePreviewIdle();
-          const window = await effectCompositionWindow(280, 140);
+          const window = await effectCompositionWindow(280, 280);
           try {
             const ready = await window.webContents.executeJavaScript(
               "window.composeEffectThumbnail(" +
@@ -2017,7 +2017,7 @@ const operations: Record<string, (...args: any[]) => any> = {
               stayHidden: true,
             });
             const data = image
-              .resize({ width: 280, height: 140, quality: "best" })
+              .resize({ width: 280, height: 280, quality: "best" })
               .toPNG();
             await atomicWrite(file, data);
             return `data:image/png;base64,${data.toString("base64")}`;

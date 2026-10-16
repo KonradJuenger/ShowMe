@@ -8,10 +8,11 @@ import {
   type DragEvent,
 } from "react";
 import { platform } from "../platform";
+import { videoPoster } from "../core/videoPoster";
+import { ImageWorkQueue } from "../core/imageWorkQueue";
 import { organizationalLibraryCategory } from "../core/libraryBrowser";
 import type {
   LibraryBrowserEntry,
-  LibraryBrowserResult,
   LibraryCategory,
 } from "../core/libraryBrowser";
 import type { Asset } from "../core/assets";
@@ -24,10 +25,9 @@ const COLUMNS = 3;
 const GAP = 8;
 const ROW_PADDING = 4;
 const FILTERS: Array<{
-  id: "all" | LibraryCategory | "Trash";
+  id: LibraryCategory | "Trash";
   label: string;
 }> = [
-  { id: "all", label: "All" },
   { id: "images", label: "Images" },
   { id: "video", label: "Video" },
   { id: "audio", label: "Audio" },
@@ -37,8 +37,8 @@ const FILTERS: Array<{
 ];
 
 type Filter = (typeof FILTERS)[number]["id"];
-type EditMode = "rename" | "move" | null;
 
+const videoPreviewWork = new ImageWorkQueue(2);
 const previewCache = new Map<string, Promise<string | undefined>>();
 
 function humanPath(path: string) {
@@ -71,11 +71,17 @@ function EntryPreview({ entry }: { entry: LibraryBrowserEntry }) {
     const key = `${entry.path}:${entry.signature ?? ""}`;
     let job = previewCache.get(key);
     if (!job) {
-      job = platform
-        .libraryBrowser({ type: "preview", path: entry.path })
+      const assetId = entry.asset?.id;
+      const load =
+        entry.category === "video" && assetId
+          ? videoPreviewWork.run(0, () => videoPoster(assetId, 0))
+          : platform
+              .libraryBrowser({ type: "preview", path: entry.path })
+              .then((result) => result.preview);
+      job = load
         .then((result) => {
-          if (!result.preview) previewCache.delete(key);
-          return result.preview;
+          if (!result) previewCache.delete(key);
+          return result ?? undefined;
         })
         .catch(() => {
           previewCache.delete(key);
@@ -100,10 +106,7 @@ function EntryPreview({ entry }: { entry: LibraryBrowserEntry }) {
         <IconFolder />
       </span>
     );
-  if (
-    preview &&
-    ["images", "video", "Effects"].includes(entry.category ?? "")
-  )
+  if (preview && ["images", "video", "Effects"].includes(entry.category ?? ""))
     return (
       <img
         className={entry.category === "Effects" ? "effect-preview-image" : ""}
@@ -149,7 +152,7 @@ export function NativeMediaLibrary({
   onInsert: (asset: Asset) => void;
   onImport?: () => void;
 }) {
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("images");
   const [folder, setFolder] = useState("");
   const [pages, setPages] = useState<Record<number, LibraryBrowserEntry[]>>({});
   const [total, setTotal] = useState(0);
@@ -158,14 +161,8 @@ export function NativeMediaLibrary({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
     () => new Set(),
   );
-  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
-  const [marquee, setMarquee] = useState<{
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const [editMode, setEditMode] = useState<EditMode>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [newFolderMode, setNewFolderMode] = useState<
     "empty" | "selection" | null
@@ -173,12 +170,6 @@ export function NativeMediaLibrary({
   const [newFolderName, setNewFolderName] = useState("");
   const [width, setWidth] = useState(300);
   const host = useRef<HTMLDivElement>(null);
-  const listHost = useRef<HTMLDivElement>(null);
-  const marqueeOrigin = useRef<{
-    x: number;
-    y: number;
-    base: Set<string>;
-  } | null>(null);
   const requested = useRef(new Set<number>());
   const generation = useRef(0);
 
@@ -194,9 +185,9 @@ export function NativeMediaLibrary({
           : ({
               type: "list",
               category: filter,
-              folder: filter === "all" ? "" : folder,
+              folder,
               query: "",
-              all: filter === "all",
+              all: false,
               offset,
               limit: PAGE_SIZE,
             } as const);
@@ -205,7 +196,9 @@ export function NativeMediaLibrary({
         .then((result) => {
           if (current !== generation.current) return;
           setPages((before) =>
-            reset ? { [page]: result.entries } : { ...before, [page]: result.entries },
+            reset
+              ? { [page]: result.entries }
+              : { ...before, [page]: result.entries },
           );
           setTotal(result.total);
           setFolders(result.folders);
@@ -225,8 +218,8 @@ export function NativeMediaLibrary({
     setPages({});
     setTotal(0);
     setSelectedPaths(new Set());
-    setSelectionAnchor(null);
-    setEditMode(null);
+    setSelectionMode(false);
+    setMoving(false);
     requestPage(0, true);
   }, [requestPage]);
 
@@ -250,7 +243,9 @@ export function NativeMediaLibrary({
   }, []);
 
   const mutate = useCallback(
-    async (request: Parameters<NonNullable<typeof platform.libraryBrowser>>[0]) => {
+    async (
+      request: Parameters<NonNullable<typeof platform.libraryBrowser>>[0],
+    ) => {
       if (!platform.libraryBrowser) return;
       try {
         await platform.libraryBrowser(request);
@@ -313,31 +308,22 @@ export function NativeMediaLibrary({
 
   const importHere = () => {
     if (filter === "Effects" || filter === "Trash") return;
-    if (filter !== "all" && platform.libraryBrowser) {
+    if (platform.libraryBrowser) {
       void mutate({ type: "import-files", category: filter, folder });
       return;
     }
     onImport?.();
   };
 
-  const loadedEntries = new Map<
-    string,
-    { entry: LibraryBrowserEntry; index: number }
-  >();
-  for (const [pageText, entries] of Object.entries(pages)) {
-    const page = Number(pageText);
-    entries.forEach((entry, offset) =>
-      loadedEntries.set(entry.path, {
-        entry,
-        index: page * PAGE_SIZE + offset,
-      }),
-    );
-  }
+  const loadedEntries = new Map(
+    Object.values(pages)
+      .flat()
+      .map((entry) => [entry.path, entry]),
+  );
   const selectedEntries = [...selectedPaths]
-    .map((path) => loadedEntries.get(path)?.entry)
+    .map((path) => loadedEntries.get(path))
     .filter((entry): entry is LibraryBrowserEntry => Boolean(entry));
-  const selected =
-    selectedEntries.length === 1 ? selectedEntries[0] : null;
+  const selected = selectedEntries.length === 1 ? selectedEntries[0] : null;
   const selectionCategory = organizationalLibraryCategory(selectedEntries);
   const selectionParent =
     selectedEntries.length > 0 &&
@@ -349,69 +335,51 @@ export function NativeMediaLibrary({
       ? selectedEntries[0].path.split("/").slice(0, -1).join("/")
       : selectionCategory;
 
-  const selectEntry = (
-    entry: LibraryBrowserEntry,
-    index: number,
-    options: { shift: boolean; additive: boolean },
-  ) => {
-    setEditMode(null);
+  const finishSelection = () => {
+    setSelectionMode(false);
+    setSelectedPaths(new Set());
+    setMoving(false);
+    setNewFolderMode(null);
+  };
+
+  const selectEntry = (entry: LibraryBrowserEntry) => {
+    setMoving(false);
     setSelectedPaths((before) => {
-      if (options.shift && selectionAnchor !== null) {
-        const next = options.additive ? new Set(before) : new Set<string>();
-        const first = Math.min(selectionAnchor, index);
-        const last = Math.max(selectionAnchor, index);
-        for (let current = first; current <= last; current++) {
-          const page = Math.floor(current / PAGE_SIZE);
-          const candidate = pages[page]?.[current % PAGE_SIZE];
-          if (candidate) next.add(candidate.path);
-        }
-        return next;
-      }
-      if (options.additive) {
-        const next = new Set(before);
-        if (next.has(entry.path)) next.delete(entry.path);
-        else next.add(entry.path);
-        return next;
-      }
-      return new Set([entry.path]);
+      if (!selectionMode) return new Set([entry.path]);
+      const next = new Set(before);
+      if (next.has(entry.path)) next.delete(entry.path);
+      else next.add(entry.path);
+      return next;
     });
-    if (!options.shift) setSelectionAnchor(index);
   };
 
-  const beginEdit = (mode: Exclude<EditMode, null>) => {
+  const beginMove = () => {
     if (selectedEntries.length === 0) return;
-    if (mode === "rename" && !selected) return;
-    setEditMode(mode);
-    if (mode === "rename") setEditValue(selected!.name);
-    else setEditValue(selectionParent ?? selectionCategory ?? "");
+    setMoving(true);
+    setEditValue(selectionParent ?? selectionCategory ?? "");
   };
 
-  const commitEdit = () => {
-    if (!editMode || !editValue.trim()) return;
-    if (editMode === "rename") {
-      if (!selected) return;
-      void mutate({
-        type: "rename",
-        path: selected.path,
-        name: editValue.trim(),
-      });
-    } else {
-      if (!selectionCategory || selectedEntries.length === 0) return;
-      const destination = editValue.replace(/\/$/, "");
-      const requests = selectedEntries
-        .map((entry) => ({
-          type: "move" as const,
-          path: entry.path,
-          destination: `${destination}/${basename(entry.path)}`,
-        }))
-        .filter((request) => request.destination !== request.path);
-      if (requests.length) void mutateMany(requests);
-    }
-    setEditMode(null);
+  const commitMove = () => {
+    if (
+      !moving ||
+      !editValue.trim() ||
+      !selectionCategory ||
+      selectedEntries.length === 0
+    )
+      return;
+    const destination = editValue.replace(/\/$/, "");
+    const requests = selectedEntries
+      .map((entry) => ({
+        type: "move" as const,
+        path: entry.path,
+        destination: `${destination}/${basename(entry.path)}`,
+      }))
+      .filter((request) => request.destination !== request.path);
+    if (requests.length) void mutateMany(requests);
+    setMoving(false);
   };
 
-  const currentCategory =
-    filter !== "all" && filter !== "Trash" ? filter : undefined;
+  const currentCategory = filter !== "Trash" ? filter : undefined;
   const currentRootLabel =
     FILTERS.find((item) => item.id === filter)?.label ?? "Media";
   const rowWidth = Math.max(1, width - GAP * (COLUMNS - 1));
@@ -439,62 +407,17 @@ export function NativeMediaLibrary({
         : undefined
       : currentCategory;
 
-  useEffect(() => {
-    const move = (event: PointerEvent) => {
-      const origin = marqueeOrigin.current;
-      const node = listHost.current;
-      if (!origin || !node) return;
-      const bounds = node.getBoundingClientRect();
-      const x = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left));
-      const y = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
-      const left = Math.min(origin.x, x);
-      const top = Math.min(origin.y, y);
-      const right = Math.max(origin.x, x);
-      const bottom = Math.max(origin.y, y);
-      setMarquee({
-        left,
-        top,
-        width: right - left,
-        height: bottom - top,
-      });
-      const next = new Set(origin.base);
-      for (const item of node.querySelectorAll<HTMLElement>(
-        ".native-library-item[data-library-path]",
-      )) {
-        const rect = item.getBoundingClientRect();
-        const itemLeft = rect.left - bounds.left;
-        const itemTop = rect.top - bounds.top;
-        const itemRight = rect.right - bounds.left;
-        const itemBottom = rect.bottom - bounds.top;
-        if (
-          itemRight >= left &&
-          itemLeft <= right &&
-          itemBottom >= top &&
-          itemTop <= bottom
-        ) {
-          const path = item.dataset.libraryPath;
-          if (path) next.add(path);
-        }
-      }
-      setSelectedPaths(next);
-    };
-    const finish = () => {
-      if (!marqueeOrigin.current) return;
-      marqueeOrigin.current = null;
-      setMarquee(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", finish);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-    };
-  }, []);
-
   return (
-    <div className="native-library" ref={host}>
+    <div
+      className="native-library"
+      ref={host}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && selectionMode) {
+          event.stopPropagation();
+          finishSelection();
+        }
+      }}
+    >
       <div className="native-library-topbar">
         <select
           className="native-library-filter"
@@ -508,6 +431,22 @@ export function NativeMediaLibrary({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="native-library-select"
+          aria-pressed={selectionMode}
+          onClick={() => {
+            if (selectionMode) finishSelection();
+            else {
+              setSelectedPaths(new Set());
+              setMoving(false);
+              setNewFolderMode(null);
+              setSelectionMode(true);
+            }
+          }}
+        >
+          {selectionMode ? "Done" : "Select"}
+        </button>
         <details className="native-library-actions">
           <summary aria-label="Library actions" title="Library actions">
             <IconMore />
@@ -542,7 +481,6 @@ export function NativeMediaLibrary({
         </details>
       </div>
 
-
       {folder && currentCategory && (
         <nav className="native-library-breadcrumbs" aria-label="Current folder">
           <button type="button" onClick={() => setFolder("")}>
@@ -553,9 +491,7 @@ export function NativeMediaLibrary({
               type="button"
               key={parts.slice(0, index + 1).join("/")}
               aria-current={index === parts.length - 1 ? "location" : undefined}
-              onClick={() =>
-                setFolder(parts.slice(0, index + 1).join("/"))
-              }
+              onClick={() => setFolder(parts.slice(0, index + 1).join("/"))}
             >
               {part}
             </button>
@@ -605,63 +541,50 @@ export function NativeMediaLibrary({
         </form>
       )}
 
-      {selectedEntries.length > 0 && (
+      {(selectionMode || selectedEntries.length > 0) && (
         <div
           className="native-library-selection"
           role="region"
           aria-label="Selected Library items"
         >
           <div className="native-library-selection-title">
-            <span title={selected?.path}>
-              {selected
-                ? selected.name
-                : `${selectedEntries.length} items selected`}
+            <span title={selected?.path} role="status">
+              {selectionMode
+                ? `${selectedEntries.length} selected`
+                : selected?.name}
             </span>
             <button
               type="button"
               aria-label="Close item actions"
-              onClick={() => {
-                setSelectedPaths(new Set());
-                setSelectionAnchor(null);
-                setEditMode(null);
-              }}
+              onClick={finishSelection}
             >
               <IconClose />
             </button>
           </div>
-          {editMode ? (
+          {moving ? (
             <form
               className="native-library-inline-form"
               onSubmit={(event) => {
                 event.preventDefault();
-                commitEdit();
+                commitMove();
               }}
             >
-              {editMode === "rename" ? (
-                <input
-                  autoFocus
-                  aria-label="New name"
-                  value={editValue}
-                  onChange={(event) => setEditValue(event.target.value)}
-                />
-              ) : (
-                <select
-                  aria-label="Destination folder"
-                  value={editValue}
-                  onChange={(event) => setEditValue(event.target.value)}
-                >
-                  <option value={selectionCategory ?? ""}>
-                    {selectionCategory}
+              <select
+                aria-label="Destination folder"
+                value={editValue}
+                onChange={(event) => setEditValue(event.target.value)}
+              >
+                <option value={selectionCategory ?? ""}>
+                  {selectionCategory}
+                </option>
+                {selectableFolders.map((candidate) => (
+                  <option key={candidate} value={candidate}>
+                    {candidate.split("/").slice(1).join(" / ")}
                   </option>
-                  {selectableFolders.map((candidate) => (
-                    <option key={candidate} value={candidate}>
-                      {candidate.split("/").slice(1).join(" / ")}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button type="submit">{editMode === "rename" ? "Rename" : "Move"}</button>
-              <button type="button" onClick={() => setEditMode(null)}>
+                ))}
+              </select>
+              <button type="submit">Move</button>
+              <button type="button" onClick={() => setMoving(false)}>
                 Cancel
               </button>
             </form>
@@ -670,7 +593,7 @@ export function NativeMediaLibrary({
               {selectedEntries.length > 1 ? (
                 <>
                   {canMoveSelection && (
-                    <button type="button" onClick={() => beginEdit("move")}>
+                    <button type="button" onClick={beginMove}>
                       Move to Folder…
                     </button>
                   )}
@@ -692,14 +615,6 @@ export function NativeMediaLibrary({
                     }
                   >
                     Restore
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void mutate({ type: "reveal", path: selected.path })
-                    }
-                  >
-                    Show in Folder
                   </button>
                 </>
               ) : selected ? (
@@ -725,21 +640,8 @@ export function NativeMediaLibrary({
                             : "Protect from Cleanup"}
                       </button>
                     )}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void mutate({ type: "reveal", path: selected.path })
-                    }
-                  >
-                    Show in Folder
-                  </button>
-                  {selected.category !== "Effects" && (
-                    <button type="button" onClick={() => beginEdit("rename")}>
-                      Rename…
-                    </button>
-                  )}
                   {canMoveSelection && (
-                    <button type="button" onClick={() => beginEdit("move")}>
+                    <button type="button" onClick={beginMove}>
                       Move to Folder…
                     </button>
                   )}
@@ -771,55 +673,19 @@ export function NativeMediaLibrary({
         </div>
       )}
 
-      {error && <div className="native-library-error" role="alert">{error}</div>}
+      {error && (
+        <div className="native-library-error" role="alert">
+          {error}
+        </div>
+      )}
 
       {total === 0 && !error ? (
         <div className="empty-library native-library-empty">
           <p>{filter === "Trash" ? "Trash is empty" : "Nothing here yet"}</p>
-          <span>
-            {filter === "all"
-              ? "Import media or create folders from the Library menu."
-              : "Change the filter or add content from the Library menu."}
-          </span>
+          <span>Change the filter or add content from the Library menu.</span>
         </div>
       ) : (
-        <div
-          className="native-library-list"
-          ref={listHost}
-          onPointerDown={(event) => {
-            if (
-              event.button !== 0 ||
-              (event.target as HTMLElement).closest(".native-library-item")
-            )
-              return;
-            const node = listHost.current;
-            if (!node) return;
-            const bounds = node.getBoundingClientRect();
-            const additive =
-              event.shiftKey || event.metaKey || event.ctrlKey;
-            marqueeOrigin.current = {
-              x: event.clientX - bounds.left,
-              y: event.clientY - bounds.top,
-              base: additive ? new Set(selectedPaths) : new Set(),
-            };
-            if (!additive) setSelectedPaths(new Set());
-            setSelectionAnchor(null);
-            setMarquee({
-              left: event.clientX - bounds.left,
-              top: event.clientY - bounds.top,
-              width: 0,
-              height: 0,
-            });
-            event.preventDefault();
-          }}
-        >
-          {marquee && (
-            <span
-              className="native-library-marquee"
-              style={marquee}
-              aria-hidden="true"
-            />
-          )}
+        <div className="native-library-list">
           <VirtualList
             label="Media Library"
             count={rowCount}
@@ -840,9 +706,8 @@ export function NativeMediaLibrary({
                       index={index}
                       entry={entry}
                       requestPage={requestPage}
-                      selected={Boolean(
-                        entry && selectedPaths.has(entry.path),
-                      )}
+                      selected={Boolean(entry && selectedPaths.has(entry.path))}
+                      selectionMode={selectionMode}
                       onSelect={selectEntry}
                       onOpenFolder={openFolder}
                       onInsert={insert}
@@ -863,6 +728,7 @@ function LibraryCell({
   entry,
   requestPage,
   selected,
+  selectionMode,
   onSelect,
   onOpenFolder,
   onInsert,
@@ -871,11 +737,8 @@ function LibraryCell({
   entry?: LibraryBrowserEntry;
   requestPage: (page: number) => void;
   selected: boolean;
-  onSelect: (
-    entry: LibraryBrowserEntry,
-    index: number,
-    options: { shift: boolean; additive: boolean },
-  ) => void;
+  selectionMode: boolean;
+  onSelect: (entry: LibraryBrowserEntry) => void;
   onOpenFolder: (entry: LibraryBrowserEntry) => void;
   onInsert: (entry: LibraryBrowserEntry) => void;
 }) {
@@ -884,13 +747,17 @@ function LibraryCell({
   }, [entry, index, requestPage]);
 
   if (!entry)
-    return <span className="asset-loading native-library-loading" aria-hidden="true">Loading…</span>;
+    return (
+      <span className="asset-loading native-library-loading" aria-hidden="true">
+        Loading…
+      </span>
+    );
 
   const insertable = isInsertable(entry);
   const pathLabel = humanPath(entry.path);
   return (
     <div
-      className={`native-library-item${selected ? " is-selected" : ""}`}
+      className={`native-library-item${selected ? " is-selected" : ""}${selectionMode ? " is-selecting" : ""}`}
       data-library-path={entry.path}
       data-library-kind={entry.kind}
       title={pathLabel ? `${entry.name}\n${pathLabel}` : entry.name}
@@ -903,16 +770,12 @@ function LibraryCell({
             ? `Select folder ${entry.name}`
             : `Select ${entry.name}`
         }
-        draggable={insertable}
+        draggable={insertable && !selectionMode}
         onDragStart={(event) => startLibraryDrag(event, entry)}
         aria-pressed={selected}
-        onClick={(event) =>
-          onSelect(entry, index, {
-            shift: event.shiftKey,
-            additive: event.metaKey || event.ctrlKey,
-          })
-        }
+        onClick={() => onSelect(entry)}
         onDoubleClick={() => {
+          if (selectionMode) return;
           if (entry.kind === "folder") onOpenFolder(entry);
           else if (insertable) void onInsert(entry);
         }}
@@ -921,6 +784,11 @@ function LibraryCell({
           className={`native-library-preview${entry.category === "Effects" ? " is-effect" : ""}`}
         >
           <EntryPreview entry={entry} />
+          {selectionMode && (
+            <span className="native-library-check" aria-hidden="true">
+              {selected ? "✓" : ""}
+            </span>
+          )}
           <span className="asset-name-overlay" aria-hidden="true">
             {entry.name}
           </span>
@@ -940,18 +808,19 @@ function LibraryCell({
           <IconLock />
         </span>
       )}
-      <button
-        type="button"
-        className="native-library-more"
-        aria-label={`Actions for ${entry.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (!selected)
-            onSelect(entry, index, { shift: false, additive: false });
-        }}
-      >
-        <IconMore />
-      </button>
+      {!selectionMode && (
+        <button
+          type="button"
+          className="native-library-more"
+          aria-label={`Actions for ${entry.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!selected) onSelect(entry);
+          }}
+        >
+          <IconMore />
+        </button>
+      )}
     </div>
   );
 }

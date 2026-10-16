@@ -34,7 +34,7 @@ export function EffectThumbnailPreview({
       style={{
         position: "relative",
         width: 280,
-        height: 140,
+        height: 280,
         overflow: "hidden",
         backgroundColor: "#f1f1ef",
         backgroundImage:
@@ -57,13 +57,15 @@ export function EffectThumbnailPreview({
           duration={2000}
           time={1}
           clocks={clocks}
+          viewport={{ width: 280, height: 280 }}
+          sampleSize={{ width: 280, height: 280 }}
         />
       ) : (
         <EffectSurface
           definition={definition}
           instance={instance}
           width={280}
-          height={140}
+          height={280}
           previewTiming={{
             progress: 0.5,
             time: 1,

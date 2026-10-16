@@ -192,24 +192,20 @@
 
 .native-library-list {
   position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   user-select: none;
 }
 
-.native-library-marquee {
-  position: absolute;
-  z-index: 20;
-  border: 1px solid var(--km-accent, #3b82db);
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--km-accent, #3b82db) 12%, transparent);
-  pointer-events: none;
-}
-
 .native-library-grid-row {
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(var(--native-library-columns, 3), minmax(0, 1fr));
+  grid-template-columns: repeat(
+    var(--native-library-columns, 3),
+    minmax(0, 1fr)
+  );
   gap: 8px;
   padding: 4px 2px;
 }
@@ -226,7 +222,39 @@
   outline-offset: 2px;
 }
 
-button.native-library-tile {
+.native-library-item.is-selecting.is-selected {
+  outline: none;
+}
+
+.native-library-check {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 25%);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+  pointer-events: none;
+}
+
+.is-selected .native-library-check {
+  background: var(--km-accent, #3b82db);
+}
+
+.native-library-topbar .native-library-select {
+  margin-left: auto;
+}
+
+button.native-library-tile,
+.right-sidebar button.native-library-tile,
+.right-sidebar button.native-library-tile[aria-pressed="true"] {
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -239,7 +267,9 @@ button.native-library-tile {
 }
 
 button.native-library-tile:hover:not(:disabled),
-button.native-library-tile:active:not(:disabled) {
+button.native-library-tile:active:not(:disabled),
+.right-sidebar button.native-library-tile:hover:not(:disabled),
+.right-sidebar button.native-library-tile:active:not(:disabled) {
   border: 0;
   background: transparent;
 }
@@ -269,7 +299,11 @@ button.native-library-tile:active:not(:disabled) {
     linear-gradient(45deg, transparent 75%, #d8d8d5 75%),
     linear-gradient(-45deg, transparent 75%, #d8d8d5 75%);
   background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
 }
 
 .native-library-preview img {
@@ -295,7 +329,6 @@ button.native-library-tile:active:not(:disabled) {
   width: 28px;
   height: 28px;
 }
-
 
 .native-library-kind {
   font-size: 10px;
