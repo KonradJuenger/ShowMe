@@ -350,6 +350,7 @@ export class NativeLibraryBrowser {
       await fs.unlink(file);
       await fs.unlink(metadata);
       await fs.rmdir(directory);
+      this.invalidate();
       await this.refresh();
       return result;
     }

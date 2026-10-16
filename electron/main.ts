@@ -1527,7 +1527,9 @@ const operations: Record<string, (...args: any[]) => any> = {
         shell.showItemInFolder(await storage.file(request.id));
         return storage.list();
       }
-      return storage.run(request);
+      const output = await storage.run(request);
+      if (request.type !== "list") nativeLibraryBrowser?.invalidate();
+      return output;
     });
     effectLibraryQueue = result.then(
       () => undefined,

@@ -389,10 +389,36 @@ it("restoring one Effect ignores unrelated malformed Effect files", async () => 
     async () => undefined,
     () => {},
   );
+  const beforeRestore = await browser.run({
+    type: "list",
+    category: "Effects",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(beforeRestore.entries.some((entry) => entry.name === "Recover Me")).toBe(
+    false,
+  );
   await browser.run({
     type: "restore",
     path: `Trash/assets/${trashFolder}/${effectFile!}`,
   });
+  const afterRestore = await browser.run({
+    type: "list",
+    category: "Effects",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(afterRestore.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "Recover Me", category: "Effects" }),
+    ]),
+  );
   expect((await readdir(effectsRoot)).some((name) => name !== "broken.txt")).toBe(
     true,
   );
