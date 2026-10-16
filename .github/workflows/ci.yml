@@ -22,7 +22,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:audit
-      - run: npx vitest run tests/feature/media/library-work.test.ts tests/feature/persistence/package-options.test.ts
+      - run: npm run test:feature -- media
+      - run: npm run test:feature -- persistence
       - run: npm test
       - run: npx playwright install chromium
-      - run: npx playwright test tests/feature/presenter/audience-navigation.spec.ts
+      - run: SHOWME_TEST_FILES='["tests/feature/presenter/audience-navigation.spec.ts"]' npx playwright test --config playwright.config.ts
