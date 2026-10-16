@@ -175,7 +175,7 @@ export function NativeMediaLibrary({
   const generation = useRef(0);
 
   const requestPage = useCallback(
-    (page: number, reset = false) => {
+    (page: number) => {
       if (!platform.libraryBrowser || requested.current.has(page)) return;
       requested.current.add(page);
       const current = generation.current;
@@ -196,11 +196,7 @@ export function NativeMediaLibrary({
         .libraryBrowser(request)
         .then((result) => {
           if (current !== generation.current) return;
-          setPages((before) =>
-            reset
-              ? { [page]: result.entries }
-              : { ...before, [page]: result.entries },
-          );
+          setPages((before) => ({ ...before, [page]: result.entries }));
           setTotal(result.total);
           setFolders(result.folders);
           setError("");
@@ -218,11 +214,12 @@ export function NativeMediaLibrary({
     generation.current++;
     requested.current.clear();
     setPages({});
-    setTotal(0);
+    // Keep the scroll extent until the refreshed count arrives. Clearing it
+    // unmounts VirtualList and loses the viewport during inventory updates.
     setSelectedPaths(new Set());
     setSelectionMode(false);
     setMoving(false);
-    requestPage(0, true);
+    requestPage(0);
   }, [requestPage]);
 
   useEffect(() => {
@@ -694,6 +691,7 @@ export function NativeMediaLibrary({
       ) : (
         <div className="native-library-list">
           <VirtualList
+            key={`${filter}/${folder}`}
             label="Media Library"
             count={rowCount}
             rowHeight={() => rowHeight}

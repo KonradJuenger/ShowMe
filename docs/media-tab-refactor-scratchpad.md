@@ -282,3 +282,13 @@ Final local verification of the complete hardening candidate (no subsequent prod
 - `git diff --check`: passed.
 
 No full/release suite, build/package, manual Windows/macOS sync exercise, or separate performance benchmark was run for this pass. Presenter gate timings are correctness evidence, not a comparable performance claim. The work stays on PR #11's existing branch; main is not modified or merged.
+
+## Media scrolling follow-up — 2026-10-16
+
+Inventory refresh previously set `total` to zero, unmounting the virtual list and losing its scroll position. The browser now retains the previous scroll extent until the refreshed count arrives; category/folder navigation explicitly remounts the list to start at the top. Page responses merge within the current generation, so a delayed first-page response cannot discard a visible page fetched while the refresh was pending. Selection resets and mutation/error reconciliation keep their existing behavior.
+
+The deterministic browser regression first reproduced the unmounted-list failure, then exposed the page-response ordering race. It now passes while checking scrolling beyond the first page, a pending inventory refresh, visible-page retention after the first page completes, and category navigation resetting to the top.
+
+Verification: `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts` (1 passed), `npm run typecheck`, focused `npx eslint src/components/NativeMediaLibrary.tsx tests/helpers/nativeMediaLibraryHarness.tsx tests/feature/media/library-scrolling.spec.ts`, and test stats/audit.
+
+Before updating PR #11, the exact final product/test candidate also passed `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts tests/feature/presenter/audience-navigation.spec.ts`: 3 passed, 0 skipped (53.9s), including both mandatory audience declarations. Earlier typecheck, focused lint and stats/audit results apply unchanged. Full/release suites and build/package were not repeated for this localized panel fix.

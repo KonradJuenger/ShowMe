@@ -704,6 +704,17 @@
     "reason": "Deterministic disappearing-entry and post-stat relocation recovery, coherent bounded inventories, two-move batch progress, separate refresh errors, partial move visibility without rollback, portable folder names and Unicode/case collisions, immutable sync-file verification, and reconstruction without local caches"
   },
   {
+    "id": "media-library-scrolling",
+    "path": "tests/feature/media/library-scrolling.spec.ts",
+    "area": "media",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-16",
+    "lastReviewed": "2026-10-16",
+    "reason": "Native Media viewport survives a pending inventory refresh and a late first-page response without losing already-loaded visible pages; category navigation resets scrolling"
+  },
+  {
     "id": "media-derived-work",
     "path": "tests/feature/media/derived-work.test.ts",
     "area": "media",
