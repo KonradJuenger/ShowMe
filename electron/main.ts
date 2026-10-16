@@ -1126,6 +1126,12 @@ let previewWindow: BrowserWindow | null = null;
 let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
+let effectPreviewWindow: BrowserWindow | null = null;
+let effectPreviewQueue: Promise<void> = Promise.resolve();
+const EFFECT_PREVIEW_MAX_ADMITTED = 8;
+let admittedEffectPreviews = 0;
+const effectPreviewSlotWaiters: Array<() => void> = [];
+const effectThumbnailJobs = new Map<string, Promise<string | null>>();
 let nativeLibraryBrowser: NativeLibraryBrowser | null = null;
 
 function activeNativeLibraryBrowser() {
@@ -1208,6 +1214,57 @@ async function compositionWindow(width: number, height: number) {
   }
   previewWindow.setContentSize(width, height);
   return previewWindow;
+}
+
+async function effectCompositionWindow(width: number, height: number) {
+  if (!effectPreviewWindow || effectPreviewWindow.isDestroyed()) {
+    effectPreviewWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width,
+      height,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+      },
+    });
+    secure(effectPreviewWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await effectPreviewWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await effectPreviewWindow.loadFile(
+        path.join(__dirname, "../dist/index.html"),
+        { query: { slidePreview: "1" } },
+      );
+  }
+  effectPreviewWindow.setContentSize(width, height);
+  return effectPreviewWindow;
+}
+
+async function acquireEffectPreviewSlot() {
+  if (admittedEffectPreviews < EFFECT_PREVIEW_MAX_ADMITTED) {
+    admittedEffectPreviews++;
+    return;
+  }
+  await new Promise<void>((resolve) => effectPreviewSlotWaiters.push(resolve));
+  admittedEffectPreviews++;
+}
+
+function releaseEffectPreviewSlot() {
+  admittedEffectPreviews--;
+  effectPreviewSlotWaiters.shift()?.();
+}
+
+async function waitForSlidePreviewIdle() {
+  while (pendingPreviews > 0) {
+    await previewQueue.catch(() => {});
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
 }
 
 const operations: Record<string, (...args: any[]) => any> = {
@@ -1936,32 +1993,51 @@ const operations: Record<string, (...args: any[]) => any> = {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    const task = previewQueue.then(async () => {
-      const window = await compositionWindow(280, 140);
+
+    const existing = effectThumbnailJobs.get(key);
+    if (existing) return existing;
+
+    const job = (async () => {
+      await acquireEffectPreviewSlot();
       try {
-        const ready = await window.webContents.executeJavaScript(
-          "window.composeEffectThumbnail(" + JSON.stringify(definition) + ")",
-        );
-        if (!ready) return null;
-        const image = await window.webContents.capturePage(undefined, {
-          stayHidden: true,
+        const task = effectPreviewQueue.then(async () => {
+          // Effect Library thumbnails yield to presentation/slide preview work.
+          // They use a separate compositor window, so queued effects can never
+          // sit ahead of slide captures on the presentation preview queue.
+          await waitForSlidePreviewIdle();
+          const window = await effectCompositionWindow(280, 140);
+          try {
+            const ready = await window.webContents.executeJavaScript(
+              "window.composeEffectThumbnail(" +
+                JSON.stringify(definition) +
+                ")",
+            );
+            if (!ready) return null;
+            const image = await window.webContents.capturePage(undefined, {
+              stayHidden: true,
+            });
+            const data = image
+              .resize({ width: 280, height: 140, quality: "best" })
+              .toPNG();
+            await atomicWrite(file, data);
+            return `data:image/png;base64,${data.toString("base64")}`;
+          } finally {
+            await window.webContents
+              .executeJavaScript("window.clearSlidePreview()")
+              .catch(() => {});
+          }
         });
-        const data = image
-          .resize({ width: 280, height: 140, quality: "best" })
-          .toPNG();
-        await atomicWrite(file, data);
-        return `data:image/png;base64,${data.toString("base64")}`;
+        effectPreviewQueue = task.then(
+          () => undefined,
+          () => undefined,
+        );
+        return await task;
       } finally {
-        await window.webContents
-          .executeJavaScript("window.clearSlidePreview()")
-          .catch(() => {});
+        releaseEffectPreviewSlot();
       }
-    });
-    previewQueue = task.then(
-      () => undefined,
-      () => undefined,
-    );
-    return task;
+    })().finally(() => effectThumbnailJobs.delete(key));
+    effectThumbnailJobs.set(key, job);
+    return job;
   },
   capturePreview(
     projection: import("../src/core/documentProjection").DocumentProjection,
