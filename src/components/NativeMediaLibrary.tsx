@@ -366,6 +366,15 @@ export function NativeMediaLibrary({
     )
       ? selectedEntries[0].category
       : undefined;
+  const selectionParent =
+    selectedEntries.length > 0 &&
+    selectedEntries.every(
+      (entry) =>
+        entry.path.split("/").slice(0, -1).join("/") ===
+        selectedEntries[0].path.split("/").slice(0, -1).join("/"),
+    )
+      ? selectedEntries[0].path.split("/").slice(0, -1).join("/")
+      : selectionCategory;
 
   const selectEntry = (
     entry: LibraryBrowserEntry,
@@ -401,7 +410,7 @@ export function NativeMediaLibrary({
     if (mode === "rename" && !selected) return;
     setEditMode(mode);
     if (mode === "rename") setEditValue(selected!.name);
-    else setEditValue(selectionCategory ?? "");
+    else setEditValue(selectionParent ?? selectionCategory ?? "");
   };
 
   const commitEdit = () => {
