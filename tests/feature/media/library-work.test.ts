@@ -7,8 +7,11 @@ import { readFile } from "node:fs/promises";
 import {
   LibraryIndex,
   importManagedFile,
+  isManagedFilenameProtected,
 } from "../../../electron/mediaLibrary";
 import { restoreLibraryAsset } from "../../../electron/libraryLifecycle";
+import { setLibraryProtection } from "../../../electron/libraryProtection";
+import { organizationalLibraryCategory } from "../../../src/core/libraryBrowser";
 import { expect, it, vi } from "vitest";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -433,5 +436,115 @@ it("restoring one Effect ignores unrelated malformed Effect files", async () => 
   expect(await readFile(path.join(effectsRoot, "broken.txt"), "utf8")).toContain(
     "definitely invalid",
   );
+  browser.dispose();
+});
+
+
+it("Trash selections never qualify for Library folder organization", () => {
+  const trash = {
+    path: "Trash/assets/one/photo__aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+    name: "photo.png",
+    kind: "trash" as const,
+    category: "images" as const,
+    managed: true,
+  };
+  const normal = {
+    path: "images/photo__bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+    name: "photo.png",
+    kind: "file" as const,
+    category: "images" as const,
+    managed: true,
+  };
+  expect(organizationalLibraryCategory([trash, { ...trash, path: "Trash/assets/two/other.png" }])).toBeUndefined();
+  expect(organizationalLibraryCategory([normal, { ...normal, path: "images/other.png" }])).toBe("images");
+  expect(organizationalLibraryCategory([normal, trash])).toBeUndefined();
+});
+
+it("partial folder protection failure invalidates the browser and exposes the mixed filesystem state", async () => {
+  const { storage } = await storedDocument();
+  const folder = path.join(storage.assetRoot, "images", "keepers");
+  await mkdir(folder, { recursive: true });
+  const firstBytes = Buffer.from("first protected payload");
+  const secondBytes = Buffer.from("second protected payload");
+  const firstId = createHash("sha256").update(firstBytes).digest("hex");
+  const secondId = createHash("sha256").update(secondBytes).digest("hex");
+  const firstName = managedFilename("a.png", firstId);
+  const secondName = managedFilename("b.png", secondId);
+  const firstProtected = managedFilename("a.png", firstId, true);
+  const conflictingProtected = managedFilename("b.png", secondId, true);
+  await writeFile(path.join(folder, firstName), firstBytes);
+  await writeFile(path.join(folder, secondName), secondBytes);
+  await writeFile(
+    path.join(folder, conflictingProtected),
+    Buffer.from("external conflicting payload"),
+  );
+  await libraryIndex(storage.assetRoot)!.refresh();
+
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (assetId) => storage.libraryAssetMetadata(assetId),
+    (file, target) => storage.importFile(file, target),
+    async () => undefined,
+    () => {},
+  );
+  await browser.run({
+    type: "list",
+    category: "images",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+
+  await expect(
+    browser.run({
+      type: "protect",
+      path: "images/keepers",
+      protected: true,
+    }),
+  ).rejects.toThrow("Conflicting managed asset protection filename");
+
+  const root = await browser.run({
+    type: "list",
+    category: "images",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(root.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: "images/keepers",
+        kind: "folder",
+        protection: "mixed",
+      }),
+    ]),
+  );
+
+  const contents = await browser.run({
+    type: "list",
+    category: "images",
+    folder: "keepers",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(contents.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: `images/keepers/${firstProtected}`,
+        protection: "self",
+      }),
+      expect.objectContaining({
+        path: `images/keepers/${secondName}`,
+        protection: undefined,
+      }),
+    ]),
+  );
+  expect(isManagedFilenameProtected(firstProtected)).toBe(true);
   browser.dispose();
 });

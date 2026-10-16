@@ -84,8 +84,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-15",
-    "reason": "Managed default keeps explicit portable .smp saves anywhere, preserves native .sme below the ShowMe root and redirects unsafe external native saves to .smp; speaker note privacy and font portability remain covered"
+    "lastReviewed": "2026-10-16",
+    "reason": "Managed default keeps explicit portable .smp saves anywhere, preserves native .sme below the ShowMe root and redirects unsafe external native saves to .smp; packaging flattens nested Library organization, strips cleanup protection markers, preserves semantic media types and round-trips; speaker note privacy and font portability remain covered"
   },
   {
     "id": "editor-dimensions",
@@ -689,8 +689,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-15",
-    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering and filename-encoded cleanup protection; cached native Library pagination avoids repeated filesystem walks and malformed Effect files do not block unrelated Trash restoration"
+    "lastReviewed": "2026-10-16",
+    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering and filename-encoded cleanup protection; Trash selections are excluded from folder organization; cached native Library pagination avoids repeated filesystem walks; partial protection failures expose the immediate mixed filesystem state; malformed Effect files do not block unrelated Trash restoration"
   },
   {
     "id": "media-derived-work",
