@@ -105,3 +105,24 @@ Development checks are green at `9cbebc1596758c0aa31ed8de6a094d7e23d84017`:
 - `npm run lint`
 - `npm run test:audit`
 - `npm test`
+
+
+## Filename-encoded cleanup protection
+
+Cleanup protection is now filesystem-native and sync-safe. There is no persistent protection database.
+
+- normal managed media: `photo__<sha256>.jpg`
+- protected managed media: `photo__<sha256>~p.jpg`
+- `~p` is metadata, not asset identity. Both forms resolve to the same SHA-256 asset ID.
+- Existing managed filenames without `~p` remain valid and are simply unprotected. No document or Library schema/version bump is required.
+- Protecting one file renames that physical managed file to/from the `~p` form.
+- Protecting a folder recursively applies that rename to the managed files currently inside it. The folder itself stores no state and protection is not inherited by files added later.
+- Folder UI protection is derived from its current descendants: fully protected or mixed.
+- Rename and move operations preserve the protection marker.
+- GC reads protection directly from the filename and treats protected asset hashes as live.
+- Protected filenames are included in the cleanup scan fingerprint so a protection change during cleanup aborts the scan rather than racing collection.
+- Filename transitions use non-overwriting hard-link publication. An existing destination is accepted only when its bytes match the encoded hash.
+- The pre-release `.showme/protected.json` mechanism is no longer authoritative and stale copies are removed during Library initialization.
+- Protection state therefore travels with the media through Syncthing, Finder/Explorer copies and folder moves without requiring a sidecar or central metadata file.
+
+Verification additionally covers that a file arriving after a folder-protect operation remains unprotected and collectible until explicitly protected.
