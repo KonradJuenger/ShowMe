@@ -22,7 +22,7 @@ export const MEDIA_FOLDERS = [
   "other",
 ] as const;
 export type MediaFolder = (typeof MEDIA_FOLDERS)[number];
-const managedPattern = /__([a-f0-9]{64})(\.[^./\\]+)?$/;
+const managedPattern = /__([a-f0-9]{64})(~p)?(\.[^./\\]+)?$/;
 const MAX_FILENAME_BYTES = 240;
 
 export function mediaFolder(name: string): MediaFolder {
@@ -36,7 +36,11 @@ export function mediaFolder(name: string): MediaFolder {
   return "other";
 }
 
-export function managedFilename(name: string, id: string): string {
+export function managedFilename(
+  name: string,
+  id: string,
+  protectedFromCleanup = false,
+): string {
   if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid asset ID");
   const ext = path.extname(name);
   if (ext && !/^\.[a-zA-Z0-9]{1,32}$/.test(ext))
@@ -47,16 +51,35 @@ export function managedFilename(name: string, id: string): string {
         ? "_"
         : character,
     ).join("") || "media";
-  const available = MAX_FILENAME_BYTES - Buffer.byteLength(`__${id}${ext}`);
+  const marker = protectedFromCleanup ? "~p" : "";
+  const available =
+    MAX_FILENAME_BYTES - Buffer.byteLength(`__${id}${marker}${ext}`);
   if (available < 1) throw new Error("Media extension is too long");
   let readable = base;
   while (Buffer.byteLength(readable) > available)
     readable = readable.slice(0, -1);
-  return `${readable.replace(/[. ]+$/, "") || "m"}__${id}${ext}`;
+  return `${readable.replace(/[. ]+$/, "") || "m"}__${id}${marker}${ext}`;
 }
 
 export function assetIdFromFilename(name: string): string | null {
   return managedPattern.exec(name)?.[1] ?? null;
+}
+
+export function isManagedFilenameProtected(name: string): boolean {
+  return Boolean(managedPattern.exec(path.basename(name))?.[2]);
+}
+
+export function setManagedFilenameProtected(
+  name: string,
+  protectedFromCleanup: boolean,
+): string {
+  const filename = path.basename(name);
+  const id = assetIdFromFilename(filename);
+  if (!id) throw new Error("Not a managed asset filename");
+  const ext = path.extname(filename);
+  const readable =
+    filename.slice(0, filename.lastIndexOf("__")) + ext;
+  return managedFilename(readable, id, protectedFromCleanup);
 }
 
 export type MediaType = "image" | "video" | "audio" | "font" | "other";
@@ -244,7 +267,7 @@ export class LibraryIndex {
     }
     const match =
       name &&
-      /^(.*)-(\d{3})(-italic)?__([a-f0-9]{64})\.(ttf|otf|woff2?)$/i.exec(name);
+      /^(.*)-(\d{3})(-italic)?__([a-f0-9]{64})(?:~p)?\.(ttf|otf|woff2?)$/i.exec(name);
     if (!match) return;
     const key = this.fontKey({
       family: match[1],

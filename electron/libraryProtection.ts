@@ -1,107 +1,81 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { z } from "zod";
-import { atomicWrite } from "./storage/io";
-import { libraryPath } from "./libraryFilesystem";
-
-const protectionSchema = z
-  .object({
-    version: z.literal(1),
-    paths: z.array(z.string().min(1).max(2000)).max(10000),
-  })
-  .strict();
-
-const metadataPath = (root: string) =>
-  libraryPath(root, ".showme/protected.json", true);
-
-const normalize = (value: string) => value.replaceAll("\\", "/");
-
-export async function readLibraryProtection(root: string) {
-  const file = metadataPath(root);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await fs.readFile(file, "utf8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Set<string>();
-    throw error;
-  }
-  const parsed = protectionSchema.parse(raw);
-  const paths = new Set<string>();
-  for (const value of parsed.paths) {
-    const relative = normalize(value);
-    libraryPath(root, relative);
-    paths.add(relative);
-  }
-  return paths;
-}
-
-async function writeLibraryProtection(root: string, paths: Set<string>) {
-  const file = metadataPath(root);
-  await atomicWrite(
-    file,
-    JSON.stringify(
-      { version: 1, paths: [...paths].sort((a, b) => a.localeCompare(b)) },
-      null,
-      2,
-    ) + "\n",
-  );
-}
+import { libraryPath, libraryWalk } from "./libraryFilesystem";
+import {
+  assetIdFromFilename,
+  hashManagedSource,
+  isManagedFilenameProtected,
+  setManagedFilenameProtected,
+} from "./mediaLibrary";
 
 export function libraryProtectionState(
-  protectedPaths: ReadonlySet<string>,
   relative: string,
-): "self" | "parent" | null {
-  const target = normalize(relative);
-  if (protectedPaths.has(target)) return "self";
-  for (const candidate of protectedPaths)
-    if (target.startsWith(candidate + "/")) return "parent";
-  return null;
+): "self" | null {
+  return isManagedFilenameProtected(path.posix.basename(relative))
+    ? "self"
+    : null;
 }
 
+async function setManagedFileProtection(
+  root: string,
+  relative: string,
+  protect: boolean,
+) {
+  const source = libraryPath(root, relative);
+  const name = path.basename(source);
+  const hash = assetIdFromFilename(name);
+  if (!hash) return false;
+  if (isManagedFilenameProtected(name) === protect) return false;
+
+  const destinationName = setManagedFilenameProtected(name, protect);
+  const destinationRelative = path.posix.join(
+    path.posix.dirname(relative.replaceAll("\\", "/")),
+    destinationName,
+  );
+  const destination = libraryPath(root, destinationRelative, true);
+
+  try {
+    await fs.link(source, destination);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if ((await hashManagedSource(destination)) !== hash)
+      throw new Error("Conflicting managed asset protection filename", {
+        cause: error,
+      });
+  }
+  await fs.unlink(source);
+  return true;
+}
+
+/**
+ * Protection is encoded in managed media filenames as:
+ *   name__<sha256>~p.ext
+ *
+ * Protecting a directory is deliberately a bulk operation over the managed
+ * files currently inside it. The directory itself stores no protection state,
+ * so files added later remain unprotected until explicitly protected.
+ */
 export async function setLibraryProtection(
   root: string,
   relative: string,
   protect: boolean,
 ) {
-  const target = normalize(relative);
-  libraryPath(root, target);
-  const paths = await readLibraryProtection(root);
-  if (protect) paths.add(target);
-  else paths.delete(target);
-  await writeLibraryProtection(root, paths);
-  return libraryProtectionState(paths, target);
-}
+  const target = relative.replaceAll("\\", "/");
+  const source = libraryPath(root, target);
+  const stat = await fs.lstat(source);
+  if (stat.isSymbolicLink())
+    throw new Error("Only real Library files and folders can be protected");
 
-export async function moveLibraryProtection(
-  root: string,
-  source: string,
-  destination: string,
-) {
-  const from = normalize(source);
-  const to = normalize(destination);
-  libraryPath(root, from);
-  libraryPath(root, to);
-  const paths = await readLibraryProtection(root);
-  let changed = false;
-  const next = new Set<string>();
-  for (const candidate of paths) {
-    if (candidate === from || candidate.startsWith(from + "/")) {
-      next.add(to + candidate.slice(from.length));
-      changed = true;
-    } else next.add(candidate);
+  if (stat.isFile()) {
+    if (!assetIdFromFilename(path.basename(source)))
+      throw new Error("Only managed Library media can be protected");
+    await setManagedFileProtection(root, target, protect);
+    return;
   }
-  if (changed) await writeLibraryProtection(root, next);
-}
+  if (!stat.isDirectory())
+    throw new Error("Only Library files and folders can be protected");
 
-export async function removeLibraryProtection(root: string, relative: string) {
-  const target = normalize(relative);
-  libraryPath(root, target);
-  const paths = await readLibraryProtection(root);
-  let changed = false;
-  for (const candidate of [...paths])
-    if (candidate === target || candidate.startsWith(target + "/")) {
-      paths.delete(candidate);
-      changed = true;
-    }
-  if (changed) await writeLibraryProtection(root, paths);
+  for (const child of await libraryWalk(root, target))
+    if (assetIdFromFilename(path.posix.basename(child)))
+      await setManagedFileProtection(root, child, protect);
 }
