@@ -75,3 +75,33 @@ Regression coverage also checks that requesting another page does not perform an
 Follow-up code heads:
 - `8c791ef5f5974ad06d8f39287aad1e8f32f1dcf9`: synchronous Effect inventory invalidation; Development checks green.
 - `8666f3c9a60ca6b12d728a4627c3ab0e4e387288`: isolated bounded low-priority Effect preview queue; Development checks green.
+
+
+## Multi-selection and folder organization
+
+The Media Library now uses a conventional desktop selection model:
+
+- single click selects an item and draws the existing blue selection outline;
+- Shift-click selects a contiguous loaded range;
+- Cmd/Ctrl-click toggles individual items;
+- dragging on empty Library space creates a blue marquee and selects intersecting visible items;
+- double-click opens a folder or inserts insertable media, so selection no longer conflicts with single-click insertion;
+- selected items expose `Move to Folder…`;
+- `New Folder…` remains a secondary Library action in the overflow menu;
+- a selection exposes `New Folder with Selection…`, which creates the destination folder and moves the selected items into it in one workflow;
+- batch moves default to the selected items' current parent folder and skip no-op same-folder moves;
+- partial batch failures force a reload when earlier mutations already succeeded, so the UI cannot remain stale.
+
+Physical Library folders remain scoped to one media category. Mixed-category items can still be selected together, but batch move/create-with-selection is only offered when the selection shares one category.
+
+Implementation heads:
+- `c4c1061509d3829b925df949b40ccd9907f2b072`: multi-selection, Shift selection, marquee selection and batch folder movement.
+- `544b649d16c29dc00ea93a2361f8cb9956b80087` / `4fe769bdfad26532aa86eaa1dc951301c6d40b3b`: create-folder-with-selection workflow and marquee styling.
+- `572c9d98dbfa163c3b5129c150b3cf74e3e10d1e`: batch moves default to the current parent folder.
+- `9cbebc1596758c0aa31ed8de6a094d7e23d84017`: batch mutation consistency on partial failure.
+
+Development checks are green at `9cbebc1596758c0aa31ed8de6a094d7e23d84017`:
+- `npm run typecheck`
+- `npm run lint`
+- `npm run test:audit`
+- `npm test`
