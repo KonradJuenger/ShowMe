@@ -540,22 +540,30 @@ it("active host and guest collaboration states block ShowMe root changes", () =>
 });
 
 
-it("persistent folder protection excludes descendants from Library cleanup", async () => {
+it("folder protection renames current managed contents and excludes them from cleanup", async () => {
   const fixture = await libraryFixture();
   const folder = path.join(fixture.libraryRoot, "images", "keepers");
   const bytes = Buffer.from("keep this asset");
   const hash = digest(bytes);
   const file = path.join(folder, managedFilename("protected.png", hash));
+  const protectedFile = path.join(
+    folder,
+    managedFilename("protected.png", hash, true),
+  );
   await mkdir(folder, { recursive: true });
   await writeFile(file, bytes);
   await setLibraryProtection(fixture.libraryRoot, "images/keepers", true);
 
+  await expect(access(file)).rejects.toThrow();
+  await expect(access(protectedFile)).resolves.toBeUndefined();
   const protectedScan = await fixture.lifecycle.scan(true);
   expect(protectedScan.complete, protectedScan.errors.join("\n")).toBe(true);
   expect(protectedScan.trash.map((item) => item.hash)).not.toContain(hash);
-  await expect(access(file)).resolves.toBeUndefined();
+  await expect(access(protectedFile)).resolves.toBeUndefined();
 
   await setLibraryProtection(fixture.libraryRoot, "images/keepers", false);
+  await expect(access(protectedFile)).rejects.toThrow();
+  await expect(access(file)).resolves.toBeUndefined();
   const collectibleScan = await fixture.lifecycle.scan(true);
   expect(collectibleScan.complete, collectibleScan.errors.join("\n")).toBe(
     true,

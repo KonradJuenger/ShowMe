@@ -71,7 +71,7 @@ export interface LibraryBrowserEntry {
   kind: "folder" | "file" | "trash";
   category?: LibraryCategory;
   managed: boolean;
-  protection?: "self" | "parent";
+  protection?: "self" | "mixed";
   bytes?: number;
   signature?: string;
   asset?: Asset;

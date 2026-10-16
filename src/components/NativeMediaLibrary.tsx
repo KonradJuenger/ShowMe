@@ -733,11 +733,7 @@ export function NativeMediaLibrary({
               ) : selected ? (
                 <>
                   {selected.category !== "Effects" &&
-                    (selected.protection === "parent" ? (
-                      <span className="native-library-protected-by-parent">
-                        <IconLock /> Protected by folder
-                      </span>
-                    ) : (
+                    (selected.kind === "folder" || selected.managed) && (
                       <button
                         type="button"
                         onClick={() =>
@@ -749,10 +745,14 @@ export function NativeMediaLibrary({
                         }
                       >
                         {selected.protection === "self"
-                          ? "Allow Cleanup"
-                          : "Protect from Cleanup"}
+                          ? selected.kind === "folder"
+                            ? "Allow Cleanup for Contents"
+                            : "Allow Cleanup"
+                          : selected.kind === "folder"
+                            ? "Protect Contents from Cleanup"
+                            : "Protect from Cleanup"}
                       </button>
-                    ))}
+                    )}
                   <button
                     type="button"
                     onClick={() =>
@@ -958,9 +958,11 @@ function LibraryCell({
         <span
           className="native-library-lock"
           title={
-            entry.protection === "parent"
-              ? "Protected by parent folder"
-              : "Protected from cleanup"
+            entry.protection === "mixed"
+              ? "Some contents are protected from cleanup"
+              : entry.kind === "folder"
+                ? "Contents protected from cleanup"
+                : "Protected from cleanup"
           }
         >
           <IconLock />

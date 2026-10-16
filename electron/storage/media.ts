@@ -45,9 +45,10 @@ export class StorageMedia {
     await fs.mkdir(this.assetRoot, { recursive: true });
     for (const folder of [...MEDIA_FOLDERS, "Effects", "Trash"])
       await fs.mkdir(path.join(this.assetRoot, folder), { recursive: true });
-    await fs.rm(path.join(this.assetRoot, ".showme", "catalog.json"), {
-      force: true,
-    });
+    for (const name of ["catalog.json", "protected.json"])
+      await fs.rm(path.join(this.assetRoot, ".showme", name), {
+        force: true,
+      });
     try {
       await fs.rmdir(path.join(this.assetRoot, ".showme"));
     } catch (error) {

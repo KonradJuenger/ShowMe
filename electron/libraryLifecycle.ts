@@ -1,8 +1,4 @@
 import { libraryPath, libraryWalk, libraryWalkSync } from "./libraryFilesystem";
-import {
-  libraryProtectionState,
-  readLibraryProtection,
-} from "./libraryProtection";
 import { createHash, randomUUID } from "node:crypto";
 import {
   promises as fs,
@@ -37,6 +33,7 @@ import {
   MEDIA_FOLDERS,
   assetIdFromFilename,
   hashManagedSource,
+  isManagedFilenameProtected,
   libraryIndex,
 } from "./mediaLibrary";
 import { atomicWrite, digest } from "./storage/io";
@@ -344,6 +341,7 @@ type PhysicalAsset = {
   relative: string;
   bytes: number;
   mtimeMs: number;
+  protectedFromCleanup: boolean;
 };
 type TrashEntry = LibraryTrashItem & { directory: string; file: string };
 
@@ -466,6 +464,7 @@ export class LibraryLifecycle {
     >();
     let presentations = 0;
     const fingerprints: string[] = [];
+    const protectedFiles: string[] = [];
 
     const visit = async (directory: string) => {
       for (const entry of await fs.readdir(directory, {
@@ -484,6 +483,19 @@ export class LibraryLifecycle {
           throw new Error(`Cannot safely scan symbolic link: ${file}`);
         if (entry.isDirectory()) await visit(file);
         else if (entry.isFile()) {
+          const libraryRelative = path.relative(this.libraryRoot, file);
+          const libraryParts = libraryRelative.split(path.sep);
+          if (
+            libraryParts.length >= 2 &&
+            !libraryRelative.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(libraryRelative) &&
+            MEDIA_FOLDERS.includes(
+              libraryParts[0] as (typeof MEDIA_FOLDERS)[number],
+            ) &&
+            assetIdFromFilename(entry.name) &&
+            isManagedFilenameProtected(entry.name)
+          )
+            protectedFiles.push(libraryParts.join("/"));
           if (path.extname(entry.name).toLowerCase() === ".sme") {
             const text = await fs.readFile(file, "utf8");
             const raw = JSON.parse(text);
@@ -505,18 +517,16 @@ export class LibraryLifecycle {
       }
     };
     await visit(this.root);
-    const protectedPaths = await readLibraryProtection(this.libraryRoot);
     return {
       assetHashes,
       fontUsages: [...fontUsages.values()],
-      protectedPaths,
       presentations,
       fingerprint: digest(
         (await fs.realpath(this.root)) +
           "\n" +
           fingerprints.sort().join("\n") +
           "\nprotected:\n" +
-          [...protectedPaths].sort().join("\n"),
+          protectedFiles.sort().join("\n"),
       ),
     };
   }
@@ -558,6 +568,9 @@ export class LibraryLifecycle {
           relative,
           bytes: stat.size,
           mtimeMs: stat.mtimeMs,
+          protectedFromCleanup: isManagedFilenameProtected(
+            path.basename(relative),
+          ),
         });
       }
     return assets;
@@ -571,8 +584,7 @@ export class LibraryLifecycle {
     const live = await this.protection.hashes();
     for (const hash of roots.assetHashes) live.add(hash);
     for (const item of assets)
-      if (libraryProtectionState(roots.protectedPaths, item.relative))
-        live.add(item.hash);
+      if (item.protectedFromCleanup) live.add(item.hash);
     const allDocuments = this.openDocuments();
     for (const document of allDocuments)
       for (const hash of documentAssetIds(document)) live.add(hash);

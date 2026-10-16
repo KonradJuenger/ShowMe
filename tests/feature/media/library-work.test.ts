@@ -279,7 +279,7 @@ it("startup reconciles files copied into a Library after its inventory was cache
 });
 
 
-it("unified native Library view keeps inherited cleanup protection", async () => {
+it("unified native Library view derives cleanup protection from managed filenames", async () => {
   const { storage, root } = await storedDocument();
   const imageSource = path.join(root, "protected.png");
   const videoSource = path.join(root, "clip.mp4");
@@ -327,7 +327,7 @@ it("unified native Library view keeps inherited cleanup protection", async () =>
       expect.objectContaining({
         category: "images",
         asset: expect.objectContaining({ id: image.id }),
-        protection: "parent",
+        protection: "self",
       }),
       expect.objectContaining({
         category: "video",
@@ -336,6 +336,14 @@ it("unified native Library view keeps inherited cleanup protection", async () =>
       }),
     ]),
   );
+
+  const protectedImagePath = path.join(
+    storage.assetRoot,
+    "images",
+    "album",
+    managedFilename("protected.png", image.id, true),
+  );
+  await expect(nodeFs.promises.access(protectedImagePath)).resolves.toBeUndefined();
 
   const images = await browser.run({
     type: "list",
