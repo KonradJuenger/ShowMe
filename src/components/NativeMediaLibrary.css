@@ -283,7 +283,6 @@ button.native-library-tile:active:not(:disabled) {
 }
 
 .native-library-folder-preview,
-.native-library-font-preview,
 .native-library-kind {
   width: 100%;
   height: 100%;
@@ -297,10 +296,6 @@ button.native-library-tile:active:not(:disabled) {
   height: 28px;
 }
 
-.native-library-font-preview {
-  font-size: clamp(24px, 8vw, 46px);
-  color: var(--km-text-primary, #33332f);
-}
 
 .native-library-kind {
   font-size: 10px;

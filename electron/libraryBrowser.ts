@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   libraryBrowserRequestSchema,
+  isVisibleLibraryCategory,
   LIBRARY_CATEGORIES,
   type LibraryBrowserResult,
   type LibraryCategory,
@@ -248,7 +249,11 @@ export class NativeLibraryBrowser {
 
       result.folders =
         request.category === "all"
-          ? [...snapshot.folders]
+          ? snapshot.folders.filter((folder) =>
+              isVisibleLibraryCategory(
+                folder.split("/")[0] as LibraryCategory,
+              ),
+            )
           : snapshot.folders.filter((folder) =>
               folder.startsWith(request.category + "/"),
             );
@@ -256,6 +261,8 @@ export class NativeLibraryBrowser {
       result.entries = snapshot.entries
         .filter((entry) => {
           if (!entry.category) return false;
+          if (unified && !isVisibleLibraryCategory(entry.category))
+            return false;
           if (!unified && entry.category !== request.category) return false;
           if (query && !entry.path.toLocaleLowerCase().includes(query))
             return false;

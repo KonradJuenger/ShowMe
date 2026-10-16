@@ -31,7 +31,6 @@ const FILTERS: Array<{
   { id: "images", label: "Images" },
   { id: "video", label: "Video" },
   { id: "audio", label: "Audio" },
-  { id: "fonts", label: "Fonts" },
   { id: "Effects", label: "Effects" },
   { id: "other", label: "Other" },
   { id: "Trash", label: "Trash" },
@@ -60,14 +59,13 @@ function isInsertable(entry: LibraryBrowserEntry) {
 
 function EntryPreview({ entry }: { entry: LibraryBrowserEntry }) {
   const [preview, setPreview] = useState<string>();
-  const font = useRef<FontFace | null>(null);
   useEffect(() => {
     setPreview(undefined);
     if (
       entry.kind === "folder" ||
       entry.error ||
       !platform.libraryBrowser ||
-      !["images", "video", "fonts", "Effects"].includes(entry.category ?? "")
+      !["images", "video", "Effects"].includes(entry.category ?? "")
     )
       return;
     const key = `${entry.path}:${entry.signature ?? ""}`;
@@ -88,26 +86,11 @@ function EntryPreview({ entry }: { entry: LibraryBrowserEntry }) {
         previewCache.delete(previewCache.keys().next().value!);
     }
     let active = true;
-    void job.then(async (value) => {
-      if (!active || !value) return;
-      if (entry.category === "fonts") {
-        try {
-          const face = new FontFace(
-            `showme-library-${entry.signature ?? entry.path}`,
-            `url(${value})`,
-          );
-          await face.load();
-          if (!active) return;
-          document.fonts.add(face);
-          font.current = face;
-          setPreview(face.family);
-        } catch {}
-      } else setPreview(value);
+    void job.then((value) => {
+      if (active && value) setPreview(value);
     });
     return () => {
       active = false;
-      if (font.current) document.fonts.delete(font.current);
-      font.current = null;
     };
   }, [entry]);
 
@@ -115,15 +98,6 @@ function EntryPreview({ entry }: { entry: LibraryBrowserEntry }) {
     return (
       <span className="native-library-folder-preview" aria-hidden="true">
         <IconFolder />
-      </span>
-    );
-  if (entry.category === "fonts")
-    return (
-      <span
-        className="native-library-font-preview"
-        style={preview ? { fontFamily: preview } : undefined}
-      >
-        Aa
       </span>
     );
   if (

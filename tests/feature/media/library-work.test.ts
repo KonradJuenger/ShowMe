@@ -370,6 +370,58 @@ it("unified native Library view derives cleanup protection from managed filename
   browser.dispose();
 });
 
+it("unified Media Library hides fonts while the internal font category remains available", async () => {
+  const { storage } = await storedDocument();
+  const bytes = Buffer.from("managed font payload");
+  const id = createHash("sha256").update(bytes).digest("hex");
+  const name = managedFilename("InternalFont.ttf", id);
+  await writeFile(path.join(storage.assetRoot, "fonts", name), bytes);
+  await libraryIndex(storage.assetRoot)!.refresh();
+
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (assetId) => storage.libraryAssetMetadata(assetId),
+    (file, folder) => storage.importFile(file, folder),
+    async () => undefined,
+    () => {},
+  );
+  const visible = await browser.run({
+    type: "list",
+    category: "all",
+    folder: "",
+    query: "",
+    all: true,
+    offset: 0,
+    limit: 100,
+  });
+  expect(visible.entries.some((entry) => entry.category === "fonts")).toBe(
+    false,
+  );
+  expect(visible.folders.some((folder) => folder.startsWith("fonts/"))).toBe(
+    false,
+  );
+
+  const internal = await browser.run({
+    type: "list",
+    category: "fonts",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(internal.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: `fonts/${name}`,
+        category: "fonts",
+        managed: true,
+      }),
+    ]),
+  );
+  browser.dispose();
+});
+
 it("restoring one Effect ignores unrelated malformed Effect files", async () => {
   const { storage } = await storedDocument();
   const effectsRoot = path.join(storage.assetRoot, "Effects");

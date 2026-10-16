@@ -11,6 +11,23 @@ export const LIBRARY_CATEGORIES = [
   "Effects",
 ] as const;
 export type LibraryCategory = (typeof LIBRARY_CATEGORIES)[number];
+
+export const VISIBLE_LIBRARY_CATEGORIES = [
+  "images",
+  "video",
+  "audio",
+  "Effects",
+  "other",
+] as const satisfies readonly LibraryCategory[];
+
+export function isVisibleLibraryCategory(
+  value: LibraryCategory,
+): value is (typeof VISIBLE_LIBRARY_CATEGORIES)[number] {
+  return (VISIBLE_LIBRARY_CATEGORIES as readonly LibraryCategory[]).includes(
+    value,
+  );
+}
+
 const category = z.enum(LIBRARY_CATEGORIES);
 const categoryFilter = z.union([category, z.literal("all")]);
 const relative = effectFolderSchema.refine((value) => value.length > 0);
