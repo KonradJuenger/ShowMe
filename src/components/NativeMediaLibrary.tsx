@@ -180,13 +180,28 @@ export function NativeMediaLibrary({
   const [total, setTotal] = useState(0);
   const [folders, setFolders] = useState<string[]>([]);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<LibraryBrowserEntry | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+  const [marquee, setMarquee] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const [editMode, setEditMode] = useState<EditMode>(null);
   const [editValue, setEditValue] = useState("");
   const [newFolder, setNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [width, setWidth] = useState(300);
   const host = useRef<HTMLDivElement>(null);
+  const listHost = useRef<HTMLDivElement>(null);
+  const marqueeOrigin = useRef<{
+    x: number;
+    y: number;
+    base: Set<string>;
+  } | null>(null);
   const requested = useRef(new Set<number>());
   const generation = useRef(0);
 
@@ -232,7 +247,8 @@ export function NativeMediaLibrary({
     requested.current.clear();
     setPages({});
     setTotal(0);
-    setSelected(null);
+    setSelectedPaths(new Set());
+    setSelectionAnchor(null);
     setEditMode(null);
     requestPage(0, true);
   }, [requestPage]);
@@ -261,6 +277,24 @@ export function NativeMediaLibrary({
       if (!platform.libraryBrowser) return;
       try {
         await platform.libraryBrowser(request);
+        reload();
+      } catch (failure) {
+        setError(String(failure));
+      }
+    },
+    [reload],
+  );
+
+  const mutateMany = useCallback(
+    async (
+      requests: Array<
+        Parameters<NonNullable<typeof platform.libraryBrowser>>[0]
+      >,
+    ) => {
+      if (!platform.libraryBrowser) return;
+      try {
+        for (const request of requests)
+          await platform.libraryBrowser(request);
         reload();
       } catch (failure) {
         setError(String(failure));
@@ -305,31 +339,88 @@ export function NativeMediaLibrary({
     onImport?.();
   };
 
+  const loadedEntries = new Map<
+    string,
+    { entry: LibraryBrowserEntry; index: number }
+  >();
+  for (const [pageText, entries] of Object.entries(pages)) {
+    const page = Number(pageText);
+    entries.forEach((entry, offset) =>
+      loadedEntries.set(entry.path, {
+        entry,
+        index: page * PAGE_SIZE + offset,
+      }),
+    );
+  }
+  const selectedEntries = [...selectedPaths]
+    .map((path) => loadedEntries.get(path)?.entry)
+    .filter((entry): entry is LibraryBrowserEntry => Boolean(entry));
+  const selected =
+    selectedEntries.length === 1 ? selectedEntries[0] : null;
+  const selectionCategory =
+    selectedEntries.length > 0 &&
+    selectedEntries.every(
+      (entry) => entry.category === selectedEntries[0].category,
+    )
+      ? selectedEntries[0].category
+      : undefined;
+
+  const selectEntry = (
+    entry: LibraryBrowserEntry,
+    index: number,
+    options: { shift: boolean; additive: boolean },
+  ) => {
+    setEditMode(null);
+    setSelectedPaths((before) => {
+      if (options.shift && selectionAnchor !== null) {
+        const next = options.additive ? new Set(before) : new Set<string>();
+        const first = Math.min(selectionAnchor, index);
+        const last = Math.max(selectionAnchor, index);
+        for (let current = first; current <= last; current++) {
+          const page = Math.floor(current / PAGE_SIZE);
+          const candidate = pages[page]?.[current % PAGE_SIZE];
+          if (candidate) next.add(candidate.path);
+        }
+        return next;
+      }
+      if (options.additive) {
+        const next = new Set(before);
+        if (next.has(entry.path)) next.delete(entry.path);
+        else next.add(entry.path);
+        return next;
+      }
+      return new Set([entry.path]);
+    });
+    if (!options.shift) setSelectionAnchor(index);
+  };
+
   const beginEdit = (mode: Exclude<EditMode, null>) => {
-    if (!selected) return;
+    if (selectedEntries.length === 0) return;
+    if (mode === "rename" && !selected) return;
     setEditMode(mode);
-    if (mode === "rename") setEditValue(selected.name);
-    else {
-      const parent = selected.path.split("/").slice(0, -1).join("/");
-      setEditValue(parent);
-    }
+    if (mode === "rename") setEditValue(selected!.name);
+    else setEditValue(selectionCategory ?? "");
   };
 
   const commitEdit = () => {
-    if (!selected || !editMode || !editValue.trim()) return;
-    if (editMode === "rename")
+    if (!editMode || !editValue.trim()) return;
+    if (editMode === "rename") {
+      if (!selected) return;
       void mutate({
         type: "rename",
         path: selected.path,
         name: editValue.trim(),
       });
-    else {
-      const destination = `${editValue.replace(/\/$/, "")}/${basename(selected.path)}`;
-      void mutate({
-        type: "move",
-        path: selected.path,
-        destination,
-      });
+    } else {
+      if (!selectionCategory || selectedEntries.length === 0) return;
+      const destination = editValue.replace(/\/$/, "");
+      void mutateMany(
+        selectedEntries.map((entry) => ({
+          type: "move" as const,
+          path: entry.path,
+          destination: `${destination}/${basename(entry.path)}`,
+        })),
+      );
     }
     setEditMode(null);
   };
@@ -343,14 +434,76 @@ export function NativeMediaLibrary({
   const rowHeight = tile + ROW_PADDING * 2;
   const rowCount = Math.ceil(total / COLUMNS);
 
-  const selectableFolders = selected?.category
+  const selectableFolders = selectionCategory
     ? folders.filter(
         (candidate) =>
-          candidate.startsWith(selected.category + "/") &&
-          candidate !== selected.path &&
-          !candidate.startsWith(selected.path + "/"),
+          candidate.startsWith(selectionCategory + "/") &&
+          selectedEntries.every(
+            (entry) =>
+              candidate !== entry.path &&
+              !candidate.startsWith(entry.path + "/"),
+          ),
       )
     : [];
+  const canMoveSelection =
+    Boolean(selectionCategory) &&
+    selectedEntries.length > 0 &&
+    selectedEntries.every((entry) => entry.kind !== "trash");
+  const folderCreationCategory = currentCategory ?? selectionCategory;
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const origin = marqueeOrigin.current;
+      const node = listHost.current;
+      if (!origin || !node) return;
+      const bounds = node.getBoundingClientRect();
+      const x = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left));
+      const y = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
+      const left = Math.min(origin.x, x);
+      const top = Math.min(origin.y, y);
+      const right = Math.max(origin.x, x);
+      const bottom = Math.max(origin.y, y);
+      setMarquee({
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+      });
+      const next = new Set(origin.base);
+      for (const item of node.querySelectorAll<HTMLElement>(
+        ".native-library-item[data-library-path]",
+      )) {
+        const rect = item.getBoundingClientRect();
+        const itemLeft = rect.left - bounds.left;
+        const itemTop = rect.top - bounds.top;
+        const itemRight = rect.right - bounds.left;
+        const itemBottom = rect.bottom - bounds.top;
+        if (
+          itemRight >= left &&
+          itemLeft <= right &&
+          itemBottom >= top &&
+          itemTop <= bottom
+        ) {
+          const path = item.dataset.libraryPath;
+          if (path) next.add(path);
+        }
+      }
+      setSelectedPaths(next);
+    };
+    const finish = () => {
+      if (!marqueeOrigin.current) return;
+      marqueeOrigin.current = null;
+      setMarquee(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, []);
 
   return (
     <div className="native-library" ref={host}>
@@ -422,7 +575,7 @@ export function NativeMediaLibrary({
         </nav>
       )}
 
-      {newFolder && currentCategory && (
+      {newFolder && folderCreationCategory && (
         <form
           className="native-library-inline-form"
           onSubmit={(event) => {
@@ -431,7 +584,9 @@ export function NativeMediaLibrary({
             if (!name) return;
             void mutate({
               type: "mkdir",
-              path: `${currentCategory}${folder ? "/" + folder : ""}/${name}`,
+              path: `${folderCreationCategory}${
+                currentCategory && folder ? "/" + folder : ""
+              }/${name}`,
             });
             setNewFolder(false);
             setNewFolderName("");
@@ -451,15 +606,24 @@ export function NativeMediaLibrary({
         </form>
       )}
 
-      {selected && (
-        <div className="native-library-selection" role="region" aria-label="Selected Library item">
+      {selectedEntries.length > 0 && (
+        <div
+          className="native-library-selection"
+          role="region"
+          aria-label="Selected Library items"
+        >
           <div className="native-library-selection-title">
-            <span title={selected.path}>{selected.name}</span>
+            <span title={selected?.path}>
+              {selected
+                ? selected.name
+                : `${selectedEntries.length} items selected`}
+            </span>
             <button
               type="button"
               aria-label="Close item actions"
               onClick={() => {
-                setSelected(null);
+                setSelectedPaths(new Set());
+                setSelectionAnchor(null);
                 setEditMode(null);
               }}
             >
@@ -487,8 +651,8 @@ export function NativeMediaLibrary({
                   value={editValue}
                   onChange={(event) => setEditValue(event.target.value)}
                 >
-                  <option value={selected.category ?? ""}>
-                    {selected.category}
+                  <option value={selectionCategory ?? ""}>
+                    {selectionCategory}
                   </option>
                   {selectableFolders.map((candidate) => (
                     <option key={candidate} value={candidate}>
@@ -504,22 +668,42 @@ export function NativeMediaLibrary({
             </form>
           ) : (
             <div className="native-library-selection-actions">
-              {selected.kind === "trash" ? (
+              {selectedEntries.length > 1 ? (
+                <>
+                  {canMoveSelection && (
+                    <button type="button" onClick={() => beginEdit("move")}>
+                      Move to Folder…
+                    </button>
+                  )}
+                  {folderCreationCategory && (
+                    <button
+                      type="button"
+                      onClick={() => setNewFolder(true)}
+                    >
+                      New Folder…
+                    </button>
+                  )}
+                </>
+              ) : selected?.kind === "trash" ? (
                 <>
                   <button
                     type="button"
-                    onClick={() => void mutate({ type: "restore", path: selected.path })}
+                    onClick={() =>
+                      void mutate({ type: "restore", path: selected.path })
+                    }
                   >
                     Restore
                   </button>
                   <button
                     type="button"
-                    onClick={() => void mutate({ type: "reveal", path: selected.path })}
+                    onClick={() =>
+                      void mutate({ type: "reveal", path: selected.path })
+                    }
                   >
                     Show in Folder
                   </button>
                 </>
-              ) : (
+              ) : selected ? (
                 <>
                   {selected.category !== "Effects" &&
                     (selected.protection === "parent" ? (
@@ -542,29 +726,47 @@ export function NativeMediaLibrary({
                           : "Protect from Cleanup"}
                       </button>
                     ))}
-                  <button type="button" onClick={() => void mutate({ type: "reveal", path: selected.path })}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void mutate({ type: "reveal", path: selected.path })
+                    }
+                  >
                     Show in Folder
                   </button>
                   {selected.category !== "Effects" && (
-                    <>
-                      <button type="button" onClick={() => beginEdit("rename")}>
-                        Rename…
-                      </button>
-                      <button type="button" onClick={() => beginEdit("move")}>
-                        Move…
-                      </button>
-                    </>
+                    <button type="button" onClick={() => beginEdit("rename")}>
+                      Rename…
+                    </button>
+                  )}
+                  {canMoveSelection && (
+                    <button type="button" onClick={() => beginEdit("move")}>
+                      Move to Folder…
+                    </button>
+                  )}
+                  {folderCreationCategory && (
+                    <button
+                      type="button"
+                      onClick={() => setNewFolder(true)}
+                    >
+                      New Folder…
+                    </button>
                   )}
                   {selected.kind === "folder" && (
                     <button
                       type="button"
-                      onClick={() => void mutate({ type: "remove-folder", path: selected.path })}
+                      onClick={() =>
+                        void mutate({
+                          type: "remove-folder",
+                          path: selected.path,
+                        })
+                      }
                     >
                       Delete Empty Folder
                     </button>
                   )}
                 </>
-              )}
+              ) : null}
             </div>
           )}
         </div>
@@ -582,7 +784,43 @@ export function NativeMediaLibrary({
           </span>
         </div>
       ) : (
-        <div className="native-library-list">
+        <div
+          className="native-library-list"
+          ref={listHost}
+          onPointerDown={(event) => {
+            if (
+              event.button !== 0 ||
+              (event.target as HTMLElement).closest(".native-library-item")
+            )
+              return;
+            const node = listHost.current;
+            if (!node) return;
+            const bounds = node.getBoundingClientRect();
+            const additive =
+              event.shiftKey || event.metaKey || event.ctrlKey;
+            marqueeOrigin.current = {
+              x: event.clientX - bounds.left,
+              y: event.clientY - bounds.top,
+              base: additive ? new Set(selectedPaths) : new Set(),
+            };
+            if (!additive) setSelectedPaths(new Set());
+            setSelectionAnchor(null);
+            setMarquee({
+              left: event.clientX - bounds.left,
+              top: event.clientY - bounds.top,
+              width: 0,
+              height: 0,
+            });
+            event.preventDefault();
+          }}
+        >
+          {marquee && (
+            <span
+              className="native-library-marquee"
+              style={marquee}
+              aria-hidden="true"
+            />
+          )}
           <VirtualList
             label="Media Library"
             count={rowCount}
@@ -603,8 +841,10 @@ export function NativeMediaLibrary({
                       index={index}
                       entry={entry}
                       requestPage={requestPage}
-                      selected={selected?.path === entry?.path}
-                      onSelect={setSelected}
+                      selected={Boolean(
+                        entry && selectedPaths.has(entry.path),
+                      )}
+                      onSelect={selectEntry}
                       onOpenFolder={openFolder}
                       onInsert={insert}
                     />
@@ -632,7 +872,11 @@ function LibraryCell({
   entry?: LibraryBrowserEntry;
   requestPage: (page: number) => void;
   selected: boolean;
-  onSelect: (entry: LibraryBrowserEntry) => void;
+  onSelect: (
+    entry: LibraryBrowserEntry,
+    index: number,
+    options: { shift: boolean; additive: boolean },
+  ) => void;
   onOpenFolder: (entry: LibraryBrowserEntry) => void;
   onInsert: (entry: LibraryBrowserEntry) => void;
 }) {
@@ -664,10 +908,16 @@ function LibraryCell({
         }
         draggable={insertable}
         onDragStart={(event) => startLibraryDrag(event, entry)}
-        onClick={() => {
+        aria-pressed={selected}
+        onClick={(event) =>
+          onSelect(entry, index, {
+            shift: event.shiftKey,
+            additive: event.metaKey || event.ctrlKey,
+          })
+        }
+        onDoubleClick={() => {
           if (entry.kind === "folder") onOpenFolder(entry);
           else if (insertable) void onInsert(entry);
-          else onSelect(entry);
         }}
       >
         <span
@@ -697,7 +947,8 @@ function LibraryCell({
         aria-label={`Actions for ${entry.name}`}
         onClick={(event) => {
           event.stopPropagation();
-          onSelect(entry);
+          if (!selected)
+            onSelect(entry, index, { shift: false, additive: false });
         }}
       >
         <IconMore />
