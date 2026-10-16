@@ -294,12 +294,16 @@ export function NativeMediaLibrary({
       >,
     ) => {
       if (!platform.libraryBrowser) return;
+      let changed = false;
       try {
-        for (const request of requests)
+        for (const request of requests) {
           await platform.libraryBrowser(request);
-        reload();
+          changed = true;
+        }
       } catch (failure) {
         setError(String(failure));
+      } finally {
+        if (changed) reload();
       }
     },
     [reload],
@@ -425,13 +429,14 @@ export function NativeMediaLibrary({
     } else {
       if (!selectionCategory || selectedEntries.length === 0) return;
       const destination = editValue.replace(/\/$/, "");
-      void mutateMany(
-        selectedEntries.map((entry) => ({
+      const requests = selectedEntries
+        .map((entry) => ({
           type: "move" as const,
           path: entry.path,
           destination: `${destination}/${basename(entry.path)}`,
-        })),
-      );
+        }))
+        .filter((request) => request.destination !== request.path);
+      if (requests.length) void mutateMany(requests);
     }
     setEditMode(null);
   };
