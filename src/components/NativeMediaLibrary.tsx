@@ -16,6 +16,7 @@ import type {
   LibraryCategory,
 } from "../core/libraryBrowser";
 import type { Asset } from "../core/assets";
+import type { EffectDefinition } from "../core/effects";
 import { IconClose, IconFolder, IconLock, IconMore } from "./AppIcons";
 import { VirtualList } from "./VirtualList";
 import "./NativeMediaLibrary.css";
@@ -147,10 +148,12 @@ export function NativeMediaLibrary({
   refresh,
   onInsert,
   onImport,
+  onApplyEffect,
 }: {
   refresh: number;
   onInsert: (asset: Asset) => void;
   onImport?: () => void;
+  onApplyEffect?: (definition: EffectDefinition) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("images");
   const [folder, setFolder] = useState("");
@@ -716,6 +719,7 @@ export function NativeMediaLibrary({
                       onSelect={selectEntry}
                       onOpenFolder={openFolder}
                       onInsert={insert}
+                      onApplyEffect={onApplyEffect}
                     />
                   );
                 })}
@@ -737,6 +741,7 @@ function LibraryCell({
   onSelect,
   onOpenFolder,
   onInsert,
+  onApplyEffect,
 }: {
   index: number;
   entry?: LibraryBrowserEntry;
@@ -746,6 +751,7 @@ function LibraryCell({
   onSelect: (entry: LibraryBrowserEntry) => void;
   onOpenFolder: (entry: LibraryBrowserEntry) => void;
   onInsert: (entry: LibraryBrowserEntry) => void;
+  onApplyEffect?: (definition: EffectDefinition) => void;
 }) {
   useEffect(() => {
     if (!entry) requestPage(Math.floor(index / PAGE_SIZE));
@@ -759,6 +765,11 @@ function LibraryCell({
     );
 
   const insertable = isInsertable(entry);
+  const effect =
+    !selectionMode && entry.kind === "file" && entry.category === "Effects"
+      ? entry.effect?.definition
+      : undefined;
+  const appliesEffect = !!effect && !!onApplyEffect;
   const pathLabel = humanPath(entry.path);
   return (
     <div
@@ -771,14 +782,20 @@ function LibraryCell({
         type="button"
         className="native-library-tile"
         aria-label={
-          entry.kind === "folder"
-            ? `Select folder ${entry.name}`
-            : `Select ${entry.name}`
+          appliesEffect
+            ? `Apply effect ${entry.name}`
+            : entry.kind === "folder"
+              ? `Select folder ${entry.name}`
+              : `Select ${entry.name}`
         }
         draggable={insertable && !selectionMode}
         onDragStart={(event) => startLibraryDrag(event, entry)}
-        aria-pressed={selected}
-        onClick={() => onSelect(entry)}
+        aria-pressed={appliesEffect ? undefined : selected}
+        onClick={(event) => {
+          if (effect && onApplyEffect) {
+            if (event.detail < 2) onApplyEffect(structuredClone(effect));
+          } else onSelect(entry);
+        }}
         onDoubleClick={() => {
           if (selectionMode) return;
           if (entry.kind === "folder") onOpenFolder(entry);

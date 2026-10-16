@@ -8,6 +8,7 @@ import {
   type CSSProperties,
 } from "react";
 import type { Asset, AssetCategory } from "../core/assets";
+import type { EffectDefinition } from "../core/effects";
 import type { AssetPage, MediaLibraryInfo } from "../platform/api";
 import { platform } from "../platform";
 import { VirtualList } from "./VirtualList";
@@ -125,12 +126,14 @@ export function AssetLibrary({
   onInsert,
   onClose,
   onImport,
+  onApplyEffect,
 }: {
   refresh: number;
   snapshot?: unknown;
   onInsert: (asset: Asset) => void;
   onClose?: () => void;
   onImport?: () => void;
+  onApplyEffect?: (definition: EffectDefinition) => void;
 }) {
   const canBrowseNative = Boolean(window.desktop && platform.libraryBrowser);
   const [nativeLibrary, setNativeLibrary] = useState<boolean | null>(
@@ -269,6 +272,7 @@ export function AssetLibrary({
           refresh={refresh}
           onInsert={onInsert}
           onImport={onImport}
+          onApplyEffect={onApplyEffect}
         />
       ) : total === 0 ? (
         <div className="empty-library">

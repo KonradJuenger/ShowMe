@@ -1864,6 +1864,12 @@ export function Editor({
                 : fileInput.current?.click()
             }
             onInsert={(asset) => void mediaActions.insertAsset(asset)}
+            onApplyEffect={(definition) =>
+              void structuralActions.applyEffect(
+                definition,
+                motionWorkspace.open ? motionWorkspace.active : 0,
+              )
+            }
           />
         }
         onReplaceMedia={() => {

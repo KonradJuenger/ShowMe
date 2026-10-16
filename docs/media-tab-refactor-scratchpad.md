@@ -292,3 +292,21 @@ The deterministic browser regression first reproduced the unmounted-list failure
 Verification: `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts` (1 passed), `npm run typecheck`, focused `npx eslint src/components/NativeMediaLibrary.tsx tests/helpers/nativeMediaLibraryHarness.tsx tests/feature/media/library-scrolling.spec.ts`, and test stats/audit.
 
 Before updating PR #11, the exact final product/test candidate also passed `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts tests/feature/presenter/audience-navigation.spec.ts`: 3 passed, 0 skipped (53.9s), including both mandatory audience declarations. Earlier typecheck, focused lint and stats/audit results apply unchanged. Full/release suites and build/package were not repeated for this localized panel fix.
+
+## Apply Library Effects from Media — 2026-10-16
+
+In ordinary browsing, clicking a valid Effect tile applies a copied definition to the current canvas selection. With no canvas selection, it inserts a standard empty frame at the current insertion point/scope, applies the effect, and selects the new frame. Text-only effects create a frame with standard text content so their target remains valid. Multiple selected objects receive independent instances; locked, missing, or incompatible selected targets report errors without falling back to new-frame creation.
+
+This uses the existing selection action controller, `setElementEffectDefinition`, and semantic document operations. Frame creation, effect resources/instances, and any click schedule commit as one authority transaction and undo/redo together. Click-triggered effects use the current Motion stage; Library definitions and filesystem organization remain independent of the presentation's copied resources. `Editor.tsx` only connects the callback.
+
+Library selection mode still toggles tile selection without applying effects; overflow management and malformed files also remain management actions. Double-clicking an Effect tile applies only once. Media insertion, folder navigation, and the scrolling fix remain unchanged.
+
+Verification:
+
+- `$env:SHOWME_TEST_FILES = '["tests/feature/effects/library-application.test.ts","tests/feature/effects/instances.test.ts"]'; npx vitest run`: 9 passed, including real authority commits and atomic undo/redo.
+- `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-effects.spec.ts","tests/feature/media/library-scrolling.spec.ts"]'; npx playwright test tests/feature/media/library-effects.spec.ts tests/feature/media/library-scrolling.spec.ts`: 2 passed, covering click/double-click, selection mode, overflow management, malformed files, and preserved scrolling.
+- `npm run typecheck`: passed.
+- `npx eslint src/components/AssetLibrary.tsx src/components/Editor.tsx src/components/NativeMediaLibrary.tsx src/components/editor/useSelectionActions.ts tests/helpers/nativeMediaLibraryHarness.tsx tests/feature/effects/library-application.test.ts tests/feature/media/library-effects.spec.ts`: passed without warnings.
+- `npm run test:stats`, `npm run test:audit`, and `git diff --check`: passed.
+
+The presenter gate, full/release suites, and build/package were not repeated during this ongoing local follow-up.

@@ -12,6 +12,8 @@ import {
   insertElements,
   removeElements,
   reorderElements,
+  setElementContents,
+  setElementEffectDefinition,
   unframeElement,
   type EditorSnapshot,
   type ReorderMode,
@@ -31,6 +33,8 @@ import {
 } from "../../core/scene";
 import { uid } from "../../core/ids";
 import type { Point } from "../../core/geometry";
+import type { EffectDefinition } from "../../core/effects";
+import { createTextElement } from "../../core/text";
 import type { CanvasSelection } from "../editorCanvasCoordinator";
 import {
   captureElementsClipboard,
@@ -249,6 +253,39 @@ export function insertEmptyFrame(
   };
 }
 
+/** One semantic edit: apply to the selection, or insert an already-effected frame. */
+export function applySelectionEffect(
+  snapshot: EditorSnapshot,
+  selection: CanvasSelection,
+  definition: EffectDefinition,
+  worldCenter: Point,
+  newId: () => string = uid,
+  stageIndex = 0,
+): SelectionActionResult {
+  let result: SelectionActionResult;
+  if (selection.elementIds.length) {
+    directEditableSelection(snapshot, selection);
+    result = { snapshot, selection };
+  } else {
+    result = insertEmptyFrame(snapshot, selection, newId(), worldCenter);
+    if (definition.target === "text") {
+      const elementId = result.selection.elementIds[0];
+      result.snapshot = setElementContents(result.snapshot, [
+        { elementId, value: createTextElement(elementId).content },
+      ]);
+    }
+  }
+  for (const elementId of result.selection.elementIds)
+    result.snapshot = setElementEffectDefinition(
+      result.snapshot,
+      elementId,
+      structuredClone(definition),
+      undefined,
+      stageIndex,
+    );
+  return result;
+}
+
 export function selectAllInSelectionScope(
   snapshot: EditorSnapshot,
   selection: CanvasSelection,
@@ -374,6 +411,23 @@ export function useSelectionActions({
           { ...current, scopeId: getInsertionScopeId() },
           idFactory(),
           getInsertionWorldPoint(),
+        ),
+      ),
+    [getInsertionScopeId, getInsertionWorldPoint, idFactory, perform],
+  );
+
+  const applyEffect = useCallback(
+    (definition: EffectDefinition, stageIndex = 0) =>
+      perform((snapshot, current) =>
+        applySelectionEffect(
+          snapshot,
+          current.elementIds.length
+            ? current
+            : { ...current, scopeId: getInsertionScopeId() },
+          definition,
+          getInsertionWorldPoint(),
+          idFactory,
+          stageIndex,
         ),
       ),
     [getInsertionScopeId, getInsertionWorldPoint, idFactory, perform],
@@ -507,6 +561,7 @@ export function useSelectionActions({
       unframeSelection,
       insertElement,
       insertFrame,
+      applyEffect,
       copySelection,
       cutSelection,
       pasteSelection,
@@ -523,6 +578,7 @@ export function useSelectionActions({
       frameSelection,
       insertElement,
       insertFrame,
+      applyEffect,
       copySelection,
       cutSelection,
       pasteSelection,
