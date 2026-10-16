@@ -18,8 +18,8 @@ Refine the Media panel into one calm, content-first Library surface while preser
 - Management stays secondary. The default surface is content. Import, folder creation and Library reveal live in one overflow menu; item management appears only after requesting item actions.
 - Effects use a checkerboard-backed rendered thumbnail so transparent/spatial shader and CSS/JS output remains legible.
 - Image/video Library items can be dragged onto the canvas and are inserted at the drop position.
-- Folders and individual cleanup-managed assets can be protected persistently from Library garbage collection. Folder protection applies to descendants and follows rename/move operations.
-- Protection is Library lifecycle metadata under the ShowMe Library, not presentation state. It participates in the cleanup fingerprint to prevent races with a running scan.
+- Cleanup-managed files can be protected persistently from Library garbage collection through the managed filename `~p` marker. Folder protection is a bulk operation over current managed descendants, not inherited folder state.
+- Protection is filesystem metadata carried by the managed filename, not presentation state or a central database. Protected filenames participate in the cleanup fingerprint to prevent races with a running scan.
 - Effects are not marked for cleanup protection because the current media garbage collector does not collect live Effects. Effect deletion remains the existing recoverable Trash path.
 - Existing applied effects remain document-owned. Editing or deleting a reusable Library copy does not mutate presentations.
 
@@ -34,8 +34,8 @@ Refine the Media panel into one calm, content-first Library surface while preser
 - [x] Preserved borderless previews and removed persistent management chrome.
 - [x] Added checkerboard-backed effect previews.
 - [x] Added drag-to-canvas for Library images/video with drop-position insertion.
-- [x] Added persistent item/folder garbage-collection protection.
-- [x] Added regression coverage for unified browsing/inherited protection and collector-level protection.
+- [x] Added sync-safe filename-encoded garbage-collection protection and folder bulk protection.
+- [x] Added regression coverage for unified browsing, filename protection and collector-level protection.
 - [x] Reviewed the final PR diff against current `main`.
 - [x] Removed Search from the Media tab.
 - [x] Effect thumbnails are queued instead of being dropped when preview work is busy; failed/empty renderer previews are not permanently cached.
@@ -126,3 +126,62 @@ Cleanup protection is now filesystem-native and sync-safe. There is no persisten
 - Protection state therefore travels with the media through Syncthing, Finder/Explorer copies and folder moves without requiring a sidecar or central metadata file.
 
 Verification additionally covers that a file arriving after a folder-protect operation remains unprotected and collectible until explicitly protected.
+
+
+## Final package and Trash review
+
+Two final integration issues were fixed without changing the package schema or the collaboration-safe cleanup-protection model.
+
+### Portable packages
+
+Library folders are organization only and are deliberately absent from `.smp` packages.
+
+- Package creation no longer infers media type from the immediate parent directory of a physical Library file.
+- The existing semantic `asset.mediaType` determines the package's top-level media directory.
+- Nested Library paths such as `images/project-a/reference/photo__<hash>.jpg` are flattened to `images/photo__<hash>.jpg`.
+- Protected Library names such as `photo__<hash>~p.jpg` are normalized to the ordinary managed filename inside the package. Cleanup protection belongs to the shared Library and does not travel into `.smp`.
+- Package bytes are not rewritten; SHA-256 asset identity remains unchanged.
+- No new package schema/version was introduced.
+
+Regression coverage imports an image and video into different nested Library folders, protects the image, packages the presentation, verifies top-level `images/` and `video/` entries and metadata, confirms no nested Library path or `~p` marker is present, verifies the packaged bytes by SHA-256, and reopens the package successfully.
+
+### Trash organization
+
+Folder organization now has one domain-level eligibility rule: a selection is organizationally movable only when every selected entry is a non-Trash entry in the same Library category.
+
+Therefore any selection containing Trash:
+
+- does not expose `Move to Folder…`;
+- does not expose `New Folder with Selection…`;
+- cannot derive a folder-creation category from Trash metadata;
+- keeps the existing single-item Restore and Show in Folder actions.
+
+A deterministic domain regression covers normal, Trash-only and mixed normal/Trash selections.
+
+### Partial protection failures
+
+Bulk folder protection remains a best-effort sequence of safe filename transitions. If an external sync conflict causes a later descendant rename to fail after earlier descendants were already protected:
+
+- successful earlier renames are not rolled back;
+- `NativeLibraryBrowser` invalidates its cached inventory and refreshes before rethrowing the error;
+- the next Library read immediately reflects the real mixed filesystem state.
+
+Regression coverage prewarms the browser inventory, induces a conflicting `~p` destination after one successful rename, and verifies the immediate mixed folder/file state.
+
+### Final verification
+
+The product/test candidate at `6dbb1f5731b83ee65fef83157aadad3d526d1b2c` was verified through the PR runner. The temporary verification-only workflow commits changed only `.github/workflows/ci.yml`; the product and test tree was unchanged.
+
+Passed:
+
+- `npm run typecheck`
+- `npm run lint`
+- `npm run test:audit`
+- focused `tests/feature/media/library-work.test.ts`
+- focused `tests/feature/persistence/package-options.test.ts`
+- `npm test`
+- mandatory audience-navigation gate with Chromium:
+  - `audience stress benchmark renders dense animated slides and reports comparable performance`
+  - `a late slide with a new image is prepared during the preceding slide instead of blocking audience navigation`
+
+Both audience-navigation declarations executed and passed. The temporary CI instrumentation was then removed and the repository's standard Development workflow restored.
