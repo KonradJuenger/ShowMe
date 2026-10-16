@@ -87,3 +87,16 @@ export interface LibraryBrowserResult {
   asset?: Asset;
   preview?: string;
 }
+
+
+export function organizationalLibraryCategory(
+  entries: readonly LibraryBrowserEntry[],
+): LibraryCategory | undefined {
+  if (!entries.length || entries.some((entry) => entry.kind === "trash"))
+    return undefined;
+  const category = entries[0].category;
+  return category &&
+    entries.every((entry) => entry.category === category)
+    ? category
+    : undefined;
+}

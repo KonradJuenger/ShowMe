@@ -372,12 +372,19 @@ export class NativeLibraryBrowser {
       const stat = await fs.lstat(source);
       if ((!stat.isFile() && !stat.isDirectory()) || stat.isSymbolicLink())
         throw new Error("Only Library files and folders can be protected");
-      await setLibraryProtection(
-        this.root,
-        request.path,
-        request.protected,
-      );
+      try {
+        await setLibraryProtection(
+          this.root,
+          request.path,
+          request.protected,
+        );
+      } catch (error) {
+        this.invalidate();
+        await this.refresh().catch(() => undefined);
+        throw error;
+      }
       this.invalidate();
+      await this.refresh();
       return result;
     }
     if (request.type === "rename") {

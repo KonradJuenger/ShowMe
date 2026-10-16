@@ -62,6 +62,7 @@ import {
   libraryIndex,
   folderForMediaType,
   findManagedFile,
+  setManagedFilenameProtected,
 } from "./mediaLibrary";
 
 interface StoredDocument {
@@ -850,23 +851,22 @@ export class DocumentStorage {
     for (const assetId of assetIds) {
       let asset = await this.assetForDocument(id, assetId);
       const source = this.assetPathForDocument(id, assetId);
-      if (!entry.packageAssets?.has(assetId)) {
-        const folder = path.basename(path.dirname(source));
-        asset = {
-          ...asset,
-          filename: path.basename(source),
-          mediaType:
-            folder === "images"
-              ? "image"
-              : folder === "video"
-                ? "video"
-                : folder === "audio"
-                  ? "audio"
-                  : folder === "fonts"
-                    ? "font"
-                    : "other",
-        };
-      }
+      const sourceName = path.basename(source);
+      const physicalManagedName =
+        assetIdFromFilename(sourceName) === assetId ? sourceName : null;
+      const metadataManagedName =
+        assetIdFromFilename(asset.filename) === assetId
+          ? asset.filename
+          : null;
+      const packageFilename = physicalManagedName
+        ? setManagedFilenameProtected(physicalManagedName, false)
+        : metadataManagedName
+          ? setManagedFilenameProtected(metadataManagedName, false)
+          : asset.filename;
+      asset = {
+        ...asset,
+        filename: packageFilename,
+      };
       const bytes = (await fs.stat(source)).size;
       if ((await hashFile(source)) !== assetId)
         throw new Error(`Asset ${assetId} failed hash verification`);

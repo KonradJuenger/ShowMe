@@ -12,6 +12,7 @@ import type {
   LibraryBrowserEntry,
   LibraryBrowserResult,
   LibraryCategory,
+  organizationalLibraryCategory,
 } from "../core/libraryBrowser";
 import type { Asset } from "../core/assets";
 import { IconClose, IconFolder, IconLock, IconMore } from "./AppIcons";
@@ -363,13 +364,7 @@ export function NativeMediaLibrary({
     .filter((entry): entry is LibraryBrowserEntry => Boolean(entry));
   const selected =
     selectedEntries.length === 1 ? selectedEntries[0] : null;
-  const selectionCategory =
-    selectedEntries.length > 0 &&
-    selectedEntries.every(
-      (entry) => entry.category === selectedEntries[0].category,
-    )
-      ? selectedEntries[0].category
-      : undefined;
+  const selectionCategory = organizationalLibraryCategory(selectedEntries);
   const selectionParent =
     selectedEntries.length > 0 &&
     selectedEntries.every(
@@ -461,11 +456,14 @@ export function NativeMediaLibrary({
           ),
       )
     : [];
-  const canMoveSelection =
-    Boolean(selectionCategory) &&
-    selectedEntries.length > 0 &&
-    selectedEntries.every((entry) => entry.kind !== "trash");
-  const folderCreationCategory = currentCategory ?? selectionCategory;
+  const canOrganizeSelection = Boolean(selectionCategory);
+  const canMoveSelection = canOrganizeSelection;
+  const folderCreationCategory =
+    newFolderMode === "selection"
+      ? canOrganizeSelection
+        ? selectionCategory
+        : undefined
+      : currentCategory;
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
@@ -702,7 +700,7 @@ export function NativeMediaLibrary({
                       Move to Folder…
                     </button>
                   )}
-                  {folderCreationCategory && (
+                  {canOrganizeSelection && (
                     <button
                       type="button"
                       onClick={() => setNewFolderMode("selection")}
@@ -771,7 +769,7 @@ export function NativeMediaLibrary({
                       Move to Folder…
                     </button>
                   )}
-                  {folderCreationCategory && (
+                  {canOrganizeSelection && (
                     <button
                       type="button"
                       onClick={() => setNewFolderMode("selection")}
