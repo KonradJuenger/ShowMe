@@ -191,8 +191,19 @@
 }
 
 .native-library-list {
+  position: relative;
   flex: 1;
   min-height: 0;
+  user-select: none;
+}
+
+.native-library-marquee {
+  position: absolute;
+  z-index: 20;
+  border: 1px solid var(--km-accent, #3b82db);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--km-accent, #3b82db) 12%, transparent);
+  pointer-events: none;
 }
 
 .native-library-grid-row {
