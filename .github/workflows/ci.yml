@@ -14,12 +14,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: 2adf54f0dd999c59f51bbe8e095a41a0a92fbc1e
       - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npx playwright install chromium
-      - run: SHOWME_TEST_FILES='["tests/feature/presenter/audience-navigation.spec.ts"]' npx playwright test --config playwright.config.ts
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:audit
+      - run: npm test
