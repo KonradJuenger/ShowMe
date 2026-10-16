@@ -11,7 +11,7 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -22,4 +22,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:audit
+      - run: npx vitest run tests/feature/media/library-work.test.ts tests/feature/persistence/package-options.test.ts
       - run: npm test
+      - run: npx playwright install chromium
+      - run: npx playwright test tests/feature/presenter/audience-navigation.spec.ts
