@@ -82,3 +82,230 @@ test("Media scrolling survives a pending inventory refresh and paginated results
       .evaluate((node) => node.scrollTop),
   ).toBe(0);
 });
+
+test("Media actions stay above a stable scrolling viewport during selection and folder commands", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/tests/helpers/nativeMediaLibraryHarness.tsx";
+    window.mediaScrollHarness = await import(/* @vite-ignore */ modulePath);
+    window.mediaScrollHarness.mountNativeMediaLibraryHarness({
+      includeFolders: true,
+      deferRefresh: false,
+    });
+  });
+  const panel = page.getByRole("region", { name: "Media scroll test" });
+  const list = panel.getByLabel("Media Library", { exact: true });
+  const folder = panel.getByRole("button", {
+    name: "Select folder Brand Assets",
+    exact: true,
+  });
+  await expect(folder).toBeVisible();
+
+  for (const width of [240, 280, 320, 360]) {
+    await panel.evaluate((node, value) => {
+      node.style.width = `${value}px`;
+    }, width);
+    await expect
+      .poll(() => panel.evaluate((node) => node.clientWidth))
+      .toBe(width);
+    const before = await list.boundingBox();
+    await folder.click();
+    expect((await list.boundingBox())?.y).toBe(before?.y);
+    await panel.getByLabel("Selected item actions", { exact: true }).click();
+    const commands = panel.getByRole("group", { name: "Item commands" });
+    await expect(commands).toBeVisible();
+    const bounds = await panel.boundingBox();
+    const menu = await commands.boundingBox();
+    expect(menu!.x).toBeGreaterThanOrEqual(bounds!.x);
+    expect(menu!.x + menu!.width).toBeLessThanOrEqual(
+      bounds!.x + bounds!.width,
+    );
+    expect((await list.boundingBox())?.y).toBe(before?.y);
+    await commands
+      .getByRole("button", { name: "Move to Folder…", exact: true })
+      .click();
+    await expect(panel.getByLabel("Destination folder")).toBeFocused();
+    expect((await list.boundingBox())?.y).toBe(before?.y);
+    await page.keyboard.press("Escape");
+    await expect(
+      panel.getByLabel("Selected item actions", { exact: true }),
+    ).toBeFocused();
+    await panel.getByLabel("Selected item actions", { exact: true }).click();
+    await panel
+      .getByRole("button", { name: "New Folder with Selection…", exact: true })
+      .click();
+    await expect(
+      panel.getByRole("textbox", { name: "Folder name" }),
+    ).toBeFocused();
+    expect((await list.boundingBox())?.y).toBe(before?.y);
+    await page.keyboard.press("Escape");
+    await panel.getByRole("button", { name: "Close item actions" }).click();
+    expect((await list.boundingBox())?.y).toBe(before?.y);
+  }
+
+  await panel
+    .getByRole("button", { name: "Actions for Brand Assets", exact: true })
+    .click();
+  await expect(
+    panel.getByRole("group", { name: "Item commands" }),
+  ).toBeVisible();
+  await expect(
+    panel.getByLabel("Selected item actions", { exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await panel.getByRole("button", { name: "Select", exact: true }).click();
+  await folder.click();
+  await panel
+    .getByRole("button", { name: "Select folder Photos", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toHaveText("2 selected");
+  const header = panel.getByRole("region", { name: "Selected Library items" });
+  const beforeScroll = await header.boundingBox();
+  await list.evaluate((node) => {
+    node.scrollTop = 500;
+  });
+  expect(await list.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  expect((await header.boundingBox())?.y).toBe(beforeScroll?.y);
+  await expect(header).toBeVisible();
+});
+
+test("Folder names are visible at rest and folders and media support normal double-click and keyboard activation", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/tests/helpers/nativeMediaLibraryHarness.tsx";
+    window.mediaScrollHarness = await import(/* @vite-ignore */ modulePath);
+    window.mediaScrollHarness.mountNativeMediaLibraryHarness({
+      includeFolders: true,
+      deferRefresh: false,
+    });
+  });
+  const panel = page.getByRole("region", { name: "Media scroll test" });
+  const folder = panel.getByRole("button", {
+    name: "Select folder Brand Assets",
+    exact: true,
+  });
+  await expect(folder.getByText("Brand Assets", { exact: true })).toBeVisible();
+  await expect(
+    panel
+      .getByRole("button", { name: "Select folder Photos", exact: true })
+      .getByText("Photos", { exact: true }),
+  ).toBeVisible();
+  await folder.dblclick();
+  const breadcrumbs = panel.getByRole("navigation", { name: "Current folder" });
+  await expect(
+    breadcrumbs.getByRole("button", { name: "Brand Assets", exact: true }),
+  ).toBeVisible();
+  await breadcrumbs
+    .getByRole("button", { name: "Images", exact: true })
+    .click();
+  await folder.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    breadcrumbs.getByRole("button", { name: "Brand Assets", exact: true }),
+  ).toBeVisible();
+  await breadcrumbs
+    .getByRole("button", { name: "Images", exact: true })
+    .click();
+  const media = panel.getByRole("button", {
+    name: "Select item-000.png",
+    exact: true,
+  });
+  await media.dblclick();
+  await media.focus();
+  await page.keyboard.press("Enter");
+  expect(
+    await page.evaluate(() => window.mediaScrollHarness.insertedLibraryAssets),
+  ).toEqual(["item-000.png", "item-000.png"]);
+});
+
+test("Media folder hierarchy reveals nested branches and keeps the current path and parent navigation clear", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/tests/helpers/nativeMediaLibraryHarness.tsx";
+    window.mediaScrollHarness = await import(/* @vite-ignore */ modulePath);
+    window.mediaScrollHarness.mountNativeMediaLibraryHarness({
+      includeFolders: true,
+      deferRefresh: false,
+    });
+  });
+  const panel = page.getByRole("region", { name: "Media scroll test" });
+  const breadcrumbs = panel.getByRole("navigation", { name: "Current folder" });
+  const up = panel.getByRole("button", { name: "Up one folder", exact: true });
+  const browse = panel.getByLabel("Browse folders", { exact: true });
+  const hierarchy = panel.getByRole("navigation", { name: "Folder hierarchy" });
+  await expect(
+    panel.getByRole("button", {
+      name: "Select folder Brand Assets",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(up).toBeDisabled();
+  await expect(
+    breadcrumbs.getByRole("button", { name: "Images", exact: true }),
+  ).toHaveAttribute("aria-current", "location");
+  const initial = await panel
+    .getByLabel("Media Library", { exact: true })
+    .boundingBox();
+  await browse.click();
+  await hierarchy
+    .getByRole("button", { name: "Expand Brand Assets", exact: true })
+    .click();
+  await expect(
+    hierarchy.getByRole("button", {
+      name: "Open folder Brand Assets / Logos",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await hierarchy
+    .getByRole("button", { name: "Expand Brand Assets / Logos", exact: true })
+    .click();
+  await expect(
+    hierarchy.getByRole("button", {
+      name: "Open folder Brand Assets / Logos / Exports",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await hierarchy
+    .getByRole("button", {
+      name: "Open folder Brand Assets / Logos",
+      exact: true,
+    })
+    .click();
+  await expect(hierarchy).not.toBeVisible();
+  await expect(browse).toBeFocused();
+  await expect(
+    breadcrumbs.getByRole("button", { name: "Logos", exact: true }),
+  ).toHaveAttribute("aria-current", "location");
+  await expect(
+    panel.getByRole("button", { name: "Select folder Exports", exact: true }),
+  ).toBeVisible();
+  expect(
+    (await panel.getByLabel("Media Library", { exact: true }).boundingBox())?.y,
+  ).toBe(initial?.y);
+  await browse.click();
+  await expect(
+    hierarchy.getByRole("button", {
+      name: "Open folder Brand Assets / Logos",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-current", "location");
+  await page.keyboard.press("Escape");
+  await expect(hierarchy).not.toBeVisible();
+  await up.click();
+  await expect(
+    breadcrumbs.getByRole("button", { name: "Brand Assets", exact: true }),
+  ).toHaveAttribute("aria-current", "location");
+  await breadcrumbs
+    .getByRole("button", { name: "Images", exact: true })
+    .click();
+  await expect(up).toBeDisabled();
+  await expect(
+    panel.getByRole("button", { name: "Select folder Photos", exact: true }),
+  ).toBeVisible();
+});

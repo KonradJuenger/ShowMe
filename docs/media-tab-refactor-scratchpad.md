@@ -310,3 +310,55 @@ Verification:
 - `npm run test:stats`, `npm run test:audit`, and `git diff --check`: passed.
 
 The presenter gate, full/release suites, and build/package were not repeated during this ongoing local follow-up.
+
+## Stable Media actions and readable folders — 2026-10-16
+
+Item selection now uses a reserved top action strip. The media viewport scrolls
+below it, and selection, item menus, Move, and New Folder forms do not change
+the grid's position. Move remains directly available; further commands open
+from Actions or a tile's ellipsis. Menus dismiss outside or on Escape, and
+command cancellation restores keyboard focus.
+
+Folders have darker 40px icons and persistent labels with room for two lines.
+The grid uses two columns in narrow containers and three when at least 260px
+is available. Borderless image/video previews remain. Real double-click opens
+folders again without selection moving the target; Enter also opens folders
+and inserts media. Effect click behavior, bulk selection, inventory refresh,
+pagination, storage operations, and the document architecture remain intact.
+
+Verification on the final implementation:
+
+- `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts","tests/feature/media/library-effects.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts tests/feature/media/library-effects.spec.ts`: 4 passed. Coverage includes stable selection/forms at 240/280/320/360px host widths, fixed controls during scrolling, visible folder labels, real double-click and keyboard activation, and the existing scrolling/effect contracts.
+- `npm run typecheck`: passed.
+- `npx eslint src/components/NativeMediaLibrary.tsx tests/helpers/nativeMediaLibraryHarness.tsx tests/feature/media/library-scrolling.spec.ts`: passed.
+- `npm run test:stats` and `npm run test:audit`: passed; two additional named browser declarations registered in the existing media group.
+- Impeccable source detector: zero findings. Rendered fixture review used real sidebar/global CSS at 284px and 360px inspector widths and 150% zoom. Selection and command forms produced zero measured viewport displacement.
+
+Visual/browser evidence uses synthetic inventory, not a live Electron library.
+No native Electron, full/release, build/package, audience-navigation gate, or
+separate performance benchmark was run. No commit or integration was made in
+this local UI pass.
+
+## Media folder hierarchy follow-up — 2026-10-16
+
+Media folders now have a stable location row with an explicit Up control,
+clickable ancestor path, and a folder hierarchy picker. The picker uses
+expand/collapse chevrons, folder icons, indented branch guides, and a highlighted
+current location. Navigating opens the current branch automatically; Escape
+and outside clicks dismiss the picker. The location row is present at the
+category root too, so entering a folder does not shift the media viewport.
+
+This uses the existing folder inventory and navigation state. It adds no
+filesystem queries, storage format, document operations, or changes to slide
+or Layers trees.
+
+Verification:
+
+- `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts","tests/feature/media/library-effects.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts tests/feature/media/library-effects.spec.ts`: 5 passed, including nested branch expansion, direct navigation, current-location state, Up, ancestor links, focus restoration, and stable viewport position.
+- `npm run typecheck`: passed.
+- `npx eslint src/components/MediaFolderNavigation.tsx src/components/NativeMediaLibrary.tsx tests/helpers/nativeMediaLibraryHarness.tsx tests/feature/media/library-scrolling.spec.ts`: passed.
+- `npm run test:stats` and `npm run test:audit`: passed; the existing media browser group now includes the folder navigation contract.
+- Impeccable detector: zero findings. Rendered fixture inspected at 284px/360px inspector widths and 150% zoom; root and nested navigation retained the same viewport position.
+
+Native Electron, full/release, build/package, and the audience-navigation gate
+were not run. No commit or integration was performed.

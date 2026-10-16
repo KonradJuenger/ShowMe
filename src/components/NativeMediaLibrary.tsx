@@ -19,10 +19,10 @@ import type { Asset } from "../core/assets";
 import type { EffectDefinition } from "../core/effects";
 import { IconClose, IconFolder, IconLock, IconMore } from "./AppIcons";
 import { VirtualList } from "./VirtualList";
+import { MediaFolderNavigation } from "./MediaFolderNavigation";
 import "./NativeMediaLibrary.css";
 
 const PAGE_SIZE = 120;
-const COLUMNS = 3;
 const GAP = 8;
 const ROW_PADDING = 4;
 const FILTERS: Array<{
@@ -174,6 +174,10 @@ export function NativeMediaLibrary({
   const [newFolderName, setNewFolderName] = useState("");
   const [width, setWidth] = useState(300);
   const host = useRef<HTMLDivElement>(null);
+  const header = useRef<HTMLDivElement>(null);
+  const libraryMenu = useRef<HTMLDetailsElement>(null);
+  const itemMenu = useRef<HTMLDetailsElement>(null);
+  const focusItemMenu = useRef(false);
   const requested = useRef(new Set<number>());
   const generation = useRef(0);
 
@@ -222,6 +226,9 @@ export function NativeMediaLibrary({
     setSelectedPaths(new Set());
     setSelectionMode(false);
     setMoving(false);
+    setNewFolderMode(null);
+    if (libraryMenu.current) libraryMenu.current.open = false;
+    if (itemMenu.current) itemMenu.current.open = false;
     requestPage(0);
   }, [requestPage]);
 
@@ -242,6 +249,22 @@ export function NativeMediaLibrary({
     observer.observe(node);
     measure();
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (libraryMenu.current && !libraryMenu.current.contains(target))
+        libraryMenu.current.open = false;
+      if (itemMenu.current && !itemMenu.current.contains(target))
+        itemMenu.current.open = false;
+      if (!header.current?.contains(target)) {
+        setMoving(false);
+        setNewFolderMode(null);
+      }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
   }, []);
 
   const mutate = useCallback(
@@ -347,10 +370,13 @@ export function NativeMediaLibrary({
     setSelectedPaths(new Set());
     setMoving(false);
     setNewFolderMode(null);
+    if (itemMenu.current) itemMenu.current.open = false;
   };
 
   const selectEntry = (entry: LibraryBrowserEntry) => {
     setMoving(false);
+    setNewFolderMode(null);
+    if (itemMenu.current) itemMenu.current.open = false;
     setSelectedPaths((before) => {
       if (!selectionMode) return new Set([entry.path]);
       const next = new Set(before);
@@ -363,6 +389,7 @@ export function NativeMediaLibrary({
   const beginMove = () => {
     if (selectedEntries.length === 0) return;
     setMoving(true);
+    setNewFolderMode(null);
     setEditValue(selectionParent ?? selectionCategory ?? "");
   };
 
@@ -389,10 +416,12 @@ export function NativeMediaLibrary({
   const currentCategory = filter !== "Trash" ? filter : undefined;
   const currentRootLabel =
     FILTERS.find((item) => item.id === filter)?.label ?? "Media";
-  const rowWidth = Math.max(1, width - GAP * (COLUMNS - 1));
-  const tile = rowWidth / COLUMNS;
+  // Keep previews and folder labels legible in the narrow inspector.
+  const columns = width < 260 ? 2 : 3;
+  const rowWidth = Math.max(1, width - GAP * (columns - 1));
+  const tile = rowWidth / columns;
   const rowHeight = tile + ROW_PADDING * 2;
-  const rowCount = Math.ceil(total / COLUMNS);
+  const rowCount = Math.ceil(total / columns);
 
   const selectableFolders = selectionCategory
     ? folders.filter(
@@ -407,6 +436,21 @@ export function NativeMediaLibrary({
     : [];
   const canOrganizeSelection = Boolean(selectionCategory);
   const canMoveSelection = canOrganizeSelection;
+  const hasSelection = selectedEntries.length > 0;
+  const hasItemActions = Boolean(
+    canOrganizeSelection ||
+    selected?.kind === "trash" ||
+    (selected?.category !== "Effects" && selected?.managed),
+  );
+  useLayoutEffect(() => {
+    if (!focusItemMenu.current) return;
+    focusItemMenu.current = false;
+    if (hasItemActions && itemMenu.current) {
+      itemMenu.current.open = true;
+      itemMenu.current.querySelector("summary")?.focus();
+    }
+  }, [selectedPaths, hasItemActions]);
+
   const folderCreationCategory =
     newFolderMode === "selection"
       ? canOrganizeSelection
@@ -414,207 +458,165 @@ export function NativeMediaLibrary({
         : undefined
       : currentCategory;
 
+  const cancelCommand = () => {
+    const trigger =
+      moving || newFolderMode === "selection" ? itemMenu : libraryMenu;
+    setMoving(false);
+    setNewFolderMode(null);
+    trigger.current?.querySelector("summary")?.focus();
+  };
+
   return (
     <div
       className="native-library"
       ref={host}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && selectionMode) {
+        if (event.key !== "Escape") return;
+        const openMenu = [libraryMenu.current, itemMenu.current].find(
+          (menu) => menu?.open,
+        );
+        if (openMenu) {
+          event.stopPropagation();
+          openMenu.open = false;
+          openMenu.querySelector("summary")?.focus();
+        } else if (moving || newFolderMode) {
+          event.stopPropagation();
+          cancelCommand();
+        } else if (selectionMode || hasSelection) {
           event.stopPropagation();
           finishSelection();
         }
       }}
     >
-      <div className="native-library-topbar">
-        <select
-          className="native-library-filter"
-          aria-label="Media type filter"
-          value={filter}
-          onChange={(event) => chooseFilter(event.target.value as Filter)}
-        >
-          {FILTERS.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="native-library-select"
-          aria-pressed={selectionMode}
-          onClick={() => {
-            if (selectionMode) finishSelection();
-            else {
-              setSelectedPaths(new Set());
-              setMoving(false);
-              setNewFolderMode(null);
-              setSelectionMode(true);
-            }
-          }}
-        >
-          {selectionMode ? "Done" : "Select"}
-        </button>
-        <details className="native-library-actions">
-          <summary aria-label="Library actions" title="Library actions">
-            <IconMore />
-          </summary>
-          <div className="native-library-menu" role="menu">
-            {filter !== "Effects" &&
-              filter !== "Trash" &&
-              (onImport || currentCategory) && (
-                <button type="button" role="menuitem" onClick={importHere}>
-                  Import…
+      <div className="native-library-header" ref={header}>
+        <div className="native-library-topbar">
+          <select
+            className="native-library-filter"
+            aria-label="Media type filter"
+            value={filter}
+            onChange={(event) => chooseFilter(event.target.value as Filter)}
+          >
+            {FILTERS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="native-library-select"
+            aria-pressed={selectionMode}
+            onClick={() => {
+              if (selectionMode) finishSelection();
+              else {
+                setSelectedPaths(new Set());
+                setMoving(false);
+                setNewFolderMode(null);
+                setSelectionMode(true);
+              }
+            }}
+          >
+            {selectionMode ? "Done" : "Select"}
+          </button>
+          <details className="native-library-actions" ref={libraryMenu}>
+            <summary aria-label="Library actions" title="Library actions">
+              <IconMore />
+            </summary>
+            <div
+              className="native-library-menu"
+              role="group"
+              aria-label="Library commands"
+              onClick={() => {
+                if (libraryMenu.current) libraryMenu.current.open = false;
+              }}
+            >
+              {filter !== "Effects" &&
+                filter !== "Trash" &&
+                (onImport || currentCategory) && (
+                  <button type="button" onClick={importHere}>
+                    Import…
+                  </button>
+                )}
+              {currentCategory && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoving(false);
+                    setNewFolderMode("empty");
+                  }}
+                >
+                  New Folder…
                 </button>
               )}
-            {currentCategory && (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => setNewFolderMode("empty")}
-              >
-                New Folder…
-              </button>
-            )}
-            {platform.openMediaLibrary && (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => void platform.openMediaLibrary?.()}
-              >
-                Show Library Folder
-              </button>
-            )}
-          </div>
-        </details>
-      </div>
+              {platform.openMediaLibrary && (
+                <button
+                  type="button"
+                  onClick={() => void platform.openMediaLibrary?.()}
+                >
+                  Show Library Folder
+                </button>
+              )}
+            </div>
+          </details>
+        </div>
 
-      {folder && currentCategory && (
-        <nav className="native-library-breadcrumbs" aria-label="Current folder">
-          <button type="button" onClick={() => setFolder("")}>
-            {currentRootLabel}
-          </button>
-          {folder.split("/").map((part, index, parts) => (
-            <button
-              type="button"
-              key={parts.slice(0, index + 1).join("/")}
-              aria-current={index === parts.length - 1 ? "location" : undefined}
-              onClick={() => setFolder(parts.slice(0, index + 1).join("/"))}
-            >
-              {part}
-            </button>
-          ))}
-        </nav>
-      )}
-
-      {newFolderMode && folderCreationCategory && (
-        <form
-          className="native-library-inline-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const name = newFolderName.trim();
-            if (!name) return;
-            const destination = `${folderCreationCategory}${
-              currentCategory && folder ? "/" + folder : ""
-            }/${name}`;
-            if (
-              newFolderMode === "selection" &&
-              selectionCategory === folderCreationCategory &&
-              selectedEntries.length > 0
-            )
-              void mutateMany([
-                { type: "mkdir", path: destination },
-                ...selectedEntries.map((entry) => ({
-                  type: "move" as const,
-                  path: entry.path,
-                  destination: `${destination}/${basename(entry.path)}`,
-                })),
-              ]);
-            else void mutate({ type: "mkdir", path: destination });
-            setNewFolderMode(null);
-            setNewFolderName("");
-          }}
-        >
-          <input
-            autoFocus
-            aria-label="Folder name"
-            value={newFolderName}
-            onChange={(event) => setNewFolderName(event.target.value)}
-            placeholder="Folder name"
-          />
-          <button type="submit">Create</button>
-          <button type="button" onClick={() => setNewFolderMode(null)}>
-            Cancel
-          </button>
-        </form>
-      )}
-
-      {(selectionMode || selectedEntries.length > 0) && (
         <div
           className="native-library-selection"
           role="region"
           aria-label="Selected Library items"
         >
-          <div className="native-library-selection-title">
-            <span title={selected?.path} role="status">
-              {selectionMode
-                ? `${selectedEntries.length} selected`
-                : selected?.name}
-            </span>
-            <button
-              type="button"
-              aria-label="Close item actions"
-              onClick={finishSelection}
-            >
-              <IconClose />
+          <span
+            className="native-library-selection-name"
+            title={selected?.path}
+            role="status"
+          >
+            {selectionMode
+              ? selectedEntries.length + " selected"
+              : (selected?.name ??
+                total + " " + (total === 1 ? "item" : "items"))}
+          </span>
+          {canMoveSelection && (
+            <button type="button" onClick={beginMove}>
+              Move…
             </button>
-          </div>
-          {moving ? (
-            <form
-              className="native-library-inline-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                commitMove();
+          )}
+          <details className="native-library-actions" ref={itemMenu}>
+            <summary
+              aria-label="Selected item actions"
+              aria-disabled={!hasItemActions}
+              tabIndex={hasItemActions ? 0 : -1}
+              onClick={(event) => {
+                if (!hasItemActions) event.preventDefault();
               }}
             >
-              <select
-                aria-label="Destination folder"
-                value={editValue}
-                onChange={(event) => setEditValue(event.target.value)}
+              Actions
+            </summary>
+            {hasItemActions && (
+              <div
+                className="native-library-menu native-library-item-menu"
+                role="group"
+                aria-label="Item commands"
+                onClick={() => {
+                  if (itemMenu.current) itemMenu.current.open = false;
+                }}
               >
-                <option value={selectionCategory ?? ""}>
-                  {selectionCategory}
-                </option>
-                {selectableFolders.map((candidate) => (
-                  <option key={candidate} value={candidate}>
-                    {candidate.split("/").slice(1).join(" / ")}
-                  </option>
-                ))}
-              </select>
-              <button type="submit">Move</button>
-              <button type="button" onClick={() => setMoving(false)}>
-                Cancel
-              </button>
-            </form>
-          ) : (
-            <div className="native-library-selection-actions">
-              {selectedEntries.length > 1 ? (
-                <>
-                  {canMoveSelection && (
-                    <button type="button" onClick={beginMove}>
-                      Move to Folder…
-                    </button>
-                  )}
-                  {canOrganizeSelection && (
-                    <button
-                      type="button"
-                      onClick={() => setNewFolderMode("selection")}
-                    >
-                      New Folder with Selection…
-                    </button>
-                  )}
-                </>
-              ) : selected?.kind === "trash" ? (
-                <>
+                {canMoveSelection && (
+                  <button type="button" onClick={beginMove}>
+                    Move to Folder…
+                  </button>
+                )}
+                {canOrganizeSelection && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoving(false);
+                      setNewFolderMode("selection");
+                    }}
+                  >
+                    New Folder with Selection…
+                  </button>
+                )}
+                {selected?.kind === "trash" ? (
                   <button
                     type="button"
                     onClick={() =>
@@ -623,62 +625,151 @@ export function NativeMediaLibrary({
                   >
                     Restore
                   </button>
-                </>
-              ) : selected ? (
-                <>
-                  {selected.category !== "Effects" &&
-                    (selected.kind === "folder" || selected.managed) && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void mutate({
-                            type: "protect",
-                            path: selected.path,
-                            protected: selected.protection !== "self",
-                          })
-                        }
-                      >
-                        {selected.protection === "self"
-                          ? selected.kind === "folder"
-                            ? "Allow Cleanup for Contents"
-                            : "Allow Cleanup"
-                          : selected.kind === "folder"
-                            ? "Protect Contents from Cleanup"
-                            : "Protect from Cleanup"}
-                      </button>
-                    )}
-                  {canMoveSelection && (
-                    <button type="button" onClick={beginMove}>
-                      Move to Folder…
-                    </button>
-                  )}
-                  {canOrganizeSelection && (
+                ) : (
+                  selected &&
+                  selected.category !== "Effects" &&
+                  (selected.kind === "folder" || selected.managed) && (
                     <button
                       type="button"
-                      onClick={() => setNewFolderMode("selection")}
-                    >
-                      New Folder with Selection…
-                    </button>
-                  )}
-                  {selected.kind === "folder" && (
-                    <button
-                      type="button"
+                      title="Protected media is kept when unused Library files are cleaned up."
                       onClick={() =>
                         void mutate({
-                          type: "remove-folder",
+                          type: "protect",
                           path: selected.path,
+                          protected: selected.protection !== "self",
                         })
                       }
                     >
-                      Delete Empty Folder
+                      {selected.protection === "self"
+                        ? selected.kind === "folder"
+                          ? "Allow Cleanup for Contents"
+                          : "Allow Cleanup"
+                        : selected.kind === "folder"
+                          ? "Protect Contents from Cleanup"
+                          : "Protect from Cleanup"}
                     </button>
-                  )}
-                </>
-              ) : null}
-            </div>
-          )}
+                  )
+                )}
+                {selected?.kind === "folder" && (
+                  <button
+                    type="button"
+                    className="native-library-delete"
+                    onClick={() =>
+                      void mutate({
+                        type: "remove-folder",
+                        path: selected.path,
+                      })
+                    }
+                  >
+                    Delete Empty Folder
+                  </button>
+                )}
+              </div>
+            )}
+          </details>
+          <button
+            type="button"
+            className="native-library-clear"
+            aria-label="Close item actions"
+            disabled={!hasSelection && !selectionMode}
+            onClick={finishSelection}
+          >
+            <IconClose />
+          </button>
         </div>
-      )}
+
+        {currentCategory && (
+          <MediaFolderNavigation
+            key={currentCategory}
+            category={currentCategory}
+            rootLabel={currentRootLabel}
+            folder={folder}
+            folders={folders}
+            onNavigate={(next) => {
+              finishSelection();
+              setFolder(next);
+            }}
+            onBrowse={() => {
+              setMoving(false);
+              setNewFolderMode(null);
+            }}
+          />
+        )}
+
+        {newFolderMode && folderCreationCategory && (
+          <form
+            className="native-library-command-panel native-library-inline-form"
+            aria-label="Create Library folder"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const name = newFolderName.trim();
+              if (!name) return;
+              const destination = `${folderCreationCategory}${
+                currentCategory && folder ? "/" + folder : ""
+              }/${name}`;
+              if (
+                newFolderMode === "selection" &&
+                selectionCategory === folderCreationCategory &&
+                selectedEntries.length > 0
+              )
+                void mutateMany([
+                  { type: "mkdir", path: destination },
+                  ...selectedEntries.map((entry) => ({
+                    type: "move" as const,
+                    path: entry.path,
+                    destination: `${destination}/${basename(entry.path)}`,
+                  })),
+                ]);
+              else void mutate({ type: "mkdir", path: destination });
+              setNewFolderMode(null);
+              setNewFolderName("");
+            }}
+          >
+            <input
+              autoFocus
+              aria-label="Folder name"
+              value={newFolderName}
+              onChange={(event) => setNewFolderName(event.target.value)}
+              placeholder="Folder name"
+            />
+            <button type="submit">Create</button>
+            <button type="button" onClick={cancelCommand}>
+              Cancel
+            </button>
+          </form>
+        )}
+
+        {moving && (
+          <form
+            className="native-library-command-panel native-library-inline-form"
+            aria-label="Move Library items"
+            onSubmit={(event) => {
+              event.preventDefault();
+              commitMove();
+            }}
+          >
+            <select
+              autoFocus
+              aria-label="Destination folder"
+              value={editValue}
+              onChange={(event) => setEditValue(event.target.value)}
+            >
+              <option value={selectionCategory ?? ""}>
+                {selectionCategory}
+              </option>
+              {selectableFolders.map((candidate) => (
+                <option key={candidate} value={candidate}>
+                  {candidate.split("/").slice(1).join(" / ")}
+                </option>
+              ))}
+            </select>
+            <button type="submit">Move</button>
+            <button type="button" onClick={cancelCommand}>
+              Cancel
+            </button>
+          </form>
+        )}
+      </div>
 
       {(mutationError || error) && (
         <div className="native-library-error" role="alert">
@@ -701,10 +792,10 @@ export function NativeMediaLibrary({
             render={(row) => (
               <div
                 className="native-library-grid-row"
-                style={{ "--native-library-columns": COLUMNS } as CSSProperties}
+                style={{ "--native-library-columns": columns } as CSSProperties}
               >
-                {Array.from({ length: COLUMNS }, (_, column) => {
-                  const index = row * COLUMNS + column;
+                {Array.from({ length: columns }, (_, column) => {
+                  const index = row * columns + column;
                   if (index >= total) return <span key={index} />;
                   const page = Math.floor(index / PAGE_SIZE);
                   const entry = pages[page]?.[index % PAGE_SIZE];
@@ -717,6 +808,10 @@ export function NativeMediaLibrary({
                       selected={Boolean(entry && selectedPaths.has(entry.path))}
                       selectionMode={selectionMode}
                       onSelect={selectEntry}
+                      onActions={(entry) => {
+                        focusItemMenu.current = true;
+                        selectEntry(entry);
+                      }}
                       onOpenFolder={openFolder}
                       onInsert={insert}
                       onApplyEffect={onApplyEffect}
@@ -740,6 +835,7 @@ function LibraryCell({
   selectionMode,
   onSelect,
   onOpenFolder,
+  onActions,
   onInsert,
   onApplyEffect,
 }: {
@@ -750,6 +846,7 @@ function LibraryCell({
   selectionMode: boolean;
   onSelect: (entry: LibraryBrowserEntry) => void;
   onOpenFolder: (entry: LibraryBrowserEntry) => void;
+  onActions: (entry: LibraryBrowserEntry) => void;
   onInsert: (entry: LibraryBrowserEntry) => void;
   onApplyEffect?: (definition: EffectDefinition) => void;
 }) {
@@ -796,6 +893,14 @@ function LibraryCell({
             if (event.detail < 2) onApplyEffect(structuredClone(effect));
           } else onSelect(entry);
         }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || selectionMode || appliesEffect) return;
+          if (entry.kind !== "folder" && !insertable) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (entry.kind === "folder") onOpenFolder(entry);
+          else onInsert(entry);
+        }}
         onDoubleClick={() => {
           if (selectionMode) return;
           if (entry.kind === "folder") onOpenFolder(entry);
@@ -803,7 +908,7 @@ function LibraryCell({
         }}
       >
         <span
-          className={`native-library-preview${entry.category === "Effects" ? " is-effect" : ""}`}
+          className={`native-library-preview${entry.kind === "folder" ? " is-folder" : entry.category === "Effects" ? " is-effect" : ""}`}
         >
           <EntryPreview entry={entry} />
           {selectionMode && (
@@ -811,7 +916,14 @@ function LibraryCell({
               {selected ? "✓" : ""}
             </span>
           )}
-          <span className="asset-name-overlay" aria-hidden="true">
+          <span
+            className={
+              entry.kind === "folder"
+                ? "native-library-folder-name"
+                : "asset-name-overlay"
+            }
+            aria-hidden="true"
+          >
             {entry.name}
           </span>
         </span>
@@ -837,7 +949,7 @@ function LibraryCell({
           aria-label={`Actions for ${entry.name}`}
           onClick={(event) => {
             event.stopPropagation();
-            if (!selected) onSelect(entry);
+            onActions(entry);
           }}
         >
           <IconMore />

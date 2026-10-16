@@ -5,10 +5,12 @@ import type { LibraryBrowserEntry } from "../../src/core/libraryBrowser";
 import { savedLibraryEffect } from "../../src/core/libraryEffects";
 import { blankEffect } from "../../src/core/effectAuthoring";
 import type { EffectDefinition } from "../../src/core/effects";
+import "../../src/components/RightSidebar.css";
 
 let inventoryChanged: (() => void) | undefined;
 export const mediaLibraryRequests: number[] = [];
 export const appliedLibraryEffects: EffectDefinition[] = [];
+export const insertedLibraryAssets: string[] = [];
 let completeRefresh: (() => void) | undefined;
 
 export function notifyMediaInventoryChanged() {
@@ -19,7 +21,10 @@ export function finishMediaInventoryRefresh() {
   completeRefresh?.();
 }
 
-export function mountNativeMediaLibraryHarness() {
+export function mountNativeMediaLibraryHarness({
+  includeFolders = false,
+  deferRefresh = true,
+} = {}) {
   const entries: LibraryBrowserEntry[] = Array.from(
     { length: 360 },
     (_, index) => ({
@@ -30,6 +35,49 @@ export function mountNativeMediaLibraryHarness() {
       managed: false,
     }),
   );
+  if (includeFolders) {
+    entries[0].asset = {
+      version: 1,
+      id: "a".repeat(64),
+      filename: "item-000.png",
+      mediaType: "image",
+      type: "image",
+      mime: "image/png",
+      names: ["item-000.png"],
+      bytes: 1,
+      createdAt: "2026-10-16T00:00:00.000Z",
+    };
+    entries.unshift(
+      {
+        path: "images/Brand Assets",
+        name: "Brand Assets",
+        category: "images",
+        kind: "folder",
+        managed: false,
+      },
+      {
+        path: "images/Photos",
+        name: "Photos",
+        category: "images",
+        kind: "folder",
+        managed: false,
+      },
+      {
+        path: "images/Brand Assets/Logos",
+        name: "Logos",
+        category: "images",
+        kind: "folder",
+        managed: false,
+      },
+      {
+        path: "images/Brand Assets/Logos/Exports",
+        name: "Exports",
+        category: "images",
+        kind: "folder",
+        managed: false,
+      },
+    );
+  }
   const effect = savedLibraryEffect({
     ...blankEffect("css-js"),
     name: "Library Glow",
@@ -55,19 +103,29 @@ export function mountNativeMediaLibraryHarness() {
   platform.libraryBrowser = async (request) => {
     if (request.type !== "list") return { entries: [], total: 0, folders: [] };
     mediaLibraryRequests.push(request.offset);
-    if (request.offset === 0 && firstPageLoaded) {
+    if (deferRefresh && request.offset === 0 && firstPageLoaded) {
       await new Promise<void>((resolve) => {
         completeRefresh = resolve;
       });
       completeRefresh = undefined;
     }
     firstPageLoaded = true;
+    const visibleEntries = includeFolders
+      ? entries.filter(
+          (entry) =>
+            entry.path.split("/").slice(0, -1).join("/") ===
+            `images${request.folder ? "/" + request.folder : ""}`,
+        )
+      : entries;
     return {
       entries:
         request.category === "Effects"
           ? effects
           : request.category === "images"
-            ? entries.slice(request.offset, request.offset + request.limit)
+            ? visibleEntries.slice(
+                request.offset,
+                request.offset + request.limit,
+              )
             : entries
                 .slice(0, 6)
                 .map((entry) => ({ ...entry, category: "audio" })),
@@ -75,9 +133,13 @@ export function mountNativeMediaLibraryHarness() {
         request.category === "Effects"
           ? effects.length
           : request.category === "images"
-            ? entries.length
+            ? visibleEntries.length
             : 6,
-      folders: [],
+      folders: includeFolders
+        ? entries
+            .filter((entry) => entry.kind === "folder")
+            .map((entry) => entry.path)
+        : [],
     };
   };
   platform.onMediaInventoryChanged = (listener) => {
@@ -91,11 +153,17 @@ export function mountNativeMediaLibraryHarness() {
   host.style.cssText =
     "position:fixed;inset:0 auto auto 0;width:320px;height:560px;display:flex;background:white;z-index:10000";
   document.body.append(host);
+  if (includeFolders) host.className = "right-sidebar sidebar-primary";
   createRoot(host).render(
-    <NativeMediaLibrary
-      refresh={0}
-      onInsert={() => {}}
-      onApplyEffect={(definition) => appliedLibraryEffects.push(definition)}
-    />,
+    <section
+      className={includeFolders ? "asset-library" : undefined}
+      style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}
+    >
+      <NativeMediaLibrary
+        refresh={0}
+        onInsert={(asset) => insertedLibraryAssets.push(asset.names[0])}
+        onApplyEffect={(definition) => appliedLibraryEffects.push(definition)}
+      />
+    </section>,
   );
 }
