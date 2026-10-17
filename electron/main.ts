@@ -1,13 +1,20 @@
+import { effectDefinitionSchema } from "../src/core/effects";
+import { NativeLibraryBrowser } from "./libraryBrowser";
+import { libraryBrowserRequestSchema } from "../src/core/libraryBrowser";
+import { importManagedFile, mediaFolder } from "./mediaLibrary";
 import { presentationMotionStages } from "../src/core/documentRuntime";
 import { acceptedImpact } from "../src/core/documentImpact";
 import { fontStorageService } from "./fontIntegration";
 import { EffectLibraryStorage } from "./effectLibrary";
-import { effectLibraryRequestSchema } from "../src/core/libraryEffects";
+import {
+  effectLibraryRequestSchema,
+  libraryEffectSchema,
+} from "../src/core/libraryEffects";
 import sharp from "sharp";
 import { ImageWorkQueue } from "../src/core/imageWorkQueue";
 import { nativeImageConcurrency } from "./imageProcessorPool";
 import { resolveSlide } from "../src/core/templates";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   audienceImageProfile as outputImageProfile,
   MAX_PREPARED_IMAGE_PIXELS,
@@ -1119,6 +1126,162 @@ let previewWindow: BrowserWindow | null = null;
 let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
+let effectPreviewWindow: BrowserWindow | null = null;
+let previewsTornDown = false;
+let effectPreviewQueue: Promise<void> = Promise.resolve();
+const EFFECT_PREVIEW_MAX_ADMITTED = 8;
+let admittedEffectPreviews = 0;
+const effectPreviewSlotWaiters: Array<() => void> = [];
+const effectThumbnailJobs = new Map<string, Promise<string | null>>();
+let nativeLibraryBrowser: NativeLibraryBrowser | null = null;
+
+function previewOwnerAlive(owner: BrowserWindow | null) {
+  return !previewsTornDown && owner !== null && editor === owner && !owner.isDestroyed();
+}
+
+function tearDownPreviewWindows() {
+  previewsTornDown = true;
+  const windows = [previewWindow, effectPreviewWindow];
+  previewWindow = effectPreviewWindow = null;
+  previewDocumentId = null;
+  for (const window of windows) if (window && !window.isDestroyed()) window.destroy();
+}
+
+function activeNativeLibraryBrowser() {
+  const storage = requireStorage();
+  if (nativeLibraryBrowser?.root === storage.assetRoot)
+    return nativeLibraryBrowser;
+  nativeLibraryBrowser?.dispose();
+  nativeLibraryBrowser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (id) => requireStorage().libraryAssetMetadata(id),
+    (file, folder) => requireStorage().importFile(file, folder),
+    async (file) => {
+      const currentStorage = requireStorage();
+      const id = /__([a-f0-9]{64})/.exec(path.basename(file))?.[1];
+      if (id && /\.(mp4|webm)$/i.test(file)) {
+        try {
+          const data = await fs.readFile(currentStorage.previewPath(id));
+          return `data:image/jpeg;base64,${data.toString("base64")}`;
+        } catch {}
+      }
+      if (
+        /\.txt$/i.test(file) &&
+        (file.includes(`${path.sep}Effects${path.sep}`) ||
+          file.includes(`${path.sep}Trash${path.sep}`))
+      ) {
+        try {
+          const effect = libraryEffectSchema.parse(
+            JSON.parse(await fs.readFile(file, "utf8")),
+          );
+          return (
+            (await operations.effectThumbnail(effect.definition)) ?? undefined
+          );
+        } catch {
+          return undefined;
+        }
+      }
+      if (/\.(ttf|otf|woff2?)$/i.test(file)) {
+        if ((await fs.stat(file)).size > 32 * 1024 ** 2) return undefined;
+        return `data:font/ttf;base64,${(await fs.readFile(file)).toString("base64")}`;
+      }
+      if (!/\.(png|jpe?g|webp|gif|svg)$/i.test(file)) return undefined;
+      const data = await sharp(file, {
+        limitInputPixels: MAX_PREPARED_IMAGE_PIXELS,
+      })
+        .rotate()
+        .resize(320, 180, { fit: "inside", withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      return `data:image/png;base64,${data.toString("base64")}`;
+    },
+    (file) => shell.showItemInFolder(file),
+  );
+  return nativeLibraryBrowser;
+}
+
+async function compositionWindow(width: number, height: number) {
+  if (!previewWindow || previewWindow.isDestroyed()) {
+    previewWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width,
+      height,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+      },
+    });
+    secure(previewWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await previewWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await previewWindow.loadFile(path.join(__dirname, "../dist/index.html"), {
+        query: { slidePreview: "1" },
+      });
+  }
+  previewWindow.setContentSize(width, height);
+  return previewWindow;
+}
+
+async function effectCompositionWindow(width: number, height: number, owner: BrowserWindow | null) {
+  if (!previewOwnerAlive(owner)) return null;
+  if (!effectPreviewWindow || effectPreviewWindow.isDestroyed()) {
+    effectPreviewWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width,
+      height,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+      },
+    });
+    secure(effectPreviewWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await effectPreviewWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await effectPreviewWindow.loadFile(
+        path.join(__dirname, "../dist/index.html"),
+        { query: { slidePreview: "1" } },
+      );
+  }
+  const window = effectPreviewWindow;
+  if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
+  window.setContentSize(width, height);
+  return window;
+}
+
+async function acquireEffectPreviewSlot() {
+  if (admittedEffectPreviews < EFFECT_PREVIEW_MAX_ADMITTED) {
+    admittedEffectPreviews++;
+    return;
+  }
+  await new Promise<void>((resolve) => effectPreviewSlotWaiters.push(resolve));
+  admittedEffectPreviews++;
+}
+
+function releaseEffectPreviewSlot() {
+  admittedEffectPreviews--;
+  effectPreviewSlotWaiters.shift()?.();
+}
+
+async function waitForSlidePreviewIdle() {
+  while (pendingPreviews > 0) {
+    await previewQueue.catch(() => {});
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+}
 
 const operations: Record<string, (...args: any[]) => any> = {
   managedFonts: (documentId?: string) =>
@@ -1437,7 +1600,9 @@ const operations: Record<string, (...args: any[]) => any> = {
         shell.showItemInFolder(await storage.file(request.id));
         return storage.list();
       }
-      return storage.run(request);
+      const output = await storage.run(request);
+      if (request.type !== "list") nativeLibraryBrowser?.invalidate();
+      return output;
     });
     effectLibraryQueue = result.then(
       () => undefined,
@@ -1654,6 +1819,39 @@ const operations: Record<string, (...args: any[]) => any> = {
           `Slide transfer asset failed hash verification: ${assetId}`,
         );
     }),
+  async libraryBrowser(raw: unknown) {
+    await refreshLifecycleSettings();
+    if (lifecycleMode === "portable")
+      throw new Error("Native Library folders are unavailable in Portable mode");
+    const request = libraryBrowserRequestSchema.parse(raw);
+    const storage = requireStorage();
+    const browser = activeNativeLibraryBrowser();
+    if (request.type === "import-files") {
+      const selected = await dialog.showOpenDialog(editor!, {
+        properties: ["openFile", "multiSelections"],
+      });
+      try {
+        if (!selected.canceled)
+          for (const source of selected.filePaths) {
+            if (mediaFolder(source) !== request.category)
+              throw new Error("Select files belonging to the current category");
+            await importManagedFile(
+              storage.assetRoot,
+              path.basename(source),
+              source,
+              (hash) => storage.openProtection.protect([hash]),
+              request.folder,
+            );
+          }
+      } catch (error) {
+        await browser.reconcileAfterMutation();
+        throw error;
+      }
+      const reconciliationError = await browser.reconcileAfterMutation();
+      return { entries: [], total: 0, folders: [], reconciliationError };
+    }
+    return browser.run(request);
+  },
   listAssets: (query, offset, limit) =>
     requireStorage().listAssets(
       String(query),
@@ -1792,11 +1990,83 @@ const operations: Record<string, (...args: any[]) => any> = {
   updateAsset: (asset) => requireStorage().updateAsset(asset),
   storePreview: (id, data) =>
     requireStorage().storePreview(id, new Uint8Array(data)),
+  async effectThumbnail(raw: unknown) {
+    const owner = editor;
+    if (!previewOwnerAlive(owner)) return null;
+    const definition = effectDefinitionSchema.parse(raw);
+    const key = createHash("sha256")
+      .update(JSON.stringify([3, definition, 280, 280, 1, 0.5, 42]))
+      .digest("hex");
+    const file = path.join(
+      requireStorage().cacheRoot,
+      "effect-thumbnails",
+      key + ".png",
+    );
+    try {
+      const data = await fs.readFile(file);
+      return previewOwnerAlive(owner) ? `data:image/png;base64,${data.toString("base64")}` : null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    const existing = effectThumbnailJobs.get(key);
+    if (existing) return existing;
+
+    const job = (async () => {
+      await acquireEffectPreviewSlot();
+      try {
+        if (!previewOwnerAlive(owner)) return null;
+        const task = effectPreviewQueue.then(async () => {
+          // Effect Library thumbnails yield to presentation/slide preview work.
+          // They use a separate compositor window, so queued effects can never
+          // sit ahead of slide captures on the presentation preview queue.
+          await waitForSlidePreviewIdle();
+          if (!previewOwnerAlive(owner)) return null;
+          const window = await effectCompositionWindow(280, 280, owner);
+          if (!window) return null;
+          try {
+            const ready = await window.webContents.executeJavaScript(
+              "window.composeEffectThumbnail(" +
+                JSON.stringify(definition) +
+                ")",
+            );
+            if (!ready || !previewOwnerAlive(owner) || window.isDestroyed()) return null;
+            const image = await window.webContents.capturePage(undefined, {
+              stayHidden: true,
+            });
+            const data = image
+              .resize({ width: 280, height: 280, quality: "best" })
+              .toPNG();
+            await atomicWrite(file, data);
+            return `data:image/png;base64,${data.toString("base64")}`;
+          } finally {
+            if (!window.isDestroyed()) await window.webContents
+              .executeJavaScript("window.clearSlidePreview()")
+              .catch(() => {});
+          }
+        });
+        effectPreviewQueue = task.then(
+          () => undefined,
+          () => undefined,
+        );
+        return await task;
+      } catch (error) {
+        if (!previewOwnerAlive(owner)) return null;
+        throw error;
+      } finally {
+        releaseEffectPreviewSlot();
+      }
+    })().finally(() => effectThumbnailJobs.delete(key));
+    effectThumbnailJobs.set(key, job);
+    return job;
+  },
   capturePreview(
     projection: import("../src/core/documentProjection").DocumentProjection,
     width: unknown,
     height: unknown,
   ) {
+    const owner = editor;
+    if (!previewOwnerAlive(owner)) return Promise.resolve(null);
     // Capture an isolated canonical surface, never editor UI overlays.
     const requestedWidth = z.number().int().positive().max(2048).parse(width);
     const requestedHeight = z.number().int().positive().max(2048).parse(height);
@@ -1805,8 +2075,10 @@ const operations: Record<string, (...args: any[]) => any> = {
     if (pendingPreviews >= 8) return Promise.resolve(null);
     pendingPreviews++;
     const task = previewQueue.then(async () => {
+      if (!previewOwnerAlive(owner)) return null;
       const current = await operations.renderProjection(documentId, slideId);
       if (
+        !previewOwnerAlive(owner) ||
         current.epoch !== projection.epoch ||
         current.revision !== projection.revision
       )
@@ -1840,6 +2112,7 @@ const operations: Record<string, (...args: any[]) => any> = {
           );
       }
       const window = previewWindow;
+      if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
       window.setContentSize(requestedWidth, requestedHeight);
       try {
         const ready = await window.webContents.executeJavaScript(
@@ -1863,7 +2136,7 @@ const operations: Record<string, (...args: any[]) => any> = {
           })
           .toDataURL();
       } finally {
-        await window.webContents
+        if (!window.isDestroyed()) await window.webContents
           .executeJavaScript("window.clearSlidePreview()")
           .catch(() => {});
       }
@@ -2277,9 +2550,7 @@ void app.whenReady().then(async () => {
     editor?.webContents.send("file-command", "prepare-close");
   });
   editor.on("closed", () => {
-    previewWindow?.destroy();
-    previewWindow = null;
-    previewDocumentId = null;
+    tearDownPreviewWindows();
     editor = null;
     activeDocumentId = null;
     presentation?.setEditor(null);
@@ -2291,6 +2562,7 @@ app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => collaboration.close());
 // All window close/save prompts have completed before will-quit fires.
 app.on("will-quit", (event) => {
+  tearDownPreviewWindows();
   if (!storage || cacheCleanupFinished) return;
   event.preventDefault();
   if (cacheCleanupPending) return;

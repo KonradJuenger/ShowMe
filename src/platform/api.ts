@@ -331,6 +331,12 @@ export interface Platform {
   requestClose?(documentId: string): Promise<CloseResult>;
   readSlideTransfer(files: File[]): Promise<unknown | null>;
   startSlideDrag(bundle: unknown): boolean;
+  libraryBrowser?(
+    request: import("../core/libraryBrowser").LibraryBrowserRequest,
+  ): Promise<import("../core/libraryBrowser").LibraryBrowserResult>;
+  effectThumbnail?(
+    definition: import("../core/effects").EffectDefinition,
+  ): Promise<string | null>;
   listAssets(query: string, offset: number, limit: number): Promise<AssetPage>;
   getAsset(id: string): Promise<Asset>;
   importAssets(files?: File[]): Promise<Asset[]>;

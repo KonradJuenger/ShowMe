@@ -7,6 +7,8 @@ export interface LibraryLifecycleInfo {
 }
 export interface LibraryTrashItem {
   hash: string;
+  version?: 1;
+  kind?: "effect";
   trashedAt: string;
   originalRelativePath: string;
   bytes: number;

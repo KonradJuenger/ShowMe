@@ -260,11 +260,20 @@ export function registerIpcRouter({
         );
       }
 
+      // Read-only Library browsing and previews must not hold the save queue.
+      if (
+        method === "libraryBrowser" &&
+        ["list", "trash", "preview", "reveal"].includes(args[0]?.type)
+      )
+        return operation(...args);
+
       if (
         [
           "createDocument",
           "openDocumentFile",
           "setLibraryLifecycleMode",
+          "libraryBrowser",
+          "effectLibrary",
           "scanLibrary",
           "emptyOldLibraryTrash",
           "recoverUntitled",

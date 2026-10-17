@@ -1,3 +1,4 @@
+import { libraryPath, libraryWalk, libraryWalkSync } from "./libraryFilesystem";
 import { createHash, randomUUID } from "node:crypto";
 import {
   promises as fs,
@@ -32,6 +33,7 @@ import {
   MEDIA_FOLDERS,
   assetIdFromFilename,
   hashManagedSource,
+  isManagedFilenameProtected,
   libraryIndex,
 } from "./mediaLibrary";
 import { atomicWrite, digest } from "./storage/io";
@@ -84,21 +86,23 @@ export function documentLibraryHashes(
     for (const id of index.fontHashes(usages)) hashes.add(id);
     return [...hashes];
   }
-  const directories = MEDIA_FOLDERS.map((folder) => path.join(root, folder));
+  for (const folder of MEDIA_FOLDERS)
+    for (const relative of libraryWalkSync(root, folder)) {
+      const hash = usesFont(usages, path.basename(relative));
+      if (hash) hashes.add(hash);
+    }
   const trash = path.join(root, "Trash", "assets");
   if (existsSync(trash))
     for (const entry of readdirSync(trash, { withFileTypes: true })) {
-      if (entry.isDirectory() && !entry.isSymbolicLink())
-        directories.push(path.join(trash, entry.name));
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      for (const file of readdirSync(path.join(trash, entry.name), {
+        withFileTypes: true,
+      })) {
+        if (!file.isFile() || file.name === "item.json") continue;
+        const hash = usesFont(usages, file.name);
+        if (hash) hashes.add(hash);
+      }
     }
-  for (const directory of directories) {
-    if (!existsSync(directory)) continue;
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      const hash = usesFont(usages, entry.name);
-      if (hash) hashes.add(hash);
-    }
-  }
   return [...hashes];
 }
 
@@ -157,7 +161,7 @@ export function librarySavePath(
     : file + ext;
 }
 
-const trashSchema = z
+const mediaTrashSchema = z
   .object({
     hash: z.string().regex(/^[a-f0-9]{64}$/),
     trashedAt: z.string().datetime(),
@@ -165,20 +169,28 @@ const trashSchema = z
     bytes: z.number().nonnegative(),
   })
   .strict();
+export const libraryTrashSchema = z.union([
+  mediaTrashSchema,
+  mediaTrashSchema
+    .extend({ version: z.literal(1), kind: z.literal("effect") })
+    .strict(),
+]);
 const protectionSchema = z.object({
   pid: z.number().int().positive(),
   hashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)),
 });
 
-function validateTrashDestination(root: string, item: LibraryTrashItem) {
-  const parts = item.originalRelativePath.split(/[\\/]/);
+export function validateTrashDestination(root: string, item: LibraryTrashItem) {
+  const parts = item.originalRelativePath.replaceAll("\\", "/").split("/");
   if (
-    parts.length !== 2 ||
-    !MEDIA_FOLDERS.includes(parts[0] as (typeof MEDIA_FOLDERS)[number]) ||
-    assetIdFromFilename(parts[1]) !== item.hash ||
-    !isInsideRoot(root, path.join(root, item.originalRelativePath))
+    parts.length < 2 ||
+    !("kind" in item && item.kind === "effect"
+      ? parts[0] === "Effects" && parts.at(-1)!.endsWith(".txt")
+      : MEDIA_FOLDERS.includes(parts[0] as (typeof MEDIA_FOLDERS)[number]) &&
+        assetIdFromFilename(parts.at(-1)!) === item.hash)
   )
     throw new Error("Invalid library trash destination");
+  libraryPath(root, item.originalRelativePath);
 }
 
 function verifyRestoredSource(file: string, expected: string) {
@@ -221,11 +233,17 @@ export function restoreLibraryAsset(root: string, hash: string) {
       throw new Error("Unsafe Library Trash entry");
     const metadata = path.join(dir, "item.json");
     if (!existsSync(metadata)) continue;
-    const item = trashSchema.parse(JSON.parse(readFileSync(metadata, "utf8")));
-    if (item.hash !== hash) continue;
+    const item = libraryTrashSchema.parse(
+      JSON.parse(readFileSync(metadata, "utf8")),
+    );
+    if (("kind" in item && item.kind === "effect") || item.hash !== hash)
+      continue;
     validateTrashDestination(root, item);
-    const source = path.join(dir, path.basename(item.originalRelativePath));
-    const destination = path.join(root, item.originalRelativePath);
+    const source = path.join(
+      dir,
+      path.posix.basename(item.originalRelativePath.replaceAll("\\", "/")),
+    );
+    const destination = libraryPath(root, item.originalRelativePath, true);
     if (existsSync(source) && !existsSync(destination)) {
       if (lstatSync(source).isSymbolicLink())
         throw new Error("Unsafe Library Trash asset");
@@ -324,6 +342,7 @@ type PhysicalAsset = {
   relative: string;
   bytes: number;
   mtimeMs: number;
+  protectedFromCleanup: boolean;
 };
 type TrashEntry = LibraryTrashItem & { directory: string; file: string };
 
@@ -411,11 +430,14 @@ export class LibraryLifecycle {
         await fs.rmdir(dir);
         continue;
       }
-      const item = trashSchema.parse(
+      const item = libraryTrashSchema.parse(
         JSON.parse(await fs.readFile(path.join(dir, "item.json"), "utf8")),
       );
       validateTrashDestination(this.libraryRoot, item);
-      const file = path.join(dir, path.basename(item.originalRelativePath));
+      const file = path.join(
+        dir,
+        path.posix.basename(item.originalRelativePath.replaceAll("\\", "/")),
+      );
       if (!existsSync(file)) {
         if (
           existsSync(path.join(this.libraryRoot, item.originalRelativePath))
@@ -443,6 +465,7 @@ export class LibraryLifecycle {
     >();
     let presentations = 0;
     const fingerprints: string[] = [];
+    const protectedFiles: string[] = [];
 
     const visit = async (directory: string) => {
       for (const entry of await fs.readdir(directory, {
@@ -461,6 +484,19 @@ export class LibraryLifecycle {
           throw new Error(`Cannot safely scan symbolic link: ${file}`);
         if (entry.isDirectory()) await visit(file);
         else if (entry.isFile()) {
+          const libraryRelative = path.relative(this.libraryRoot, file);
+          const libraryParts = libraryRelative.split(path.sep);
+          if (
+            libraryParts.length >= 2 &&
+            !libraryRelative.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(libraryRelative) &&
+            MEDIA_FOLDERS.includes(
+              libraryParts[0] as (typeof MEDIA_FOLDERS)[number],
+            ) &&
+            assetIdFromFilename(entry.name) &&
+            isManagedFilenameProtected(entry.name)
+          )
+            protectedFiles.push(libraryParts.join("/"));
           if (path.extname(entry.name).toLowerCase() === ".sme") {
             const text = await fs.readFile(file, "utf8");
             const raw = JSON.parse(text);
@@ -487,7 +523,11 @@ export class LibraryLifecycle {
       fontUsages: [...fontUsages.values()],
       presentations,
       fingerprint: digest(
-        (await fs.realpath(this.root)) + "\n" + fingerprints.sort().join("\n"),
+        (await fs.realpath(this.root)) +
+          "\n" +
+          fingerprints.sort().join("\n") +
+          "\nprotected:\n" +
+          protectedFiles.sort().join("\n"),
       ),
     };
   }
@@ -519,26 +559,21 @@ export class LibraryLifecycle {
 
   private async physicalAssets() {
     const assets: PhysicalAsset[] = [];
-    for (const folder of MEDIA_FOLDERS) {
-      for (const entry of await fs.readdir(
-        path.join(this.libraryRoot, folder),
-        {
-          withFileTypes: true,
-        },
-      )) {
-        if (!entry.isFile()) continue;
-        const hash = assetIdFromFilename(entry.name);
+    for (const folder of MEDIA_FOLDERS)
+      for (const relative of await libraryWalk(this.libraryRoot, folder)) {
+        const hash = assetIdFromFilename(path.basename(relative));
         if (!hash) continue;
-        const relative = path.join(folder, entry.name);
-        const stat = await fs.stat(path.join(this.libraryRoot, relative));
+        const stat = await fs.stat(libraryPath(this.libraryRoot, relative));
         assets.push({
           hash,
           relative,
           bytes: stat.size,
           mtimeMs: stat.mtimeMs,
+          protectedFromCleanup: isManagedFilenameProtected(
+            path.basename(relative),
+          ),
         });
       }
-    }
     return assets;
   }
 
@@ -549,6 +584,8 @@ export class LibraryLifecycle {
   ) {
     const live = await this.protection.hashes();
     for (const hash of roots.assetHashes) live.add(hash);
+    // Document/draft references are hash-wide. Filename protection belongs
+    // only to that physical copy and must never enter this hash-wide set.
     const allDocuments = this.openDocuments();
     for (const document of allDocuments)
       for (const hash of documentAssetIds(document)) live.add(hash);
@@ -563,7 +600,9 @@ export class LibraryLifecycle {
       })),
       ...trash.map((item) => ({
         hash: item.hash,
-        name: path.basename(item.originalRelativePath),
+        name: path.posix.basename(
+          item.originalRelativePath.replaceAll("\\", "/"),
+        ),
       })),
     ]) {
       if (usesFont(usages, item.name)) live.add(item.hash);
@@ -629,15 +668,17 @@ export class LibraryLifecycle {
       if (cleanup)
         for (const item of assets) {
           if (
+            !item.protectedFromCleanup &&
             !live.has(item.hash) &&
             (await hashManagedSource(
-              path.join(this.libraryRoot, item.relative),
+              libraryPath(this.libraryRoot, item.relative),
             )) !== item.hash
           )
             throw new Error(`Asset hash mismatch: ${item.relative}`);
         }
       for (const item of trash) {
-        const needsRestore = restore && live.has(item.hash);
+        const needsRestore =
+          restore && !("kind" in item) && live.has(item.hash);
         const needsExpiry =
           expire &&
           !live.has(item.hash) &&
@@ -655,10 +696,16 @@ export class LibraryLifecycle {
         otherBytes - assets.reduce((sum, item) => sum + item.bytes, 0),
       );
       for (const item of trash) {
-        if (!restore || !live.has(item.hash)) continue;
-        const destination = path.join(
+        if (
+          !restore ||
+          ("kind" in item && item.kind === "effect") ||
+          !live.has(item.hash)
+        )
+          continue;
+        const destination = libraryPath(
           this.libraryRoot,
           item.originalRelativePath,
+          true,
         );
         if (!existsSync(destination)) {
           await fs.rename(item.file, destination);
@@ -669,7 +716,7 @@ export class LibraryLifecycle {
         // If both copies exist, keep the redundant trash copy for user review.
       }
       for (const item of assets) {
-        if (live.has(item.hash)) {
+        if (item.protectedFromCleanup || live.has(item.hash)) {
           result.referencedBytes += item.bytes;
           continue;
         }
@@ -678,7 +725,7 @@ export class LibraryLifecycle {
         // Recheck process drafts immediately before the move, including imports
         // that started while filesystem scanning was in progress.
         if ((await this.protection.hashes()).has(item.hash)) continue;
-        const source = path.join(this.libraryRoot, item.relative);
+        const source = libraryPath(this.libraryRoot, item.relative);
         const stat = await fs.stat(source);
         if (stat.size !== item.bytes || stat.mtimeMs !== item.mtimeMs)
           throw new Error(`Asset changed during scan: ${source}`);
@@ -748,7 +795,11 @@ export class LibraryLifecycle {
       result.unusedBytes = 0;
       const currentProtection = await this.protection.hashes();
       for (const item of await this.physicalAssets()) {
-        if (live.has(item.hash) || currentProtection.has(item.hash))
+        if (
+          item.protectedFromCleanup ||
+          live.has(item.hash) ||
+          currentProtection.has(item.hash)
+        )
           result.referencedBytes += item.bytes;
         else result.unusedBytes += item.bytes;
       }
@@ -764,9 +815,10 @@ export class LibraryLifecycle {
         try {
           await this.validateBoundary();
           await this.validateManagedDirectories();
-          const destination = path.join(
+          const destination = libraryPath(
             this.libraryRoot,
             item.originalRelativePath,
+            true,
           );
           try {
             await fs.copyFile(item.file, destination, constants.COPYFILE_EXCL);

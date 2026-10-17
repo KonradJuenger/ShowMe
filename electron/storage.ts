@@ -62,6 +62,7 @@ import {
   libraryIndex,
   folderForMediaType,
   findManagedFile,
+  setManagedFilenameProtected,
 } from "./mediaLibrary";
 
 interface StoredDocument {
@@ -850,23 +851,22 @@ export class DocumentStorage {
     for (const assetId of assetIds) {
       let asset = await this.assetForDocument(id, assetId);
       const source = this.assetPathForDocument(id, assetId);
-      if (!entry.packageAssets?.has(assetId)) {
-        const folder = path.basename(path.dirname(source));
-        asset = {
-          ...asset,
-          filename: path.basename(source),
-          mediaType:
-            folder === "images"
-              ? "image"
-              : folder === "video"
-                ? "video"
-                : folder === "audio"
-                  ? "audio"
-                  : folder === "fonts"
-                    ? "font"
-                    : "other",
-        };
-      }
+      const sourceName = path.basename(source);
+      const physicalManagedName =
+        assetIdFromFilename(sourceName) === assetId ? sourceName : null;
+      const metadataManagedName =
+        assetIdFromFilename(asset.filename) === assetId
+          ? asset.filename
+          : null;
+      const packageFilename = physicalManagedName
+        ? setManagedFilenameProtected(physicalManagedName, false)
+        : metadataManagedName
+          ? setManagedFilenameProtected(metadataManagedName, false)
+          : asset.filename;
+      asset = {
+        ...asset,
+        filename: packageFilename,
+      };
       const bytes = (await fs.stat(source)).size;
       if ((await hashFile(source)) !== assetId)
         throw new Error(`Asset ${assetId} failed hash verification`);
@@ -1122,7 +1122,11 @@ export class DocumentStorage {
     return entry.localMedia;
   }
 
-  private async importSource(name: string, source: string | Uint8Array) {
+  private async importSource(
+    name: string,
+    source: string | Uint8Array,
+    folder = "",
+  ) {
     const entry = this.importDocumentId
       ? this.documents.get(this.importDocumentId)
       : undefined;
@@ -1134,7 +1138,7 @@ export class DocumentStorage {
       const local = await this.localMedia(entry);
       const asset =
         typeof source === "string"
-          ? await local.importFile(source)
+          ? await local.importFile(source, undefined, folder)
           : await local.importBytes(name, source);
       entry.packageAssets ??= new Map();
       entry.packageAssets.set(asset.id, {
@@ -1154,16 +1158,21 @@ export class DocumentStorage {
       restoreLibraryAsset(this.assetRoot, hash);
     };
     return typeof source === "string"
-      ? this.media.importFile(source, protect)
+      ? this.media.importFile(source, protect, folder)
       : this.media.importBytes(name, source, protect);
   }
 
-  async importFile(file: string) {
-    return this.importSource(path.basename(file), file);
+  async importFile(file: string, folder = "") {
+    return this.importSource(path.basename(file), file, folder);
   }
 
   async importAssetData(name: string, bytes: Uint8Array) {
     return this.importSource(name, bytes);
+  }
+
+  /** Inventory metadata only; insertion and byte consumers still verify assets. */
+  async libraryAssetMetadata(id: string): Promise<Asset> {
+    return this.media.asset(id);
   }
 
   async asset(id: string): Promise<Asset> {
