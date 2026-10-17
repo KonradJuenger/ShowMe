@@ -1321,14 +1321,11 @@ export function Editor({
               : getInsertionWorldPoint();
 
             if (assetPayload) {
-              try {
-                const asset = assetSchema.parse(JSON.parse(assetPayload));
-                void mediaActions
-                  .insertAsset(asset, insertionPoint)
-                  .catch(reportError);
-              } catch (error) {
-                reportError(error);
-              }
+              void (async () => {
+                const draggedAsset = assetSchema.parse(JSON.parse(assetPayload));
+                const asset = await platform.getAsset(draggedAsset.id);
+                await mediaActions.insertAsset(asset, insertionPoint);
+              })().catch(reportError);
               return;
             }
             if (libraryPayload && platform.libraryBrowser) {

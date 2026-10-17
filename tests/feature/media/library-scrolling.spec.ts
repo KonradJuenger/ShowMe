@@ -20,6 +20,119 @@ test("inserting enriched Library metadata still verifies bytes and rejects a cha
   expect(await page.evaluate(() => window.mediaScrollHarness.insertedLibraryAssets)).toEqual([]);
 });
 
+test("dragging enriched Library metadata verifies bytes before modifying the document", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/tests/helpers/nativeMediaLibraryHarness.tsx";
+    window.mediaScrollHarness = await import(/* @vite-ignore */ modulePath);
+    window.mediaScrollHarness.mountNativeMediaLibraryHarness({
+      includeFolders: true,
+      deferRefresh: false,
+      rejectVerifiedAsset: true,
+    });
+  });
+  const panel = page.getByRole("region", { name: "Media scroll test" });
+  const source = panel.getByRole("button", {
+    name: "Select item-000.png",
+    exact: true,
+  });
+  const stage = page.getByTestId("stage");
+  await expect(source).toBeVisible();
+  await expect(stage).toBeVisible();
+  const documentId = await page
+    .locator("[data-editor]")
+    .getAttribute("data-document-id");
+  if (!documentId) throw new Error("Editor document missing");
+  const before = await page.evaluate(async (id) => {
+    const platformPath = "/src/platform/index.ts";
+    const { platform } = await import(/* @vite-ignore */ platformPath);
+    const projection = await platform.documentProjection!(id);
+    return {
+      revision: projection.revision,
+      slide: JSON.stringify(projection.slide),
+    };
+  }, documentId);
+
+  await source.dragTo(stage);
+
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Error: Asset hash mismatch: managed file changed" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => window.mediaScrollHarness.verifiedLibraryAssetRequests,
+    ),
+  ).toEqual(["a".repeat(64)]);
+  const after = await page.evaluate(async (id) => {
+    const platformPath = "/src/platform/index.ts";
+    const { platform } = await import(/* @vite-ignore */ platformPath);
+    const projection = await platform.documentProjection!(id);
+    return {
+      revision: projection.revision,
+      slide: JSON.stringify(projection.slide),
+    };
+  }, documentId);
+  expect(after).toEqual(before);
+});
+
+test("ordinary Library drag insertion verifies the asset and inserts it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/tests/helpers/nativeMediaLibraryHarness.tsx";
+    window.mediaScrollHarness = await import(/* @vite-ignore */ modulePath);
+    window.mediaScrollHarness.mountNativeMediaLibraryHarness({
+      includeFolders: true,
+      deferRefresh: false,
+    });
+  });
+  const panel = page.getByRole("region", { name: "Media scroll test" });
+  const source = panel.getByRole("button", {
+    name: "Select item-000.png",
+    exact: true,
+  });
+  const stage = page.getByTestId("stage");
+  await expect(source).toBeVisible();
+  await expect(stage).toBeVisible();
+  const documentId = await page
+    .locator("[data-editor]")
+    .getAttribute("data-document-id");
+  if (!documentId) throw new Error("Editor document missing");
+  const beforeRevision = await page.evaluate(async (id) => {
+    const platformPath = "/src/platform/index.ts";
+    const { platform } = await import(/* @vite-ignore */ platformPath);
+    return (await platform.documentProjection!(id)).revision;
+  }, documentId);
+
+  await source.dragTo(stage);
+
+  await expect
+    .poll(() =>
+      page.evaluate(async (id) => {
+        const platformPath = "/src/platform/index.ts";
+        const { platform } = await import(/* @vite-ignore */ platformPath);
+        return (await platform.documentProjection!(id)).revision;
+      }, documentId),
+    )
+    .toBeGreaterThan(beforeRevision);
+  expect(
+    await page.evaluate(
+      () => window.mediaScrollHarness.verifiedLibraryAssetRequests,
+    ),
+  ).toContain("a".repeat(64));
+  const insertedSlide = await page.evaluate(async (id) => {
+    const platformPath = "/src/platform/index.ts";
+    const { platform } = await import(/* @vite-ignore */ platformPath);
+    return JSON.stringify((await platform.documentProjection!(id)).slide);
+  }, documentId);
+  expect(insertedSlide).toContain("a".repeat(64));
+});
+
 test("Media scrolling survives a pending inventory refresh and paginated results while category navigation resets it", async ({
   page,
 }) => {
