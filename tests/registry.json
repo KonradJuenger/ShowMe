@@ -712,7 +712,7 @@
     "runtime": "browser",
     "created": "2026-10-16",
     "lastReviewed": "2026-10-17",
-    "reason": "Native Media viewport survives a pending inventory refresh and a late first-page response without losing already-loaded visible pages; category navigation resets scrolling; selection and top action forms preserve the grid position across sidebar widths; folder labels remain visible and real double-click and keyboard activation open folders and insert media; compact folder breadcrumbs retain ancestor navigation without redundant Up/tree controls or viewport shifts; enriched Library insertion calls verified asset resolution and refuses changed managed bytes; Library drag insertion uses the same verified asset boundary, rejects stale enriched metadata without advancing the document revision, and preserves ordinary drag insertion"
+    "reason": "Native Media viewport survives a pending inventory refresh and a late first-page response without losing already-loaded visible pages; category navigation resets scrolling; dedicated Move and Protect buttons replace the selected-item Actions menu, with Move cancellation restoring focus; selection and top action forms preserve the grid position across sidebar widths; folder labels remain visible and real double-click and keyboard activation open folders and insert media; compact folder breadcrumbs retain ancestor navigation without redundant Up/tree controls or viewport shifts; enriched Library insertion calls verified asset resolution and refuses changed managed bytes; Library drag insertion uses the same verified asset boundary, rejects stale enriched metadata without advancing the document revision, and preserves ordinary drag insertion"
   },
   {
     "id": "media-library-effects",

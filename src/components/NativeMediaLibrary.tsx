@@ -174,8 +174,8 @@ export function NativeMediaLibrary({
   const host = useRef<HTMLDivElement>(null);
   const header = useRef<HTMLDivElement>(null);
   const libraryMenu = useRef<HTMLDetailsElement>(null);
-  const itemMenu = useRef<HTMLDetailsElement>(null);
-  const focusItemMenu = useRef(false);
+  const itemActionButton = useRef<HTMLButtonElement>(null);
+  const focusItemAction = useRef(false);
   const requested = useRef(new Set<number>());
   const generation = useRef(0);
 
@@ -226,7 +226,6 @@ export function NativeMediaLibrary({
     setMoving(false);
     setNewFolderMode(null);
     if (libraryMenu.current) libraryMenu.current.open = false;
-    if (itemMenu.current) itemMenu.current.open = false;
     requestPage(0);
   }, [requestPage]);
 
@@ -254,8 +253,6 @@ export function NativeMediaLibrary({
       const target = event.target as Node;
       if (libraryMenu.current && !libraryMenu.current.contains(target))
         libraryMenu.current.open = false;
-      if (itemMenu.current && !itemMenu.current.contains(target))
-        itemMenu.current.open = false;
       if (!header.current?.contains(target)) {
         setMoving(false);
         setNewFolderMode(null);
@@ -313,7 +310,12 @@ export function NativeMediaLibrary({
       try {
         const asset = entry.asset
           ? await platform.getAsset(entry.asset.id)
-          : (await platform.libraryBrowser({ type: "import", path: entry.path })).asset;
+          : (
+              await platform.libraryBrowser({
+                type: "import",
+                path: entry.path,
+              })
+            ).asset;
         if (asset) onInsert(asset);
       } catch (failure) {
         setError(String(failure));
@@ -367,13 +369,11 @@ export function NativeMediaLibrary({
     setSelectedPaths(new Set());
     setMoving(false);
     setNewFolderMode(null);
-    if (itemMenu.current) itemMenu.current.open = false;
   };
 
   const selectEntry = (entry: LibraryBrowserEntry) => {
     setMoving(false);
     setNewFolderMode(null);
-    if (itemMenu.current) itemMenu.current.open = false;
     setSelectedPaths((before) => {
       if (!selectionMode) return new Set([entry.path]);
       const next = new Set(before);
@@ -434,17 +434,24 @@ export function NativeMediaLibrary({
   const canOrganizeSelection = Boolean(selectionCategory);
   const canMoveSelection = canOrganizeSelection;
   const hasSelection = selectedEntries.length > 0;
-  const hasItemActions = Boolean(
-    canOrganizeSelection ||
-    selected?.kind === "trash" ||
-    (selected?.category !== "Effects" && selected?.managed),
+  const protectableEntries = selectedEntries.filter(
+    (entry) =>
+      entry.kind !== "trash" &&
+      entry.category !== "Effects" &&
+      (entry.kind === "folder" || entry.managed),
   );
+  const canProtectSelection =
+    protectableEntries.length === selectedEntries.length &&
+    protectableEntries.length > 0;
+  const selectionProtected = protectableEntries.every(
+    (entry) => entry.protection === "self",
+  );
+  const hasItemActions = canMoveSelection || selected?.kind === "trash";
   useLayoutEffect(() => {
-    if (!focusItemMenu.current) return;
-    focusItemMenu.current = false;
-    if (hasItemActions && itemMenu.current) {
-      itemMenu.current.open = true;
-      itemMenu.current.querySelector("summary")?.focus();
+    if (!focusItemAction.current) return;
+    focusItemAction.current = false;
+    if (hasItemActions && itemActionButton.current) {
+      itemActionButton.current.focus();
     }
   }, [selectedPaths, hasItemActions]);
 
@@ -457,10 +464,11 @@ export function NativeMediaLibrary({
 
   const cancelCommand = () => {
     const trigger =
-      moving || newFolderMode === "selection" ? itemMenu : libraryMenu;
+      moving || newFolderMode === "selection" ? itemActionButton : libraryMenu;
     setMoving(false);
     setNewFolderMode(null);
-    trigger.current?.querySelector("summary")?.focus();
+    if (trigger === itemActionButton) itemActionButton.current?.focus();
+    else libraryMenu.current?.querySelector("summary")?.focus();
   };
 
   return (
@@ -469,9 +477,7 @@ export function NativeMediaLibrary({
       ref={host}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
-        const openMenu = [libraryMenu.current, itemMenu.current].find(
-          (menu) => menu?.open,
-        );
+        const openMenu = libraryMenu.current?.open ? libraryMenu.current : null;
         if (openMenu) {
           event.stopPropagation();
           openMenu.open = false;
@@ -584,101 +590,41 @@ export function NativeMediaLibrary({
             </span>
           )}
           {canMoveSelection && (
-            <button type="button" onClick={beginMove}>
+            <button type="button" ref={itemActionButton} onClick={beginMove}>
               Move…
             </button>
           )}
-          <details
-            className="native-library-actions"
-            ref={itemMenu}
-            hidden={!hasItemActions}
-          >
-            <summary
-              aria-label="Selected item actions"
-              aria-disabled={!hasItemActions}
-              tabIndex={hasItemActions ? 0 : -1}
-              onClick={(event) => {
-                if (!hasItemActions) event.preventDefault();
+          {canProtectSelection && (
+            <button
+              type="button"
+              aria-pressed={selectionProtected}
+              title="Protected media is kept when unused Library files are cleaned up."
+              onClick={() => {
+                void (async () => {
+                  for (const entry of protectableEntries) {
+                    await mutate({
+                      type: "protect",
+                      path: entry.path,
+                      protected: !selectionProtected,
+                    });
+                  }
+                })();
               }}
             >
-              Actions
-            </summary>
-            {hasItemActions && (
-              <div
-                className="native-library-menu native-library-item-menu"
-                role="group"
-                aria-label="Item commands"
-                onClick={() => {
-                  if (itemMenu.current) itemMenu.current.open = false;
-                }}
-              >
-                {canMoveSelection && (
-                  <button type="button" onClick={beginMove}>
-                    Move to Folder…
-                  </button>
-                )}
-                {canOrganizeSelection && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMoving(false);
-                      setNewFolderMode("selection");
-                    }}
-                  >
-                    New Folder with Selection…
-                  </button>
-                )}
-                {selected?.kind === "trash" ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void mutate({ type: "restore", path: selected.path })
-                    }
-                  >
-                    Restore
-                  </button>
-                ) : (
-                  selected &&
-                  selected.category !== "Effects" &&
-                  (selected.kind === "folder" || selected.managed) && (
-                    <button
-                      type="button"
-                      title="Protected media is kept when unused Library files are cleaned up."
-                      onClick={() =>
-                        void mutate({
-                          type: "protect",
-                          path: selected.path,
-                          protected: selected.protection !== "self",
-                        })
-                      }
-                    >
-                      {selected.protection === "self"
-                        ? selected.kind === "folder"
-                          ? "Allow Cleanup for Contents"
-                          : "Allow Cleanup"
-                        : selected.kind === "folder"
-                          ? "Protect Contents from Cleanup"
-                          : "Protect from Cleanup"}
-                    </button>
-                  )
-                )}
-                {selected?.kind === "folder" && (
-                  <button
-                    type="button"
-                    className="native-library-delete"
-                    onClick={() =>
-                      void mutate({
-                        type: "remove-folder",
-                        path: selected.path,
-                      })
-                    }
-                  >
-                    Delete Empty Folder
-                  </button>
-                )}
-              </div>
-            )}
-          </details>
+              {selectionProtected ? "Unprotect" : "Protect"}
+            </button>
+          )}
+          {selected?.kind === "trash" && (
+            <button
+              type="button"
+              ref={itemActionButton}
+              onClick={() =>
+                void mutate({ type: "restore", path: selected.path })
+              }
+            >
+              Restore
+            </button>
+          )}
           <button
             type="button"
             className="native-library-clear"
@@ -804,7 +750,7 @@ export function NativeMediaLibrary({
                       selectionMode={selectionMode}
                       onSelect={selectEntry}
                       onActions={(entry) => {
-                        focusItemMenu.current = true;
+                        focusItemAction.current = true;
                         selectEntry(entry);
                       }}
                       onOpenFolder={openFolder}

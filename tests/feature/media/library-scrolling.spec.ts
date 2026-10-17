@@ -6,18 +6,36 @@ declare global {
   }
 }
 
-test("inserting enriched Library metadata still verifies bytes and rejects a changed managed asset", async ({ page }) => {
+test("inserting enriched Library metadata still verifies bytes and rejects a changed managed asset", async ({
+  page,
+}) => {
   await page.goto("/");
   await page.evaluate(async () => {
     const modulePath = "/tests/helpers/nativeMediaLibraryHarness.tsx";
     window.mediaScrollHarness = await import(/* @vite-ignore */ modulePath);
-    window.mediaScrollHarness.mountNativeMediaLibraryHarness({ includeFolders: true, deferRefresh: false, rejectVerifiedAsset: true });
+    window.mediaScrollHarness.mountNativeMediaLibraryHarness({
+      includeFolders: true,
+      deferRefresh: false,
+      rejectVerifiedAsset: true,
+    });
   });
   const panel = page.getByRole("region", { name: "Media scroll test" });
-  await panel.getByRole("button", { name: "Select item-000.png", exact: true }).dblclick();
-  await expect(panel.getByText("Error: Asset hash mismatch: managed file changed", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.mediaScrollHarness.verifiedLibraryAssetRequests)).toEqual(["a".repeat(64)]);
-  expect(await page.evaluate(() => window.mediaScrollHarness.insertedLibraryAssets)).toEqual([]);
+  await panel
+    .getByRole("button", { name: "Select item-000.png", exact: true })
+    .dblclick();
+  await expect(
+    panel.getByText("Error: Asset hash mismatch: managed file changed", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => window.mediaScrollHarness.verifiedLibraryAssetRequests,
+    ),
+  ).toEqual(["a".repeat(64)]);
+  expect(
+    await page.evaluate(() => window.mediaScrollHarness.insertedLibraryAssets),
+  ).toEqual([]);
 });
 
 test("dragging enriched Library metadata verifies bytes before modifying the document", async ({
@@ -246,34 +264,19 @@ test("Media actions stay above a stable scrolling viewport during selection and 
     const before = await list.boundingBox();
     await folder.click();
     expect((await list.boundingBox())?.y).toBe(before?.y);
-    await panel.getByLabel("Selected item actions", { exact: true }).click();
-    const commands = panel.getByRole("group", { name: "Item commands" });
-    await expect(commands).toBeVisible();
-    const bounds = await panel.boundingBox();
-    const menu = await commands.boundingBox();
-    expect(menu!.x).toBeGreaterThanOrEqual(bounds!.x);
-    expect(menu!.x + menu!.width).toBeLessThanOrEqual(
-      bounds!.x + bounds!.width,
-    );
-    expect((await list.boundingBox())?.y).toBe(before?.y);
-    await commands
-      .getByRole("button", { name: "Move to Folder…", exact: true })
-      .click();
+    await expect(
+      panel.getByLabel("Selected item actions", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      panel.getByRole("button", { name: "Protect", exact: true }),
+    ).toBeVisible();
+    await panel.getByRole("button", { name: "Move…", exact: true }).click();
     await expect(panel.getByLabel("Destination folder")).toBeFocused();
     expect((await list.boundingBox())?.y).toBe(before?.y);
     await page.keyboard.press("Escape");
     await expect(
-      panel.getByLabel("Selected item actions", { exact: true }),
+      panel.getByRole("button", { name: "Move…", exact: true }),
     ).toBeFocused();
-    await panel.getByLabel("Selected item actions", { exact: true }).click();
-    await panel
-      .getByRole("button", { name: "New Folder with Selection…", exact: true })
-      .click();
-    await expect(
-      panel.getByRole("textbox", { name: "Folder name" }),
-    ).toBeFocused();
-    expect((await list.boundingBox())?.y).toBe(before?.y);
-    await page.keyboard.press("Escape");
     await panel.getByRole("button", { name: "Close item actions" }).click();
     expect((await list.boundingBox())?.y).toBe(before?.y);
   }
@@ -282,10 +285,7 @@ test("Media actions stay above a stable scrolling viewport during selection and 
     .getByRole("button", { name: "Actions for Brand Assets", exact: true })
     .click();
   await expect(
-    panel.getByRole("group", { name: "Item commands" }),
-  ).toBeVisible();
-  await expect(
-    panel.getByLabel("Selected item actions", { exact: true }),
+    panel.getByRole("button", { name: "Move…", exact: true }),
   ).toBeFocused();
   await page.keyboard.press("Escape");
   await panel.getByRole("button", { name: "Select", exact: true }).click();
