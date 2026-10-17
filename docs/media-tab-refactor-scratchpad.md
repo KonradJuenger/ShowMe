@@ -362,3 +362,39 @@ Verification:
 
 Native Electron, full/release, build/package, and the audience-navigation gate
 were not run. No commit or integration was performed.
+
+## Compact Media header — 2026-10-17
+
+Removed the Up button and folder-tree picker as requested. The header now has
+two compact rows: filter/selection controls, then item count, ancestor path,
+or selected-item actions. The redundant category breadcrumb is omitted at the
+root. Ancestor links remain available inside folders. Idle action controls
+are removed from layout; selection and navigation retain the same grid origin.
+The unused tree state, event listener, rendering, and styles were removed.
+
+Verification: `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts","tests/feature/media/library-effects.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts tests/feature/media/library-effects.spec.ts`
+passed all 5 declarations. `npm run typecheck`, targeted ESLint on the two
+components and scrolling test, `npm run test:audit`, `git diff --check`, and
+the Impeccable source detector passed. The revised navigation test covers the
+removed controls, nested folder entry, ancestor links, and stable grid position.
+Root, selection, and nested states were visually checked using real CSS and
+synthetic inventory. Native Electron and the presenter gate were not run;
+no commit or integration was performed.
+
+## Supported Media categories and PR update — 2026-10-17
+
+Removed Audio and Other from the visible Media selector: neither is insertable
+as a presentation element. Images, Video, Effects, and Trash remain. Internal
+Library categories and persisted formats are unchanged. The scrolling test
+now switches to Video and checks that both unsupported options are absent.
+
+Final compact-header/filter verification before updating PR #11:
+
+- `$env:SHOWME_TEST_FILES = '["tests/feature/media/library-scrolling.spec.ts","tests/feature/media/library-effects.spec.ts"]'; npx playwright test tests/feature/media/library-scrolling.spec.ts tests/feature/media/library-effects.spec.ts`: 5 passed.
+- `npm run typecheck`: passed.
+- `npx eslint src/components/MediaFolderNavigation.tsx src/components/NativeMediaLibrary.tsx tests/helpers/nativeMediaLibraryHarness.tsx tests/feature/media/library-scrolling.spec.ts`: passed.
+- `npm run test:audit`: passed; declaration counts unchanged.
+- `git diff --check`: passed.
+
+The native Electron and presenter gate checks were not repeated. This updates
+the existing task branch and PR only; it does not integrate into main.

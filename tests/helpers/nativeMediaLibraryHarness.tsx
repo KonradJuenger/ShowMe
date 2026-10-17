@@ -128,7 +128,7 @@ export function mountNativeMediaLibraryHarness({
               )
             : entries
                 .slice(0, 6)
-                .map((entry) => ({ ...entry, category: "audio" })),
+                .map((entry) => ({ ...entry, category: "video" })),
       total:
         request.category === "Effects"
           ? effects.length

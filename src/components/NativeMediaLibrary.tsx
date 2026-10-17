@@ -31,9 +31,7 @@ const FILTERS: Array<{
 }> = [
   { id: "images", label: "Images" },
   { id: "video", label: "Video" },
-  { id: "audio", label: "Audio" },
   { id: "Effects", label: "Effects" },
-  { id: "other", label: "Other" },
   { id: "Trash", label: "Trash" },
 ];
 
@@ -565,22 +563,37 @@ export function NativeMediaLibrary({
           role="region"
           aria-label="Selected Library items"
         >
-          <span
-            className="native-library-selection-name"
-            title={selected?.path}
-            role="status"
-          >
-            {selectionMode
-              ? selectedEntries.length + " selected"
-              : (selected?.name ??
-                total + " " + (total === 1 ? "item" : "items"))}
-          </span>
+          {!selectionMode && !hasSelection && folder && currentCategory ? (
+            <MediaFolderNavigation
+              rootLabel={currentRootLabel}
+              folder={folder}
+              onNavigate={(next) => {
+                finishSelection();
+                setFolder(next);
+              }}
+            />
+          ) : (
+            <span
+              className="native-library-selection-name"
+              title={selected?.path}
+              role="status"
+            >
+              {selectionMode
+                ? selectedEntries.length + " selected"
+                : (selected?.name ??
+                  total + " " + (total === 1 ? "item" : "items"))}
+            </span>
+          )}
           {canMoveSelection && (
             <button type="button" onClick={beginMove}>
               Move…
             </button>
           )}
-          <details className="native-library-actions" ref={itemMenu}>
+          <details
+            className="native-library-actions"
+            ref={itemMenu}
+            hidden={!hasItemActions}
+          >
             <summary
               aria-label="Selected item actions"
               aria-disabled={!hasItemActions}
@@ -672,29 +685,12 @@ export function NativeMediaLibrary({
             className="native-library-clear"
             aria-label="Close item actions"
             disabled={!hasSelection && !selectionMode}
+            hidden={!hasSelection && !selectionMode}
             onClick={finishSelection}
           >
             <IconClose />
           </button>
         </div>
-
-        {currentCategory && (
-          <MediaFolderNavigation
-            key={currentCategory}
-            category={currentCategory}
-            rootLabel={currentRootLabel}
-            folder={folder}
-            folders={folders}
-            onNavigate={(next) => {
-              finishSelection();
-              setFolder(next);
-            }}
-            onBrowse={() => {
-              setMoving(false);
-              setNewFolderMode(null);
-            }}
-          />
-        )}
 
         {newFolderMode && folderCreationCategory && (
           <form

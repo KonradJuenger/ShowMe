@@ -59,7 +59,13 @@ test("Media scrolling survives a pending inventory refresh and paginated results
   ).toBeVisible();
   expect(await list.evaluate((node) => node.scrollTop)).toBeCloseTo(top, 0);
 
-  await panel.getByLabel("Media type filter").selectOption("audio");
+  await expect(
+    panel.getByRole("option", { name: "Audio", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    panel.getByRole("option", { name: "Other", exact: true }),
+  ).toHaveCount(0);
+  await panel.getByLabel("Media type filter").selectOption("video");
   await expect
     .poll(() =>
       page.evaluate(
@@ -222,7 +228,7 @@ test("Folder names are visible at rest and folders and media support normal doub
   ).toEqual(["item-000.png", "item-000.png"]);
 });
 
-test("Media folder hierarchy reveals nested branches and keeps the current path and parent navigation clear", async ({
+test("Compact Media navigation keeps ancestor links and stable layout without redundant folder controls", async ({
   page,
 }) => {
   await page.goto("/");
@@ -235,77 +241,45 @@ test("Media folder hierarchy reveals nested branches and keeps the current path 
     });
   });
   const panel = page.getByRole("region", { name: "Media scroll test" });
+  const list = panel.getByLabel("Media Library", { exact: true });
+  const folder = panel.getByRole("button", {
+    name: "Select folder Brand Assets",
+    exact: true,
+  });
+  await expect(folder).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Up one folder", exact: true }),
+  ).toHaveCount(0);
+  await expect(panel.getByLabel("Browse folders", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    panel.getByRole("navigation", { name: "Current folder" }),
+  ).toHaveCount(0);
+  const initial = await list.boundingBox();
+  await folder.dblclick();
+  await panel
+    .getByRole("button", { name: "Select folder Logos", exact: true })
+    .dblclick();
   const breadcrumbs = panel.getByRole("navigation", { name: "Current folder" });
-  const up = panel.getByRole("button", { name: "Up one folder", exact: true });
-  const browse = panel.getByLabel("Browse folders", { exact: true });
-  const hierarchy = panel.getByRole("navigation", { name: "Folder hierarchy" });
-  await expect(
-    panel.getByRole("button", {
-      name: "Select folder Brand Assets",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(up).toBeDisabled();
-  await expect(
-    breadcrumbs.getByRole("button", { name: "Images", exact: true }),
-  ).toHaveAttribute("aria-current", "location");
-  const initial = await panel
-    .getByLabel("Media Library", { exact: true })
-    .boundingBox();
-  await browse.click();
-  await hierarchy
-    .getByRole("button", { name: "Expand Brand Assets", exact: true })
-    .click();
-  await expect(
-    hierarchy.getByRole("button", {
-      name: "Open folder Brand Assets / Logos",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await hierarchy
-    .getByRole("button", { name: "Expand Brand Assets / Logos", exact: true })
-    .click();
-  await expect(
-    hierarchy.getByRole("button", {
-      name: "Open folder Brand Assets / Logos / Exports",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await hierarchy
-    .getByRole("button", {
-      name: "Open folder Brand Assets / Logos",
-      exact: true,
-    })
-    .click();
-  await expect(hierarchy).not.toBeVisible();
-  await expect(browse).toBeFocused();
   await expect(
     breadcrumbs.getByRole("button", { name: "Logos", exact: true }),
   ).toHaveAttribute("aria-current", "location");
   await expect(
     panel.getByRole("button", { name: "Select folder Exports", exact: true }),
   ).toBeVisible();
-  expect(
-    (await panel.getByLabel("Media Library", { exact: true }).boundingBox())?.y,
-  ).toBe(initial?.y);
-  await browse.click();
-  await expect(
-    hierarchy.getByRole("button", {
-      name: "Open folder Brand Assets / Logos",
-      exact: true,
-    }),
-  ).toHaveAttribute("aria-current", "location");
-  await page.keyboard.press("Escape");
-  await expect(hierarchy).not.toBeVisible();
-  await up.click();
+  expect((await list.boundingBox())?.y).toBe(initial?.y);
+  await breadcrumbs
+    .getByRole("button", { name: "Brand Assets", exact: true })
+    .click();
   await expect(
     breadcrumbs.getByRole("button", { name: "Brand Assets", exact: true }),
   ).toHaveAttribute("aria-current", "location");
   await breadcrumbs
     .getByRole("button", { name: "Images", exact: true })
     .click();
-  await expect(up).toBeDisabled();
   await expect(
     panel.getByRole("button", { name: "Select folder Photos", exact: true }),
   ).toBeVisible();
+  expect((await list.boundingBox())?.y).toBe(initial?.y);
 });
