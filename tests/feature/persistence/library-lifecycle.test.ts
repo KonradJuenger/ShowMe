@@ -315,6 +315,32 @@ it("a managed Library directory escaping through a symlink blocks cleanup", asyn
   expect(fixture.deleteTrash).not.toHaveBeenCalled();
 });
 
+it("lifecycle restoration preserves Trash when original parent names collide by case or NFC", async () => {
+  for (const [existing, original] of [["project", "Project"], ["Café", "Cafe\u0301"]]) {
+    const fixture = await libraryFixture();
+    await fixture.lifecycle.scan(true);
+    const trashRoot = path.join(fixture.libraryRoot, "Trash", "assets");
+    const entries = await Promise.all((await fs.readdir(trashRoot)).map(async name => {
+      const directory = path.join(trashRoot, name);
+      return { directory, metadata: JSON.parse(await readFile(path.join(directory, "item.json"), "utf8")) };
+    }));
+    const directory = entries.find(entry => entry.metadata.hash === fixture.asset.id)!.directory;
+    const metadataFile = path.join(directory, "item.json");
+    const metadata = JSON.parse(await readFile(metadataFile, "utf8"));
+    metadata.originalRelativePath = `images/${original}/${path.basename(fixture.source)}`;
+    await writeFile(metadataFile, JSON.stringify(metadata));
+    await mkdir(path.join(fixture.libraryRoot, "images", existing));
+    await writeFile(path.join(fixture.showMeRoot, "referenced.sme"), JSON.stringify(fixture.document));
+    const result = await fixture.lifecycle.scan(true, true);
+    expect(result.complete).toBe(false);
+    expect(result.errors.join("\n")).toContain("collides");
+    expect(await readFile(path.join(directory, path.basename(fixture.source)))).toEqual(Buffer.from([1, 2, 3]));
+    expect(await readFile(metadataFile, "utf8")).toContain(original);
+    expect(await fs.readdir(path.join(fixture.libraryRoot, "images", existing))).toEqual([]);
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+  }
+});
+
 it("a referenced Trash asset is restored from a deeply nested presentation before expiry", async () => {
   const fixture = await libraryFixture();
   expect((await fixture.lifecycle.scan(true)).trash).toHaveLength(2);

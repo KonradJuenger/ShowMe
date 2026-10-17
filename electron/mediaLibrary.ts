@@ -1,5 +1,6 @@
 import {
   libraryPath,
+  libraryMutationPath,
   libraryWalk,
   libraryWalkSync,
   observeLibrary,
@@ -178,7 +179,8 @@ export async function importManagedFile(
       )
     )
       return { id, file: existing, created: false };
-    const destination = path.join(directory, managedFilename(name, id));
+    const destination = libraryMutationPath(root,
+      path.relative(root, path.join(directory, managedFilename(name, id))).split(path.sep).join("/"));
     // Hard-link publication cannot replace another importer's immutable winner.
     try {
       await fs.link(temporary, destination);

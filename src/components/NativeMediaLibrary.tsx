@@ -311,10 +311,9 @@ export function NativeMediaLibrary({
     async (entry: LibraryBrowserEntry) => {
       if (!isInsertable(entry) || !platform.libraryBrowser) return;
       try {
-        const asset =
-          entry.asset ??
-          (await platform.libraryBrowser({ type: "import", path: entry.path }))
-            .asset;
+        const asset = entry.asset
+          ? await platform.getAsset(entry.asset.id)
+          : (await platform.libraryBrowser({ type: "import", path: entry.path })).asset;
         if (asset) onInsert(asset);
       } catch (failure) {
         setError(String(failure));

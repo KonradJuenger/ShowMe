@@ -6,6 +6,20 @@ declare global {
   }
 }
 
+test("inserting enriched Library metadata still verifies bytes and rejects a changed managed asset", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/tests/helpers/nativeMediaLibraryHarness.tsx";
+    window.mediaScrollHarness = await import(/* @vite-ignore */ modulePath);
+    window.mediaScrollHarness.mountNativeMediaLibraryHarness({ includeFolders: true, deferRefresh: false, rejectVerifiedAsset: true });
+  });
+  const panel = page.getByRole("region", { name: "Media scroll test" });
+  await panel.getByRole("button", { name: "Select item-000.png", exact: true }).dblclick();
+  await expect(panel.getByText("Error: Asset hash mismatch: managed file changed", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.mediaScrollHarness.verifiedLibraryAssetRequests)).toEqual(["a".repeat(64)]);
+  expect(await page.evaluate(() => window.mediaScrollHarness.insertedLibraryAssets)).toEqual([]);
+});
+
 test("Media scrolling survives a pending inventory refresh and paginated results while category navigation resets it", async ({
   page,
 }) => {

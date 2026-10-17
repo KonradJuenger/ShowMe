@@ -25,6 +25,23 @@ import type { Asset } from "../../../src/core/assets";
 import { NativeLibraryBrowser } from "../../../electron/libraryBrowser";
 import { EffectLibraryStorage } from "../../../electron/effectLibrary";
 import { blankEffect } from "../../../src/core/effectAuthoring";
+import sharp from "sharp";
+
+it("enriched inventory remains untrusted after its managed image bytes change", async () => {
+  const { storage, runtime } = await storedDocument();
+  const original = await sharp({ create: { width: 8, height: 8, channels: 3, background: "red" } }).png().toBuffer();
+  const asset = await storage.importAssetData("enriched.png", original);
+  await storage.updateAsset({ ...asset, width: 8, height: 8 });
+  await expect(storage.asset(asset.id)).resolves.toMatchObject({ width: 8, height: 8 });
+  const file = storage.assetPath(asset.id);
+  const replacement = await sharp({ create: { width: 8, height: 8, channels: 3, background: "blue" } }).png().toBuffer();
+  await writeFile(file, replacement);
+  await libraryIndex(storage.assetRoot)!.refresh();
+  expect(await storage.libraryAssetMetadata(asset.id)).toMatchObject({ id: asset.id, width: 8, height: 8 });
+  await expect(storage.asset(asset.id)).rejects.toThrow("Asset not found");
+  expect(runtime.authority.revision).toBe(0);
+  expect(runtime.authority.document.slides[runtime.authority.document.deck.slideIds[0]].nodes[0].children).toEqual([]);
+});
 
 it("warm asset lookup and listing reuse inventory without directory enumeration", async () => {
   const { storage } = await storedDocument();

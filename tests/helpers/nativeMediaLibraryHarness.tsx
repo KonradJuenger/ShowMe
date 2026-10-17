@@ -11,6 +11,7 @@ let inventoryChanged: (() => void) | undefined;
 export const mediaLibraryRequests: number[] = [];
 export const appliedLibraryEffects: EffectDefinition[] = [];
 export const insertedLibraryAssets: string[] = [];
+export const verifiedLibraryAssetRequests: string[] = [];
 let completeRefresh: (() => void) | undefined;
 
 export function notifyMediaInventoryChanged() {
@@ -24,6 +25,7 @@ export function finishMediaInventoryRefresh() {
 export function mountNativeMediaLibraryHarness({
   includeFolders = false,
   deferRefresh = true,
+  rejectVerifiedAsset = false,
 } = {}) {
   const entries: LibraryBrowserEntry[] = Array.from(
     { length: 360 },
@@ -45,6 +47,8 @@ export function mountNativeMediaLibraryHarness({
       mime: "image/png",
       names: ["item-000.png"],
       bytes: 1,
+      width: 8,
+      height: 8,
       createdAt: "2026-10-16T00:00:00.000Z",
     };
     entries.unshift(
@@ -100,6 +104,13 @@ export function mountNativeMediaLibraryHarness({
     },
   ];
   let firstPageLoaded = false;
+  platform.getAsset = async (id) => {
+    verifiedLibraryAssetRequests.push(id);
+    if (rejectVerifiedAsset) throw new Error("Asset hash mismatch: managed file changed");
+    const asset = entries.find(entry => entry.asset?.id === id)?.asset;
+    if (!asset) throw new Error("Asset not found");
+    return asset;
+  };
   platform.libraryBrowser = async (request) => {
     if (request.type !== "list") return { entries: [], total: 0, folders: [] };
     mediaLibraryRequests.push(request.offset);

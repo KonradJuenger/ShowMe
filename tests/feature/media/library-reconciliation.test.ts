@@ -13,6 +13,7 @@ import {
   LibraryObservationChanged,
   observeLibrary,
 } from "../../../electron/libraryFilesystem";
+import { restoreLibraryAsset } from "../../../electron/libraryLifecycle";
 
 const browsers: NativeLibraryBrowser[] = [];
 afterEach(() => {
@@ -307,6 +308,42 @@ it("folder mutations reject nonportable names and case or Unicode-equivalent sib
   expect(await fs.readdir(path.join(storage.assetRoot, "images"))).toContain(
     "other",
   );
+});
+
+it("browser and indexed restoration reject case and NFC sibling collisions without consuming Trash", async () => {
+  const { storage, browser } = await fixture();
+  for (const [existing, original] of [["project", "Project"], ["Café", "Cafe\u0301"]]) {
+    await fs.mkdir(path.join(storage.assetRoot, "images", existing));
+    const bytes = Buffer.from(`restored ${original}`);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const filename = managedFilename("restored.png", hash);
+    const relative = `Trash/assets/${hash}`;
+    const directory = path.join(storage.assetRoot, relative);
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(path.join(directory, filename), bytes);
+    await fs.writeFile(path.join(directory, "item.json"), JSON.stringify({ hash, bytes: bytes.length,
+      trashedAt: "2026-10-17T00:00:00Z", originalRelativePath: `images/${original}/${filename}` }));
+    await libraryIndex(storage.assetRoot)!.refresh();
+    await libraryIndex(storage.assetRoot)!.verify(hash);
+    await expect(browser.run({ type: "restore", path: `${relative}/${filename}` })).rejects.toThrow("collides");
+    expect(() => restoreLibraryAsset(storage.assetRoot, hash)).toThrow("collides");
+    expect(await fs.readFile(path.join(directory, filename))).toEqual(bytes);
+    expect(await fs.readdir(path.join(storage.assetRoot, "images", existing))).toEqual([]);
+    expect(await fs.readdir(path.join(storage.assetRoot, "images"))).not.toContain(original);
+  }
+});
+
+it("import publication refuses a case-equivalent corrupt filename and preserves the conflicting bytes", async () => {
+  const { storage } = await fixture();
+  const bytes = Buffer.from("valid imported payload");
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const alias = `PHOTO__${hash}.PNG`;
+  const images = path.join(storage.assetRoot, "images");
+  await fs.writeFile(path.join(images, alias), "corrupt synced payload");
+  await libraryIndex(storage.assetRoot)!.refresh();
+  await expect(storage.importAssetData("photo.png", bytes)).rejects.toThrow("collides");
+  expect(await fs.readFile(path.join(images, alias), "utf8")).toBe("corrupt synced payload");
+  expect(await fs.readdir(images)).toEqual([alias]);
 });
 
 it("renamed valid copies resolve by hash while conflicts and partial sync bytes never become that asset", async () => {
