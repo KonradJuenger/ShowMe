@@ -10,6 +10,66 @@ import { imageIdentity, planPresentationImages } from "../../../src/core/present
 import { newPresentationDocument } from "../../../src/core/document";
 import { createMediaElement } from "../../../src/core/media";
 import { DocumentStorage } from "../../../electron/storage";
+import { blankEffect } from "../../../src/core/effectAuthoring";
+
+test("closing the editor destroys effect thumbnails and prevents queued previews from recreating hidden windows", async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "showme-effect-close-"));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined)) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder, SHOWME_DOCUMENT_DIR: path.join(folder, "presentations") });
+  const app = await electron.launch({ args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`], env });
+  let output = "";
+  app.process().stdout?.on("data", chunk => { output += String(chunk); });
+  app.process().stderr?.on("data", chunk => { output += String(chunk); });
+  try {
+    const page = await app.firstWindow();
+    await readyEditor(page);
+    const definition = blankEffect("css-js");
+    expect(await page.evaluate(definition => window.desktop!.effectThumbnail!(definition), definition)).toMatch(/^data:image\/png;base64,/);
+    const preview = app.windows().find(window => window.url().includes("slidePreview=1"))!;
+    await preview.evaluate(() => {
+      Object.assign(window, {
+        queuedEffectStarted: false,
+        composeEffectThumbnail: async () => {
+          Object.assign(window, { queuedEffectStarted: true });
+          await new Promise(() => {});
+        },
+      });
+    });
+    const jobs = page.evaluate(async definition => Promise.all(Array.from({ length: 12 }, (_, index) =>
+      window.desktop!.effectThumbnail!({ ...definition, name: `Pending ${index}` }).catch(() => null))), definition).catch(() => null);
+    await expect.poll(() => preview.evaluate(() => (window as unknown as { queuedEffectStarted: boolean }).queuedEffectStarted)).toBe(true);
+    await app.evaluate(({ app, BrowserWindow }) => {
+      const editor = BrowserWindow.getAllWindows().find(window => !window.webContents.getURL().includes("slidePreview=1"))!;
+      let closed = false;
+      editor.once("closed", () => { closed = true; });
+      app.on("browser-window-created", () => {
+        if (closed) process.stdout.write("SHOWME_PREVIEW_RECREATED_AFTER_CLOSE\n");
+      });
+    });
+    const exited = app.waitForEvent("close", { timeout: 10000 });
+    // Exercise accepted teardown with the scripted discard of this untitled
+    // fixture, rather than waiting for a native unsaved-changes dialog.
+    let closeResult: unknown;
+    const closeCommand = page.evaluate(() => window.desktop!.requestClose!(document.querySelector("[data-editor]")!.getAttribute("data-document-id")!))
+      .then(result => { closeResult = result; }, error => { closeResult = String(error); });
+    try {
+      await exited;
+    } catch (error) {
+      console.log("Windows remaining after close:", await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(window => ({ title: window.getTitle(), url: window.webContents.getURL(), visible: window.isVisible() }))));
+      console.log("Editor:", await page.locator("body").innerText().catch(() => "closed"));
+      console.log("Close command:", closeResult);
+      console.log(output);
+      throw error;
+    }
+    await closeCommand;
+    await jobs;
+    expect(output).not.toContain("SHOWME_PREVIEW_RECREATED_AFTER_CLOSE");
+  } finally {
+    await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
+    await app.close().catch(() => {});
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 test("opening a cold presentation caches every slide before navigation and keeps readiness green on later slides", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-open-images-"));
@@ -164,6 +224,7 @@ test("native rail composition captures canonical custom CSS pixels, excludes edi
       ([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined,
     ),
   ) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder });
   const app = await electron.launch({
     args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`],
     env,

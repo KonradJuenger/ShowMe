@@ -22,6 +22,7 @@ export function ContentEffectPreview({
   started = true,
   wholeSlide = false,
   viewport = { width: 280, height: 140 },
+  sampleSize = { width: 280, height: 140 },
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
@@ -45,6 +46,7 @@ export function ContentEffectPreview({
   started?: boolean;
   wholeSlide?: boolean;
   viewport?: { width: number; height: number };
+  sampleSize?: { width: number; height: number };
 }) {
   const root = useRef<HTMLDivElement>(null);
   const preview = useMemo(() => {
@@ -52,8 +54,8 @@ export function ContentEffectPreview({
       ? structuredClone(element)
       : createEmptyFrame("content-preview");
     if (!element) {
-      visual.frame.width = 280;
-      visual.frame.height = 140;
+      visual.frame.width = sampleSize.width;
+      visual.frame.height = sampleSize.height;
       visual.appearance.fill = "#245684";
       const shape = createBasicShape("preview-shape", "ellipse", {
         x: 15,
@@ -148,7 +150,10 @@ export function ContentEffectPreview({
       return {
         slide,
         deck: snapshot.deck,
-        scale: Math.min(viewport.width / 280, viewport.height / 140),
+        scale: Math.min(
+          viewport.width / sampleSize.width,
+          viewport.height / sampleSize.height,
+        ),
         x: 0,
         y: 0,
       };
@@ -204,6 +209,8 @@ export function ContentEffectPreview({
     wholeSlide,
     viewport.width,
     viewport.height,
+    sampleSize.width,
+    sampleSize.height,
   ]);
   useLayoutEffect(() => {
     const node = Array.from(

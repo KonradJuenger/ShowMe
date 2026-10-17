@@ -159,3 +159,24 @@ it("desktop library ignores disposable old effect files and refuses invalid fold
     storage.run({ type: "folder", folder: "CON" }),
   ).rejects.toThrow();
 });
+
+it("effect folders, saves and moves reject case and NFC destination collisions without changing the source", async () => {
+  const { root } = await storedDocument();
+  const directory = path.join(root, "Effects");
+  const storage = new EffectLibraryStorage(directory);
+  const asset = (await storage.run({ type: "save", definition: { ...blankEffect("css-js"), name: "Glow" } })).entries[0].asset;
+  const source = await storage.file(asset.id);
+  const before = await fs.readFile(source, "utf8");
+  for (const [existing, requested] of [["Project", "project"], ["Café", "Cafe\u0301"]]) {
+    await fs.mkdir(path.join(directory, existing));
+    await expect(storage.run({ type: "folder", folder: requested })).rejects.toThrow("collides");
+    await expect(storage.run({ type: "move", id: asset.id, revision: asset.revision, folder: `${requested}/nested` })).rejects.toThrow("collides");
+    await expect(storage.run({ type: "save", definition: blankEffect("css-js"), folder: requested })).rejects.toThrow("collides");
+    expect(await fs.readdir(path.join(directory, existing))).toEqual([]);
+  }
+  const name = libraryEffectFilename(asset);
+  const alias = name.toLowerCase();
+  await fs.rename(source, path.join(directory, alias));
+  await expect(storage.run({ type: "save", id: asset.id, revision: asset.revision, definition: asset.definition })).rejects.toThrow("collides");
+  expect(await fs.readFile(path.join(directory, alias), "utf8")).toBe(before);
+});

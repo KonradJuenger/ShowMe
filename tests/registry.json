@@ -84,8 +84,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-15",
-    "reason": "Managed default keeps explicit portable .smp saves anywhere, preserves native .sme below the ShowMe root and redirects unsafe external native saves to .smp; speaker note privacy and font portability remain covered"
+    "lastReviewed": "2026-10-16",
+    "reason": "Managed default keeps explicit portable .smp saves anywhere, preserves native .sme below the ShowMe root and redirects unsafe external native saves to .smp; packaging flattens nested Library organization, strips cleanup protection markers, preserves semantic media types and round-trips; speaker note privacy and font portability remain covered"
   },
   {
     "id": "editor-dimensions",
@@ -579,8 +579,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Named text effect files, stable identity across edits/rename/move, duplicate isolation, revision conflicts, failure cleanup and disposable old files"
+    "lastReviewed": "2026-10-17",
+    "reason": "Named text effect files, stable identity across edits/rename/move, duplicate isolation, revision conflicts, failure cleanup and disposable old files; effect folder creation, saves and moves enforce portable case/NFC naming for parents and destination files"
   },
   {
     "id": "effects-library-manager",
@@ -689,8 +689,52 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-15",
-    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered"
+    "lastReviewed": "2026-10-17",
+    "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering hides internal font resources from the visible Media surface while retaining the internal font category, and covers filename-encoded cleanup protection; Trash selections are excluded from folder organization; cached native Library pagination avoids repeated filesystem walks; partial protection failures expose the immediate mixed filesystem state; malformed Effect files do not block unrelated Trash restoration; previously enriched inventory stays untrusted after managed bytes change and verified resolution rejects it without document changes"
+  },
+  {
+    "id": "media-library-reconciliation",
+    "path": "tests/feature/media/library-reconciliation.test.ts",
+    "area": "media",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-16",
+    "lastReviewed": "2026-10-17",
+    "reason": "Deterministic disappearing-entry and post-stat relocation recovery, coherent bounded inventories, two-move batch progress, separate refresh errors, partial move visibility without rollback, portable folder names and Unicode/case collisions, immutable sync-file verification, and reconstruction without local caches; browser and indexed restoration enforce case/NFC parent collisions and preserve original Trash payloads"
+  },
+  {
+    "id": "media-library-scrolling",
+    "path": "tests/feature/media/library-scrolling.spec.ts",
+    "area": "media",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-16",
+    "lastReviewed": "2026-10-17",
+    "reason": "Native Media viewport survives a pending inventory refresh and a late first-page response without losing already-loaded visible pages; category navigation resets scrolling; dedicated Move and Protect buttons replace the selected-item Actions menu, with Move cancellation restoring focus; selection and top action forms preserve the grid position across sidebar widths; folder labels remain visible and real double-click and keyboard activation open folders and insert media; compact folder breadcrumbs retain ancestor navigation without redundant Up/tree controls or viewport shifts; enriched Library insertion calls verified asset resolution and refuses changed managed bytes; Library drag insertion uses the same verified asset boundary, rejects stale enriched metadata without advancing the document revision, and preserves ordinary drag insertion"
+  },
+  {
+    "id": "media-library-effects",
+    "path": "tests/feature/media/library-effects.spec.ts",
+    "area": "media",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-16",
+    "lastReviewed": "2026-10-16",
+    "reason": "Single-click Library Effects application, double-click deduplication, and management-only selection mode, overflow actions and malformed files"
+  },
+  {
+    "id": "effects-library-application",
+    "path": "tests/feature/effects/library-application.test.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-16",
+    "lastReviewed": "2026-10-16",
+    "reason": "Selection-aware Library Effect application uses semantic operations, creates and selects an effect frame only without selection, preserves timing and immutable definitions, undoes atomically, and rejects locked/missing/incompatible targets"
   },
   {
     "id": "media-derived-work",
@@ -744,8 +788,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-15",
-    "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions; native format settings persist across restart, studio URLs serve matching encodings and transparent images remain PNG; opening a cold file caches all slides including hidden slides and later navigation keeps readiness green without new image jobs"
+    "lastReviewed": "2026-10-17",
+    "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions; native format settings persist across restart, studio URLs serve matching encodings and transparent images remain PNG; opening a cold file caches all slides including hidden slides and later navigation keeps readiness green without new image jobs; closing the editor destroys active effect previews and queued/admission-waiting thumbnails cannot recreate windows or keep the app alive"
   },
   {
     "id": "presenter-image-readiness",
@@ -766,8 +810,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-15",
-    "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching"
+    "lastReviewed": "2026-10-17",
+    "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching; filename-encoded protection survives cleanup; folder protection bulk-renames current managed contents without creating inherited policy; filename protection is physical-copy-specific while document references retain all duplicate hashes; protection renames invalidate the cleanup fingerprint before collection; lifecycle restoration rejects case/NFC parent collisions without consuming Trash or running expiry"
   },
   {
     "id": "persistence-current-formats",
