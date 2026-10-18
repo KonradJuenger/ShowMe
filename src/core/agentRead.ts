@@ -22,7 +22,14 @@ export const agentInspectRequestSchema = z
           includeTextStyles: z.boolean().optional(),
         })
         .strict(),
-      z.object({ type: z.literal("slide"), slideId: id, ...hidden }).strict(),
+      z
+        .object({
+          type: z.literal("slide"),
+          slideId: id,
+          ...hidden,
+          includeNotes: z.boolean().optional(),
+        })
+        .strict(),
       z
         .object({
           type: z.literal("elements"),
