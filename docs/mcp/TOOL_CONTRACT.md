@@ -627,13 +627,16 @@ A write request should resolve it to explicit IDs before the transaction is cons
 
 This prevents a delayed tool call from accidentally following a user's later selection change.
 
-## Generated IDs
+## Stable IDs
 
-ShowMe should create IDs, not the model.
+ShowMe generates IDs by default and returns them in the apply receipt. Creation and
+grouping operations may also accept an optional validated ID when a later operation
+in the same atomic batch must target the newly created object. IDs remain opaque
+document identities, not presentation content.
 
-The model can optionally supply human-facing names.
-
-Return all generated IDs in `ApplyResult`.
+Duplication returns an `idMap` from every duplicated source identity to its new
+identity. Slide duplication includes mappings for the duplicated element hierarchy.
+Text Style and Layer creation return their own stable ID lists.
 
 ## Why not dozens of tools?
 
@@ -666,3 +669,47 @@ showme_history (optional)
 ```
 
 Internal APIs stay granular. The MCP contract stays semantic.
+
+
+## Implemented normal-authoring vocabulary
+
+The current public MCP still has only five tools:
+`showme.context`, `showme.inspect`, `showme.authoring`,
+`showme.apply` and `showme.preview`. Normal editor parity is expressed as variants
+inside `showme.apply`, not additional tools.
+
+Implemented semantic groups:
+
+- slide: `slide.create`, `slide.duplicate`, `slide.delete`,
+  `slide.move`, `slide.update`, `slide.template.apply`,
+  `slide.make_independent`;
+- deck/layers: `deck.rename`, `deck.dimensions.set`,
+  `deck.stylesheet.set`, `layer.create`, `layer.update`,
+  `layer.delete`, `layer.reorder`;
+- insertion: `element.insert_text`, `element.insert_shape`,
+  `element.insert_frame`;
+- geometry/appearance: `elements.move`, `elements.frame.set`,
+  `elements.appearance.patch`, `elements.css_classes.set`,
+  `elements.align`, `elements.distribute`;
+- structure: `elements.reorder`, `elements.duplicate`,
+  `elements.group`, `elements.ungroup`, `elements.reparent`,
+  `elements.remove`;
+- text: `text.set`, `text.style`, `text.style.apply`,
+  `text.style.clear_overrides`, `text.style.create`;
+- existing managed media: `frame.fit`, `frame.fill`,
+  `frame.content_transform.set`, `frame.content_center`,
+  `frame.content_reset`;
+- creative code/timing: the existing Effect, background shader, Motion and Presence
+  variants remain supported.
+
+All persisted Element geometry is parent-local. `showme.inspect` can derive world
+bounds/transforms on request but MCP never persists redundant world coordinates.
+Layer IDs and container Element IDs are the only authoring parents.
+
+`showme.inspect` exposes the corresponding hierarchy, frame, appearance,
+typography, Text Style reference, media transform, CSS classes, Effects and optional
+Motion/Presence/world detail. Deck inspection can opt into Text Style definitions.
+
+New media insertion is intentionally not implemented yet. It requires a bounded
+semantic operation over ShowMe's managed Library/asset authority. Arbitrary paths,
+raw bytes and fabricated asset records are not accepted.
