@@ -6,7 +6,6 @@ import {
   replaceElement,
   setElementAppearances,
   setElementFramesPreservingContent,
-  setElementContents,
   translateElements,
   createSlide,
   duplicateSlide,
@@ -29,7 +28,13 @@ import {
 import { editorOperations, setEditorOperations } from "./editorChange";
 import { getChildren, getOwningLayer, locateElement } from "./scene";
 import { getWorldMatrix } from "./scene";
-import { transformPoint, isNeutralFrame, type Element, type MediaContent } from "./element";
+import {
+  transformPoint,
+  isNeutralFrame,
+  resolveMediaFrame,
+  type Element,
+  type MediaContent,
+} from "./element";
 import { IDENTITY } from "./element";
 import {
   insertText,
@@ -868,10 +873,11 @@ export async function assembleAgentMutation(
           afterId,
           newId,
         );
-        const operation = editorOperations(duplicated).findLast(
-          (value) => value.type === "slide.duplicate",
-        ) as Extract<ReturnType<typeof editorOperations>[number], { type: "slide.duplicate" }> | undefined;
-        const createdSlide = operation?.type === "slide.duplicate" ? operation.slide : undefined;
+        const operation = [...editorOperations(duplicated)]
+          .reverse()
+          .find((value) => value.type === "slide.duplicate");
+        const createdSlide =
+          operation?.type === "slide.duplicate" ? operation.slide : undefined;
         if (!createdSlide)
           throw new AgentMutationError("COMMIT_FAILED", "The duplicated slide was not staged.");
         next = setEditorOperations(
@@ -894,7 +900,7 @@ export async function assembleAgentMutation(
             "Supply a slide name, background, or hidden state.",
           );
         if (op.background) {
-          if (next.deck.slideMeta[request.slideId]?.templateId)
+          if (next.deck.slideMeta[next.slide.id]?.templateId)
             throw new AgentMutationError(
               "TEMPLATE_OWNED",
               "The slide background is inherited from its template.",
@@ -1399,10 +1405,11 @@ export async function assembleAgentMutation(
     (id) => !projection.deck.slideIds.includes(id),
   );
   const updatedSlideIds =
-    next.slide !== projection.slide ||
-    JSON.stringify(next.deck.slideMeta[request.slideId]) !==
-      JSON.stringify(projection.deck.slideMeta[request.slideId])
-      ? [request.slideId]
+    next.slide.id === projection.slide.id &&
+    (next.slide !== projection.slide ||
+      JSON.stringify(next.deck.slideMeta[projection.slide.id]) !==
+        JSON.stringify(projection.deck.slideMeta[projection.slide.id]))
+      ? [projection.slide.id]
       : [];
   return {
     snapshot: next,
