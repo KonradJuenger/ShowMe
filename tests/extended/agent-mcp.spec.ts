@@ -18,6 +18,8 @@ import {
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
+import { createHash } from "node:crypto";
+import { managedFilename } from "../../electron/mediaLibrary";
 import { newPresentationDocument } from "../../src/core/document";
 import { createTextElement } from "../../src/core/text";
 import { readyEditor } from "../helpers/startup";
@@ -51,7 +53,7 @@ async function fixture() {
       storageWarningSeen: true,
     }),
   );
-  return { folder, user, file };
+  return { folder, root, user, file };
 }
 async function launch(user: string, file: string) {
   const env = Object.fromEntries(
@@ -116,6 +118,24 @@ async function context(client: Client): Promise<AgentContext> {
 
 test("MCP builds multiple styled slides with production text measurement and real pixels after capture resizing", async () => {
   const f = await fixture();
+  const mediaBytes = await sharp({
+    create: {
+      width: 64,
+      height: 64,
+      channels: 4,
+      background: { r: 70, g: 120, b: 200, alpha: 1 },
+    },
+  })
+    .png()
+    .toBuffer();
+  const mediaId = createHash("sha256").update(mediaBytes).digest("hex");
+  const mediaDir = path.join(f.root, "ShowMe Library", "images");
+  await mkdir(mediaDir, { recursive: true });
+  await writeFile(
+    path.join(mediaDir, managedFilename("mcp-sample.png", mediaId)),
+    mediaBytes,
+  );
+
   let app: ElectronApplication | undefined, client: Client | undefined;
   try {
     const launched = await launch(f.user, f.file);
@@ -127,6 +147,32 @@ test("MCP builds multiple styled slides with production text measurement and rea
       await window.desktop!.setMcpEditingEnabled!(true);
     });
     const initial = await context(client);
+    const assets = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: initial.document!.revision,
+        target: { type: "assets", query: "mcp-sample", limit: 10 },
+      },
+    });
+    expect(assets.isError, JSON.stringify(assets.structuredContent)).toBe(false);
+    expect(assets.structuredContent).toMatchObject({
+      data: {
+        assets: {
+          items: [
+            {
+              assetId: mediaId,
+              name: "mcp-sample.png",
+              type: "image",
+              width: 64,
+              height: 64,
+            },
+          ],
+        },
+      },
+    });
+
     const apply = async (
       slideId: string,
       operations: unknown[],
@@ -204,6 +250,14 @@ test("MCP builds multiple styled slides with production text measurement and rea
         appearance: { fill: "#D6ED88", strokeWidth: 0 },
       },
       {
+        type: "element.insert_media",
+        id: "mcp-media",
+        parentId,
+        assetId: mediaId,
+        frame: { x: 920, y: 820, width: 220, height: 120 },
+        name: "Managed MCP image",
+      },
+      {
         type: "elements.group",
         id: "mcp-copy",
         elementIds: ["mcp-title", "mcp-subtitle", "mcp-rule"],
@@ -216,6 +270,7 @@ test("MCP builds multiple styled slides with production text measurement and rea
         "mcp-subtitle",
         "mcp-rule",
         "mcp-accent",
+        "mcp-media",
         "mcp-copy",
       ]),
     });
@@ -296,6 +351,10 @@ test("MCP builds multiple styled slides with production text measurement and rea
           i % 4 === 0 && v > 230 && data[i + 1] > 230 && data[i + 2] > 220,
       ),
     ).toBe(true);
+    const mediaPixel = (410 * 960 + 500) * 4;
+    expect([...data.subarray(mediaPixel, mediaPixel + 4)]).toEqual([
+      70, 120, 200, 255,
+    ]);
     await capture(secondId, 480, 270, [10, 10], [0, 127, 115, 255]);
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()
