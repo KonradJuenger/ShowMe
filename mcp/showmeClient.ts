@@ -116,6 +116,14 @@ export async function bridgeRead(
 export class ShowMeClient {
   private cachedDescriptor: BridgeDescriptor | null = null;
 
+  private accessChanged(value: any) {
+    return (
+      value?.ok === false &&
+      (value.error?.code === "MCP_ACCESS_CHANGED" ||
+        value.error?.code === "UNAUTHORIZED")
+    );
+  }
+
   constructor(
     private readonly userData: string,
     private readonly instanceId?: string,
@@ -215,7 +223,12 @@ export class ShowMeClient {
     this.cachedDescriptor = discovered.descriptor;
     if (value.command === "context") return discovered.context;
     try {
-      return await bridgeRead(discovered.descriptor, value, signal);
+      const result = await bridgeRead(discovered.descriptor, value, signal);
+      if (this.accessChanged(result)) {
+        this.cachedDescriptor = null;
+        return null;
+      }
+      return result;
     } catch {
       this.cachedDescriptor = null;
       return null;
@@ -225,7 +238,9 @@ export class ShowMeClient {
   async read(value: AgentBridgeRequest, signal?: AbortSignal) {
     if (this.cachedDescriptor) {
       try {
-        return await bridgeRead(this.cachedDescriptor, value, signal);
+        const result = await bridgeRead(this.cachedDescriptor, value, signal);
+        if (!this.accessChanged(result)) return result;
+        this.cachedDescriptor = null;
       } catch {
         this.cachedDescriptor = null;
       }
