@@ -2,6 +2,7 @@ import {
   agentAuthoringRequestSchema,
   buildAgentAuthoringGuide,
   effectAuthoringKind,
+  isAgentEffectAuthoringKind,
 } from "../src/core/agentAuthoring";
 import type { AgentContext } from "../src/core/agentContext";
 import type { DocumentProjection } from "../src/core/documentProjection";
@@ -66,10 +67,10 @@ export class AgentAuthoringService {
           "UNKNOWN_SLIDE",
           "The requested slide is unavailable.",
         );
-      if (request.kind === "motion")
+      if (!isAgentEffectAuthoringKind(request.kind))
         return {
           ok: true as const,
-          data: buildAgentAuthoringGuide("motion"),
+          data: buildAgentAuthoringGuide(request.kind),
         };
       const visual = resolveVisualSlide(
         projection.deck,
