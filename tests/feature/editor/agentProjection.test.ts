@@ -284,6 +284,26 @@ it("projects ordered deck metadata without unavailable counts or document bodies
   );
 });
 
+it("exposes Text Styles only when explicitly requested", () => {
+  const projection = fixture();
+  expect(projectAgentDeck(projection).deck).not.toHaveProperty("textStyles");
+  expect(
+    projectAgentDeck(projection, { includeTextStyles: true }).deck.textStyles,
+  ).toEqual([
+    expect.objectContaining({
+      id: "heading",
+      name: "Heading",
+      defaultKind: "heading",
+      typography: expect.objectContaining({ fontWeight: 700 }),
+    }),
+    expect.objectContaining({
+      id: "body",
+      name: "Text",
+      defaultKind: "text",
+    }),
+  ]);
+});
+
 it("describes canonical visual preorder with actual parent and layer identities", () => {
   const projection = fixture();
   const result = projectAgentSlide(projection);
