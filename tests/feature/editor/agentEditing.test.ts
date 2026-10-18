@@ -798,7 +798,12 @@ it("existing managed media exposes semantic fit fill center reset and content tr
     transform: { rule: "fit", intrinsicWidth: 1200, intrinsicHeight: 800 },
   });
   const moved = await assembleAgentMutation(
-    fit.snapshot as typeof p,
+    {
+      ...p,
+      deck: fit.snapshot.deck,
+      slide: fit.snapshot.slide,
+      templates: fit.snapshot.templates,
+    },
     agentApplyRequestSchema.parse(
       f.request([
         {
