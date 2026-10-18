@@ -371,6 +371,7 @@ export class AgentEditingService {
       updatedEffectInstanceIds: staged.updatedEffectInstanceIds,
       idMap: staged.idMap,
       createdTextStyleIds: staged.createdTextStyleIds,
+      createdLayerIds: staged.createdLayerIds,
       deckChanged: projection.deck !== staged.snapshot.deck,
     };
     const changed = staged.changed;
