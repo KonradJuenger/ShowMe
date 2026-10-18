@@ -1146,7 +1146,10 @@ export function updateSlideMeta(
 export function setDeckProperties(
   snapshot: EditorSnapshot,
   changes: Partial<
-    Pick<Deck, "name" | "width" | "height" | "transitionDefaults">
+    Pick<
+      Deck,
+      "name" | "stylesheet" | "width" | "height" | "transitionDefaults"
+    >
   >,
 ): EditorSnapshot {
   if (

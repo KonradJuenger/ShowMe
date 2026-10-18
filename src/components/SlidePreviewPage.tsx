@@ -12,6 +12,8 @@ import type { AgentPreviewWarning } from "../core/agentPreview";
 import { measureText } from "./editor/textLayout";
 import type { Element as SceneElement } from "../core/element";
 import type { TextContent, TextMeasurement } from "../core/text";
+import { validateEffectDefinitionProduction } from "./effectValidation";
+import type { EffectValidationResult } from "../core/effectValidation";
 
 declare global {
   interface Window {
@@ -20,6 +22,10 @@ declare global {
       element: SceneElement & { content: TextContent },
     ) => Promise<TextMeasurement | null>;
     composeEffectThumbnail?: (definition: EffectDefinition) => Promise<boolean>;
+    validateAgentEffect?: (
+      definition: EffectDefinition,
+      sampleText?: string,
+    ) => Promise<EffectValidationResult>;
     clearSlidePreview?: () => void;
     slidePreviewWarnings?: () => AgentPreviewWarning[];
     composeSlidePreview?: (
@@ -50,6 +56,8 @@ export function installSlidePreviewPage() {
     await document.fonts.ready;
     return measureText(element);
   };
+  window.validateAgentEffect = (definition, sampleText) =>
+    validateEffectDefinitionProduction(definition, { sampleText });
   window.clearSlidePreview = () => flushSync(() => root.render(null));
   window.slidePreviewWarnings = () => {
     const warnings: AgentPreviewWarning[] = [];
