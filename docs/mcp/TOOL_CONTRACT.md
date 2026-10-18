@@ -1,6 +1,7 @@
 # MCP tool and resource contract
 
-This document proposes the first model-facing contract. It is intentionally smaller than ShowMe's internal API.
+This document describes the model-facing contract implemented on the current MCP branch.
+It is intentionally smaller than ShowMe's internal API.
 
 The public MCP contract should remain stable even when internal editor command functions change.
 
@@ -209,9 +210,11 @@ type ShowMeSemanticOperation =
       type: "element.insert_text";
       slideId: string;
       parentId: string;
-      center: { x: number; y: number };
+      frame: { x: number; y: number; width: number; height: number };
       text: string;
       name?: string;
+      typography?: Partial<TextTypography>;
+      autoSize?: "none" | "height" | "both";
     }
   | {
       type: "element.insert_shape";
@@ -430,6 +433,54 @@ destructiveHint: true
 idempotentHint: false
 openWorldHint: false
 ```
+
+## Current creative extensions
+
+The current semantic union additionally exposes:
+
+```ts
+{ type: "slide.make_independent" }
+{ type: "deck.stylesheet.set"; source: string }
+{ type: "elements.css_classes.set"; elementIds: string[]; classes: string[] }
+{ type: "elements.reorder"; parentId: string; elementIds: string[];
+  mode: "front" | "back" | "forward" | "backward" }
+
+{ type: "effect.apply_code"; elementId: string; name: string;
+  effectType: "shader" | "css" | "text-js";
+  affects: "pixels" | "backdrop" | "generated" | "element" | "text";
+  source: string; styleSource?: string; speed?: number;
+  timeControl?: EffectTimeControl; parameters?: EffectParameter[];
+  existingInstanceId?: string; stageIndex?: number }
+
+{ type: "effect.parameter.set"; elementId: string; effectInstanceId: string;
+  key: string; value: number | boolean | string }
+{ type: "effect.enabled.set"; elementId: string; effectInstanceId: string; enabled: boolean }
+{ type: "effect.remove"; elementId: string; effectInstanceId: string }
+
+{ type: "background.shader.create"; name: string; source: string;
+  speed?: number; timeControl?: EffectTimeControl; parameters?: EffectParameter[];
+  stageIndex?: number }
+
+{ type: "motion.add_preset"; stageIndex: number; elementIds: string[];
+  preset: "Move" | "Scale" | "Rotate" | "Fade" | "Pulse" }
+{ type: "motion.animate"; stageIndex: number; elementId: string; property: string;
+  from: number; to: number; durationMs: number; ease?: NamedMotionEase }
+{ type: "presence.add"; stageIndex: number; elementIds: string[] }
+```
+
+Shader operations reconcile `uniform float ... // @param ...` declarations through the
+same source reconciliation used by Effect Studio. Effect code is then validated using
+the real WebGL2 program linker, scoped CSS compiler, or isolated text-JS worker. Failed
+validation returns structured diagnostics and does not mutate the document.
+
+### showme.authoring
+
+`showme.authoring` accepts one of
+`background-shader`, `content-shader`, `backdrop-shader`, `css-effect`,
+`text-effect` or `motion`. With no document scope it returns a creation contract and
+starter. With exact document/epoch/revision/slide scope plus element/effect IDs it also
+returns the current authored source. The Effect ABI comes from
+`buildEffectAuthoringPrompt()`, not a duplicated MCP-only specification.
 
 ## Effect authoring resource
 

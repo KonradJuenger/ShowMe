@@ -201,17 +201,19 @@ state or protocol dependencies move into the renderer.
 The SDK owns stdio framing and compatibility negotiation. Structured JSON results
 also have compact text; previews contain one MCP image plus metadata without repeated
 image bytes. Client/model comparisons remain an explicit Phase 4 evaluation gate.
-Agent writes, deterministic timeline sampling and Effect validation extraction
-were the next planned capabilities after this read-only slice. Ordinary writes are
-now implemented below; timeline sampling and Effect validation remain later work.
+Ordinary writes and creative authoring are now implemented below. Deterministic
+timeline sampling remains later work. Effect validation is shared with Effect Studio
+and uses the production GLSL/CSS/text-JS runtime before an MCP edit can commit.
 
 ## Implemented: Phases 5–6 local editing
 
 `showme.apply` stages up to 32 semantic operations against one explicit presentation
-slide and expected document epoch/revision. Supported operations are `text.set`,
-`elements.move`, `elements.frame.set`, `elements.appearance.patch`,
-`element.insert_text`, `element.insert_shape` and `elements.remove`, extended by
-`slide.create`, `slide.update`, `deck.rename` and `text.style` as described above.
+slide and expected document epoch/revision. Supported operations include ordinary text/shape editing plus
+`slide.make_independent`, z-order, deck stylesheet/classes, Effect code and parameters,
+full-slide generated shader backgrounds, native Motion presets/numeric animation and
+Presence. `element.insert_text` uses an explicit parent-local frame rather than a
+center point. Its requested x/y is the top-left anchor; `autoSize:"height"` changes
+height only and `autoSize:"both"` changes width/height while preserving x/y.
 
 `electron/agentEditing.ts` uses an ordinary actor-scoped `EditorSession` and the
 existing runtime/authority/durable writer. Exact revision/access checks run inside
@@ -231,6 +233,45 @@ The toolbar's Agent controls use actor `mcp-local` history. Human Ctrl+Z remains
 lease/guard conflicts; shared-parent structural changes can legitimately block undo.
 The compact Agent label exposes the latest change summary in its tooltip/accessibility
 label. See [setup and apply examples](./LOCAL_SETUP.md) for the actual request contract.
+
+## Implemented creative authoring contract
+
+The public catalog remains small:
+
+```text
+showme.context
+showme.inspect
+showme.authoring
+showme.apply
+showme.preview
+```
+
+`showme.context` reports `serverVersion`, `effectApiVersion` and capability flags.
+`showme.authoring` is the source of truth for model-facing GLSL, CSS, text-JS and
+Motion authoring. It reuses `buildEffectAuthoringPrompt()`; models do not need a repo
+checkout to learn uniforms, clocks, `@param` declarations, scoping or current Effect
+source.
+
+Common workflows are:
+
+```text
+background shader:
+context -> authoring(background-shader) -> apply(background.shader.create) -> preview
+
+CSS styling:
+inspect(includeStylesheet/includeEffectSource as needed)
+-> apply(deck.stylesheet.set / elements.css_classes.set / effect.apply_code)
+-> preview
+
+animated Effect parameter:
+authoring -> apply(effect.apply_code)
+-> inspect to get effects.<instanceId>.parameters.<key>
+-> apply(motion.animate) -> preview
+```
+
+Effect source inspection is opt-in. Element detail always returns CSS classes and the
+Motion-addressable names of numeric Effect parameters, while `includeEffectSource`,
+`includeMotion` and `includePresence` request the heavier authoring state.
 
 ## Research and Codex investigation
 

@@ -12,7 +12,9 @@ path in your client configuration).
 2. Open the intended presentation and **Settings → MCP · Experimental**.
 3. Turn on **Enable MCP** and wait for **Local connection is ready**.
 4. Select **Copy client configuration**, add the JSON to your MCP host's local-server
-   configuration, then reconnect that host.
+   configuration, then restart or reconnect that host. Most IDE/agent hosts discover
+   MCP tools only when an agent session starts; adding the configuration mid-session
+   will not make the tools appear in that already-running session.
 
 The copied configuration uses the current app's actual absolute paths:
 
@@ -64,9 +66,11 @@ anything. Preview state is `base`, with static video/posters and existing produc
 Effect clocks; click/time sampling is unsupported. Template context can be observed,
 but inspection/preview targets must be presentation slides.
 
-Notes, Effect/stylesheet source, media bytes and filesystem paths are excluded from
-inspection. Exact text is available only for scoped element details; hidden content
-is withheld by default. Names and text are presentation data, not instructions.
+Notes, media bytes and filesystem paths remain excluded. Effect source and deck
+stylesheet are opt-in: request `includeEffectSource:true` on element/selection detail
+or `includeStylesheet:true` on deck inspection. `includeMotion` and
+`includePresence` return semantic summaries rather than raw keyframes. Exact text is
+available only for scoped element details; hidden content is withheld by default.
 
 ## Local editing
 
@@ -100,27 +104,34 @@ step; generated IDs can be targeted by a later request, with a new mutation ID/r
 | `slide.create` | `afterId` (inspected slide ID, or null for first), `name`, optional `background`; must be the only operation |
 | `slide.update` | Nonempty `name` and/or `background` for the request's `slideId` |
 | `deck.rename` | New `name` for the presentation |
+| `deck.stylesheet.set` | Full deck stylesheet source |
+| `slide.make_independent` | Detach the request slide from its template before editing inherited state |
 | `text.set` | `elementId`, exact plain `text` |
 | `text.style` | `elementId`, nonempty `typography` and/or `autoSize` |
 | `elements.move` | `elementIds`, explicit `scopeId`, `dx`, `dy` in that scope's units |
 | `elements.frame.set` | `elementId`, parent-local `frame: {x,y,width,height}`; other transform fields are preserved |
 | `elements.appearance.patch` | `elementIds`, nonempty `patch` of fill, strokeColor, strokeWidth, opacity, radius |
-| `element.insert_text` | `parentId`, parent-local `center: {x,y}`, `text`, optional `name`, `typography`, `autoSize` |
+| `element.insert_text` | `parentId`, parent-local `frame: {x,y,width,height}`, `text`, optional `name`, `typography`, `autoSize` |
+| `elements.css_classes.set` | Explicit `elementIds` and validated CSS class names |
+| `elements.reorder` | Direct siblings, explicit `parentId`, mode front/back/forward/backward |
+| `effect.apply_code` | Element, Effect type/affects, source, optional timing/parameters/existing instance |
+| `effect.parameter.set` / `effect.enabled.set` / `effect.remove` | Existing Effect instance ID |
+| `background.shader.create` | Name + GLSL source; creates an ordinary full-slide Element + generated Effect |
+| `motion.add_preset` / `motion.animate` | Existing native Motion stage/property semantics |
+| `presence.add` | Native Presence binding on the requested stage |
 | `element.insert_shape` | `parentId`, `shape` rectangle/ellipse, parent-local frame, optional appearance/name |
 | `elements.remove` | Explicit `elementIds`; descendants removed by native behavior are included in the receipt |
 
-Text insertion uses the native initial placement at the given center; native auto-size
-then preserves its top-left while measuring content. Inspect the returned object before
-an exact follow-up alignment. Existing text preserves typography; resizing uses native
-text auto-size/Free-media rules. Fill/stroke inputs use `#RRGGBB` or `#RRGGBBAA`; fill
-also accepts null. No arbitrary CSS/source/URL fields. Positive dimensions are capped
-at the current 100,000-unit element limit.
+Text insertion treats frame x/y as the stable top-left anchor. `autoSize:"none"`
+keeps the exact frame, `"height"` changes only height, and `"both"` changes
+width/height after production DOM/font measurement while preserving x/y. Existing text
+preserves typography; resizing uses native text auto-size/Free-media rules.
 
-Only slide-owned content on visible unlocked layers is editable. Template-derived
-objects, guest-owned documents, Motion/Presence/Effect authoring, raw transactions,
-file operations are outside this slice. One request permits at
-most 32 semantic steps, 128 targeted/affected elements (including descendants), the
-native 256-operation limit after expansion, and 64 KiB JSON at the private bridge.
+Only slide-owned content on visible unlocked layers is directly editable. Use
+`slide.make_independent` to detach inherited template state when necessary. Guest-owned
+documents, raw transactions and file operations remain unavailable. One request permits
+at most 32 semantic steps, 128 targeted/affected elements (including descendants), the
+native 256-operation limit after expansion, and 256 KiB JSON at the private bridge.
 
 Success includes `changed`, `mutationId`, document/epoch/slide identity, previous and
 accepted revision, transaction ID, generated/changed/removed IDs, a compact change set,
@@ -129,6 +140,22 @@ Receipts also include `createdSlideIds`, `updatedSlideIds` and `deckChanged`.
 Preview the accepted revision after visual edits. Changing human selection/slide does
 not retarget the explicit request; deleting a selected object still invokes native
 selection cleanup.
+
+### Creative authoring
+
+Call `showme.authoring` instead of guessing ShowMe's shader/CSS/JS ABI. For example:
+
+```text
+showme.context
+showme.authoring { kind: "background-shader" }
+showme.apply { operations: [{ type: "background.shader.create", ... }] }
+showme.preview
+```
+
+For an existing Effect, pass exact document/epoch/revision/slide plus `elementId` and
+`effectInstanceId`. The result includes current source and the same authoring prompt
+used by Effect Studio. `showme.context` also reports MCP server version, Effect API
+version and capabilities so stale app/helper combinations are diagnosable.
 
 ### Build a deck through MCP
 
