@@ -264,19 +264,21 @@ it("publishes only a private authenticated loopback descriptor and cleans it up 
   expect(f.descriptor.token).toMatch(/^[a-f0-9]{64}$/);
   if (process.platform === "win32") {
     const run = promisify(execFile);
-    const identity = await run("whoami.exe", ["/user", "/fo", "csv", "/nh"], {
-      windowsHide: true,
-    });
-    const acl = await run(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `[System.IO.File]::GetAccessControl('${f.file.replaceAll("'", "''")}').Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }`,
-      ],
-      { windowsHide: true },
-    );
+    const [identity, acl] = await Promise.all([
+      run("whoami.exe", ["/user", "/fo", "csv", "/nh"], {
+        windowsHide: true,
+      }),
+      run(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `[System.IO.File]::GetAccessControl('${f.file.replaceAll("'", "''")}').Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }`,
+        ],
+        { windowsHide: true },
+      ),
+    ]);
     const userSid = identity.stdout.match(/S-1-5-[0-9-]+/)![0];
     const allowed = new Set([
       userSid,
@@ -295,7 +297,7 @@ it("publishes only a private authenticated loopback descriptor and cleans it up 
   expect(
     await new ShowMeClient(f.folder).read({ command: "context", params: {} }),
   ).toMatchObject({ error: { code: "APP_UNAVAILABLE" } });
-}, 10000);
+});
 it("rejects unauthenticated DNS rebinding browser origins and fetch requests before dispatch", async () => {
   let calls = 0;
   const f = await fixture(async () => {
