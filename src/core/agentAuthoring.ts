@@ -134,7 +134,44 @@ function normalAuthoringGuide(
         "Use stable IDs returned by create/duplicate/group operations.",
         "Layers and containers are valid parents. Hidden or locked layers are not editable until explicitly changed through Layer authoring.",
         "Use semantic structure operations rather than reconstructing nested objects.",
+        "When several elements form one visual component, put them in one Frame/group and animate the parent instead of animating every child independently.",
       ],
+      componentWorkflow: {
+        summary:
+          "Build composite visuals as structural Frames/groups so layout and lifecycle animation preserve visual hierarchy.",
+        steps: [
+          "Create a Frame/group with an explicit stable ID.",
+          "Insert children with that ID as parentId.",
+          "Author child x/y/width/height in parent-local coordinates.",
+          "Style child elements normally.",
+          "Use Presence on the parent when the whole component should enter or exit as one visual object.",
+        ],
+        example: {
+          parent: {
+            type: "element.insert_frame",
+            id: "card",
+            parentId: "<layerId>",
+            frame: { x: 120, y: 180, width: 520, height: 320 },
+          },
+          child: {
+            type: "element.insert_text",
+            id: "card-title",
+            parentId: "card",
+            frame: { x: 32, y: 28, width: 456, height: 60 },
+            text: "Card title",
+          },
+          lifecycle: {
+            type: "presence.add",
+            stageIndex: 1,
+            elementIds: ["card"],
+            transition: "move",
+            direction: "Up",
+            distance: 50,
+            durationMs: 400,
+            easing: "Ease Out",
+          },
+        },
+      },
       operations: [
         "slide.create",
         "slide.duplicate",
@@ -168,6 +205,7 @@ function normalAuthoringGuide(
       kind,
       rules: [
         "Text layout uses ShowMe's production text measurement.",
+        "Use showme.measure_text before construction when wrapping or measured paragraph height materially affects layout; do not guess those dimensions.",
         "A fixed authored box uses autoSize=none; height/both use native measured auto-size.",
         "Applying a Text Style keeps local overrides as ShowMe style overrides.",
       ],
@@ -251,7 +289,10 @@ function normalAuthoringGuide(
     effectParameterAddress: "effects.<instanceId>.parameters.<key>",
     rules: [
       "Only numeric Effect parameters are Motion-addressable.",
-      "Use Presence for lifecycle visibility instead of opacity hacks.",
+      "Use Presence for entering/exiting visibility and entrance/exit movement.",
+      "Use Motion for properties that animate while the element is present.",
+      "Do not combine a Move Motion preset with a move Presence transition merely to create an entrance.",
+      "Motion and Presence use the same named easing vocabulary: Linear, Ease In, Ease Out, Ease In Out and Hold.",
       "Motion operates on ShowMe's existing Click Timeline stages.",
     ],
     operations: {
