@@ -116,6 +116,7 @@ import { AgentInspectionService } from "./agentInspection";
 import { AgentAuthoringService } from "./agentAuthoring";
 import { AgentBridge } from "./agentBridge";
 import { AgentEditingService } from "./agentEditing";
+import { AgentTextMeasurementService } from "./agentTextMeasurement";
 import { DocumentClosing } from "./documentClosing";
 import type { AgentPreviewWarning, SlidePreviewCapture } from "../src/core/agentPreview";
 import { PresentationRuntime } from "./presentationRuntime";
@@ -1191,6 +1192,10 @@ let previewWindowSize = "";
 let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
+let agentRuntimeWindow: BrowserWindow | null = null;
+let agentRuntimeQueue: Promise<void> = Promise.resolve();
+let pendingAgentRuntime = 0;
+const AGENT_RUNTIME_MAX_ADMITTED = 8;
 let effectPreviewWindow: BrowserWindow | null = null;
 let previewsTornDown = false;
 let effectPreviewQueue: Promise<void> = Promise.resolve();
@@ -1206,8 +1211,10 @@ function previewOwnerAlive(owner: BrowserWindow | null) {
 
 function tearDownPreviewWindows() {
   previewsTornDown = true;
-  const windows = [previewWindow, effectPreviewWindow];
-  previewWindow = effectPreviewWindow = null;
+  const windows = [previewWindow, agentRuntimeWindow, effectPreviewWindow];
+  previewWindow = null;
+  agentRuntimeWindow = null;
+  effectPreviewWindow = null;
   previewDocumentId = null;
   for (const window of windows) if (window && !window.isDestroyed()) window.destroy();
 }
@@ -1303,6 +1310,91 @@ async function compositionWindow(width: number, height: number, owner: BrowserWi
   const window = previewWindow;
   if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
   return window;
+}
+
+async function agentRuntimeSurface(owner: BrowserWindow | null) {
+  if (!previewOwnerAlive(owner)) return null;
+  if (!agentRuntimeWindow || agentRuntimeWindow.isDestroyed()) {
+    agentRuntimeWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width: 320,
+      height: 180,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+        offscreen: true,
+      },
+    });
+    secure(agentRuntimeWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await agentRuntimeWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await agentRuntimeWindow.loadFile(
+        path.join(__dirname, "../dist/index.html"),
+        { query: { slidePreview: "1" } },
+      );
+  }
+  const window = agentRuntimeWindow;
+  if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
+  return window;
+}
+
+function resetAgentRuntimeWindow(window?: BrowserWindow | null) {
+  const target = window ?? agentRuntimeWindow;
+  if (target && !target.isDestroyed()) target.destroy();
+  if (!window || agentRuntimeWindow === window) agentRuntimeWindow = null;
+}
+
+function runAgentRuntime<T>(
+  execute: (window: BrowserWindow) => Promise<T>,
+): Promise<T | null> {
+  const owner = editor;
+  if (
+    !previewOwnerAlive(owner) ||
+    pendingAgentRuntime >= AGENT_RUNTIME_MAX_ADMITTED
+  )
+    return Promise.resolve(null);
+  pendingAgentRuntime++;
+  const task = agentRuntimeQueue.then(async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!previewOwnerAlive(owner)) return null;
+      const window = await agentRuntimeSurface(owner);
+      if (!window) return null;
+      const timeout = setTimeout(() => resetAgentRuntimeWindow(window), 10000);
+      try {
+        const result = await execute(window);
+        if (
+          !previewOwnerAlive(owner) ||
+          window.isDestroyed() ||
+          agentRuntimeWindow !== window
+        )
+          throw new Error("Agent runtime unavailable");
+        return result;
+      } catch {
+        resetAgentRuntimeWindow(window);
+        if (attempt === 1) return null;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    return null;
+  });
+  agentRuntimeQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  void task
+    .finally(() => {
+      pendingAgentRuntime--;
+    })
+    .catch(() => {});
+  return task;
 }
 
 /** Accept only a compositor frame carrying this request's cropped-out acknowledgement. */
@@ -1501,70 +1593,51 @@ function captureSlidePreview(
 }
 
 function validateAgentEffect(
-  documentId: string,
+  _documentId: string,
   definition: EffectDefinition,
   sampleText?: string,
 ): Promise<EffectValidationResult | null> {
-  const owner = editor;
-  if (!previewOwnerAlive(owner) || pendingPreviews >= 8)
-    return Promise.resolve(null);
-  pendingPreviews++;
-  const task = previewQueue.then(async () => {
-    if (!previewOwnerAlive(owner)) return null;
-    previewDocumentId = documentId;
-    const window = await compositionWindow(320, 180, owner);
-    if (!window) return null;
-    const timeout = setTimeout(() => {
-      if (!window.isDestroyed()) window.destroy();
-    }, 10000);
-    try {
-      const result = await window.webContents.executeJavaScript(
-        "window.validateAgentEffect(" +
-          JSON.stringify(definition) +
-          "," +
-          JSON.stringify(sampleText) +
-          ")",
-      );
-      return previewOwnerAlive(owner) ? result : null;
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timeout);
-    }
-  });
-  previewQueue = task.then(
-    () => undefined,
-    () => undefined,
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.validateAgentEffect(" +
+        JSON.stringify(definition) +
+        "," +
+        JSON.stringify(sampleText) +
+        ")",
+    ),
   );
-  void task
-    .finally(() => {
-      pendingPreviews--;
-    })
-    .catch(() => {});
-  return task;
 }
 
-function measureAgentText(documentId: string, element: import("../src/core/element").Element & { content: import("../src/core/text").TextContent }): Promise<import("../src/core/text").TextMeasurement | null> {
-  const owner = editor;
-  if (!previewOwnerAlive(owner) || pendingPreviews >= 8) return Promise.resolve(null);
-  pendingPreviews++;
-  const task = previewQueue.then(async () => {
-    if (!previewOwnerAlive(owner)) return null;
-    previewDocumentId = documentId;
-    const window = await compositionWindow(320, 180, owner);
-    if (!window) return null;
-    const timeout = setTimeout(() => { if (!window.isDestroyed()) window.destroy(); }, 10000);
-    try {
-      const result = await window.webContents.executeJavaScript("window.measureAgentText(" + JSON.stringify(documentId) + "," + JSON.stringify(element) + ")");
-      return previewOwnerAlive(owner) ? result : null;
-    } catch { return null; }
-    finally {
-      clearTimeout(timeout);
-    }
-  });
-  previewQueue = task.then(() => undefined, () => undefined);
-  void task.finally(() => { pendingPreviews--; }).catch(() => {});
-  return task;
+function measureAgentText(
+  documentId: string,
+  element: import("../src/core/element").Element & {
+    content: import("../src/core/text").TextContent;
+  },
+): Promise<import("../src/core/text").TextMeasurement | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.measureAgentText(" +
+        JSON.stringify(documentId) +
+        "," +
+        JSON.stringify(element) +
+        ")",
+    ),
+  );
+}
+
+function measureAgentTextBatch(
+  documentId: string,
+  items: readonly import("../src/core/agentTextMeasure").AgentTextMeasureItem[],
+): Promise<import("../src/core/text").TextMeasurement[] | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.measureAgentTextBatch(" +
+        JSON.stringify(documentId) +
+        "," +
+        JSON.stringify(items) +
+        ")",
+    ),
+  );
 }
 
 const agentInspection = new AgentInspectionService({
@@ -1593,6 +1666,21 @@ const agentAuthoring = new AgentAuthoringService({
       : documentRuntime(id).projection(id, pageId);
   },
 });
+const agentTextMeasurement = new AgentTextMeasurementService({
+  access: () => (agentContext.isEnabled ? mcpAccessVersion : null),
+  activeDocumentId: activeAgentDocumentId,
+  state: async (documentId) => {
+    const context = await agentContext.read();
+    if (!context.document || context.document.id !== documentId)
+      throw new Error("Document unavailable");
+    return {
+      documentId: context.document.id,
+      epoch: context.document.epoch,
+      revision: context.document.revision,
+    };
+  },
+  measure: measureAgentTextBatch,
+});
 function notifyAgentHistory() {
   if (editor && !editor.isDestroyed()) editor.webContents.send("agent-history-changed");
 }
@@ -1619,6 +1707,7 @@ const agentContextRead = async () => ({
     deckCss: true,
     motion: true,
     presence: true,
+    measureText: true,
     preview: true,
   },
   editing: { enabled: mcpEditingEnabled, ...agentEditing.availability() },
@@ -1628,6 +1717,8 @@ const agentBridge = new AgentBridge(app.getPath("userData"), async (request, sig
   if (request.command === "inspect") return agentInspection.inspect(request.params);
   if (request.command === "authoring")
     return agentAuthoring.authoring(request.params);
+  if (request.command === "measure_text")
+    return agentTextMeasurement.measure(request.params);
   if (request.command === "apply") return agentEditing.apply(request.params, signal);
   return agentPreview.preview(request.params, signal);
 });
