@@ -1289,7 +1289,11 @@ export function scopesForOperations(
           );
         break;
       }
-      cursor = projected;
+      cursor =
+        operation.type === "slide.create" ||
+        operation.type === "slide.duplicate"
+          ? { ...projected, slide: structuredClone(operation.slide) }
+          : projected;
     }
   }
   return result;
