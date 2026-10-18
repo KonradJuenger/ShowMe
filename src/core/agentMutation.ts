@@ -169,10 +169,21 @@ const transitionDefaultsSchema = z
     easing: transitionEasing,
   })
   .strict();
+const namedMotionEasingSchema = z.enum([
+  "Linear",
+  "Ease In",
+  "Ease Out",
+  "Ease In Out",
+  "Hold",
+]);
 const presenceEasingSchema = z.union([
-  z.literal("linear"),
-  z.literal("hold"),
-  z.tuple([z.number(), z.number(), z.number(), z.number()]),
+  namedMotionEasingSchema,
+  z.tuple([
+    z.number().min(0).max(1),
+    z.number().finite(),
+    z.number().min(0).max(1),
+    z.number().finite(),
+  ]),
 ]);
 const presenceTransitionInputSchema = z
   .object({
@@ -660,9 +671,7 @@ export const agentApplyRequestSchema = z
               from: number,
               to: number,
               durationMs: z.number().int().min(1).max(86400000),
-              ease: z
-                .enum(["Linear", "Ease In", "Ease Out", "Ease In Out", "Hold"])
-                .optional(),
+              ease: namedMotionEasingSchema.optional(),
             })
             .strict(),
           z
@@ -739,7 +748,7 @@ export const agentApplyRequestSchema = z
         ]),
       )
       .min(1)
-      .max(32),
+      .max(128),
   })
   .strict();
 export type AgentApplyRequest = z.infer<typeof agentApplyRequestSchema>;
@@ -1745,10 +1754,16 @@ export async function assembleAgentMutation(
             kind,
             explicit?.direction ?? op.direction,
           );
+          const easing = explicit?.easing ?? op.easing;
           return {
             kind,
             durationMs: explicit?.durationMs ?? op.durationMs ?? def.durationMs,
-            easing: (explicit?.easing ?? op.easing ?? def.easing) as PresenceTransition["easing"],
+            easing:
+              easing === undefined
+                ? def.easing
+                : Array.isArray(easing)
+                  ? easing
+                  : motionEaseFromName(easing),
             ...(explicit?.direction ?? op.direction
               ? { direction: explicit?.direction ?? op.direction }
               : {}),
