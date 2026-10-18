@@ -132,7 +132,7 @@ function normalAuthoringGuide(
       },
       rules: [
         "Use stable IDs returned by create/duplicate/group operations.",
-        "Layers and containers are valid parents. Hidden or locked layers are not editable.",
+        "Layers and containers are valid parents. Hidden or locked layers are not editable until explicitly changed through Layer authoring.",
         "Use semantic structure operations rather than reconstructing nested objects.",
       ],
       operations: [
@@ -144,6 +144,10 @@ function normalAuthoringGuide(
         "slide.template.apply",
         "slide.make_independent",
         "deck.dimensions.set",
+        "layer.create",
+        "layer.update",
+        "layer.delete",
+        "layer.reorder",
         "element.insert_text",
         "element.insert_shape",
         "element.insert_frame",
