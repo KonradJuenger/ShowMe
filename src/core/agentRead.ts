@@ -6,7 +6,7 @@ import { agentPreviewRequestSchema } from "./agentPreview";
 import { agentWorkspaceRequestSchema } from "./agentWorkspace";
 import { agentDeliveryRequestSchema } from "./agentDelivery";
 
-export const SHOWME_MCP_SERVER_VERSION = "1.8.0" as const;
+export const SHOWME_MCP_SERVER_VERSION = "1.9.0" as const;
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const scope = {

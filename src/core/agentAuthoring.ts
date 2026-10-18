@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import { EFFECT_API_VERSION, type EffectDefinition } from "./effects";
 import {
   blankEffect,
-  buildEffectAuthoringPrompt,
+  effectRuntimeContract,
   changeEffectAffects,
   effectAffects,
 } from "./effectAuthoring";
@@ -11,6 +11,7 @@ import {
   agentOperationContracts,
   agentOperationFamilies,
   agentContractDigest,
+  agentProtocolGuide,
 } from "./agentOperationContracts";
 import { agentPreviewRequestSchema } from "./agentPreview";
 import { agentWorkspaceRequestSchema } from "./agentWorkspace";
@@ -36,6 +37,7 @@ export const agentAuthoringKinds = [
   ...agentEffectAuthoringKinds,
   "motion",
   "operations",
+  "protocol",
   "deck",
   "timeline",
   "preview",
@@ -56,6 +58,7 @@ export const agentAuthoringRequestSchema = z
     detail: z.enum(["compact", "full"]).optional(),
     family: z.enum(agentOperationFamilies).optional(),
     operation: z.string().min(1).max(100).optional(),
+    operations: z.array(z.string().min(1).max(100)).min(1).max(32).optional(),
     documentId: id.optional(),
     epoch: z.string().min(1).max(100).optional(),
     revision: z.number().int().nonnegative().optional(),
@@ -65,15 +68,44 @@ export const agentAuthoringRequestSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    const selectors = [value.family, value.operation, value.operations].filter(
+      (v) => v !== undefined,
+    );
+    if (selectors.length > 1)
+      ctx.addIssue({
+        code: "custom",
+        path: ["operations"],
+        message: "Use exactly one selector: family, operation, or operations.",
+      });
     if (
-      value.operation &&
-      !agentOperationContracts(value.family, value.operation).operations.length
+      selectors.length &&
+      value.kind !== "operations" &&
+      value.kind !== "deck" &&
+      value.kind !== "timeline"
     )
       ctx.addIssue({
         code: "custom",
         message:
-          "Use an operation and matching family from the operations catalog.",
+          "Operation selectors require kind=operations, deck or timeline.",
       });
+    const family =
+      value.family ??
+      (value.kind === "deck"
+        ? "deck"
+        : value.kind === "timeline"
+          ? "timeline"
+          : undefined);
+    for (const [index, name] of (
+      value.operations ?? (value.operation ? [value.operation] : [])
+    ).entries()) {
+      if (!agentOperationContracts(family, name).operations.length)
+        ctx.addIssue({
+          code: "custom",
+          path: value.operations ? ["operations", index] : ["operation"],
+          message:
+            "Unknown operation or mismatched family; read the operations catalog.",
+        });
+    }
     const scoped = value.documentId !== undefined;
     if (
       scoped &&
@@ -142,6 +174,7 @@ function starter(kind: AgentEffectAuthoringKind) {
 
 function normalAuthoringGuide(
   kind: Exclude<AgentAuthoringKind, AgentEffectAuthoringKind>,
+  detail: "compact" | "full" = "compact",
 ) {
   const serviceSchema =
     kind === "preview"
@@ -152,7 +185,19 @@ function normalAuthoringGuide(
   if (kind === "workspace")
     return {
       kind,
+      contractVersion: 2,
       schema: z.toJSONSchema(agentWorkspaceRequestSchema),
+      ...(detail === "full"
+        ? {
+            example: {
+              action: "create",
+              documentId: "<currentDocumentId>",
+              epoch: "<currentEpoch>",
+              expectedRevision: 0,
+              name: "New presentation",
+            },
+          }
+        : {}),
       rules: [
         "Save before switching or closing. Exact current identity/revision is required.",
         "create/open/close use native lifecycle services; import-assets returns managed asset IDs. Supplied paths stay within the user-selected root (realpath checked); omit paths for native pickers.",
@@ -162,9 +207,51 @@ function normalAuthoringGuide(
   if (kind === "preview" || kind === "delivery")
     return {
       kind,
-      contractVersion: 1,
+      contractVersion: 2,
       schema: serviceSchema!,
       schemaDigest: agentContractDigest(JSON.stringify(serviceSchema)),
+      ...(detail === "full"
+        ? {
+            example:
+              kind === "preview"
+                ? {
+                    documentId: "<documentId>",
+                    epoch: "<epoch>",
+                    revision: 0,
+                    slideId: "<incomingSlideId>",
+                    width: 960,
+                    height: 540,
+                    sample: {
+                      mode: "transition",
+                      elapsedMs: 350,
+                      previousSlideId: "<outgoingSlideId>",
+                      outgoing: {
+                        presentationOriginMs: 0,
+                        activationMs: 0,
+                        captureTimeMs: 3350,
+                        clickTimesMs: [],
+                      },
+                      incoming: {
+                        presentationOriginMs: 0,
+                        activationMs: 3000,
+                        captureTimeMs: 3350,
+                        clickTimesMs: [],
+                        previousSlideId: "<outgoingSlideId>",
+                      },
+                    },
+                  }
+                : {
+                    documentId: "<documentId>",
+                    epoch: "<epoch>",
+                    expectedRevision: 0,
+                    action: "package",
+                    packageOptions: {
+                      mediaLocked: false,
+                      speakerNotes: "include",
+                    },
+                  },
+          }
+        : {}),
       rules:
         kind === "preview"
           ? [
@@ -197,42 +284,46 @@ function normalAuthoringGuide(
         "Use semantic structure operations rather than reconstructing nested objects.",
         "When several elements form one visual component, put them in one Frame/group and animate the parent instead of animating every child independently.",
       ],
-      componentWorkflow: {
-        summary:
-          "Build composite visuals as structural Frames/groups so layout and lifecycle animation preserve visual hierarchy.",
-        steps: [
-          "Create a Frame/group with an explicit stable ID.",
-          "Insert children with that ID as parentId.",
-          "Author child x/y/width/height in parent-local coordinates.",
-          "Style child elements normally.",
-          "Use Presence on the parent when the whole component should enter or exit as one visual object.",
-        ],
-        example: {
-          parent: {
-            type: "element.insert_frame",
-            id: "card",
-            parentId: "<layerId>",
-            frame: { x: 120, y: 180, width: 520, height: 320 },
-          },
-          child: {
-            type: "element.insert_text",
-            id: "card-title",
-            parentId: "card",
-            frame: { x: 32, y: 28, width: 456, height: 60 },
-            text: "Card title",
-          },
-          lifecycle: {
-            type: "presence.add",
-            stageIndex: 1,
-            elementIds: ["card"],
-            transition: "move",
-            direction: "Up",
-            distance: 50,
-            durationMs: 400,
-            easing: "Ease Out",
-          },
-        },
-      },
+      ...(detail === "full"
+        ? {
+            componentWorkflow: {
+              summary:
+                "Build composite visuals as structural Frames/groups so layout and lifecycle animation preserve visual hierarchy.",
+              steps: [
+                "Create a Frame/group with an explicit stable ID.",
+                "Insert children with that ID as parentId.",
+                "Author child x/y/width/height in parent-local coordinates.",
+                "Style child elements normally.",
+                "Use Presence on the parent when the whole component should enter or exit as one visual object.",
+              ],
+              example: {
+                parent: {
+                  type: "element.insert_frame",
+                  id: "card",
+                  parentId: "<layerId>",
+                  frame: { x: 120, y: 180, width: 520, height: 320 },
+                },
+                child: {
+                  type: "element.insert_text",
+                  id: "card-title",
+                  parentId: "card",
+                  frame: { x: 32, y: 28, width: 456, height: 60 },
+                  text: "Card title",
+                },
+                lifecycle: {
+                  type: "presence.add",
+                  stageIndex: 1,
+                  elementIds: ["card"],
+                  transition: "move",
+                  direction: "Up",
+                  distance: 50,
+                  durationMs: 400,
+                  easing: "Ease Out",
+                },
+              },
+            },
+          }
+        : {}),
       operations: [
         "slide.create",
         "slide.duplicate",
@@ -374,45 +465,25 @@ export function buildAgentAuthoringGuide(
     detail?: "compact" | "full";
     family?: string;
     operation?: string;
+    operations?: string[];
   } = {},
 ) {
-  if (kind === "preview" || kind === "delivery" || kind === "workspace")
-    return normalAuthoringGuide(kind);
+  if (kind === "protocol") return { kind, ...agentProtocolGuide() };
   const family =
     options.family ??
     (kind === "deck" ? "deck" : kind === "timeline" ? "timeline" : undefined);
-  if (
-    options.detail === "compact" ||
-    kind === "operations" ||
-    kind === "deck" ||
-    kind === "timeline"
-  ) {
-    const inferred =
-      family ??
-      (kind === "text"
-        ? "text"
-        : kind === "motion"
-          ? "motion"
-          : kind === "frame"
-            ? "frame"
-            : kind === "layout"
-              ? "element"
-              : kind === "media"
-                ? "element"
-                : "effect");
+  if (kind === "operations" || kind === "deck" || kind === "timeline")
     return {
       kind,
-      ...agentOperationContracts(
-        kind === "operations" && !family ? undefined : inferred,
-        options.operation,
-      ),
+      ...agentOperationContracts(family, options.operation, options),
     };
-  }
-  if (!isAgentEffectAuthoringKind(kind)) return normalAuthoringGuide(kind);
+  if (!isAgentEffectAuthoringKind(kind))
+    return normalAuthoringGuide(kind, options.detail);
 
   const definition = options.definition ?? starter(kind);
   return {
     kind,
+    contractVersion: 2,
     effectApiVersion: EFFECT_API_VERSION,
     editing: !!options.definition,
     contract: {
@@ -421,15 +492,11 @@ export function buildAgentAuthoringGuide(
       timeControl: definition.timeControl,
       speed: definition.speed ?? 1,
       parameters: definition.parameters,
-      source: definition.source,
-      ...(definition.styleSource === undefined
-        ? {}
-        : { styleSource: definition.styleSource }),
     },
-    authoringPrompt: buildEffectAuthoringPrompt(definition, {
-      creating: !options.definition,
-      previewElementName: options.previewElementName,
-    }),
+    runtime: effectRuntimeContract(definition),
+    ...(options.detail === "full"
+      ? { examples: effectGuideExamples(kind) }
+      : {}),
     operationTemplate:
       kind === "background-shader" && !options.effectInstanceId
         ? {
@@ -460,5 +527,21 @@ export function buildAgentAuthoringGuide(
               ? { existingInstanceId: options.effectInstanceId }
               : {}),
           },
+  };
+}
+
+function effectGuideExamples(kind: AgentEffectAuthoringKind) {
+  if (kind.endsWith("shader"))
+    return {
+      continuous:
+        "Use sin(u_t * 2.0) for oscillation; u_p is only a finite interval's completion.",
+      slideChange:
+        "Blend u_previousSlideSeed toward u_slideSeed with smoothstep(0.0, 1.2, u_slideTime); first entry uses the current seed for both.",
+      parameter: "uniform float strength; // @param 12 [0, 60]",
+    };
+  return {
+    glass:
+      ":scope { background: rgba(255,255,255,.3); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,.7); border-radius: 24px; }",
+    time: "Use calc(var(--t) * 1deg) for continuous time; finite @keyframes are paused and sampled from --p. Stop None supplies p=1, not a repeating animation clock.",
   };
 }

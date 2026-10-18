@@ -32,7 +32,7 @@ import {
   agentOperationFamilies,
   agentOperationSchema,
 } from "../../../src/core/agentOperationContracts";
-import { buildAgentAuthoringGuide } from "../../../src/core/agentAuthoring";
+import { agentAuthoringRequestSchema, buildAgentAuthoringGuide } from "../../../src/core/agentAuthoring";
 
 it("canonical discovery exports every operation and validated examples in bounded families", () => {
   const all = agentOperationContracts();
@@ -42,7 +42,7 @@ it("canonical discovery exports every operation and validated examples in bounde
   expect(all.operations.map((item) => item.operation)).toEqual(variants);
   const discovered: string[] = [];
   for (const family of agentOperationFamilies) {
-    const contract = agentOperationContracts(family);
+    const contract = agentOperationContracts(family, undefined, { detail: "full" });
     for (const item of contract.operations) {
       expect(item).toHaveProperty("schema.required");
       expect(item).toHaveProperty("example");
@@ -62,9 +62,8 @@ it("canonical discovery exports every operation and validated examples in bounde
     detail: "compact",
   });
   expect(compact).not.toHaveProperty("authoringPrompt");
-  expect(buildAgentAuthoringGuide("background-shader")).toHaveProperty(
-    "authoringPrompt",
-  );
+  expect(compact).toHaveProperty("runtime.slideContext");
+  expect(buildAgentAuthoringGuide("background-shader", { detail: "full" })).toHaveProperty("examples.slideChange");
   expect(
     buildAgentAuthoringGuide("preview", { detail: "compact" }),
   ).toMatchObject({
@@ -81,6 +80,68 @@ it("canonical discovery exports every operation and validated examples in bounde
       required: expect.arrayContaining(["action", "expectedRevision"]),
     },
   });
+});
+
+it("batched compact discovery preserves exact admission schemas and relevant semantic rules without repeating the protocol", () => {
+  const names = ["presence.add", "element.insert_text", "slide.create", "presence.add"];
+  const batch = agentOperationContracts(undefined, undefined, { operations: names });
+  expect(batch.operations.map((item) => item.operation)).toEqual(
+    agentOperationSchema.options.map((variant) => variant.shape.type.value).filter((name) => names.includes(name)),
+  );
+  expect(batch).not.toHaveProperty("request");
+  expect(batch).not.toHaveProperty("limits");
+  expect(batch).not.toHaveProperty("result");
+  expect(batch.operations.every((item) => !("example" in item))).toBe(true);
+  for (const item of batch.operations) {
+    const variant = agentOperationSchema.options.find((v) => v.shape.type.value === item.operation)!;
+    expect(item).toHaveProperty("schema", z.toJSONSchema(variant));
+  }
+  const rules = "rules" in batch ? batch.rules!.join(" ") : "";
+  expect(rules).toContain("parent-local");
+  expect(rules).toContain("slide-end stop requires Exit None");
+  expect(new Set(batch.rules).size).toBe(batch.rules!.length);
+  expect(agentOperationContracts(undefined, undefined, { operations: [...names].reverse(), detail: "full" }).schemaDigest).toBe(batch.schemaDigest);
+  expect(agentOperationContracts(undefined, "presence.add")).toEqual(agentOperationContracts(undefined, undefined, { operations: ["presence.add"] }));
+  const protocol = buildAgentAuthoringGuide("protocol");
+  expect(protocol).toHaveProperty("request.required", expect.arrayContaining(["epoch", "expectedRevision", "mutationId"]));
+  expect(protocol).toHaveProperty("limits.nativeOperations", 256);
+  expect(agentOperationContracts().operations.every((item) => !("schema" in item))).toBe(true);
+});
+
+it("discovery selectors reject ambiguous unknown oversized and domain-mismatched requests", () => {
+  for (const input of [
+    { kind: "operations", operations: [] },
+    { kind: "operations", operations: Array(33).fill("slide.create") },
+    { kind: "operations", operations: ["no.such_operation"] },
+    { kind: "operations", operations: ["slide.create"], operation: "slide.create" },
+    { kind: "operations", family: "slide", operation: "slide.create" },
+    { kind: "deck", operations: ["presence.add"] },
+    { kind: "css-effect", operations: ["effect.apply_code"] },
+    { kind: "protocol", family: "slide" },
+  ]) expect(agentAuthoringRequestSchema.safeParse(input).success).toBe(false);
+  expect(agentAuthoringRequestSchema.safeParse({ kind: "operations", operations: ["slide.create", "presence.add"] }).success).toBe(true);
+  expect(agentAuthoringRequestSchema.safeParse({ kind: "operations", operation: "slide.create" }).success).toBe(true);
+});
+
+it("compact domain guides retain runtime facts and scoped source once while full detail adds valid examples", () => {
+  const shader = buildAgentAuthoringGuide("background-shader", { detail: "compact" });
+  expect(shader).toHaveProperty("runtime.environment", expect.stringContaining("No input texture"));
+  expect(shader).toHaveProperty("runtime.timing.progress", expect.stringContaining("Stop None supplies p=1"));
+  expect(shader).not.toHaveProperty("authoringPrompt");
+  const css = buildAgentAuthoringGuide("css-effect");
+  expect(css).toHaveProperty("runtime.environment", expect.stringContaining("nested @supports"));
+  expect(css).toHaveProperty("runtime.environment", expect.stringContaining("paused and sampled"));
+  const definition = { ...blankEffect("shader"), source: "unique-private-source" };
+  const scoped = buildAgentAuthoringGuide("content-shader", { definition, elementId: "element", effectInstanceId: "effect", detail: "full" });
+  expect(scoped).toHaveProperty("operationTemplate.source", definition.source);
+  expect(scoped).toHaveProperty("operationTemplate.existingInstanceId", "effect");
+  expect(JSON.stringify(scoped).split(definition.source)).toHaveLength(2);
+  expect(JSON.stringify(shader)).not.toContain(definition.source);
+  const full = buildAgentAuthoringGuide("preview", { detail: "full" });
+  expect(full).toHaveProperty("example.sample.incoming.captureTimeMs", 3350);
+  expect(buildAgentAuthoringGuide("preview")).not.toHaveProperty("example");
+  expect(buildAgentAuthoringGuide("layout")).not.toHaveProperty("componentWorkflow");
+  expect(buildAgentAuthoringGuide("layout", { detail: "full" })).toHaveProperty("componentWorkflow");
 });
 
 it("replay preserves the historical receipt and separately observes subsequent accepted revisions", async () => {
