@@ -1,5 +1,6 @@
 import { z } from "zod/v4";
 import { createBasicShape, createEmptyFrame } from "./elementFactory";
+import type { Asset } from "./assets";
 import {
   insertElements,
   removeElements,
@@ -57,6 +58,7 @@ import {
 import {
   centerMedia,
   convertMediaRule,
+  createMediaElement,
   isMediaContent,
   resetMedia,
   setMediaContent,
@@ -107,6 +109,7 @@ const frame = point
   })
   .strict();
 const optionalId = id.optional();
+const assetId = z.string().regex(/^[a-f0-9]{64}$/);
 const childIndex = z.number().int().min(0).max(100000);
 const color = z.string().regex(/^#[a-fA-F0-9]{6}(?:[a-fA-F0-9]{2})?$/);
 const appearance = z
@@ -592,6 +595,16 @@ export const agentApplyRequestSchema = z
             })
             .strict(),
           z
+            .object({
+              type: z.literal("element.insert_media"),
+              parentId: id,
+              assetId,
+              frame,
+              name: z.string().max(200).optional(),
+              id: optionalId,
+            })
+            .strict(),
+          z
             .object({ type: z.literal("elements.remove"), elementIds: ids })
             .strict(),
         ]),
@@ -616,6 +629,9 @@ export type AgentTextMeasure = (
   element: Element & { content: TextContent },
 ) => Promise<TextMeasurement | null>;
 export type AgentEffectValidate = EffectDefinitionValidator;
+export type AgentAssetResolve = (
+  assetId: string,
+) => Promise<Asset> | Asset;
 function forest(snapshot: EditorSnapshot) {
   const entries = new Map<string, Element>();
   const visit = (element: Element) => {
@@ -643,6 +659,7 @@ export async function assembleAgentMutation(
   measure: AgentTextMeasure,
   newId = () => crypto.randomUUID(),
   validateEffect?: AgentEffectValidate,
+  resolveAsset?: AgentAssetResolve,
   replacementSlide?: import("./document").Slide,
 ) {
   if (
@@ -1458,6 +1475,31 @@ export async function assembleAgentMutation(
             ...op.typography,
             autoSize: op.autoSize ?? "none",
           });
+          createdThisBatch.add(elementId);
+        } else if (op.type === "element.insert_media") {
+          if (!resolveAsset)
+            throw new AgentMutationError(
+              "UNSUPPORTED_OPERATION",
+              "Managed Library asset resolution is unavailable.",
+            );
+          let asset: Asset;
+          try {
+            asset = await resolveAsset(op.assetId);
+          } catch {
+            throw new AgentMutationError(
+              "INVALID_MEDIA",
+              "Use an existing ShowMe-managed asset ID.",
+            );
+          }
+          if (asset.id !== op.assetId || !asset.width || !asset.height)
+            throw new AgentMutationError(
+              "INVALID_MEDIA",
+              "The managed asset is missing prepared dimensions.",
+            );
+          const element = createMediaElement(elementId, asset, op.frame);
+          element.frame = { ...element.frame, ...op.frame };
+          if (op.name !== undefined) element.name = op.name;
+          next = insertElements(next, [element], op.parentId);
           createdThisBatch.add(elementId);
         } else {
           const element =
