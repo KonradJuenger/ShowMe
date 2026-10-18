@@ -97,6 +97,19 @@ function fixture(
     measure: (_id, element) => measure(element),
     validateEffect: (documentId, definition, sampleText) =>
       validateEffect(documentId, definition, sampleText),
+    asset: async (_documentId, id) => ({
+      version: 1,
+      id,
+      filename: "managed.png",
+      mediaType: "image",
+      type: "image",
+      mime: "image/png",
+      names: ["managed.png"],
+      bytes: 1024,
+      width: 1200,
+      height: 800,
+      createdAt: "2026-10-18T00:00:00.000Z",
+    }),
     changed: () => {
       notifications++;
     },
@@ -756,8 +769,38 @@ it("layer authoring creates stable parents and respects visibility locking", asy
   expect(p.deck.layers[0].id).toBe("agent-layer");
 });
 
-it("existing managed media exposes semantic fit fill center reset and content transforms", async () => {
+it("managed media can be inserted by asset ID and exposes semantic fit fill center reset and content transforms", async () => {
   const f = fixture();
+  const inserted = await f.service.apply(
+    f.request([
+      {
+        type: "element.insert_media",
+        id: "inserted-media",
+        parentId: f.slide.nodes[0].id,
+        assetId: "c".repeat(64),
+        frame: { x: 200, y: 180, width: 720, height: 480 },
+        name: "Managed image",
+      },
+    ]),
+  );
+  expect(inserted).toMatchObject({
+    ok: true,
+    createdIds: ["inserted-media"],
+  });
+  expect(findElement((await f.projection()).slide, "inserted-media")).toMatchObject({
+    name: "Managed image",
+    frame: { x: 200, y: 180, width: 720, height: 480 },
+    content: {
+      type: "image",
+      assetId: "c".repeat(64),
+      transform: {
+        rule: "fill",
+        intrinsicWidth: 1200,
+        intrinsicHeight: 800,
+      },
+    },
+  });
+
   const p = await f.projection();
   const media = createBasicShape("managed-media", "rectangle");
   media.frame = {
