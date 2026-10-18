@@ -129,21 +129,28 @@ ShowMe includes an experimental local MCP server for agents running on your comp
 Open **Settings → MCP · Experimental**, enable MCP, then use **Copy client
 configuration** to connect a stdio MCP host. Node.js 24 or 26 is required.
 
-The server exposes four tools: `showme.context`, `showme.inspect`, `showme.preview`
-and `showme.apply`. Agents can inspect accepted unsaved presentation state, capture
-slide PNGs, and—with **Allow agent editing** enabled—add slides, name the deck,
-style text, move or resize elements, change basic appearance, insert text or
-shapes, and remove elements.
-Edits use the normal document authority and have separate Agent undo/redo controls.
-Both MCP and agent editing are off by default.
+The server exposes five tools: `showme.context`, `showme.inspect`,
+`showme.authoring`, `showme.apply` and `showme.preview`. Agents can inspect
+accepted unsaved presentation state, capture production slide PNGs and, with
+**Allow agent editing** enabled, author normal ShowMe content through the same
+document authority used by the editor.
 
-This feature is under local development. Editing currently requires a locally owned
-document; template content, animation/effect authoring and file operations are outside
-its scope. ShowMe does not connect to external MCP services.
+The semantic authoring surface includes slides, layers, text and Text Styles,
+shapes, Frames, hierarchy, alignment/distribution, managed image/SVG/video assets,
+media crop/frame controls, transitions, deck CSS, Effects, Motion and Presence.
+Persistent geometry stays parent-local, and previews use ShowMe's production renderer.
+Media insertion accepts only existing ShowMe-managed asset IDs. It never accepts
+filesystem paths or raw media bytes.
+
+Edits use a separate Agent history so human Ctrl+Z remains independent. Both MCP and
+agent editing are off by default. Editing currently requires a locally owned document;
+collaboration guest writes and arbitrary file import remain outside the MCP boundary.
+ShowMe does not connect to external MCP services.
 
 See [local MCP setup and supported operations](docs/mcp/LOCAL_SETUP.md) for connection,
-retry and recovery instructions, and [MCP development status](docs/mcp/README.md) for
-implementation details and pending evaluation.
+retry and recovery instructions, [the authoring capability matrix](docs/mcp/AUTHORING_CAPABILITY_MATRIX.md)
+for editor parity, and [MCP development status](docs/mcp/README.md) for implementation
+details and pending evaluation.
 
 ## Development
 
