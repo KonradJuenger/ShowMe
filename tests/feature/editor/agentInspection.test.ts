@@ -48,6 +48,25 @@ function fixture() {
     activeDocumentId: () => active,
     context: () => readContext(),
     projection: (_id, pageId) => read(pageId),
+    listAssets: async () => ({
+      items: [
+        {
+          version: 1,
+          id: "a".repeat(64),
+          filename: "private-photo.png",
+          mediaType: "image",
+          type: "image",
+          mime: "image/png",
+          names: ["photo.png"],
+          bytes: 12345,
+          width: 1600,
+          height: 900,
+          createdAt: "2026-10-18T00:00:00.000Z",
+        },
+      ],
+      total: 1,
+      counts: { images: 1, videos: 0 },
+    }),
   });
   const request: AgentInspectRequest = {
     documentId: model.documentId,
@@ -140,6 +159,43 @@ it("returns detached sparse deck slide and exact element reads without notes or 
   });
   expect(f.projection).toEqual(before);
 });
+it("lists bounded managed assets without paths bytes or private storage metadata", async () => {
+  const f = fixture();
+  const result = await f.service.inspect({
+    ...f.request,
+    target: { type: "assets", query: "photo", offset: 0, limit: 10 },
+  });
+  expect(result).toMatchObject({
+    ok: true,
+    data: {
+      assets: {
+        query: "photo",
+        offset: 0,
+        limit: 10,
+        total: 1,
+        counts: { images: 1, videos: 0 },
+        items: [
+          {
+            assetId: "a".repeat(64),
+            name: "photo.png",
+            type: "image",
+            mediaType: "image",
+            width: 1600,
+            height: 900,
+          },
+        ],
+      },
+    },
+  });
+  expect(JSON.stringify(result)).not.toMatch(/private-photo|bytes|mime|createdAt/i);
+  expect(
+    await f.service.inspect({
+      ...f.request,
+      target: { type: "assets", limit: 51 },
+    }),
+  ).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+});
+
 it("rejects stale epochs revisions and missing scope instead of retargeting", async () => {
   const f = fixture();
   expect(await f.service.inspect({ ...f.request, epoch: "old" })).toMatchObject(
