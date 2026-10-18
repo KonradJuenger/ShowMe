@@ -91,7 +91,7 @@ export function createShowMeServer(
     "showme.authoring",
     {
       description:
-        "Learn ShowMe's live creative authoring contract without repository access. Use background/content/backdrop shader, CSS Effect, text Effect or Motion context. Optionally scope to an exact document/slide/element/Effect to receive its current source and parameter contract.",
+        "Learn ShowMe's live authoring contract without repository access. Use layout, text, frame, media, shader, CSS Effect, text Effect or Motion context. Creative-code contexts may be scoped to an exact document/slide/element/Effect.",
       inputSchema: schema(agentAuthoringRequestSchema),
       outputSchema: schema(envelopeSchema),
       annotations,
@@ -103,7 +103,7 @@ export function createShowMeServer(
     "showme.inspect",
     {
       description:
-        "Inspect accepted creative state at an exact epoch/revision. Default output stays sparse; explicitly request deck stylesheet, Effect source, semantic Motion/Presence summaries or world transforms when needed. Element details include CSS classes, Effect instances and Motion-addressable numeric Effect parameter names. Hidden text is withheld by default.",
+        "Inspect accepted authoring state at an exact epoch/revision. Default output stays sparse; request Text Styles, deck stylesheet, Effect source, semantic Motion/Presence summaries or world transforms when needed. Element details expose parent-local frame, hierarchy, appearance, text/media state and CSS/Effect metadata. Hidden text is withheld by default.",
       inputSchema: schema(agentInspectRequestSchema),
       outputSchema: schema(envelopeSchema),
       annotations,
@@ -115,7 +115,7 @@ export function createShowMeServer(
     "showme.apply",
     {
       description:
-        "Apply an atomic semantic batch to the active locally owned presentation. Requires Allow agent editing and an exact inspected revision. Supports frame-based text insertion, template detachment, z-order, deck CSS/classes, ShowMe Effects, generated shader backgrounds, numeric Motion, Presence and ordinary editing. Effect code is production-validated before commit and shader @param uniforms become native parameters. Reuse an identical mutationId after a lost response. Raw document operations remain unavailable.",
+        "Apply an atomic semantic batch to the active locally owned presentation. Requires Allow agent editing and an exact inspected revision. Supports slide construction, text/shape/frame insertion, parent-local geometry, appearance, z-order, hierarchy, duplication, grouping, alignment/distribution, Text Styles, existing-media frame/crop controls, templates, deck CSS, Effects, Motion and Presence. Effect code is production-validated. Reuse an identical mutationId after a lost response. Raw document operations remain unavailable.",
       inputSchema: schema(agentApplyRequestSchema),
       outputSchema: schema(
         z.union([
@@ -138,6 +138,8 @@ export function createShowMeServer(
               updatedSlideIds: z.array(z.string()),
               createdEffectInstanceIds: z.array(z.string()),
               updatedEffectInstanceIds: z.array(z.string()),
+              idMap: z.record(z.string(), z.string()),
+              createdTextStyleIds: z.array(z.string()),
               deckChanged: z.boolean(),
               changes: z.array(
                 z
