@@ -1,5 +1,5 @@
 import { readdir, readFile, lstat, rm } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
+import { Agent as HttpAgent, request as httpRequest } from "node:http";
 import path from "node:path";
 import { z } from "zod/v4";
 import { agentFailure, type AgentBridgeRequest } from "../src/core/agentRead";
@@ -33,6 +33,13 @@ function processIsAlive(pid: number) {
   }
 }
 
+const bridgeAgent = new HttpAgent({
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  maxSockets: 8,
+  maxFreeSockets: 4,
+});
+
 export async function bridgeRead(
   descriptor: BridgeDescriptor,
   value: AgentBridgeRequest,
@@ -48,7 +55,7 @@ export async function bridgeRead(
         port: descriptor.port,
         path: "/v1/read",
         method: "POST",
-        agent: false,
+        agent: bridgeAgent,
         signal,
         headers: {
           Authorization: `Bearer ${descriptor.token}`,
@@ -104,13 +111,20 @@ export async function bridgeRead(
   });
 }
 
-/** Discovery is per call: no token/session cache can outlive a preference transition. */
+/** Cache only a verified live descriptor. Every request still carries the current
+ * bearer token and verifies the instance headers, so bridge revocation remains authoritative. */
 export class ShowMeClient {
+  private cachedDescriptor: BridgeDescriptor | null = null;
+
   constructor(
     private readonly userData: string,
     private readonly instanceId?: string,
   ) {}
-  async read(value: AgentBridgeRequest, signal?: AbortSignal) {
+
+  private async discover(signal?: AbortSignal): Promise<
+    | { ok: true; descriptor: BridgeDescriptor; context: unknown }
+    | { ok: false; failure: ReturnType<typeof agentFailure> }
+  > {
     const directory = path.join(this.userData, "mcp", "instances");
     try {
       const files = (await readdir(directory)).filter((file) =>
@@ -120,7 +134,8 @@ export class ShowMeClient {
         descriptor: BridgeDescriptor;
         context: unknown;
       }> = [];
-      // Parallel probes have bounded count, short discovery deadline and no native captures.
+      // Parallel probes are bounded by the descriptor count and only happen
+      // during initial discovery or after a cached connection fails.
       await Promise.all(
         files.map(async (file) => {
           if (this.instanceId && file !== `${this.instanceId}.json`) return;
@@ -164,23 +179,71 @@ export class ShowMeClient {
         }),
       );
       if (available.length > 1)
-        return agentFailure(
-          "AMBIGUOUS_INSTANCE",
-          "Multiple ShowMe instances are available. Configure --instance with the intended instance ID from Settings.",
-        );
+        return {
+          ok: false,
+          failure: agentFailure(
+            "AMBIGUOUS_INSTANCE",
+            "Multiple ShowMe instances are available. Configure --instance with the intended instance ID from Settings.",
+          ),
+        };
       if (!available.length)
-        return agentFailure(
-          "APP_UNAVAILABLE",
-          "Open ShowMe, enable MCP in Settings and check the configured user-data directory.",
-        );
-      return value.command === "context"
-        ? available[0].context
-        : await bridgeRead(available[0].descriptor, value, signal);
+        return {
+          ok: false,
+          failure: agentFailure(
+            "APP_UNAVAILABLE",
+            "Open ShowMe, enable MCP in Settings and check the configured user-data directory.",
+          ),
+        };
+      return { ok: true, ...available[0] };
     } catch {
-      return agentFailure(
-        "APP_UNAVAILABLE",
-        "ShowMe is unavailable or MCP access changed. Read context and retry.",
-      );
+      return {
+        ok: false,
+        failure: agentFailure(
+          "APP_UNAVAILABLE",
+          "ShowMe is unavailable or MCP access changed. Read context and retry.",
+        ),
+      };
     }
   }
+
+  private async readDiscovered(
+    value: AgentBridgeRequest,
+    signal?: AbortSignal,
+  ) {
+    const discovered = await this.discover(signal);
+    if (!discovered.ok) return discovered.failure;
+    this.cachedDescriptor = discovered.descriptor;
+    if (value.command === "context") return discovered.context;
+    try {
+      return await bridgeRead(discovered.descriptor, value, signal);
+    } catch {
+      this.cachedDescriptor = null;
+      return null;
+    }
+  }
+
+  async read(value: AgentBridgeRequest, signal?: AbortSignal) {
+    if (this.cachedDescriptor) {
+      try {
+        return await bridgeRead(this.cachedDescriptor, value, signal);
+      } catch {
+        this.cachedDescriptor = null;
+      }
+    }
+
+    const first = await this.readDiscovered(value, signal);
+    if (first !== null) return first;
+
+    // A descriptor can become stale between discovery and the actual request.
+    // Rediscover exactly once. Never loop indefinitely on a broken instance.
+    const retry = await this.readDiscovered(value, signal);
+    return (
+      retry ??
+      agentFailure(
+        "APP_UNAVAILABLE",
+        "ShowMe is unavailable or MCP access changed. Read context and retry.",
+      )
+    );
+  }
 }
+
