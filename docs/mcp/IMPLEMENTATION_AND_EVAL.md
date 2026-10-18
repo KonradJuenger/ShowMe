@@ -506,3 +506,50 @@ Minimum release gate:
 - all public tool inputs/outputs are versioned by server release and covered by tests.
 
 The first public MCP should be small and boring enough that agents can trust it.
+
+
+## Visual authoring benchmark corpus
+
+The expanded semantic surface is intended to support these future model evaluations
+without repository access:
+
+### Task A: editorial title slide
+
+Start from a blank slide. Build a restrained title, subtitle, rule and page marker
+with exact frames and typography. Render through the production preview and refine.
+
+### Task B: image + text layout
+
+Start with a ShowMe-managed image already available to MCP once Library insertion is
+exposed. Build a large cropped image beside text, use Frame fill/crop semantics, and
+verify the content transform through structured inspection.
+
+### Task C: structured information slide
+
+Build a three-column information layout using normal shapes, text, alignment,
+distribution, grouping and duplication. Verify hierarchy and parent-local geometry.
+
+### Task D: creative slide
+
+Build a typographic composition using normal authoring primitives plus a CSS,
+text-JS or GLSL Effect. Animate a native or numeric Effect property through Motion.
+
+### Task E: repair an existing slide
+
+Inspect a deliberately weak layout, improve hierarchy/spacing/typography and z-order,
+then compare structured state and production previews before/after.
+
+The real Electron MCP suite now covers the core prerequisite for this corpus: a client
+can create a complete title slide from scratch in one semantic batch, inspect it and
+render the production PNG.
+
+## Current authoring boundary
+
+Implemented now: slide lifecycle/order/hidden state/templates, layer management,
+text/shape/Frame creation, parent-local transform/appearance, hierarchy/z-order,
+duplicate/group/ungroup/reparent, alignment/distribution, Text Styles, existing-media
+Frame/crop transforms, deck CSS, Effects, Motion, Presence and production preview.
+
+Intentionally unsupported: arbitrary filesystem access and new image/SVG/video
+insertion by path. That operation should be added only after the managed Library can
+resolve an authorized asset identity for MCP.
