@@ -12,6 +12,7 @@ import {
   duplicateSlideWithResult,
   deleteSlide,
   setSlideBackground,
+  setSlideNotes,
   updateSlideMeta,
   setDeckProperties,
   reorderSlides,
@@ -95,6 +96,10 @@ import {
 } from "./effectAuthoring";
 import type { EffectDefinitionValidator } from "./effectValidation";
 import { uid } from "./ids";
+import {
+  slideTransitionSchema,
+  transitionDefaultsSchema,
+} from "./slideTransitions";
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const number = z.number().finite();
@@ -274,6 +279,8 @@ export const agentApplyRequestSchema = z
               name: z.string().trim().min(1).max(200).optional(),
               background: background.optional(),
               hidden: z.boolean().optional(),
+              notes: z.string().max(100000).optional(),
+              transition: slideTransitionSchema.nullable().optional(),
             })
             .strict(),
           z
@@ -300,6 +307,12 @@ export const agentApplyRequestSchema = z
               type: z.literal("deck.dimensions.set"),
               width: number.positive().max(100000),
               height: number.positive().max(100000),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("deck.transition_defaults.set"),
+              value: transitionDefaultsSchema,
             })
             .strict(),
           z
@@ -1050,10 +1063,16 @@ export async function assembleAgentMutation(
       } else if (op.type === "slide.move") {
         next = reorderSlides(next, next.slide.id, op.afterId);
       } else if (op.type === "slide.update") {
-        if (op.name === undefined && op.background === undefined && op.hidden === undefined)
+        if (
+          op.name === undefined &&
+          op.background === undefined &&
+          op.hidden === undefined &&
+          op.notes === undefined &&
+          op.transition === undefined
+        )
           throw new AgentMutationError(
             "INVALID_REQUEST",
-            "Supply a slide name, background, or hidden state.",
+            "Supply a slide name, background, hidden state, notes, or transition.",
           );
         if (op.background) {
           if (next.deck.slideMeta[next.slide.id]?.templateId)
@@ -1070,6 +1089,12 @@ export async function assembleAgentMutation(
           next = updateSlideMeta(next, next.slide.id, { name: op.name });
         if (op.hidden !== undefined)
           next = updateSlideMeta(next, next.slide.id, { hidden: op.hidden });
+        if (op.notes !== undefined)
+          next = setSlideNotes(next, op.notes);
+        if (op.transition !== undefined)
+          next = updateSlideMeta(next, next.slide.id, {
+            transition: op.transition ?? undefined,
+          });
       } else if (op.type === "slide.template.apply") {
         next = applyTemplate(next, op.templateId);
       } else if (op.type === "slide.make_independent") {
@@ -1080,6 +1105,8 @@ export async function assembleAgentMutation(
         next = setDeckProperties(next, { stylesheet: op.source });
       } else if (op.type === "deck.dimensions.set") {
         next = setDeckProperties(next, { width: op.width, height: op.height });
+      } else if (op.type === "deck.transition_defaults.set") {
+        next = setDeckProperties(next, { transitionDefaults: op.value });
       } else if (op.type === "layer.create") {
         const layerId = op.id ?? newId();
         if (next.deck.layers.some((layer) => layer.id === layerId))
