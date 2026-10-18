@@ -1328,10 +1328,11 @@ export async function assembleAgentMutation(
         op.type === "frame.content_transform.set"
       ) {
         const element = requireEditable(op.elementId);
-        if (!isMediaContent(element.content))
+        const mediaContent = element.content;
+        if (!isMediaContent(mediaContent))
           throw new AgentMutationError("INVALID_MEDIA", "The target has no image, SVG, or video content.");
         const intrinsic = async () => {
-          const stored = mediaIntrinsic(element.content);
+          const stored = mediaIntrinsic(mediaContent);
           if (stored) return stored;
           if (!resolveAsset)
             throw new AgentMutationError(
@@ -1339,7 +1340,7 @@ export async function assembleAgentMutation(
               "The media source dimensions are unavailable.",
             );
           try {
-            const asset = await resolveAsset(element.content.assetId);
+            const asset = await resolveAsset(mediaContent.assetId);
             if (!asset.width || !asset.height) throw new Error("unprepared");
             return { width: asset.width, height: asset.height };
           } catch {
