@@ -7,11 +7,20 @@ import { platform } from "../platform";
 import { SlideRenderer } from "./SlideRenderer";
 import { waitForSlideImages } from "./audienceImagePreparation";
 import { flushEffectSurfaces } from "./effectRuntime";
+import type { AgentPreviewWarning } from "../core/agentPreview";
+import { measureText } from "./editor/textLayout";
+import type { Element as SceneElement } from "../core/element";
+import type { TextContent, TextMeasurement } from "../core/text";
 
 declare global {
   interface Window {
+    measureAgentText?: (
+      documentId: string,
+      element: SceneElement & { content: TextContent },
+    ) => Promise<TextMeasurement | null>;
     composeEffectThumbnail?: (definition: EffectDefinition) => Promise<boolean>;
     clearSlidePreview?: () => void;
+    slidePreviewWarnings?: () => AgentPreviewWarning[];
     composeSlidePreview?: (
       projection: DocumentProjection,
       width: number,
@@ -25,7 +34,62 @@ export function installSlidePreviewPage() {
   const host = document.getElementById("root")!;
   document.body.style.margin = "0";
   const root = createRoot(host);
+  window.measureAgentText = async (documentId, element) => {
+    await platform.managedFonts?.(documentId);
+    const typography =
+      element.content.format.kind === "local"
+        ? element.content.format.typography
+        : null;
+    if (!typography) return null;
+    await document.fonts.load(
+      `${typography.italic ? "italic " : ""}${typography.fontWeight} ${typography.fontSize}px ${typography.fontFamily}`,
+      element.content.text || " ",
+    );
+    await document.fonts.ready;
+    return measureText(element);
+  };
   window.clearSlidePreview = () => flushSync(() => root.render(null));
+  window.slidePreviewWarnings = () => {
+    const warnings: AgentPreviewWarning[] = [];
+    const elementIds = (nodes: Element[]) =>
+      [
+        ...new Set(
+          nodes.flatMap((node) => {
+            const id = node
+              .closest("[data-element-id]")
+              ?.getAttribute("data-element-id");
+            return id ? [id] : [];
+          }),
+        ),
+      ].sort();
+    const missing = [...host.querySelectorAll('[data-missing-media="true"]')];
+    if (missing.length)
+      warnings.push({
+        code: "MISSING_MEDIA",
+        message: "The preview contains missing media placeholders.",
+        elementIds: elementIds(missing),
+      });
+    const errors = [
+      ...host.querySelectorAll("[data-effect-id][data-effect-error]"),
+    ].filter((node) => !!node.getAttribute("data-effect-error"));
+    if (errors.length)
+      warnings.push({
+        code: "EFFECT_FALLBACK",
+        message: "An Effect reported a production runtime diagnostic.",
+        elementIds: elementIds(errors),
+        effectInstanceIds: [
+          ...new Set(
+            errors.flatMap((node) => {
+              const id = node
+                .closest("[data-effect-id]")
+                ?.getAttribute("data-effect-id");
+              return id ? [id] : [];
+            }),
+          ),
+        ].sort(),
+      });
+    return warnings;
+  };
   window.composeEffectThumbnail = async (definition) => {
     flushSync(() =>
       root.render(<EffectThumbnailPreview definition={definition} />),
@@ -35,7 +99,9 @@ export function installSlidePreviewPage() {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
     );
     const ready = await flushEffectSurfaces(host);
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
     return ready && !host.querySelector('[role="status"]');
   };
   window.composeSlidePreview = async (projection, width, height) => {
@@ -75,7 +141,15 @@ export function installSlidePreviewPage() {
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );
-      return !abort.signal.aborted && (await flushEffectSurfaces(host));
+      // A native resize can publish fresh surface density after the first flush.
+      // Wait on the actual readiness contract within the existing capture deadline.
+      while (!abort.signal.aborted) {
+        if (await flushEffectSurfaces(host)) return !abort.signal.aborted;
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
+      }
+      return false;
     } finally {
       clearTimeout(timer);
     }

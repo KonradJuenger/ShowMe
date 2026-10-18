@@ -123,6 +123,27 @@ LAN collaboration is experimental. It is intended for trusted local networks and
 
 Collaboration synchronizes presentation edits, not filesystem contents. Sync the complete ShowMe root, including `ShowMe Library/` and every `.sme` presentation that uses it, for example with Syncthing. Each computer selects its local copy of that same root; absolute paths can differ. Keep native presentations anywhere below the root so Library cleanup scans the complete set. Missing media is shown as a placeholder and updates when the asset becomes available locally.
 
+## Local MCP integration
+
+ShowMe includes an experimental local MCP server for agents running on your computer.
+Open **Settings → MCP · Experimental**, enable MCP, then use **Copy client
+configuration** to connect a stdio MCP host. Node.js 24 or 26 is required.
+
+The server exposes four tools: `showme.context`, `showme.inspect`, `showme.preview`
+and `showme.apply`. Agents can inspect accepted unsaved presentation state, capture
+slide PNGs, and—with **Allow agent editing** enabled—edit text, move or resize
+elements, change basic appearance, insert text or shapes, and remove elements.
+Edits use the normal document authority and have separate Agent undo/redo controls.
+Both MCP and agent editing are off by default.
+
+This feature is under local development. Editing currently requires a locally owned
+document; template content, animation/effect authoring and file operations are outside
+its scope. ShowMe does not connect to external MCP services.
+
+See [local MCP setup and supported operations](docs/mcp/LOCAL_SETUP.md) for connection,
+retry and recovery instructions, and [MCP development status](docs/mcp/README.md) for
+implementation details and pending evaluation.
+
 ## Development
 
 [AGENTS.md](AGENTS.md) describes the development workflow.

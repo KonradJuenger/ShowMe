@@ -654,6 +654,26 @@ export function resizeElements(
     (frame) => scaleTransformToBox(frame, start, next),
     scopeId,
   );
+  return preserveResizedContents(snapshot, resized, selected);
+}
+
+/** Frame replacement with the same text/media preservation as native resizing. */
+export function setElementFramesPreservingContent(
+  snapshot: EditorSnapshot,
+  changes: readonly { elementId: string; value: Element["frame"] }[],
+): EditorSnapshot {
+  return preserveResizedContents(
+    snapshot,
+    setElementFrames(snapshot, changes),
+    changes.map((change) => change.elementId),
+  );
+}
+
+function preserveResizedContents(
+  snapshot: EditorSnapshot,
+  resized: EditorSnapshot,
+  selected: string[],
+) {
   // Free media is independent of the viewport boundary, including its origin.
   return setElementContents(
     resized,

@@ -1,5 +1,104 @@
 [
   {
+    "id": "editor-agent-editing",
+    "path": "tests/feature/editor/agentEditing.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-18",
+    "lastReviewed": "2026-10-18",
+    "reason": "Seven semantic edits stage atomically through an actor-scoped EditorSession with exact in-queue revision admission, native resize/media preservation, replay and capacity bounds, human/LAN lease conflicts, durable failure and post-acceptance refresh recovery, and separate guarded agent undo/redo"
+  },
+  {
+    "id": "editor-agent-mcp",
+    "path": "tests/extended/agent-mcp.spec.ts",
+    "area": "editor",
+    "tier": "extended",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-18",
+    "reason": "Real SDK stdio client uses Settings configuration for context inspection and production image reads, preserves editor/document state, rejects revoked captures and old identities, and recovers from application crash/restart; explicit local editing opt-in exposes atomic apply with production text sizing and independent guarded user/agent history even while external access is off"
+  },
+  {
+    "id": "editor-agent-bridge",
+    "path": "tests/feature/editor/agentBridge.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-18",
+    "reason": "Authenticated loopback bridge enforces private descriptors and Windows ACLs, strict dispatch and browser request rejection, size limits, revocation and instance discovery without fallback; lost HTTP response during an actual durable mutation replays its accepted insertion receipt without repeating writes"
+  },
+  {
+    "id": "editor-agent-inspection",
+    "path": "tests/feature/editor/agentInspection.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Strict scoped accepted-document reads preserve projection privacy and exact identity, resolve selection at a UI epoch, and reject missing targets and freshness/access races"
+  },
+  {
+    "id": "editor-agent-preview",
+    "path": "tests/feature/editor/agentPreview.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Strict preview requests use accepted document/slide/epoch/revision and bounded pixels, reject disabled or stale access before/after capture, preserve explicit targeting and return structured failures without pixel/source leakage"
+  },
+  {
+    "id": "editor-agent-preview-electron",
+    "path": "tests/extended/agent-preview.spec.ts",
+    "area": "editor",
+    "tier": "extended",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Context/inspection/native preview loop captures template/nested/text/image/alpha/GLSL/CSS output with real missing-media and Effect-fallback diagnostics, excludes editor overlays, waits for surface readiness, preserves UI/document state, rejects unauthorized preview callers and discards revoked or stale in-flight output"
+  },
+  {
+    "id": "editor-agent-context",
+    "path": "tests/feature/editor/agentContext.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Opt-in ephemeral context distinguishes accepted revisions from UI epochs, normalizes selection and timeline handles, isolates templates/drafts/presenter state, rejects obsolete views and read races, and persists only the MCP app preference"
+  },
+  {
+    "id": "editor-agent-context-electron",
+    "path": "tests/extended/agent-context.spec.ts",
+    "area": "editor",
+    "tier": "extended",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Real settings toggle gates and persists editor context; selection/template/slide navigation and reload publish current handles without document edits; strict IPC payloads, foreign windows and unprivileged subframes preserve the boundary"
+  },
+  {
+    "id": "editor-agent-projection",
+    "path": "tests/feature/editor/agentProjection.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Pure agent deck/visual-slide/scoped-element reads preserve template ownership, canonical order, production world geometry, hidden-content opt-in, bounded Unicode previews, style/media/effect/timeline metadata, explicit failures and detached results without source/path/note disclosure"
+  },
+  {
     "id": "presenter-audience-images",
     "path": "tests/feature/presenter/audience-images.test.ts",
     "area": "presenter",

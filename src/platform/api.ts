@@ -137,6 +137,18 @@ export type FileCommand =
 export type CloseResult = "closed" | "canceled";
 
 export interface Platform {
+  getMcpEnabled?(): Promise<boolean>;
+  getMcpEditingEnabled?(): Promise<boolean>;
+  setMcpEditingEnabled?(enabled: boolean): Promise<boolean>;
+  agentHistory?(): Promise<{ documentId: string | null; canUndo: boolean; canRedo: boolean; summary: string | null }>;
+  agentUndo?(request: { documentId: string; redo: boolean }): Promise<{ ok: boolean; error?: { message: string } }>;
+  onAgentHistoryChanged?(callback: () => void): () => void;
+  getMcpConnection?(): Promise<import("../core/agentRead").McpConnectionInfo>;
+  setMcpEnabled?(enabled: boolean): Promise<boolean>;
+  onMcpEnabledChanged?(callback: (enabled: boolean) => void): () => void;
+  editorAgentContext?(request: import("../core/agentContext").EditorAgentContextRequest): Promise<import("../core/agentContext").EditorAgentContextReply>;
+  agentContext?(): Promise<import("../core/agentContext").AgentContext>;
+  agentPreview?(request: import("../core/agentPreview").AgentPreviewRequest): Promise<import("../core/agentPreview").AgentPreviewResult>;
   effectLibrary?(
     request: import("../core/libraryEffects").EffectLibraryRequest,
   ): Promise<import("../core/libraryEffects").EffectLibrary>;

@@ -5,7 +5,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import { prepareMediaAsset } from "../../core/media";
+import { prepareMediaAsset } from "../mediaEnrichment";
 import {
   centerMedia,
   convertMediaRule,

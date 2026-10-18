@@ -271,6 +271,11 @@ export function registerIpcRouter({
         [
           "createDocument",
           "openDocumentFile",
+          "setMcpEnabled",
+          "setMcpEditingEnabled",
+          "setImageCacheFormat",
+          "setDeleteImageCacheOnClose",
+          "setImageCachingEnabled",
           "setLibraryLifecycleMode",
           "libraryBrowser",
           "effectLibrary",

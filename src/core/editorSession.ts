@@ -73,6 +73,11 @@ export interface EditorSessionOptions {
 }
 
 type Listener = () => void;
+export class EditorLeaseDeniedError extends Error {
+  constructor() {
+    super("A collaborator owns this edit scope");
+  }
+}
 
 export class EditorSession {
   private replicaState: EditorReplica | null = null;
@@ -97,6 +102,7 @@ export class EditorSession {
   private invalidatedUnsubscribe: (() => void) | undefined;
   private disposed = false;
   private lastErrorValue: unknown = null;
+  private committed: AcceptedTransaction | null = null;
   private draftConflictValue: DraftConflict | null = null;
   private readonly idFactory: () => string;
   private readonly leaseRenewMs: number;
@@ -183,6 +189,11 @@ export class EditorSession {
 
   get lastError() {
     return this.failedIntents[0]?.error ?? this.lastErrorValue;
+  }
+
+  /** Receipt remains available even if post-acceptance refresh/notification fails. */
+  get lastCommittedTransaction() {
+    return this.committed && structuredClone(this.committed);
   }
 
   get hasFailedIntent() {
@@ -406,7 +417,7 @@ export class EditorSession {
           operations: [...operations],
         };
         this.setReplica(setEditorReplicaDraft(replica, replica.accepted));
-        throw new Error("A collaborator owns this edit scope");
+        throw new EditorLeaseDeniedError();
       }
       tokens = this.activeLeaseTokens;
     }
@@ -430,6 +441,7 @@ export class EditorSession {
         transaction,
       );
       result.accepted = accepted;
+      this.committed = accepted;
       this.queuedOperations = this.queuedOperations.filter(
         (batch) => batch !== operations,
       );

@@ -1,0 +1,83 @@
+import { z } from "zod/v4";
+import { agentApplyRequestSchema } from "./agentMutation";
+
+const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
+const scope = {
+  documentId: id,
+  epoch: z.string().min(1).max(100),
+  revision: z.number().int().nonnegative(),
+};
+const hidden = { includeHiddenContent: z.boolean().optional() };
+export const agentInspectRequestSchema = z
+  .object({
+    ...scope,
+    target: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("deck") }).strict(),
+      z.object({ type: z.literal("slide"), slideId: id, ...hidden }).strict(),
+      z
+        .object({
+          type: z.literal("elements"),
+          slideId: id,
+          elementIds: z.array(id).min(1).max(128),
+          ...hidden,
+          includeWorldTransform: z.boolean().optional(),
+        })
+        .strict(),
+      z
+        .object({
+          type: z.literal("selection"),
+          uiEpoch: z.number().int().nonnegative(),
+          ...hidden,
+          includeWorldTransform: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+export type AgentInspectRequest = z.infer<typeof agentInspectRequestSchema>;
+export const agentPreviewInputSchema = z
+  .object({
+    ...scope,
+    slideId: id,
+    width: z.number().int().min(1).max(2048),
+    height: z.number().int().min(1).max(2048),
+  })
+  .strict();
+export const agentBridgeRequestSchema = z.discriminatedUnion("command", [
+  z
+    .object({ command: z.literal("apply"), params: agentApplyRequestSchema })
+    .strict(),
+  z
+    .object({ command: z.literal("context"), params: z.object({}).strict() })
+    .strict(),
+  z
+    .object({
+      command: z.literal("inspect"),
+      params: agentInspectRequestSchema,
+    })
+    .strict(),
+  z
+    .object({ command: z.literal("preview"), params: agentPreviewInputSchema })
+    .strict(),
+]);
+export type AgentBridgeRequest = z.infer<typeof agentBridgeRequestSchema>;
+export function agentFailure(
+  code: string,
+  message: string,
+  actualRevision?: number,
+) {
+  return {
+    ok: false as const,
+    error: {
+      code,
+      message,
+      recoverable: code !== "INVALID_REQUEST",
+      ...(actualRevision === undefined ? {} : { actualRevision }),
+    },
+  };
+}
+export interface McpConnectionInfo {
+  status: "disabled" | "ready" | "unavailable";
+  configuration: string | null;
+  instanceId: string | null;
+}
