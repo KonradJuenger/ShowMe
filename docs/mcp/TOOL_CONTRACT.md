@@ -465,7 +465,11 @@ The current semantic union additionally exposes:
   preset: "Move" | "Scale" | "Rotate" | "Fade" | "Pulse" }
 { type: "motion.animate"; stageIndex: number; elementId: string; property: string;
   from: number; to: number; durationMs: number; ease?: NamedMotionEase }
-{ type: "presence.add"; stageIndex: number; elementIds: string[] }
+{ type: "presence.add"; stageIndex: number; elementIds: string[];
+  transition?: "none" | "fade" | "move" | "scale" | "rotate";
+  direction?: "Left" | "Right" | "Up" | "Down" | "Clockwise" | "Counter-clockwise";
+  distance?: number; durationMs?: number; easing?: NamedMotionEase | CubicBezier;
+  enterTransition?: PresenceTransitionInput; exitTransition?: PresenceTransitionInput }
 ```
 
 Shader operations reconcile `uniform float ... // @param ...` declarations through the
@@ -673,9 +677,9 @@ Internal APIs stay granular. The MCP contract stays semantic.
 
 ## Implemented normal-authoring vocabulary
 
-The current public MCP still has only five tools:
+The current public MCP has six tools:
 `showme.context`, `showme.inspect`, `showme.authoring`,
-`showme.apply` and `showme.preview`. Normal editor parity is expressed as variants
+`showme.measure_text`, `showme.apply` and `showme.preview`. Normal editor parity is expressed as variants
 inside `showme.apply`, not additional tools.
 
 Implemented semantic groups:
@@ -715,3 +719,75 @@ The result exposes only managed asset IDs, display names, media type and prepare
 dimensions/duration. `element.insert_media` then resolves the chosen ID through
 ShowMe's document asset authority. Importing a new filesystem asset is intentionally
 outside MCP. Arbitrary paths, raw bytes and fabricated asset records are not accepted.
+
+## Current text measurement query
+
+`showme.measure_text` is the one additional dedicated query tool in the current
+contract because production typography measurement is a service, not a persistent
+document mutation.
+
+Input:
+
+```ts
+{
+  documentId: string;
+  epoch: string;
+  revision: number;
+  items: Array<{
+    text: string;
+    width: number;
+    typography?: Partial<TextTypography>;
+  }>; // 1..64
+}
+```
+
+Output preserves item order:
+
+```ts
+{
+  ok: true;
+  documentId: string;
+  epoch: string;
+  revision: number;
+  measurements: Array<{ width: number; height: number }>;
+}
+```
+
+The implementation uses the document font environment and production DOM text
+measurement. A stale epoch/revision is rejected. Measurement never mutates the
+document.
+
+## Presence and Motion contract
+
+`presence.add` supports integrated enter/exit transitions. Its model-facing
+transition kinds are `none`, `fade`, `move`, `scale`, and `rotate`.
+Transition configuration can include direction, distance/scale/angle, duration,
+and easing, with explicit enter and exit transitions when required.
+
+Named easing is consistent with Motion:
+
+```text
+Linear
+Ease In
+Ease Out
+Ease In Out
+Hold
+```
+
+Presence is the lifecycle system. Motion is for animating properties while an
+element exists. A model should not combine a Move Motion preset with a move
+Presence transition just to create an entrance.
+
+## Composite authoring contract
+
+ShowMe does not expose MCP-only Card/container primitives. Use
+`element.insert_frame`, `elements.group`, reparenting and parent-local
+coordinates. Give the parent a stable ID, insert children beneath it, and animate
+the parent with Presence when the full component should move together.
+
+## Apply batching
+
+A single `showme.apply` request accepts at most 128 semantic operations. It stays
+one atomic staged mutation and, when changed, one durable accepted transaction.
+The request byte limit, exact revision, leases and normal document authority are
+not weakened for throughput.
