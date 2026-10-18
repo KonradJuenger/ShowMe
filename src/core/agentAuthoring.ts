@@ -223,12 +223,13 @@ function normalAuthoringGuide(
     return {
       kind,
       boundary:
-        "MCP never accepts arbitrary filesystem paths or forged assets. Media insertion requires a ShowMe-managed Library asset authority and is not exposed yet.",
+        "MCP never accepts arbitrary filesystem paths, raw bytes or forged assets. element.insert_media accepts only an existing ShowMe-managed assetId resolved by the document asset authority.",
       supported:
-        "Existing image, SVG and video elements can be inspected, resized, fit/filled, centered, reset and have their content transform edited.",
+        "Managed image/SVG/video assets can be inserted by assetId. Existing media can be inspected, resized, fit/filled, centered, reset and have its content transform edited.",
       inspect:
         "Element detail returns assetId, media type, lockAspect and the canonical semantic transform.",
       operations: [
+        "element.insert_media",
         "elements.frame.set",
         "frame.fit",
         "frame.fill",
