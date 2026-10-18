@@ -56,6 +56,7 @@ export interface AgentDeckOutline extends AgentRevision {
 export interface AgentSlideOptions {
   /** Hidden slide/layer content is withheld by default; Presence is not sampled. */
   includeHiddenContent?: boolean;
+  includeNotes?: boolean;
 }
 
 export interface AgentElementOptions extends AgentSlideOptions {
@@ -103,6 +104,7 @@ export interface AgentSlideOutline extends AgentRevision {
     background: string;
     transition: Deck["slideMeta"][string]["transition"] | null;
     notesLength: number;
+    notes?: string;
     elementCount: number;
   };
   layers: Array<
@@ -374,6 +376,7 @@ export function projectAgentSlide(
       background: slide.background,
       transition: meta.transition ?? null,
       notesLength: projection.slide.notes.length,
+      ...(options.includeNotes ? { notes: projection.slide.notes } : {}),
       elementCount: entries.length,
     },
     layers: projection.deck.layers.map(
