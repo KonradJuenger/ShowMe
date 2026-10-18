@@ -196,6 +196,64 @@ async function raw(
     },
   );
 }
+it("caches a verified bridge between calls and rediscovers after MCP restart", async () => {
+  let contextCalls = 0;
+  let inspectCalls = 0;
+  const f = await fixture(async (request) => {
+    if (request.command === "context") {
+      contextCalls++;
+      return { ok: true, data: { document: null } };
+    }
+    if (request.command === "inspect") {
+      inspectCalls++;
+      return { ok: true, data: { inspected: true } };
+    }
+    return { ok: true, data: {} };
+  });
+  const client = new ShowMeClient(f.folder);
+
+  expect(await client.read({ command: "context", params: {} })).toMatchObject({
+    ok: true,
+  });
+  expect(contextCalls).toBe(1);
+
+  // Once verified, ordinary calls no longer depend on descriptor rescans or a
+  // redundant context probe.
+  await rm(f.file, { force: true });
+  expect(
+    await client.read({
+      command: "inspect",
+      params: {
+        documentId: "doc",
+        epoch: "epoch",
+        revision: 0,
+        target: { type: "deck" },
+      },
+    }),
+  ).toMatchObject({ ok: true, data: { inspected: true } });
+  expect(contextCalls).toBe(1);
+  expect(inspectCalls).toBe(1);
+
+  const oldInstance = f.bridge.instanceId;
+  await f.bridge.setEnabled(false);
+  await f.bridge.setEnabled(true);
+  expect(f.bridge.instanceId).not.toBe(oldInstance);
+
+  expect(
+    await client.read({
+      command: "inspect",
+      params: {
+        documentId: "doc",
+        epoch: "epoch",
+        revision: 0,
+        target: { type: "deck" },
+      },
+    }),
+  ).toMatchObject({ ok: true, data: { inspected: true } });
+  expect(contextCalls).toBe(2);
+  expect(inspectCalls).toBe(2);
+});
+
 it("publishes only a private authenticated loopback descriptor and cleans it up on disable", async () => {
   const f = await fixture();
   expect(f.descriptor).toMatchObject({
