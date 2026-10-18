@@ -560,6 +560,125 @@ it("creative semantic operations reuse deck CSS Effects z-order and native Motio
   ).toBe(true);
 });
 
+it("Presence uses named easing and attaches lifecycle animation to the grouped parent", async () => {
+  const f = fixture();
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "presence.add",
+          stageIndex: 0,
+          elementIds: ["group"],
+          transition: "move",
+          direction: "Up",
+          distance: 50,
+          durationMs: 400,
+          easing: "Ease Out",
+          exitTransition: {
+            kind: "fade",
+            durationMs: 250,
+            easing: "Ease In",
+          },
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  const p = await f.projection();
+  const block = p.slide.motion?.stages[0].blocks?.find(
+    (candidate) =>
+      candidate.binding?.kind === "presence" &&
+      candidate.binding.elementId === "group",
+  );
+  expect(block).toMatchObject({
+    binding: { kind: "presence", elementId: "group" },
+    members: [],
+    presenceSchedule: {
+      enterTransition: {
+        kind: "move",
+        direction: "Up",
+        distance: 50,
+        durationMs: 400,
+        easing: [0, 0, 0.58, 1],
+      },
+      exitTransition: {
+        kind: "fade",
+        durationMs: 250,
+        easing: [0.42, 0, 1, 1],
+      },
+    },
+  });
+  expect(
+    p.slide.motion?.stages[0].tracks.some(
+      (track) => track.elementId === "group",
+    ),
+  ).toBe(false);
+});
+
+it("large semantic batches commit once stay atomic and remain bounded", async () => {
+  const f = fixture();
+  const root = f.slide.nodes[0].id;
+  const operations = Array.from({ length: 50 }, (_, index) => ({
+    type: "element.insert_shape" as const,
+    id: `bulk-${index}`,
+    parentId: root,
+    shape: "rectangle" as const,
+    frame: { x: index * 2, y: index * 2, width: 20, height: 20 },
+  }));
+  const accepted = await f.service.apply(f.request(operations, "bulk-50"));
+  expect(accepted).toMatchObject({
+    ok: true,
+    previousRevision: 0,
+    revision: 1,
+  });
+  expect(accepted.createdIds).toHaveLength(50);
+  expect(f.counts()).toEqual({ writes: 1, notifications: 1 });
+
+  const rejected = fixture();
+  const rejectedRoot = rejected.slide.nodes[0].id;
+  const before = await rejected.projection();
+  const lateFailure = [
+    ...Array.from({ length: 49 }, (_, index) => ({
+      type: "element.insert_shape" as const,
+      id: `late-${index}`,
+      parentId: rejectedRoot,
+      shape: "rectangle" as const,
+      frame: { x: index, y: index, width: 10, height: 10 },
+    })),
+    {
+      type: "element.insert_shape" as const,
+      id: "late-invalid",
+      parentId: "missing-parent",
+      shape: "rectangle" as const,
+      frame: { x: 0, y: 0, width: 10, height: 10 },
+    },
+  ];
+  expect(
+    await rejected.service.apply(
+      rejected.request(lateFailure, "bulk-late-failure"),
+    ),
+  ).toMatchObject({
+    error: { code: "INVALID_SCOPE" },
+    stepIndex: 49,
+  });
+  expect(await rejected.projection()).toEqual(before);
+  expect(rejected.counts().writes).toBe(0);
+
+  expect(
+    agentApplyRequestSchema.safeParse(
+      rejected.request(
+        Array.from({ length: 129 }, (_, index) => ({
+          type: "element.insert_shape",
+          id: `too-many-${index}`,
+          parentId: rejectedRoot,
+          shape: "rectangle",
+          frame: { x: 0, y: 0, width: 10, height: 10 },
+        })),
+        "too-many",
+      ),
+    ).success,
+  ).toBe(false);
+});
+
 it("structural authoring reuses native group duplicate reparent align distribute and Text Styles", async () => {
   const f = fixture();
   const root = f.slide.nodes[0].id;
