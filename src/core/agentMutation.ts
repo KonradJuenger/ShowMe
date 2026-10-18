@@ -49,6 +49,7 @@ import { resolveTextTypography } from "./textTypography";
 import type { DocumentProjection } from "./documentProjection";
 import { applyTemplate, makeIndependent } from "./templateCommands";
 import { alignSelection, distributeSelection } from "./arrangeCommands";
+import { setSelectionProperty } from "./elementProperties";
 import {
   addLayer,
   changeLayer,
@@ -60,12 +61,15 @@ import {
   convertMediaRule,
   createMediaElement,
   isMediaContent,
+  mediaIntrinsic,
   resetMedia,
   setMediaContent,
   updateMediaFromResolved,
 } from "./media";
 import {
   createTextStyleFromElement,
+  setTextStyle,
+  updateTextStyleFromElement,
 } from "./textStyleCommands";
 import {
   addMotionPreset,
@@ -348,6 +352,25 @@ export const agentApplyRequestSchema = z
             .strict(),
           z
             .object({
+              type: z.literal("text.style.update"),
+              elementId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("text.style.rename"),
+              styleId: id,
+              name: z.string().trim().min(1).max(200),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("text.style.delete"),
+              styleId: id,
+            })
+            .strict(),
+          z
+            .object({
               type: z.literal("text.style"),
               elementId: id,
               typography: typography.optional(),
@@ -458,6 +481,12 @@ export const agentApplyRequestSchema = z
             .strict(),
           z
             .object({
+              type: z.literal("frame.free"),
+              elementId: id,
+            })
+            .strict(),
+          z
+            .object({
               type: z.literal("frame.content_center"),
               elementId: id,
             })
@@ -473,6 +502,38 @@ export const agentApplyRequestSchema = z
               type: z.literal("frame.content_transform.set"),
               elementId: id,
               frame,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("media.transform.patch"),
+              elementId: id,
+              patch: z
+                .object({
+                  rotation: number.min(-360000).max(360000).optional(),
+                  flipX: z.boolean().optional(),
+                  flipY: z.boolean().optional(),
+                  zoom: number.positive().max(100).optional(),
+                  anchorX: number.min(0).max(1).optional(),
+                  anchorY: number.min(0).max(1).optional(),
+                })
+                .strict(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("video.playback.patch"),
+              elementId: id,
+              patch: z
+                .object({
+                  volume: number.min(0).max(1).optional(),
+                  mute: z.boolean().optional(),
+                  loop: z.boolean().optional(),
+                  autoplay: z.boolean().optional(),
+                  startTime: number.min(0).max(86400).optional(),
+                  endTime: number.min(0).max(86400).nullable().optional(),
+                })
+                .strict(),
             })
             .strict(),
           z
@@ -1068,6 +1129,26 @@ export async function assembleAgentMutation(
         const styleId = op.styleId ?? newId();
         next = createTextStyleFromElement(next, op.elementId, op.name, styleId);
         createdTextStyleIds.push(styleId);
+      } else if (op.type === "text.style.update") {
+        requireEditable(op.elementId);
+        next = updateTextStyleFromElement(next, op.elementId);
+      } else if (op.type === "text.style.rename") {
+        const style = next.deck.textStyles.find((value) => value.id === op.styleId);
+        if (!style)
+          throw new AgentMutationError("UNKNOWN_TEXT_STYLE", "Inspect Text Styles and use an existing style ID.");
+        if (style.defaultKind)
+          throw new AgentMutationError("UNSUPPORTED_OPERATION", "Built-in Heading/Text styles cannot be renamed.");
+        next = setTextStyle(next, {
+          styleId: style.id,
+          value: { ...style, name: op.name },
+        });
+      } else if (op.type === "text.style.delete") {
+        const style = next.deck.textStyles.find((value) => value.id === op.styleId);
+        if (!style)
+          throw new AgentMutationError("UNKNOWN_TEXT_STYLE", "Inspect Text Styles and use an existing style ID.");
+        if (style.defaultKind)
+          throw new AgentMutationError("UNSUPPORTED_OPERATION", "Built-in Heading/Text styles cannot be deleted.");
+        next = setTextStyle(next, { styleId: style.id, value: null });
       } else if (op.type === "text.style") {
         if (
           !Object.keys(op.typography ?? {}).length &&
@@ -1173,6 +1254,7 @@ export async function assembleAgentMutation(
       } else if (
         op.type === "frame.fit" ||
         op.type === "frame.fill" ||
+        op.type === "frame.free" ||
         op.type === "frame.content_center" ||
         op.type === "frame.content_reset" ||
         op.type === "frame.content_transform.set"
@@ -1180,29 +1262,82 @@ export async function assembleAgentMutation(
         const element = requireEditable(op.elementId);
         if (!isMediaContent(element.content))
           throw new AgentMutationError("INVALID_MEDIA", "The target has no image, SVG, or video content.");
+        const intrinsic = async () => {
+          const stored = mediaIntrinsic(element.content);
+          if (stored) return stored;
+          if (!resolveAsset)
+            throw new AgentMutationError(
+              "INVALID_MEDIA",
+              "The media source dimensions are unavailable.",
+            );
+          try {
+            const asset = await resolveAsset(element.content.assetId);
+            if (!asset.width || !asset.height) throw new Error("unprepared");
+            return { width: asset.width, height: asset.height };
+          } catch {
+            throw new AgentMutationError(
+              "INVALID_MEDIA",
+              "The managed media source is unavailable.",
+            );
+          }
+        };
         let content: MediaContent;
-        if (
-          (op.type === "frame.fit" || op.type === "frame.fill") &&
-          element.content.transform.rule === "free"
-        )
-          throw new AgentMutationError(
-            "INVALID_MEDIA",
-            "Fit/fill from a Free media transform requires managed asset dimensions that are not available through the current MCP boundary.",
-          );
         if (op.type === "frame.fit")
-          content = convertMediaRule(element, "fit");
+          content = convertMediaRule(element, "fit", await intrinsic());
         else if (op.type === "frame.fill")
-          content = convertMediaRule(element, "fill");
+          content = convertMediaRule(element, "fill", await intrinsic());
+        else if (op.type === "frame.free")
+          content = convertMediaRule(element, "free", await intrinsic());
         else if (op.type === "frame.content_center")
-          content = centerMedia(element);
+          content = centerMedia(element, await intrinsic());
         else if (op.type === "frame.content_reset")
-          content = resetMedia(element);
+          content = resetMedia(element, await intrinsic());
         else
           content = updateMediaFromResolved(element, {
-            ...resolveMediaFrame(element)!,
+            ...resolveMediaFrame(element, await intrinsic())!,
             ...op.frame,
-          });
+          }, await intrinsic());
         next = setMediaContent(next, op.elementId, content);
+      } else if (op.type === "media.transform.patch") {
+        requireEditable(op.elementId);
+        if (!Object.keys(op.patch).length)
+          throw new AgentMutationError("INVALID_REQUEST", "Supply a nonempty media transform patch.");
+        const mapping = {
+          rotation: "content.media.rotation",
+          flipX: "content.media.flipX",
+          flipY: "content.media.flipY",
+          zoom: "content.media.zoom",
+          anchorX: "content.media.anchorX",
+          anchorY: "content.media.anchorY",
+        } as const;
+        for (const [key, property] of Object.entries(mapping) as Array<
+          [keyof typeof mapping, (typeof mapping)[keyof typeof mapping]]
+        >) {
+          const value = op.patch[key];
+          if (value !== undefined)
+            next = setSelectionProperty(next, [op.elementId], property as any, value as any);
+        }
+      } else if (op.type === "video.playback.patch") {
+        const element = requireEditable(op.elementId);
+        if (element.content?.type !== "video")
+          throw new AgentMutationError("INVALID_MEDIA", "Video playback settings require a video element.");
+        if (!Object.keys(op.patch).length)
+          throw new AgentMutationError("INVALID_REQUEST", "Supply a nonempty video playback patch.");
+        const mapping = {
+          volume: "content.video.volume",
+          mute: "content.video.mute",
+          loop: "content.video.loop",
+          autoplay: "content.video.autoplay",
+          startTime: "content.video.startTime",
+          endTime: "content.video.endTime",
+        } as const;
+        for (const [key, property] of Object.entries(mapping) as Array<
+          [keyof typeof mapping, (typeof mapping)[keyof typeof mapping]]
+        >) {
+          const value = op.patch[key];
+          if (value !== undefined)
+            next = setSelectionProperty(next, [op.elementId], property as any, value as any);
+        }
       } else if (op.type === "effect.apply_code") {
         const target = requireEditable(op.elementId);
         const existing = op.existingInstanceId
