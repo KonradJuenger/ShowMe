@@ -721,6 +721,335 @@ test("real stdio client reads context inspection and production PNG with Setting
   }
 });
 
+test("MCP creative authoring validates live GLSL CSS text-JS and native Effect Motion", async () => {
+  const f = await fixture();
+  let app: ElectronApplication | undefined, client: Client | undefined;
+  try {
+    const launched = await launch(f.user, f.file);
+    app = launched.app;
+    const page = launched.page;
+    client = (await connect(f.user, f.folder)).client;
+    await page.evaluate(async () => {
+      await window.desktop!.setMcpEnabled!(true);
+      await window.desktop!.setMcpEditingEnabled!(true);
+    });
+
+    const initial = (await context(client)) as AgentContext & {
+      serverVersion?: string;
+      effectApiVersion?: number;
+      capabilities?: Record<string, boolean>;
+    };
+    expect(initial.serverVersion).toBe("1.1.0");
+    expect(initial.effectApiVersion).toBe(1);
+    expect(initial.capabilities).toMatchObject({
+      shaderEffects: true,
+      cssEffects: true,
+      textJsEffects: true,
+      deckCss: true,
+      motion: true,
+      presence: true,
+      preview: true,
+    });
+
+    const guide = await client.callTool({
+      name: "showme.authoring",
+      arguments: { kind: "background-shader" },
+    });
+    expect(guide.isError).toBe(false);
+    expect(guide.structuredContent).toMatchObject({
+      ok: true,
+      data: {
+        kind: "background-shader",
+        effectApiVersion: 1,
+        contract: { effectKind: "fragment-glsl", affects: "generated" },
+        operationTemplate: { type: "background.shader.create" },
+      },
+    });
+    expect(JSON.stringify(guide.structuredContent)).toContain("#version 300 es");
+
+    const slideId = initial.editor!.page.id;
+    const slide = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: initial.document!.revision,
+        target: { type: "slide", slideId },
+      },
+    });
+    const root = (slide.structuredContent as any).data.layers[0].id;
+    expect(root).toBeTruthy();
+
+    const shader = `#version 300 es
+precision highp float;
+uniform float brightness; // @param 0.8 [0, 1]
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  outColor = vec4(0.1 * brightness, 0.7 * brightness, 0.3 * brightness, 1.0);
+}`;
+    const authored = await client.callTool({
+      name: "showme.apply",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        expectedRevision: initial.document!.revision,
+        mutationId: crypto.randomUUID(),
+        slideId,
+        operations: [
+          {
+            type: "deck.stylesheet.set",
+            source: ".agent-accent { opacity: 0.95; }",
+          },
+          {
+            type: "elements.css_classes.set",
+            elementIds: ["title"],
+            classes: ["agent-accent"],
+          },
+          {
+            type: "effect.apply_code",
+            elementId: "title",
+            name: "Soft CSS",
+            effectType: "css",
+            affects: "element",
+            source: ":scope { filter: brightness(0.95); }",
+          },
+          {
+            type: "effect.apply_code",
+            elementId: "title",
+            name: "Uppercase",
+            effectType: "text-js",
+            affects: "text",
+            source: "function render({ text }) { return text.toUpperCase(); }",
+          },
+          {
+            type: "background.shader.create",
+            name: "Green field",
+            source: shader,
+          },
+        ],
+      },
+    });
+    expect(authored.isError, JSON.stringify(authored.structuredContent)).toBe(
+      false,
+    );
+    const receipt = authored.structuredContent as any;
+    expect(receipt).toMatchObject({
+      ok: true,
+      createdIds: [expect.any(String)],
+      createdEffectInstanceIds: [
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+      ],
+    });
+    const backgroundId = receipt.createdIds[0];
+
+    const title = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: receipt.revision,
+        target: {
+          type: "elements",
+          slideId,
+          elementIds: ["title"],
+          includeEffectSource: true,
+        },
+      },
+    });
+    const titleDetail = (title.structuredContent as any).data.elements[0];
+    expect(titleDetail.cssClasses).toEqual(["agent-accent"]);
+    expect(titleDetail.effects.map((effect: any) => effect.kind).sort()).toEqual([
+      "css",
+      "text-js",
+    ]);
+    expect(
+      titleDetail.effects.some(
+        (effect: any) =>
+          effect.kind === "text-js" &&
+          effect.source.includes("toUpperCase"),
+      ),
+    ).toBe(true);
+
+    const background = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: receipt.revision,
+        target: {
+          type: "elements",
+          slideId,
+          elementIds: [backgroundId],
+          includeEffectSource: true,
+        },
+      },
+    });
+    const backgroundDetail = (background.structuredContent as any).data
+      .elements[0];
+    const shaderEffect = backgroundDetail.effects[0];
+    expect(shaderEffect.parameterContract).toMatchObject([
+      {
+        key: "brightness",
+        type: "number",
+        default: 0.8,
+        min: 0,
+        max: 1,
+      },
+    ]);
+    expect(shaderEffect.source).toBe(shader);
+    const property = shaderEffect.motionProperties[0];
+    expect(property).toBe(
+      `effects.${shaderEffect.id}.parameters.brightness`,
+    );
+
+    const motion = await client.callTool({
+      name: "showme.apply",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        expectedRevision: receipt.revision,
+        mutationId: crypto.randomUUID(),
+        slideId,
+        operations: [
+          {
+            type: "motion.animate",
+            stageIndex: 0,
+            elementId: backgroundId,
+            property,
+            from: 0.8,
+            to: 0.4,
+            durationMs: 400,
+            ease: "Ease Out",
+          },
+        ],
+      },
+    });
+    expect(motion.isError, JSON.stringify(motion.structuredContent)).toBe(false);
+    const motionReceipt = motion.structuredContent as any;
+    const animated = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: motionReceipt.revision,
+        target: {
+          type: "elements",
+          slideId,
+          elementIds: [backgroundId],
+          includeMotion: true,
+          includeEffectSource: true,
+        },
+      },
+    });
+    expect(
+      (animated.structuredContent as any).data.elements[0].motion[0].properties,
+    ).toContain(property);
+
+    const existingGuide = await client.callTool({
+      name: "showme.authoring",
+      arguments: {
+        kind: "background-shader",
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: motionReceipt.revision,
+        slideId,
+        elementId: backgroundId,
+        effectInstanceId: shaderEffect.id,
+      },
+    });
+    expect(existingGuide.structuredContent).toMatchObject({
+      ok: true,
+      data: {
+        editing: true,
+        contract: { source: shader },
+        operationTemplate: {
+          type: "effect.apply_code",
+          elementId: backgroundId,
+          existingInstanceId: shaderEffect.id,
+        },
+      },
+    });
+
+    const deck = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: motionReceipt.revision,
+        target: { type: "deck", includeStylesheet: true },
+      },
+    });
+    expect((deck.structuredContent as any).data.deck.stylesheet).toContain(
+      ".agent-accent",
+    );
+
+    const preview = await client.callTool({
+      name: "showme.preview",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: motionReceipt.revision,
+        slideId,
+        width: 320,
+        height: 180,
+      },
+    });
+    expect(preview.isError, JSON.stringify(preview.structuredContent)).toBe(
+      false,
+    );
+    expect((preview.structuredContent as any).warnings).toEqual([]);
+    const image = preview.content.find((item) => item.type === "image");
+    if (!image || image.type !== "image")
+      throw new Error("Missing creative preview");
+    const { data, info } = await sharp(Buffer.from(image.data, "base64"))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const offset = ((info.height - 10) * info.width + (info.width - 10)) * 4;
+    expect(data[offset + 1]).toBeGreaterThan(data[offset]);
+    expect(data[offset + 1]).toBeGreaterThan(data[offset + 2]);
+
+    const broken = await client.callTool({
+      name: "showme.apply",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        expectedRevision: motionReceipt.revision,
+        mutationId: crypto.randomUUID(),
+        slideId,
+        operations: [
+          {
+            type: "background.shader.create",
+            name: "Broken shader",
+            source:
+              "#version 300 es\nprecision highp float;\nout vec4 outColor;\nvoid main(){ outColor = ; }",
+          },
+        ],
+      },
+    });
+    expect(broken.structuredContent).toMatchObject({
+      ok: false,
+      error: {
+        code: "EFFECT_VALIDATION_ERROR",
+        details: {
+          kind: "fragment-glsl",
+          diagnostics: [expect.objectContaining({ severity: "error" })],
+        },
+      },
+    });
+    expect((await context(client)).document!.revision).toBe(
+      motionReceipt.revision,
+    );
+  } finally {
+    await client?.close();
+    await close(app);
+    await rm(f.folder, { recursive: true, force: true });
+  }
+});
+
 test("stdio discovery survives an app crash restart and explicit document replacement without serving old content", async () => {
   const f = await fixture();
   let app: ElectronApplication | undefined, client: Client | undefined;

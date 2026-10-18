@@ -19,7 +19,7 @@
     "runtime": "electron",
     "created": "2026-10-17",
     "lastReviewed": "2026-10-18",
-    "reason": "Real SDK stdio client builds multiple styled slides with cold text measurement and pixel-verified previews after resize and minimize; covers Settings opt-in, context/inspection, stable UI state, revocation, crash/restart, atomic editing and independent guarded user/agent history even with external access off"
+    "reason": "Real SDK stdio client covers Settings opt-in, context/inspection, deck creation, frame-based text editing, production PNG previews, creative authoring discovery, production GLSL/CSS/text-JS validation, deck CSS/classes, native Effect-parameter Motion, revocation, crash/restart, exact revision recovery and separate guarded user/agent history."
   },
   {
     "id": "editor-agent-bridge",
