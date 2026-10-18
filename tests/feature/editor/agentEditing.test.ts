@@ -679,6 +679,181 @@ it("slide duplicate move hide and delete preserve native slide semantics and ret
   expect((await f.projection()).deck.slideIds).not.toContain("copy-slide");
 });
 
+it("layer authoring creates stable parents and respects visibility locking", async () => {
+  const f = fixture();
+  const created = await f.service.apply(
+    f.request([
+      {
+        type: "layer.create",
+        id: "agent-layer",
+        patch: { name: "Agent Layer", color: "#123456" },
+      },
+      {
+        type: "element.insert_shape",
+        id: "layer-shape",
+        parentId: "agent-layer",
+        shape: "rectangle",
+        frame: { x: 20, y: 30, width: 100, height: 80 },
+      },
+    ]),
+  );
+  expect(created).toMatchObject({
+    ok: true,
+    createdLayerIds: ["agent-layer"],
+    createdIds: ["layer-shape"],
+  });
+  let p = await f.projection();
+  expect(p.deck.layers.at(-1)).toMatchObject({
+    id: "agent-layer",
+    name: "Agent Layer",
+    color: "#123456",
+    hidden: false,
+    locked: false,
+  });
+  expect(p.slide.nodes.at(-1)?.children[0]?.id).toBe("layer-shape");
+
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "layer.update",
+          layerId: "agent-layer",
+          patch: { hidden: true, locked: true },
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "elements.move",
+          elementIds: ["layer-shape"],
+          scopeId: "agent-layer",
+          dx: 10,
+          dy: 0,
+        },
+      ]),
+    ),
+  ).toMatchObject({ error: { code: "TARGET_NOT_EDITABLE" } });
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "layer.update",
+          layerId: "agent-layer",
+          patch: { hidden: false, locked: false },
+        },
+        {
+          type: "layer.reorder",
+          layerIds: ["agent-layer"],
+          index: 0,
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  p = await f.projection();
+  expect(p.deck.layers[0].id).toBe("agent-layer");
+});
+
+it("existing managed media exposes semantic fit fill center reset and content transforms", async () => {
+  const f = fixture();
+  const p = await f.projection();
+  const media = createBasicShape("managed-media", "rectangle");
+  media.frame = {
+    ...media.frame,
+    x: 100,
+    y: 100,
+    width: 600,
+    height: 400,
+  };
+  media.content = {
+    type: "image",
+    assetId: "b".repeat(64),
+    filename: "managed.png",
+    mediaType: "image",
+    opacity: 1,
+    lockAspect: true,
+    transform: {
+      rule: "fill",
+      intrinsicWidth: 1200,
+      intrinsicHeight: 800,
+      rotation: 0,
+      flipX: false,
+      flipY: false,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      zoom: 1,
+    },
+  };
+  p.slide.nodes[0].children.push(media);
+  const fit = await assembleAgentMutation(
+    p,
+    agentApplyRequestSchema.parse(
+      f.request([{ type: "frame.fit", elementId: "managed-media" }]),
+    ),
+    async () => null,
+  );
+  expect(findElement(fit.snapshot.slide, "managed-media")!.content).toMatchObject({
+    transform: { rule: "fit", intrinsicWidth: 1200, intrinsicHeight: 800 },
+  });
+  const moved = await assembleAgentMutation(
+    fit.snapshot as typeof p,
+    agentApplyRequestSchema.parse(
+      f.request([
+        {
+          type: "frame.content_transform.set",
+          elementId: "managed-media",
+          frame: {
+            x: 20,
+            y: 30,
+            width: 560,
+            height: 360,
+            rotation: 8,
+          },
+        },
+        { type: "frame.content_center", elementId: "managed-media" },
+        { type: "frame.content_reset", elementId: "managed-media" },
+        { type: "frame.fill", elementId: "managed-media" },
+      ]),
+    ),
+    async () => null,
+  );
+  expect(findElement(moved.snapshot.slide, "managed-media")!.content).toMatchObject({
+    transform: {
+      rule: "fill",
+      intrinsicWidth: 1200,
+      intrinsicHeight: 800,
+      rotation: 0,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      zoom: 1,
+    },
+  });
+
+  const free = structuredClone(p);
+  const freeMedia = findElement(free.slide, "managed-media")!;
+  if (!freeMedia.content || freeMedia.content.type === "text")
+    throw new Error("Missing media fixture");
+  freeMedia.content.transform = {
+    rule: "free",
+    local: {
+      ...freeMedia.frame,
+      x: 0,
+      y: 0,
+    },
+  };
+  await expect(
+    assembleAgentMutation(
+      free,
+      agentApplyRequestSchema.parse(
+        f.request([{ type: "frame.fill", elementId: "managed-media" }]),
+      ),
+      async () => null,
+    ),
+  ).rejects.toMatchObject({ code: "INVALID_MEDIA" });
+});
+
 it("shader parameters reconcile from source and validation failure is atomic", async () => {
   const shader = `#version 300 es
 precision highp float;
