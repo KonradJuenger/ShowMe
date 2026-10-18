@@ -679,6 +679,117 @@ it("large semantic batches commit once stay atomic and remain bounded", async ()
   ).toBe(false);
 });
 
+it("builds composite cards with local children and parent Presence in one atomic batch", async () => {
+  const f = fixture();
+  const root = f.slide.nodes[0].id;
+  const operations: any[] = [
+    {
+      type: "element.insert_text",
+      id: "dashboard-title",
+      parentId: root,
+      frame: { x: 120, y: 80, width: 1200, height: 100 },
+      autoSize: "none",
+      text: "Dashboard",
+      typography: { fontSize: 72, bold: true },
+    },
+  ];
+  for (const [index, id] of ["card-a", "card-b", "card-c"].entries()) {
+    operations.push(
+      {
+        type: "element.insert_frame",
+        id,
+        parentId: root,
+        frame: {
+          x: 120 + index * 560,
+          y: 240,
+          width: 500,
+          height: 360,
+        },
+        name: `Card ${index + 1}`,
+      },
+      {
+        type: "element.insert_shape",
+        id: `${id}-background`,
+        parentId: id,
+        shape: "rectangle",
+        frame: { x: 0, y: 0, width: 500, height: 360 },
+        appearance: { fill: "#f4f4f4", radius: 24 },
+      },
+      {
+        type: "element.insert_text",
+        id: `${id}-label`,
+        parentId: id,
+        frame: { x: 32, y: 28, width: 436, height: 48 },
+        autoSize: "none",
+        text: `Metric ${index + 1}`,
+        typography: { fontSize: 24 },
+      },
+      {
+        type: "element.insert_text",
+        id: `${id}-metric`,
+        parentId: id,
+        frame: { x: 32, y: 100, width: 436, height: 90 },
+        autoSize: "none",
+        text: `${(index + 1) * 25}%`,
+        typography: { fontSize: 64, bold: true },
+      },
+    );
+  }
+  operations.push({
+    type: "presence.add",
+    stageIndex: 0,
+    elementIds: ["card-a", "card-b", "card-c"],
+    transition: "move",
+    direction: "Up",
+    distance: 40,
+    durationMs: 350,
+    easing: "Ease Out",
+  });
+
+  const receipt = await f.service.apply(
+    f.request(operations, "composite-cards"),
+  );
+  expect(receipt).toMatchObject({
+    ok: true,
+    previousRevision: 0,
+    revision: 1,
+  });
+  expect(f.counts()).toEqual({ writes: 1, notifications: 1 });
+
+  const p = await f.projection();
+  for (const id of ["card-a", "card-b", "card-c"]) {
+    const card = findElement(p.slide, id)!;
+    expect(card).toMatchObject({
+      container: true,
+      frame: { width: 500, height: 360 },
+    });
+    expect(card.children.map((child) => child.id)).toEqual([
+      `${id}-background`,
+      `${id}-label`,
+      `${id}-metric`,
+    ]);
+    expect(findElement(p.slide, `${id}-label`)!.frame).toMatchObject({
+      x: 32,
+      y: 28,
+      width: 436,
+      height: 48,
+    });
+  }
+  const presenceParents = (p.slide.motion?.stages[0].blocks ?? [])
+    .flatMap((block) =>
+      block.binding?.kind === "presence" ? [block.binding.elementId] : [],
+    )
+    .sort();
+  expect(presenceParents).toEqual(["card-a", "card-b", "card-c"]);
+  expect(
+    (p.slide.motion?.stages[0].tracks ?? []).some((track) =>
+      track.elementId.includes("-label") ||
+      track.elementId.includes("-metric") ||
+      track.elementId.includes("-background"),
+    ),
+  ).toBe(false);
+});
+
 it("structural authoring reuses native group duplicate reparent align distribute and Text Styles", async () => {
   const f = fixture();
   const root = f.slide.nodes[0].id;
