@@ -150,15 +150,76 @@ test("MCP builds multiple styled slides with production text measurement and rea
       return result.structuredContent as any;
     };
     const anchor = initial.editor!.page.id;
+    const anchorInspect = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: initial.document!.revision,
+        target: { type: "slide", slideId: anchor },
+      },
+    });
+    const parentId = (anchorInspect.structuredContent as any).data.layers[0].id;
     const first = await apply(anchor, [
       {
         type: "slide.create",
+        id: "mcp-title-slide",
         afterId: anchor,
         name: "A local creative partner",
         background: "#152F32",
       },
+      { type: "deck.rename", name: "ShowMe MCP deck" },
+      {
+        type: "element.insert_text",
+        id: "mcp-title",
+        parentId,
+        frame: { x: 160, y: 220, width: 960, height: 150 },
+        autoSize: "none",
+        text: "Create locally.",
+        typography: { fontSize: 100, color: "#F6F3EB", bold: true },
+      },
+      {
+        type: "element.insert_text",
+        id: "mcp-subtitle",
+        parentId,
+        frame: { x: 160, y: 400, width: 820, height: 90 },
+        autoSize: "none",
+        text: "A complete slide authored through MCP.",
+        typography: { fontSize: 42, color: "#F6F3EB" },
+      },
+      {
+        type: "element.insert_shape",
+        id: "mcp-rule",
+        parentId,
+        shape: "rectangle",
+        frame: { x: 160, y: 520, width: 720, height: 4 },
+        appearance: { fill: "#F6F3EB", strokeWidth: 0 },
+      },
+      {
+        type: "element.insert_shape",
+        id: "mcp-accent",
+        parentId,
+        shape: "rectangle",
+        frame: { x: 1200, y: 200, width: 400, height: 600 },
+        appearance: { fill: "#D6ED88", strokeWidth: 0 },
+      },
+      {
+        type: "elements.group",
+        id: "mcp-copy",
+        elementIds: ["mcp-title", "mcp-subtitle", "mcp-rule"],
+      },
     ]);
-    const firstId = first.createdSlideIds[0];
+    expect(first).toMatchObject({
+      createdSlideIds: ["mcp-title-slide"],
+      createdIds: expect.arrayContaining([
+        "mcp-title",
+        "mcp-subtitle",
+        "mcp-rule",
+        "mcp-accent",
+        "mcp-copy",
+      ]),
+    });
+    const firstId = "mcp-title-slide";
     const second = await apply(anchor, [
       {
         type: "slide.create",
@@ -168,34 +229,6 @@ test("MCP builds multiple styled slides with production text measurement and rea
       },
     ]);
     const secondId = second.createdSlideIds[0];
-    const inspect = await client.callTool({
-      name: "showme.inspect",
-      arguments: {
-        documentId: initial.document!.id,
-        epoch: initial.document!.epoch,
-        revision: second.revision,
-        target: { type: "slide", slideId: firstId },
-      },
-    });
-    const parentId = (inspect.structuredContent as any).data.layers[0].id;
-    await apply(firstId, [
-      { type: "deck.rename", name: "ShowMe MCP deck" },
-      {
-        type: "element.insert_text",
-        parentId,
-        frame: { x: 520, y: 300, width: 800, height: 180 },
-        autoSize: "both",
-        text: "Create locally.",
-        typography: { fontSize: 100, color: "#F6F3EB", bold: true },
-      },
-      {
-        type: "element.insert_shape",
-        parentId,
-        shape: "rectangle",
-        frame: { x: 1200, y: 200, width: 400, height: 600 },
-        appearance: { fill: "#D6ED88" },
-      },
-    ]);
     const styled = await apply(secondId, [
       {
         type: "slide.update",
@@ -739,7 +772,7 @@ test("MCP creative authoring validates live GLSL CSS text-JS and native Effect M
       effectApiVersion?: number;
       capabilities?: Record<string, boolean>;
     };
-    expect(initial.serverVersion).toBe("1.1.0");
+    expect(initial.serverVersion).toBe("1.2.0");
     expect(initial.effectApiVersion).toBe(1);
     expect(initial.capabilities).toMatchObject({
       shaderEffects: true,
