@@ -140,6 +140,7 @@ export function createShowMeServer(
               updatedEffectInstanceIds: z.array(z.string()),
               idMap: z.record(z.string(), z.string()),
               createdTextStyleIds: z.array(z.string()),
+              createdLayerIds: z.array(z.string()),
               deckChanged: z.boolean(),
               changes: z.array(
                 z
