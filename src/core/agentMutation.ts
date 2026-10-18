@@ -44,10 +44,8 @@ import {
   type MotionProperty,
 } from "./motionModel";
 import {
+  EFFECT_STRING_LIMIT,
   effectDefinitionSchema,
-  effectParameterSchema,
-  effectParameterValueSchema,
-  effectTimeControlSchema,
   numericEffectParameter,
   reconcileShaderSource,
   type EffectDefinition,
@@ -111,6 +109,75 @@ const cssClasses = z
     "Duplicate CSS class",
   );
 const stageIndex = z.number().int().nonnegative().max(10000);
+const effectParameterKey = z
+  .string()
+  .regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/)
+  .refine(
+    (key) =>
+      !key.startsWith("u_") &&
+      !["resolution", "size"].includes(key) &&
+      key !== "stepIndex",
+    "Reserved runtime input name",
+  );
+const effectParameterBase = {
+  key: effectParameterKey,
+  label: z.string().min(1).max(100),
+};
+const agentEffectParameterSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        ...effectParameterBase,
+        type: z.literal("number"),
+        default: z.number().finite(),
+        min: z.number().finite().optional(),
+        max: z.number().finite().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        ...effectParameterBase,
+        type: z.literal("boolean"),
+        default: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        ...effectParameterBase,
+        type: z.literal("string"),
+        default: z.string().max(EFFECT_STRING_LIMIT),
+      })
+      .strict(),
+  ])
+  .refine(
+    (parameter) =>
+      parameter.type !== "number" ||
+      parameter.min === undefined ||
+      parameter.max === undefined ||
+      parameter.min <= parameter.max,
+    "Invalid parameter range",
+  );
+const agentEffectParameterValueSchema = z.union([
+  z.number().finite(),
+  z.boolean(),
+  z.string().max(EFFECT_STRING_LIMIT),
+]);
+const agentEffectTimeControlSchema = z
+  .object({
+    start: z.enum(["presentation", "slide", "click"]),
+    stop: z.discriminatedUnion("mode", [
+      z.object({ mode: z.literal("none") }).strict(),
+      z.object({ mode: z.literal("next-click") }).strict(),
+      z.object({ mode: z.literal("slide-end") }).strict(),
+      z
+        .object({
+          mode: z.literal("after"),
+          durationMs: z.number().int().positive().max(86400000),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
 export const agentApplyRequestSchema = z
   .object({
     documentId: id,
@@ -218,8 +285,8 @@ export const agentApplyRequestSchema = z
               source: z.string().min(1).max(100000),
               styleSource: z.string().max(100000).optional(),
               speed: z.number().finite().nonnegative().max(100).optional(),
-              timeControl: effectTimeControlSchema.optional(),
-              parameters: z.array(effectParameterSchema).max(32).optional(),
+              timeControl: agentEffectTimeControlSchema.optional(),
+              parameters: z.array(agentEffectParameterSchema).max(32).optional(),
               existingInstanceId: id.optional(),
               stageIndex: stageIndex.optional(),
             })
@@ -230,7 +297,7 @@ export const agentApplyRequestSchema = z
               elementId: id,
               effectInstanceId: id,
               key: z.string().min(1).max(64),
-              value: effectParameterValueSchema,
+              value: agentEffectParameterValueSchema,
             })
             .strict(),
           z
@@ -254,8 +321,8 @@ export const agentApplyRequestSchema = z
               name: z.string().trim().min(1).max(100),
               source: z.string().min(1).max(100000),
               speed: z.number().finite().nonnegative().max(100).optional(),
-              timeControl: effectTimeControlSchema.optional(),
-              parameters: z.array(effectParameterSchema).max(32).optional(),
+              timeControl: agentEffectTimeControlSchema.optional(),
+              parameters: z.array(agentEffectParameterSchema).max(32).optional(),
               stageIndex: stageIndex.optional(),
             })
             .strict(),
@@ -833,11 +900,16 @@ export async function assembleAgentMutation(
         );
         const elementId = newId();
         const element = createBasicShape(elementId, "rectangle", {
+          x: next.deck.width / 2,
+          y: next.deck.height / 2,
+        });
+        element.frame = {
+          ...element.frame,
           x: 0,
           y: 0,
           width: next.deck.width,
           height: next.deck.height,
-        });
+        };
         element.name = op.name;
         element.appearance = {
           ...element.appearance,
