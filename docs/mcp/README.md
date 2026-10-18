@@ -208,19 +208,46 @@ and uses the production GLSL/CSS/text-JS runtime before an MCP edit can commit.
 ## Implemented: Phases 5–6 local editing
 
 `showme.apply` stages up to 32 semantic operations against one explicit presentation
-slide and expected document epoch/revision. Supported operations include ordinary text/shape editing plus
-`slide.make_independent`, z-order, deck stylesheet/classes, Effect code and parameters,
-full-slide generated shader backgrounds, native Motion presets/numeric animation and
-Presence. `element.insert_text` uses an explicit parent-local frame rather than a
-center point. Its requested x/y is the top-left anchor; `autoSize:"height"` changes
-height only and `autoSize:"both"` changes width/height while preserving x/y.
+slide and exact document epoch/revision. The semantic surface now covers the normal
+editor authoring model rather than only creative Effects:
+
+- slides: create, duplicate, delete, move, rename, hide/unhide, background,
+  template assignment and make-independent;
+- layers: create, update visibility/lock/name/color, delete and reorder;
+- elements: create text, rectangle, ellipse and empty clipping Frame; move, set the
+  full parent-local frame, appearance, CSS classes, align/distribute, reorder,
+  duplicate, group/ungroup, reparent and remove;
+- text: replace content, full persistent typography/autosize, apply/reset/create
+  Text Styles;
+- Frames/media: preserve the outer Frame separately from the media content transform,
+  fit/fill, center/reset and explicit content-transform editing for existing managed
+  media;
+- deck: name, dimensions and stylesheet;
+- Effects/Motion/Presence: the existing GLSL, CSS, text-JS, shader-background,
+  parameter, native Motion and Presence authoring path remains unchanged.
+
+A `slide.create` or `slide.duplicate` may be the first operation in a batch and
+following operations can author that new slide before the single atomic commit.
+Creation operations accept optional stable IDs when later steps in the same batch
+need to target the new object. Duplicate/group receipts return created IDs and an
+old-to-new `idMap` where hierarchy duplication creates multiple identities.
+
+Geometry persisted by MCP is parent-local, matching ShowMe's model. Request
+`includeWorldTransform` only for derived world-space reasoning. Text auto-size uses
+the production DOM/font measurement path. Frame resizing shares ShowMe's native
+Free-media/text preservation. Group/reparent/align/distribute and slide/layer changes
+call the same core commands used by the human editor.
+
+Media insertion is the deliberate remaining boundary. MCP does not accept local file
+paths or fabricated asset metadata. Existing image/SVG/video elements are fully
+inspectable and their Frame/crop state is authorable, but inserting a new media asset
+will wait for a bounded operation over ShowMe's managed Library/asset authority.
 
 `electron/agentEditing.ts` uses an ordinary actor-scoped `EditorSession` and the
 existing runtime/authority/durable writer. Exact revision/access checks run inside
 the authority queue; native guarded stale behavior for human/LAN callers stays intact.
-Auto-sized text uses production DOM/font measurement. Frame resizing shares native
-Free-media/text preservation. No document/persistence format or second authority was
-introduced. Collaboration guest writes are explicitly unsupported.
+No document/persistence format or second authority was introduced. Collaboration
+guest writes remain explicitly unsupported.
 
 A process-local epoch registry shares pending requests and replays terminal receipts
 for identical mutation IDs, without duplicate insertions. Accepted IDs/results survive
@@ -247,8 +274,8 @@ showme.preview
 ```
 
 `showme.context` reports `serverVersion`, `effectApiVersion` and capability flags.
-`showme.authoring` is the source of truth for model-facing GLSL, CSS, text-JS and
-Motion authoring. It reuses `buildEffectAuthoringPrompt()`; models do not need a repo
+`showme.authoring` exposes compact `layout`, `text`, `frame`, `media`,
+GLSL, CSS, text-JS and Motion authoring contexts. It reuses `buildEffectAuthoringPrompt()`; models do not need a repo
 checkout to learn uniforms, clocks, `@param` declarations, scoping or current Effect
 source.
 
