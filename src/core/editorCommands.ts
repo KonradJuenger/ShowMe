@@ -975,14 +975,19 @@ export function createSlide(
   ]);
 }
 
-export function duplicateSlide(
+export interface DuplicateSlideResult {
+  snapshot: EditorSnapshot;
+  idMap: Record<string, string>;
+}
+
+export function duplicateSlideWithResult(
   snapshot: EditorSnapshot,
   sourceSlide: Slide,
   newSlideId: string,
   meta: Deck["slideMeta"][string],
   afterId: string | null = sourceSlide.id,
   newElementId: () => string = uid,
-): EditorSnapshot {
+): DuplicateSlideResult {
   if (!snapshot.deck.slideIds.includes(sourceSlide.id))
     throw new Error("Unknown source slide");
   if (snapshot.deck.slideIds.includes(newSlideId))
@@ -1015,15 +1020,36 @@ export function duplicateSlide(
       [newSlideId]: structuredClone(meta),
     },
   });
-  return appendChange(snapshot, withDeck(snapshot, deck), [
-    {
-      type: "slide.duplicate",
-      sourceSlideId: sourceSlide.id,
-      slide,
-      meta: structuredClone(meta),
-      afterId,
-    },
-  ]);
+  return {
+    snapshot: appendChange(snapshot, withDeck(snapshot, deck), [
+      {
+        type: "slide.duplicate",
+        sourceSlideId: sourceSlide.id,
+        slide,
+        meta: structuredClone(meta),
+        afterId,
+      },
+    ]),
+    idMap: Object.fromEntries(elementMap),
+  };
+}
+
+export function duplicateSlide(
+  snapshot: EditorSnapshot,
+  sourceSlide: Slide,
+  newSlideId: string,
+  meta: Deck["slideMeta"][string],
+  afterId: string | null = sourceSlide.id,
+  newElementId: () => string = uid,
+): EditorSnapshot {
+  return duplicateSlideWithResult(
+    snapshot,
+    sourceSlide,
+    newSlideId,
+    meta,
+    afterId,
+    newElementId,
+  ).snapshot;
 }
 
 export function deleteSlide(
