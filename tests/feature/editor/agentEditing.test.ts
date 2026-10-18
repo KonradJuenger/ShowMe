@@ -240,7 +240,7 @@ it("agent typography uses native style overrides measurement fixed text frames a
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        frame: { x: 500, y: 300 , width: 800, height: 180 },\n        autoSize: "both",
+        frame: { x: 500, y: 300, width: 800, height: 180 },
         text: "Design",
         typography: { fontSize: 120, color: "#007F73", bold: true },
         autoSize: "both",
@@ -591,7 +591,8 @@ it("all seven operations use one native transaction and return generated measure
       {
         type: "element.insert_text",
         parentId: root,
-        frame: { x: 150, y: 100 , width: 800, height: 180 },\n        autoSize: "both",
+        frame: { x: 150, y: 100, width: 800, height: 180 },
+        autoSize: "both",
         text: "Label",
         name: "Agent label",
       },
@@ -817,7 +818,8 @@ it("pre-admission measurement cancellation access changes guest and active-docum
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
+        frame: { x: 0, y: 0, width: 800, height: 180 },
+        autoSize: "both",
         text: "Held",
       },
     ]),
@@ -973,7 +975,8 @@ it("locked layers inherited targets invalid scopes and ancestor-descendant trans
         {
           type: "element.insert_text",
           parentId: "missing",
-          frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
+          frame: { x: 0, y: 0, width: 800, height: 180 },
+        autoSize: "both",
           text: "Bad",
         },
       ]),
@@ -1098,7 +1101,8 @@ it("access generation changes while measuring invalidate staged work before admi
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
+        frame: { x: 0, y: 0, width: 800, height: 180 },
+        autoSize: "both",
         text: "Unaccepted",
       },
     ]),
@@ -1126,7 +1130,8 @@ it("closing a runtime while measuring rejects staged writes and reopening requir
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
+        frame: { x: 0, y: 0, width: 800, height: 180 },
+        autoSize: "both",
         text: "Closing",
       },
     ]),
