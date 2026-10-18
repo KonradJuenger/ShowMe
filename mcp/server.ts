@@ -9,8 +9,10 @@ import { agentApplyRequestSchema } from "../src/core/agentMutation";
 import {
   agentInspectRequestSchema,
   agentPreviewInputSchema,
+  SHOWME_MCP_SERVER_VERSION,
   type AgentBridgeRequest,
 } from "../src/core/agentRead";
+import { agentAuthoringRequestSchema } from "../src/core/agentAuthoring";
 
 const schema = <T extends z.ZodType>(value: T) =>
   fromJsonSchema<z.infer<T>>(z.toJSONSchema(value) as JsonSchemaType);
@@ -20,6 +22,7 @@ const errorSchema = z
     message: z.string(),
     recoverable: z.boolean(),
     actualRevision: z.number().optional(),
+    details: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 const envelopeSchema = z.union([
@@ -57,7 +60,10 @@ const previewMetadataSchema = z.union([
 export function createShowMeServer(
   read: (request: AgentBridgeRequest, signal?: AbortSignal) => Promise<any>,
 ) {
-  const server = new McpServer({ name: "showme", version: "1.0.0" });
+  const server = new McpServer({
+    name: "showme",
+    version: SHOWME_MCP_SERVER_VERSION,
+  });
   const annotations = {
     readOnlyHint: true,
     destructiveHint: false,
@@ -82,10 +88,22 @@ export function createShowMeServer(
       json(await read({ command: "context", params: {} }, ctx.mcpReq.signal)),
   );
   server.registerTool(
+    "showme.authoring",
+    {
+      description:
+        "Learn ShowMe's live creative authoring contract without repository access. Use background/content/backdrop shader, CSS Effect, text Effect or Motion context. Optionally scope to an exact document/slide/element/Effect to receive its current source and parameter contract.",
+      inputSchema: schema(agentAuthoringRequestSchema),
+      outputSchema: schema(envelopeSchema),
+      annotations,
+    },
+    async (params, ctx) =>
+      json(await read({ command: "authoring", params }, ctx.mcpReq.signal)),
+  );
+  server.registerTool(
     "showme.inspect",
     {
       description:
-        "Inspect the active accepted document at an exact epoch/revision: deck metadata, one slide outline, explicit element details or selection at a UI epoch. Bounds are base-frame bounds. Hidden text is withheld by default. No notes, source code, file paths, raw tracks or implicit descendants. Use context to recover stale targets.",
+        "Inspect accepted creative state at an exact epoch/revision. Default output stays sparse; explicitly request deck stylesheet, Effect source, semantic Motion/Presence summaries or world transforms when needed. Element details include CSS classes, Effect instances and Motion-addressable numeric Effect parameter names. Hidden text is withheld by default.",
       inputSchema: schema(agentInspectRequestSchema),
       outputSchema: schema(envelopeSchema),
       annotations,
@@ -97,7 +115,7 @@ export function createShowMeServer(
     "showme.apply",
     {
       description:
-        "Apply an atomic batch to the active locally owned presentation. Requires Allow agent editing. Inspect first and supply explicit slideId, epoch and exact expectedRevision; selection is never retargeted. slide.create must be the only operation: supply an inspected afterId (null inserts first), name and optional background; it creates an independent blank slide and returns createdSlideIds without navigating the editor. Inspect that ID before adding content. Supports text/style, shapes, movement, resizing, appearance, removal, slide.update and deck.rename. Coordinates and font sizes are slide units. text.style and insert_text accept typography and autoSize; fixed text frames use autoSize none. Reuse identical mutationId/request after lost responses. One changed batch is one agent undo unit. No templates, Effect source, Motion, raw transactions or file operations.",
+        "Apply an atomic semantic batch to the active locally owned presentation. Requires Allow agent editing and an exact inspected revision. Supports frame-based text insertion, template detachment, z-order, deck CSS/classes, ShowMe Effects, generated shader backgrounds, numeric Motion, Presence and ordinary editing. Effect code is production-validated before commit and shader @param uniforms become native parameters. Reuse an identical mutationId after a lost response. Raw document operations remain unavailable.",
       inputSchema: schema(agentApplyRequestSchema),
       outputSchema: schema(
         z.union([
@@ -118,6 +136,8 @@ export function createShowMeServer(
               removedIds: z.array(z.string()),
               createdSlideIds: z.array(z.string()),
               updatedSlideIds: z.array(z.string()),
+              createdEffectInstanceIds: z.array(z.string()),
+              updatedEffectInstanceIds: z.array(z.string()),
               deckChanged: z.boolean(),
               changes: z.array(
                 z

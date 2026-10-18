@@ -1,4 +1,10 @@
-import { effectDefinitionSchema } from "../src/core/effects";
+import {
+  EFFECT_API_VERSION,
+  effectDefinitionSchema,
+  type EffectDefinition,
+} from "../src/core/effects";
+import type { EffectValidationResult } from "../src/core/effectValidation";
+import { SHOWME_MCP_SERVER_VERSION } from "../src/core/agentRead";
 import { NativeLibraryBrowser } from "./libraryBrowser";
 import { libraryBrowserRequestSchema } from "../src/core/libraryBrowser";
 import { importManagedFile, mediaFolder } from "./mediaLibrary";
@@ -107,6 +113,7 @@ import { registerIpcRouter } from "./ipcRouter";
 import { AgentContextService } from "./agentContext";
 import { AgentPreviewService } from "./agentPreview";
 import { AgentInspectionService } from "./agentInspection";
+import { AgentAuthoringService } from "./agentAuthoring";
 import { AgentBridge } from "./agentBridge";
 import { AgentEditingService } from "./agentEditing";
 import { DocumentClosing } from "./documentClosing";
@@ -1493,6 +1500,50 @@ function captureSlidePreview(
   return task;
 }
 
+function validateAgentEffect(
+  documentId: string,
+  definition: EffectDefinition,
+  sampleText?: string,
+): Promise<EffectValidationResult | null> {
+  const owner = editor;
+  if (!previewOwnerAlive(owner) || pendingPreviews >= 8)
+    return Promise.resolve(null);
+  pendingPreviews++;
+  const task = previewQueue.then(async () => {
+    if (!previewOwnerAlive(owner)) return null;
+    previewDocumentId = documentId;
+    const window = await compositionWindow(320, 180, owner);
+    if (!window) return null;
+    const timeout = setTimeout(() => {
+      if (!window.isDestroyed()) window.destroy();
+    }, 10000);
+    try {
+      const result = await window.webContents.executeJavaScript(
+        "window.validateAgentEffect(" +
+          JSON.stringify(definition) +
+          "," +
+          JSON.stringify(sampleText) +
+          ")",
+      );
+      return previewOwnerAlive(owner) ? result : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+  previewQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  void task
+    .finally(() => {
+      pendingPreviews--;
+    })
+    .catch(() => {});
+  return task;
+}
+
 function measureAgentText(documentId: string, element: import("../src/core/element").Element & { content: import("../src/core/text").TextContent }): Promise<import("../src/core/text").TextMeasurement | null> {
   const owner = editor;
   if (!previewOwnerAlive(owner) || pendingPreviews >= 8) return Promise.resolve(null);
@@ -1525,6 +1576,21 @@ const agentInspection = new AgentInspectionService({
     return collaboration.isGuest(id) ? collaboration.projection(id, pageId) : documentRuntime(id).projection(id, pageId);
   },
 });
+const agentAuthoring = new AgentAuthoringService({
+  access: () => (agentContext.isEnabled ? mcpAccessVersion : null),
+  activeDocumentId: activeAgentDocumentId,
+  context: () => agentContext.read(),
+  projection: async (id, pageId) => {
+    if (
+      collaboration.isGuest(id) &&
+      collaboration.status().clientStatus !== "connected"
+    )
+      throw new Error("Guest unavailable");
+    return collaboration.isGuest(id)
+      ? collaboration.projection(id, pageId)
+      : documentRuntime(id).projection(id, pageId);
+  },
+});
 function notifyAgentHistory() {
   if (editor && !editor.isDestroyed()) editor.webContents.send("agent-history-changed");
 }
@@ -1534,13 +1600,30 @@ const agentEditing = new AgentEditingService({
   activeDocumentId: activeAgentDocumentId,
   runtime: documentRuntime,
   measure: measureAgentText,
+  validateEffect: validateAgentEffect,
   changed: notifyAgentHistory,
 });
 const documentClosing = new DocumentClosing(agentEditing);
-const agentContextRead = async () => ({ ...await agentContext.read(), editing: { enabled: mcpEditingEnabled, ...agentEditing.availability() } });
+const agentContextRead = async () => ({
+  ...(await agentContext.read()),
+  serverVersion: SHOWME_MCP_SERVER_VERSION,
+  effectApiVersion: EFFECT_API_VERSION,
+  capabilities: {
+    shaderEffects: true,
+    cssEffects: true,
+    textJsEffects: true,
+    deckCss: true,
+    motion: true,
+    presence: true,
+    preview: true,
+  },
+  editing: { enabled: mcpEditingEnabled, ...agentEditing.availability() },
+});
 const agentBridge = new AgentBridge(app.getPath("userData"), async (request, signal) => {
   if (request.command === "context") return { ok: true, data: await agentContextRead() };
   if (request.command === "inspect") return agentInspection.inspect(request.params);
+  if (request.command === "authoring")
+    return agentAuthoring.authoring(request.params);
   if (request.command === "apply") return agentEditing.apply(request.params, signal);
   return agentPreview.preview(request.params, signal);
 });

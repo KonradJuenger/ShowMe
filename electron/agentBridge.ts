@@ -10,7 +10,7 @@ import {
   type AgentBridgeRequest,
 } from "../src/core/agentRead";
 
-export const BRIDGE_REQUEST_LIMIT = 64 * 1024;
+export const BRIDGE_REQUEST_LIMIT = 256 * 1024;
 export const BRIDGE_JSON_LIMIT = 2 * 1024 * 1024;
 export const BRIDGE_PREVIEW_LIMIT = 32 * 1024 * 1024;
 export interface BridgeDescriptor {

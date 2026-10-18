@@ -5,10 +5,13 @@ import { transformPoint } from "./element";
 import type { Box, Point } from "./geometry";
 import {
   effectExecutionRange,
+  effectParameters,
+  effectProperty,
+  numericEffectParameters,
   type EffectDefinition,
   type ElementEffect,
 } from "./effects";
-import type { EffectSchedule } from "./motionModel";
+import type { EffectSchedule, PresenceSchedule } from "./motionModel";
 import { getWorldBounds, getWorldMatrix } from "./scene";
 import { resolveVisualSlide } from "./templates";
 import { resolveTextTypography, type TextTypography } from "./textTypography";
@@ -31,6 +34,7 @@ export interface AgentDeckOutline extends AgentRevision {
     height: number;
     slideCount: number;
     hasStylesheet: boolean;
+    stylesheet?: string;
     slides: Array<{
       id: string;
       index: number;
@@ -49,6 +53,9 @@ export interface AgentSlideOptions {
 
 export interface AgentElementOptions extends AgentSlideOptions {
   includeWorldTransform?: boolean;
+  includeEffectSource?: boolean;
+  includeMotion?: boolean;
+  includePresence?: boolean;
 }
 
 export interface AgentElementOutline {
@@ -118,6 +125,10 @@ export interface AgentEffectSummary extends ElementEffect {
   kind: EffectDefinition["kind"];
   target: EffectDefinition["target"];
   input?: EffectDefinition["input"];
+  motionProperties: string[];
+  source?: string;
+  styleSource?: string;
+  parameterContract?: ReturnType<typeof effectParameters>;
   timing: {
     defaults: EffectDefinition["timeControl"];
     stageIndex?: number;
@@ -129,10 +140,17 @@ export interface AgentElementDetail extends AgentElementOutline {
   frame: Element["frame"];
   appearance: Element["appearance"];
   geometry: Element["geometry"];
+  cssClasses: string[];
   content?: AgentContentDetail;
   effects?: AgentEffectSummary[];
   motionStageIndices: number[];
   presenceStageIndices: number[];
+  motion?: Array<{
+    stageIndex: number;
+    properties: string[];
+    blockCount: number;
+  }>;
+  presence?: Array<{ stageIndex: number; schedule: PresenceSchedule }>;
   worldTransform?: { matrix: Matrix; corners: Point[] };
 }
 
@@ -166,6 +184,7 @@ function revision(projection: DocumentProjection): AgentRevision {
 /** Metadata only: a DocumentProjection has no bodies/counts for other slides. */
 export function projectAgentDeck(
   projection: DocumentProjection,
+  options: { includeStylesheet?: boolean } = {},
 ): AgentDeckOutline {
   const { deck } = projection;
   return {
@@ -177,6 +196,9 @@ export function projectAgentDeck(
       height: deck.height,
       slideCount: deck.slideIds.length,
       hasStylesheet: !!deck.stylesheet,
+      ...(options.includeStylesheet
+        ? { stylesheet: deck.stylesheet ?? "" }
+        : {}),
       slides: deck.slideIds.map((id, index) => {
         const { name, section, hidden, templateId } = deck.slideMeta[id];
         return { id, index, name, section, hidden, templateId };
@@ -363,7 +385,11 @@ function contentDetail(element: Element, deck: Deck): AgentContentDetail {
   };
 }
 
-function effectDetails(element: Element, slide: Slide): AgentEffectSummary[] {
+function effectDetails(
+  element: Element,
+  slide: Slide,
+  includeSource = false,
+): AgentEffectSummary[] {
   return (element.effects ?? []).map((instance) => {
     const definition = slide.effectResources![instance.resourceId];
     const range = effectExecutionRange(slide.motion, element.id, instance.id);
@@ -382,6 +408,18 @@ function effectDetails(element: Element, slide: Slide): AgentEffectSummary[] {
       kind: definition.kind,
       target: definition.target,
       ...(definition.input !== undefined ? { input: definition.input } : {}),
+      motionProperties: numericEffectParameters(definition).map((parameter) =>
+        effectProperty(instance.id, parameter.key),
+      ),
+      ...(includeSource
+        ? {
+            source: definition.source,
+            ...(definition.styleSource === undefined
+              ? {}
+              : { styleSource: definition.styleSource }),
+            parameterContract: effectParameters(definition),
+          }
+        : {}),
       timing: {
         defaults: definition.timeControl,
         ...(range
@@ -390,6 +428,36 @@ function effectDetails(element: Element, slide: Slide): AgentEffectSummary[] {
       },
     };
   });
+}
+
+function motionSummary(slide: Slide, elementId: string) {
+  return (slide.motion?.stages ?? []).flatMap((stage, stageIndex) => {
+    const tracks = stage.tracks.filter((track) => track.elementId === elementId);
+    const blocks = (stage.blocks ?? []).filter(
+      (block) => block.binding?.elementId === elementId,
+    );
+    return tracks.length || blocks.length
+      ? [
+          {
+            stageIndex,
+            properties: [...new Set(tracks.map((track) => track.property))],
+            blockCount: blocks.length,
+          },
+        ]
+      : [];
+  });
+}
+
+function presenceSummary(slide: Slide, elementId: string) {
+  return (slide.motion?.stages ?? []).flatMap((stage, stageIndex) =>
+    (stage.blocks ?? []).flatMap((block) =>
+      block.binding?.kind === "presence" &&
+      block.binding.elementId === elementId &&
+      block.presenceSchedule
+        ? [{ stageIndex, schedule: structuredClone(block.presenceSchedule) }]
+        : [],
+    ),
+  );
 }
 
 function worldTransform(
@@ -444,14 +512,25 @@ export function projectAgentElements(
         frame: element.frame,
         appearance: element.appearance,
         geometry: element.geometry,
+        cssClasses: [...(element.cssClasses ?? [])],
         ...(!outline.contentWithheld
           ? {
               content: contentDetail(element, projection.deck),
-              effects: effectDetails(element, slide),
+              effects: effectDetails(
+                element,
+                slide,
+                options.includeEffectSource ?? false,
+              ),
             }
           : {}),
         motionStageIndices: stages.motion.get(element.id) ?? [],
         presenceStageIndices: stages.presence.get(element.id) ?? [],
+        ...(options.includeMotion
+          ? { motion: motionSummary(slide, element.id) }
+          : {}),
+        ...(options.includePresence
+          ? { presence: presenceSummary(slide, element.id) }
+          : {}),
         ...(options.includeWorldTransform
           ? { worldTransform: worldTransform(slide, element) }
           : {}),

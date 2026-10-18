@@ -108,7 +108,7 @@ export class AgentInspectionService {
         );
       const data =
         target.type === "deck"
-          ? projectAgentDeck(p)
+          ? projectAgentDeck(p, target)
           : target.type === "slide"
             ? projectAgentSlide(p, target)
             : projectAgentElements(
