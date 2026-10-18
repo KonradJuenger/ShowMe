@@ -5,6 +5,7 @@ import {
   assembleAgentMutation,
   type AgentApplyRequest,
   type AgentTextMeasure,
+  type AgentEffectValidate,
 } from "../src/core/agentMutation";
 import { agentFailure } from "../src/core/agentRead";
 import {
@@ -28,6 +29,10 @@ interface Dependencies {
     documentId: string,
     element: Element & { content: TextContent },
   ): ReturnType<AgentTextMeasure>;
+  validateEffect?: (
+    documentId: string,
+    ...args: Parameters<AgentEffectValidate>
+  ) => ReturnType<AgentEffectValidate>;
   changed(): void;
   maxIdentities?: number;
   maxReceiptBytes?: number;
@@ -230,7 +235,12 @@ export class AgentEditingService {
   private failure(error: unknown) {
     if (error instanceof AgentMutationError)
       return {
-        ...agentFailure(error.code, error.message, error.actualRevision),
+        ...agentFailure(
+          error.code,
+          error.message,
+          error.actualRevision,
+          error.details,
+        ),
         ...(error.stepIndex === undefined
           ? {}
           : { stepIndex: error.stepIndex }),
@@ -312,6 +322,19 @@ export class AgentEditingService {
         check();
         return measured;
       },
+      undefined,
+      this.dependencies.validateEffect
+        ? async (definition, sampleText) => {
+            check();
+            const result = await this.dependencies.validateEffect!(
+              request.documentId,
+              definition,
+              sampleText,
+            );
+            check();
+            return result;
+          }
+        : undefined,
     );
     check();
     const base = {
@@ -326,6 +349,8 @@ export class AgentEditingService {
       removedIds: staged.removedIds,
       createdSlideIds: staged.createdSlideIds,
       updatedSlideIds: staged.updatedSlideIds,
+      createdEffectInstanceIds: staged.createdEffectInstanceIds,
+      updatedEffectInstanceIds: staged.updatedEffectInstanceIds,
       deckChanged: projection.deck !== staged.snapshot.deck,
     };
     const changed = staged.changed;

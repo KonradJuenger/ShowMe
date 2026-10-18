@@ -11,6 +11,11 @@ import {
   setSlideBackground,
   updateSlideMeta,
   setDeckProperties,
+  reorderElements,
+  setElementEffectDefinition,
+  setElementEffectParameterValue,
+  setSlideEffects,
+  setSlideMotion,
   type EditorSnapshot,
 } from "./editorCommands";
 import { editorOperations } from "./editorChange";
@@ -27,6 +32,33 @@ import {
 } from "./text";
 import { resolveTextTypography } from "./textTypography";
 import type { DocumentProjection } from "./documentProjection";
+import { makeIndependent } from "./templateCommands";
+import {
+  addMotionPreset,
+  addParameterAnimation,
+  motionEaseFromName,
+} from "./motion";
+import { addPresence } from "./presence";
+import {
+  motionProperties,
+  type MotionProperty,
+} from "./motionModel";
+import {
+  effectDefinitionSchema,
+  effectParameterSchema,
+  effectParameterValueSchema,
+  effectTimeControlSchema,
+  numericEffectParameter,
+  reconcileShaderSource,
+  type EffectDefinition,
+} from "./effects";
+import {
+  blankEffect,
+  changeEffectAffects,
+  type EffectAffects,
+} from "./effectAuthoring";
+import type { EffectDefinitionValidator } from "./effectValidation";
+import { uid } from "./ids";
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const number = z.number().finite();
@@ -67,6 +99,18 @@ const typography = z
   .strict();
 const autoSize = z.enum(["none", "height", "both"]);
 const background = z.string().regex(/^#[a-fA-F0-9]{6}$/);
+const cssClass = z
+  .string()
+  .regex(/^[a-zA-Z_][a-zA-Z0-9_-]*$/)
+  .max(100);
+const cssClasses = z
+  .array(cssClass)
+  .max(100)
+  .refine(
+    (values) => new Set(values).size === values.length,
+    "Duplicate CSS class",
+  );
+const stageIndex = z.number().int().nonnegative().max(10000);
 export const agentApplyRequestSchema = z
   .object({
     documentId: id,
@@ -92,10 +136,17 @@ export const agentApplyRequestSchema = z
               background: background.optional(),
             })
             .strict(),
+          z.object({ type: z.literal("slide.make_independent") }).strict(),
           z
             .object({
               type: z.literal("deck.rename"),
               name: z.string().trim().min(1).max(200),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("deck.stylesheet.set"),
+              source: z.string().max(100000),
             })
             .strict(),
           z
@@ -138,9 +189,110 @@ export const agentApplyRequestSchema = z
             .strict(),
           z
             .object({
+              type: z.literal("elements.css_classes.set"),
+              elementIds: ids,
+              classes: cssClasses,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("elements.reorder"),
+              parentId: id,
+              elementIds: ids,
+              mode: z.enum(["front", "back", "forward", "backward"]),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("effect.apply_code"),
+              elementId: id,
+              name: z.string().trim().min(1).max(100),
+              effectType: z.enum(["shader", "css", "text-js"]),
+              affects: z.enum([
+                "pixels",
+                "backdrop",
+                "generated",
+                "element",
+                "text",
+              ]),
+              source: z.string().min(1).max(100000),
+              styleSource: z.string().max(100000).optional(),
+              speed: z.number().finite().nonnegative().max(100).optional(),
+              timeControl: effectTimeControlSchema.optional(),
+              parameters: z.array(effectParameterSchema).max(32).optional(),
+              existingInstanceId: id.optional(),
+              stageIndex: stageIndex.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("effect.parameter.set"),
+              elementId: id,
+              effectInstanceId: id,
+              key: z.string().min(1).max(64),
+              value: effectParameterValueSchema,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("effect.enabled.set"),
+              elementId: id,
+              effectInstanceId: id,
+              enabled: z.boolean(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("effect.remove"),
+              elementId: id,
+              effectInstanceId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("background.shader.create"),
+              name: z.string().trim().min(1).max(100),
+              source: z.string().min(1).max(100000),
+              speed: z.number().finite().nonnegative().max(100).optional(),
+              timeControl: effectTimeControlSchema.optional(),
+              parameters: z.array(effectParameterSchema).max(32).optional(),
+              stageIndex: stageIndex.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("motion.add_preset"),
+              stageIndex,
+              elementIds: ids,
+              preset: z.enum(["Move", "Scale", "Rotate", "Fade", "Pulse"]),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("motion.animate"),
+              stageIndex,
+              elementId: id,
+              property: z.string().min(1).max(200),
+              from: number,
+              to: number,
+              durationMs: z.number().int().min(1).max(86400000),
+              ease: z
+                .enum(["Linear", "Ease In", "Ease Out", "Ease In Out", "Hold"])
+                .optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("presence.add"),
+              stageIndex,
+              elementIds: ids,
+            })
+            .strict(),
+          z
+            .object({
               type: z.literal("element.insert_text"),
               parentId: id,
-              center: point,
+              frame,
               text: z.string().max(100000),
               name: z.string().max(200).optional(),
               typography: typography.optional(),
@@ -173,6 +325,7 @@ export class AgentMutationError extends Error {
     message: string,
     readonly stepIndex?: number,
     readonly actualRevision?: number,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -180,6 +333,7 @@ export class AgentMutationError extends Error {
 export type AgentTextMeasure = (
   element: Element & { content: TextContent },
 ) => Promise<TextMeasurement | null>;
+export type AgentEffectValidate = EffectDefinitionValidator;
 function forest(snapshot: EditorSnapshot) {
   const entries = new Map<string, Element>();
   const visit = (element: Element) => {
@@ -206,6 +360,7 @@ export async function assembleAgentMutation(
   request: AgentApplyRequest,
   measure: AgentTextMeasure,
   newId = () => crypto.randomUUID(),
+  validateEffect?: AgentEffectValidate,
 ) {
   if (
     !projection.deck.slideIds.includes(request.slideId) ||
@@ -216,6 +371,8 @@ export async function assembleAgentMutation(
       "Edit an explicit presentation slide.",
     );
   let next: EditorSnapshot = projection;
+  const createdEffectInstanceIds: string[] = [];
+  const updatedEffectInstanceIds: string[] = [];
   const targets = new Set(
     request.operations.flatMap((op) =>
       "elementIds" in op
@@ -296,6 +453,123 @@ export async function assembleAgentMutation(
       );
     next = updateText(next, elementId, {}, () => measured);
   };
+  type ApplyEffectCode = Extract<
+    AgentApplyRequest["operations"][number],
+    { type: "effect.apply_code" }
+  >;
+  const effectDefinition = (
+    op: Omit<ApplyEffectCode, "type" | "elementId">,
+    existing?: EffectDefinition,
+  ): EffectDefinition => {
+    const shader = op.effectType === "shader";
+    if (
+      (shader && !["pixels", "backdrop", "generated"].includes(op.affects)) ||
+      (op.effectType === "css" && op.affects !== "element") ||
+      (op.effectType === "text-js" && op.affects !== "text")
+    )
+      throw new AgentMutationError(
+        "INVALID_REQUEST",
+        "Match shader with pixels/backdrop/generated, CSS with element, and text-js with text.",
+      );
+    if (op.effectType !== "text-js" && op.styleSource !== undefined)
+      throw new AgentMutationError(
+        "INVALID_REQUEST",
+        "styleSource is only available for text-js Effects.",
+      );
+    const compatibleExisting =
+      existing &&
+      ((op.effectType === "shader" &&
+        existing.kind === "fragment-glsl") ||
+        (op.effectType === "css" && existing.kind === "css") ||
+        (op.effectType === "text-js" && existing.kind === "text-js"))
+        ? existing
+        : undefined;
+    let definition: EffectDefinition =
+      compatibleExisting ??
+      (op.effectType === "shader"
+        ? changeEffectAffects(
+            blankEffect("shader"),
+            op.affects as EffectAffects,
+            true,
+          )
+        : changeEffectAffects(
+            blankEffect("css-js"),
+            op.effectType === "text-js" ? "text" : "element",
+            true,
+          ));
+    if (definition.kind === "fragment-glsl")
+      definition = changeEffectAffects(
+        definition,
+        op.affects as EffectAffects,
+        false,
+      );
+    definition = {
+      ...definition,
+      name: op.name,
+      speed: op.speed ?? definition.speed,
+      timeControl: op.timeControl ?? definition.timeControl,
+      parameters: op.parameters ?? definition.parameters,
+    };
+    if (definition.kind === "fragment-glsl")
+      definition = reconcileShaderSource(definition, op.source);
+    else if (definition.kind === "text-js")
+      definition = {
+        ...definition,
+        source: op.source,
+        styleSource: op.styleSource ?? definition.styleSource,
+      };
+    else definition = { ...definition, source: op.source };
+    const parsed = effectDefinitionSchema.safeParse(definition);
+    if (!parsed.success)
+      throw new AgentMutationError(
+        "INVALID_REQUEST",
+        parsed.error.issues.map(({ message }) => message).join("; "),
+      );
+    return parsed.data;
+  };
+  const validateDefinition = async (
+    definition: EffectDefinition,
+    sampleText?: string,
+  ) => {
+    if (!validateEffect)
+      throw new AgentMutationError(
+        "EFFECT_VALIDATION_UNAVAILABLE",
+        "Production Effect validation is unavailable. Retry when the renderer is ready.",
+      );
+    const result = await validateEffect(definition, sampleText);
+    if (!result)
+      throw new AgentMutationError(
+        "EFFECT_VALIDATION_UNAVAILABLE",
+        "Production Effect validation is unavailable. Retry when the renderer is ready.",
+      );
+    if (!result.ok)
+      throw new AgentMutationError(
+        "EFFECT_VALIDATION_ERROR",
+        result.diagnostics.map(({ message }) => message).join("; "),
+        undefined,
+        undefined,
+        { kind: result.kind, diagnostics: result.diagnostics },
+      );
+    return result.definition;
+  };
+  const requireEffect = (elementId: string, instanceId: string) => {
+    const element = requireEditable(elementId);
+    const instance = element.effects?.find(({ id }) => id === instanceId);
+    const definition =
+      instance && next.slide.effectResources?.[instance.resourceId];
+    if (!instance || !definition)
+      throw new AgentMutationError(
+        "UNKNOWN_EFFECT",
+        "Inspect the element and use an existing Effect instance ID.",
+      );
+    return { element, instance, definition };
+  };
+  const ensureStages = (index: number) => {
+    const motion = structuredClone(next.slide.motion ?? { stages: [] });
+    while (motion.stages.length <= index)
+      motion.stages.push({ id: uid(), tracks: [], blocks: [] });
+    return motion;
+  };
   for (let stepIndex = 0; stepIndex < request.operations.length; stepIndex++) {
     const op = request.operations[stepIndex];
     try {
@@ -338,15 +612,22 @@ export async function assembleAgentMutation(
         if (op.background) {
           if (next.deck.slideMeta[request.slideId]?.templateId)
             throw new AgentMutationError(
-              "TARGET_NOT_EDITABLE",
-              "The template owns this slide background. Create an independent slide to set its background.",
+              "TEMPLATE_OWNED",
+              "The slide background is inherited from its template.",
+              undefined,
+              undefined,
+              { suggestedOperation: "slide.make_independent" },
             );
           next = setSlideBackground(next, op.background);
         }
         if (op.name)
           next = updateSlideMeta(next, request.slideId, { name: op.name });
+      } else if (op.type === "slide.make_independent") {
+        next = makeIndependent(next);
       } else if (op.type === "deck.rename") {
         next = setDeckProperties(next, { name: op.name });
+      } else if (op.type === "deck.stylesheet.set") {
+        next = setDeckProperties(next, { stylesheet: op.source });
       } else if (op.type === "text.style") {
         if (
           !Object.keys(op.typography ?? {}).length &&
@@ -388,6 +669,247 @@ export async function assembleAgentMutation(
             value: { ...requireEditable(elementId).appearance, ...op.patch },
           })),
         );
+      } else if (op.type === "elements.css_classes.set") {
+        for (const elementId of [...new Set(op.elementIds)]) {
+          const element = requireEditable(elementId);
+          const replacement = { ...element };
+          if (op.classes.length) replacement.cssClasses = [...op.classes];
+          else delete replacement.cssClasses;
+          next = replaceElement(next, elementId, replacement);
+        }
+      } else if (op.type === "elements.reorder") {
+        requireParent(op.parentId);
+        const direct = new Set(
+          (getChildren(next.slide, op.parentId) ?? []).map(({ id }) => id),
+        );
+        const invalid = op.elementIds.filter((id) => !direct.has(id));
+        if (invalid.length)
+          throw new AgentMutationError(
+            "INVALID_SCOPE",
+            "Reorder targets must be direct siblings of the supplied parent.",
+            undefined,
+            undefined,
+            { requiredParentId: op.parentId, elementIds: invalid },
+          );
+        next = reorderElements(next, op.parentId, op.elementIds, op.mode);
+      } else if (op.type === "effect.apply_code") {
+        const target = requireEditable(op.elementId);
+        const existing = op.existingInstanceId
+          ? requireEffect(op.elementId, op.existingInstanceId)
+          : undefined;
+        const definition = await validateDefinition(
+          effectDefinition(
+            {
+              name: op.name,
+              effectType: op.effectType,
+              affects: op.affects,
+              source: op.source,
+              ...(op.styleSource === undefined
+                ? {}
+                : { styleSource: op.styleSource }),
+              ...(op.speed === undefined ? {} : { speed: op.speed }),
+              ...(op.timeControl === undefined
+                ? {}
+                : { timeControl: op.timeControl }),
+              ...(op.parameters === undefined
+                ? {}
+                : { parameters: op.parameters }),
+              ...(op.existingInstanceId === undefined
+                ? {}
+                : { existingInstanceId: op.existingInstanceId }),
+              ...(op.stageIndex === undefined
+                ? {}
+                : { stageIndex: op.stageIndex }),
+            },
+            existing?.definition,
+          ),
+          target.content?.type === "text" ? target.content.text : undefined,
+        );
+        const before = new Set((target.effects ?? []).map(({ id }) => id));
+        next = setElementEffectDefinition(
+          next,
+          op.elementId,
+          definition,
+          op.existingInstanceId,
+          op.stageIndex ?? 0,
+        );
+        if (op.existingInstanceId)
+          updatedEffectInstanceIds.push(op.existingInstanceId);
+        else {
+          const created = locateElement(next.slide, op.elementId)!.element.effects?.find(
+            ({ id }) => !before.has(id),
+          );
+          if (!created)
+            throw new AgentMutationError(
+              "COMMIT_FAILED",
+              "The Effect instance was not created.",
+            );
+          createdEffectInstanceIds.push(created.id);
+        }
+      } else if (op.type === "effect.parameter.set") {
+        requireEffect(op.elementId, op.effectInstanceId);
+        next = setElementEffectParameterValue(
+          next,
+          op.elementId,
+          op.effectInstanceId,
+          op.key,
+          op.value,
+        );
+        updatedEffectInstanceIds.push(op.effectInstanceId);
+      } else if (op.type === "effect.enabled.set") {
+        const { element } = requireEffect(op.elementId, op.effectInstanceId);
+        next = setSlideEffects(next, {
+          changes: [
+            {
+              elementId: op.elementId,
+              value: element.effects!.map((effect) =>
+                effect.id === op.effectInstanceId
+                  ? { ...effect, enabled: op.enabled }
+                  : effect,
+              ),
+            },
+          ],
+        });
+        updatedEffectInstanceIds.push(op.effectInstanceId);
+      } else if (op.type === "effect.remove") {
+        const { element, instance } = requireEffect(
+          op.elementId,
+          op.effectInstanceId,
+        );
+        const remaining = element.effects!.filter(
+          ({ id }) => id !== op.effectInstanceId,
+        );
+        const usedElsewhere = [...forest(next).values()].some(
+          (candidate) =>
+            candidate.id !== op.elementId &&
+            candidate.effects?.some(
+              ({ resourceId }) => resourceId === instance.resourceId,
+            ),
+        );
+        const resources = { ...(next.slide.effectResources ?? {}) };
+        if (
+          !usedElsewhere &&
+          !remaining.some(
+            ({ resourceId }) => resourceId === instance.resourceId,
+          )
+        )
+          delete resources[instance.resourceId];
+        next = setSlideEffects(next, {
+          resources: Object.keys(resources).length ? resources : null,
+          changes: [
+            {
+              elementId: op.elementId,
+              value: remaining.length ? remaining : null,
+            },
+          ],
+        });
+      } else if (op.type === "background.shader.create") {
+        const layerIndex = next.deck.layers.findIndex(
+          ({ hidden, locked }) => !hidden && !locked,
+        );
+        const parentId = next.slide.nodes[layerIndex]?.id;
+        if (layerIndex < 0 || !parentId)
+          throw new AgentMutationError(
+            "TARGET_NOT_EDITABLE",
+            "A visible unlocked layer is required for a background Element.",
+          );
+        const definition = await validateDefinition(
+          effectDefinition({
+            name: op.name,
+            effectType: "shader",
+            affects: "generated",
+            source: op.source,
+            ...(op.speed === undefined ? {} : { speed: op.speed }),
+            ...(op.timeControl === undefined
+              ? {}
+              : { timeControl: op.timeControl }),
+            ...(op.parameters === undefined
+              ? {}
+              : { parameters: op.parameters }),
+            ...(op.stageIndex === undefined
+              ? {}
+              : { stageIndex: op.stageIndex }),
+          }),
+        );
+        const elementId = newId();
+        const element = createBasicShape(elementId, "rectangle", {
+          x: 0,
+          y: 0,
+          width: next.deck.width,
+          height: next.deck.height,
+        });
+        element.name = op.name;
+        element.appearance = {
+          ...element.appearance,
+          fill: null,
+          strokeWidth: 0,
+        };
+        next = insertElements(next, [element], parentId);
+        next = setElementEffectDefinition(
+          next,
+          elementId,
+          definition,
+          undefined,
+          op.stageIndex ?? 0,
+        );
+        next = reorderElements(next, parentId, [elementId], "back");
+        const created = locateElement(next.slide, elementId)!.element.effects?.[0];
+        if (created) createdEffectInstanceIds.push(created.id);
+      } else if (op.type === "motion.add_preset") {
+        next = setSlideMotion(
+          next,
+          addMotionPreset(
+            ensureStages(op.stageIndex),
+            op.stageIndex,
+            op.elementIds,
+            op.preset,
+          ),
+        );
+      } else if (op.type === "motion.animate") {
+        const element = requireEditable(op.elementId);
+        if (
+          !(motionProperties as readonly string[]).includes(op.property) &&
+          !numericEffectParameter(
+            element,
+            op.property,
+            next.slide.effectResources ?? {},
+          )
+        )
+          throw new AgentMutationError(
+            "UNSUPPORTED_MOTION_PROPERTY",
+            "Use a native Motion property or a numeric Effect parameter returned by inspection.",
+            undefined,
+            undefined,
+            { property: op.property },
+          );
+        const motion = addParameterAnimation(
+          next.slide.motion,
+          op.stageIndex,
+          op.elementId,
+          op.property as MotionProperty,
+          op.property,
+          op.from,
+          op.to,
+          op.durationMs,
+          true,
+        );
+        if (op.ease) {
+          const block = motion.stages[op.stageIndex].blocks?.at(-1);
+          const member = block?.members[0];
+          const track = motion.stages[op.stageIndex].tracks.find(
+            ({ id }) => id === member?.trackId,
+          );
+          const from = track?.keyframes.find(
+            ({ id }) => id === member?.fromKeyframeId,
+          );
+          if (from) from.easeToNext = motionEaseFromName(op.ease);
+        }
+        next = setSlideMotion(next, motion);
+      } else if (op.type === "presence.add") {
+        next = setSlideMotion(
+          next,
+          addPresence(ensureStages(op.stageIndex), op.stageIndex, op.elementIds),
+        );
       } else if (op.type === "elements.remove")
         next = removeElements(next, op.elementIds);
       else {
@@ -407,7 +929,10 @@ export async function assembleAgentMutation(
           const inserted = insertText(
             next,
             op.parentId,
-            transformPoint(matrix, op.center),
+            transformPoint(matrix, {
+              x: op.frame.x + op.frame.width / 2,
+              y: op.frame.y + op.frame.height / 2,
+            }),
             elementId,
           );
           if (inserted.scopeId !== op.parentId)
@@ -416,6 +941,13 @@ export async function assembleAgentMutation(
               "The insertion parent is not editable.",
             );
           next = inserted.snapshot;
+          const textElement = locateElement(next.slide, elementId)!.element;
+          next = setElementFramesPreservingContent(next, [
+            {
+              elementId,
+              value: { ...textElement.frame, ...op.frame },
+            },
+          ]);
           if (op.name !== undefined) {
             const element = locateElement(next.slide, elementId)!.element;
             const named = { ...element, name: op.name };
@@ -425,7 +957,7 @@ export async function assembleAgentMutation(
             text: op.text,
             placeholder: false,
             ...op.typography,
-            ...(op.autoSize === undefined ? {} : { autoSize: op.autoSize }),
+            autoSize: op.autoSize ?? "none",
           });
         } else {
           const element = createBasicShape(elementId, op.shape, op.frame);
@@ -447,6 +979,7 @@ export async function assembleAgentMutation(
           error.message,
           stepIndex,
           error.actualRevision,
+          error.details,
         );
       throw new AgentMutationError(
         "INVALID_SCOPE",
@@ -481,6 +1014,8 @@ export async function assembleAgentMutation(
     ...changes,
     createdSlideIds,
     updatedSlideIds,
+    createdEffectInstanceIds: [...new Set(createdEffectInstanceIds)],
+    updatedEffectInstanceIds: [...new Set(updatedEffectInstanceIds)],
     changed: editorOperations(next).length > 0,
   };
 }
