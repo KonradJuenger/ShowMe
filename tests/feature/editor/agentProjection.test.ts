@@ -258,6 +258,7 @@ it("projects ordered deck metadata without unavailable counts or document bodies
       height: 1080,
       slideCount: 2,
       hasStylesheet: true,
+      transitionDefaults: DEFAULT_TRANSITION,
       slides: [
         {
           id: "other",
@@ -397,6 +398,8 @@ it("preserves template ownership and composed background without treating inheri
     hidden: false,
     templateId: "template",
     background: "#123456",
+    transition: null,
+    notesLength: "PRIVATE_SPEAKER_NOTES".length,
     elementCount: 7,
   });
   expect(result.elements[0]).toMatchObject({
@@ -445,6 +448,16 @@ it("preserves template ownership and composed background without treating inheri
     templateId: null,
   });
   expect(projectAgentSlide(projection).elements[0].id).toBe("group");
+});
+
+it("withholds notes by default and returns them only on explicit inspection", () => {
+  const projection = fixture();
+  const sparse = projectAgentSlide(projection);
+  expect(sparse.slide.notesLength).toBe("PRIVATE_SPEAKER_NOTES".length);
+  expect(sparse.slide).not.toHaveProperty("notes");
+  expect(projectAgentSlide(projection, { includeNotes: true }).slide.notes).toBe(
+    "PRIVATE_SPEAKER_NOTES",
+  );
 });
 
 it("withholds hidden content by default while exposing structural state and locked visible content", () => {
