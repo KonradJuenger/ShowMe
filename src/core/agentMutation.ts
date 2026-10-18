@@ -8,7 +8,7 @@ import {
   setElementFramesPreservingContent,
   translateElements,
   createSlide,
-  duplicateSlide,
+  duplicateSlideWithResult,
   deleteSlide,
   setSlideBackground,
   updateSlideMeta,
@@ -865,7 +865,7 @@ export async function assembleAgentMutation(
         const afterId = op.afterId === undefined ? next.slide.id : op.afterId;
         if (afterId !== null && !next.deck.slideIds.includes(afterId))
           throw new AgentMutationError("UNKNOWN_SLIDE", "Use an inspected slide anchor or null.");
-        const duplicated = duplicateSlide(
+        const duplicated = duplicateSlideWithResult(
           next,
           next.slide,
           slideId,
@@ -873,7 +873,10 @@ export async function assembleAgentMutation(
           afterId,
           newId,
         );
-        const operation = [...editorOperations(duplicated)]
+        Object.assign(idMap, duplicated.idMap);
+        for (const value of Object.values(duplicated.idMap))
+          createdThisBatch.add(value);
+        const operation = [...editorOperations(duplicated.snapshot)]
           .reverse()
           .find((value) => value.type === "slide.duplicate");
         const createdSlide =
@@ -881,8 +884,8 @@ export async function assembleAgentMutation(
         if (!createdSlide)
           throw new AgentMutationError("COMMIT_FAILED", "The duplicated slide was not staged.");
         next = setEditorOperations(
-          { ...duplicated, slide: createdSlide },
-          editorOperations(duplicated),
+          { ...duplicated.snapshot, slide: createdSlide },
+          editorOperations(duplicated.snapshot),
         );
       } else if (op.type === "slide.delete") {
         if (request.operations.length !== 1 || !replacementSlide)
