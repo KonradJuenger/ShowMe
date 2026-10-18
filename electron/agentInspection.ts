@@ -7,12 +7,23 @@ import {
   projectAgentSlide,
 } from "../src/core/agentProjection";
 import type { DocumentProjection } from "../src/core/documentProjection";
+import type { Asset } from "../src/core/assets";
 
 interface Dependencies {
   access(): number | null;
   activeDocumentId(): string | null;
   context(): Promise<AgentContext>;
   projection(documentId: string, pageId?: string): Promise<DocumentProjection>;
+  listAssets(
+    documentId: string,
+    query: string,
+    offset: number,
+    limit: number,
+  ): Promise<{
+    items: Asset[];
+    total: number;
+    counts: { images: number; videos: number };
+  }>;
 }
 export class AgentInspectionService {
   constructor(private readonly dependencies: Dependencies) {}
@@ -84,6 +95,46 @@ export class AgentInspectionService {
       const head = await d.projection(request.documentId);
       const before = check() ?? fresh(head);
       if (before) return before;
+      if (target.type === "assets") {
+        const query = target.query ?? "";
+        const offset = target.offset ?? 0;
+        const limit = target.limit ?? 25;
+        const result = await d.listAssets(
+          request.documentId,
+          query,
+          offset,
+          limit,
+        );
+        const current = await d.projection(request.documentId);
+        const pending = check() ?? fresh(current);
+        if (pending) return pending;
+        return {
+          ok: true as const,
+          data: {
+            documentId: request.documentId,
+            epoch: request.epoch,
+            revision: request.revision,
+            assets: {
+              query,
+              offset,
+              limit,
+              total: result.total,
+              counts: result.counts,
+              items: result.items.map((asset) => ({
+                assetId: asset.id,
+                name: asset.names[0] ?? asset.filename,
+                type: asset.type,
+                mediaType: asset.mediaType,
+                ...(asset.width === undefined ? {} : { width: asset.width }),
+                ...(asset.height === undefined ? {} : { height: asset.height }),
+                ...(asset.duration === undefined
+                  ? {}
+                  : { duration: asset.duration }),
+              })),
+            },
+          },
+        };
+      }
       const pageId =
         target.type === "deck"
           ? head.deck.slideIds[0]
