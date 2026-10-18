@@ -96,11 +96,6 @@ import {
 } from "./effectAuthoring";
 import type { EffectDefinitionValidator } from "./effectValidation";
 import { uid } from "./ids";
-import {
-  slideTransitionSchema,
-  transitionDefaultsSchema,
-} from "./slideTransitions";
-
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const number = z.number().finite();
 const point = z.object({ x: number, y: number }).strict();
@@ -150,6 +145,29 @@ const typography = z
   .strict();
 const autoSize = z.enum(["none", "height", "both"]);
 const background = z.string().regex(/^#[a-fA-F0-9]{6}$/);
+const transitionKind = z.enum(["none", "fade", "push", "wipe"]);
+const transitionEasing = z.enum([
+  "linear",
+  "ease",
+  "ease-in",
+  "ease-out",
+  "ease-in-out",
+]);
+const transitionDuration = number.min(0).max(60000);
+const slideTransitionSchema = z
+  .object({
+    kind: transitionKind.optional(),
+    durationMs: transitionDuration.optional(),
+    easing: transitionEasing.optional(),
+  })
+  .strict();
+const transitionDefaultsSchema = z
+  .object({
+    kind: transitionKind,
+    durationMs: transitionDuration,
+    easing: transitionEasing,
+  })
+  .strict();
 const layerPatch = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
