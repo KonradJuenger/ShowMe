@@ -1,14 +1,17 @@
 # ShowMe MCP design
 
-Status: Phases 1–6 are implemented for local development: inspection, production
-previews and ordinary editing through the local MCP server. Editing requires both
+Status: Phases 1–6 are implemented for local development: scoped inspection,
+managed asset discovery, production previews, normal presentation authoring and
+creative Effects/Motion/Presence through the local MCP server. Editing requires both
 Enable MCP and Allow agent editing. Cross-host model evaluation remains pending.
 
-Deck-building refinement adds `slide.create`, `slide.update`, `deck.rename` and
-`text.style` through `showme.apply`, including typography at insertion. See
-[local setup](./LOCAL_SETUP.md#build-a-deck-through-mcp) for the exact creation loop.
-New slides are independent, and creating one does not navigate the human editor.
-The capture page now initializes text measurement on a cold surface. A new native
+The semantic authoring surface now mirrors the editor's persistent presentation model:
+slides, layers, text/Text Styles, shapes, Frames, managed media, hierarchy,
+alignment/distribution, transitions, deck CSS, Effects, Motion and Presence. See the
+[authoring capability matrix](./AUTHORING_CAPABILITY_MATRIX.md) and
+[local setup](./LOCAL_SETUP.md#build-a-deck-through-mcp). New slides can be authored
+in one atomic batch without navigating the human editor. The capture page now
+initializes text measurement on a cold surface. A new native
 test reproduced the blank PNG after a size transition and editor minimization.
 Capture now uses a fresh surface for a changed size and verifies a completed
 composition before returning its cropped PNG. Native tests check actual pixels,
@@ -238,11 +241,13 @@ the production DOM/font measurement path. Frame resizing shares ShowMe's native
 Free-media/text preservation. Group/reparent/align/distribute and slide/layer changes
 call the same core commands used by the human editor.
 
-Media insertion remains bounded by ShowMe's Library/asset authority. MCP accepts
-`element.insert_media` only with an existing managed `assetId`; the Electron host
-resolves it through `assetForDocument`. Local file paths, raw bytes and fabricated
-asset metadata are never accepted. Importing a new file into the Library remains a
-human/host action.
+Media insertion remains bounded by ShowMe's Library/asset authority. MCP can
+discover managed assets through bounded `showme.inspect` asset queries, then
+`element.insert_media` accepts only one of those existing managed `assetId` values;
+the Electron host resolves it through `assetForDocument`. Inspection exposes a
+display name, type and prepared dimensions, never filesystem paths or raw bytes.
+Fabricated asset metadata is not accepted. Importing a new file into the Library
+remains a human/host action.
 
 `electron/agentEditing.ts` uses an ordinary actor-scoped `EditorSession` and the
 existing runtime/authority/durable writer. Exact revision/access checks run inside
