@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -19,6 +20,81 @@ import { newPresentationDocument } from "../../../src/core/document";
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
+});
+
+async function lostLifecycleResponse(
+  cached: boolean,
+  command: "workspace" | "deliver",
+) {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "showme-lost-receipt-"));
+  cleanup.push(() => rm(folder, { recursive: true, force: true }));
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(path.join(folder, "mcp", "instances"), { recursive: true });
+  let calls = 0;
+  const instanceId = randomUUID();
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      if (JSON.parse(body).command === "context") {
+        res.writeHead(200, {
+          "x-showme-instance": instanceId,
+          "x-showme-bridge": "1",
+        });
+        res.end(JSON.stringify({ ok: true, data: {} }));
+      } else {
+        calls++; // Native side effect completed, but its response was lost.
+        res.destroy();
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  cleanup.push(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  const address = server.address() as { port: number };
+  await writeFile(
+    path.join(folder, "mcp", "instances", `${instanceId}.json`),
+    JSON.stringify({
+      version: 1,
+      instanceId,
+      pid: process.pid,
+      port: address.port,
+      token: "a".repeat(64),
+    }),
+    { mode: 0o600 },
+  );
+  const client = new ShowMeClient(folder, instanceId);
+  if (cached) await client.read({ command: "context", params: {} });
+  const identity = { documentId: "doc", epoch: "epoch", expectedRevision: 0 };
+  const result = await client.read(
+    command === "workspace"
+      ? { command, params: { ...identity, action: "create", name: "Once" } }
+      : { command, params: { ...identity, action: "package" } },
+  );
+  expect(result).toMatchObject({
+    ok: false,
+    error: { code: "OUTCOME_UNKNOWN" },
+  });
+  expect(calls).toBe(1);
+  expect(await client.read({ command: "context", params: {} })).toMatchObject({
+    ok: true,
+  });
+  expect(calls).toBe(1);
+}
+
+it("lost workspace receipts never resend newly discovered or cached lifecycle work", async () => {
+  await lostLifecycleResponse(false, "workspace");
+  await lostLifecycleResponse(true, "workspace");
+});
+
+it("lost package receipts never resend newly discovered or cached delivery work", async () => {
+  await lostLifecycleResponse(false, "deliver");
+  await lostLifecycleResponse(true, "deliver");
 });
 
 it("a lost HTTP response during durability replays the accepted mutation without duplicating inserts", async () => {
@@ -347,8 +423,8 @@ it("rejects unknown commands raw IPC malformed JSON routes and oversized payload
     400,
   );
   expect(
-    (await raw(f.descriptor, {}, "x".repeat(BRIDGE_REQUEST_LIMIT + 1))).body.error
-      .code,
+    (await raw(f.descriptor, {}, "x".repeat(BRIDGE_REQUEST_LIMIT + 1))).body
+      .error.code,
   ).toBe("PAYLOAD_TOO_LARGE");
   expect(calls).toBe(0);
 });

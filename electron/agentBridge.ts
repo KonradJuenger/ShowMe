@@ -135,7 +135,7 @@ export class AgentBridge {
         const command = parsed.data.command;
         timer = setTimeout(
           () => response.destroy(),
-          command === "preview" || command === "apply" ? 30000 : 15000,
+          (command === "deliver" || command === "workspace") ? 120000 : command === "preview" ? 60000 : command === "apply" ? 30000 : 15000,
         );
         const abort = new AbortController();
         response.once("close", () => abort.abort());

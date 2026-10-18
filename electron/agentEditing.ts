@@ -6,7 +6,15 @@ import {
   type AgentApplyRequest,
   type AgentTextMeasure,
   type AgentEffectValidate,
+  type agentPageGroupSchema,
 } from "../src/core/agentMutation";
+import type { z } from "zod/v4";
+import { applyDocumentOperations } from "../src/core/documentOperations";
+import { scopesForOperations } from "../src/core/documentAuthority";
+import {
+  editorOperations,
+  setEditorOperations,
+} from "../src/core/editorChange";
 import { agentFailure } from "../src/core/agentRead";
 import {
   EditorLeaseDeniedError,
@@ -155,8 +163,18 @@ export class AgentEditingService {
       return agentFailure(
         "INVALID_REQUEST",
         "Use explicit document/slide/epoch/revision, a mutation ID and supported bounded semantic operations.",
+        undefined,
+        {
+          issues: parsed.error.issues.slice(0, 12).map((issue) => ({
+            path: issue.path.join("."),
+            code: issue.code,
+            message: issue.message.slice(0, 240),
+          })),
+        },
       );
-    const request = parsed.data;
+    const pages = "pages" in parsed.data ? parsed.data.pages : undefined;
+    const request =
+      "pages" in parsed.data ? { ...parsed.data, operations: [] } : parsed.data;
     try {
       const access = this.requireAccess(request.documentId),
         runtime = this.dependencies.runtime(request.documentId);
@@ -193,7 +211,21 @@ export class AgentEditingService {
           );
         const value = await prior.promise;
         this.requireAccess(request.documentId);
-        return value.ok ? { ...value, replayed: true } : value;
+        if (!value.ok) return value;
+        const current = runtime.metadata(request.documentId);
+        if (current.epoch !== request.epoch)
+          throw new AgentMutationError(
+            "EPOCH_CONFLICT",
+            "The document was replaced. Read context again.",
+          );
+        return {
+          ...value,
+          replayed: true,
+          currentObservation: {
+            epoch: current.epoch,
+            revision: current.revision,
+          },
+        };
       }
       if (
         ledger.entries.size >= (this.dependencies.maxIdentities ?? 1024) ||
@@ -207,7 +239,7 @@ export class AgentEditingService {
       const ownedLedger = ledger;
       ledger.bytes += RESERVATION_BYTES;
       const promise = ledger.queue
-        .then(() => this.execute(request, runtime, access, signal))
+        .then(() => this.execute(request, runtime, access, signal, pages))
         .catch((error) => this.failure(error))
         .then((value) => {
           if (value.ok && value.changed) {
@@ -262,6 +294,7 @@ export class AgentEditingService {
     runtime: DocumentRuntime,
     access: number,
     signal?: AbortSignal,
+    pages?: z.infer<typeof agentPageGroupSchema>[],
   ) {
     const check = (
       state: {
@@ -301,7 +334,10 @@ export class AgentEditingService {
     if (
       !runtime
         .presentationDeck(request.documentId)
-        .slideIds.includes(request.slideId)
+        .slideIds.concat(
+          runtime.presentationDeck(request.documentId).templateIds,
+        )
+        .includes(request.slideId)
     )
       throw new AgentMutationError(
         "UNKNOWN_SLIDE",
@@ -329,41 +365,199 @@ export class AgentEditingService {
       ).slide;
     }
     check();
-    const staged = await assembleAgentMutation(
-      projection,
-      request,
-      async (element) => {
+    const stagePage = (
+      pageProjection: typeof projection,
+      pageRequest: AgentApplyRequest,
+    ) =>
+      assembleAgentMutation(
+        pageProjection,
+        pageRequest,
+        async (element) => {
+          check();
+          const measured = await this.dependencies.measure(
+            request.documentId,
+            element,
+          );
+          check();
+          return measured;
+        },
+        undefined,
+        this.dependencies.validateEffect
+          ? async (definition, sampleText) => {
+              check();
+              const result = await this.dependencies.validateEffect!(
+                request.documentId,
+                definition,
+                sampleText,
+              );
+              check();
+              return result;
+            }
+          : undefined,
+        this.dependencies.asset
+          ? (assetId) => this.dependencies.asset!(request.documentId, assetId)
+          : undefined,
+        replacementSlide,
+      );
+    let staged: Awaited<ReturnType<typeof stagePage>>;
+    const pageResults: Array<Record<string, unknown>> = [];
+    if (pages) {
+      let candidate = runtime.fullSnapshot(request.documentId).document;
+      const results: Awaited<ReturnType<typeof stagePage>>[] = [];
+      const operations: import("../src/core/documentOperations").DocumentOperation[] =
+        [];
+      for (const [pageIndex, page] of pages.entries()) {
         check();
-        const measured = await this.dependencies.measure(
-          request.documentId,
-          element,
-        );
-        check();
-        return measured;
-      },
-      undefined,
-      this.dependencies.validateEffect
-        ? async (definition, sampleText) => {
-            check();
-            const result = await this.dependencies.validateEffect!(
-              request.documentId,
-              definition,
-              sampleText,
+        const existing =
+          candidate.slides[page.slideId] ?? candidate.templates[page.slideId];
+        const first = page.operations[0];
+        if (
+          !existing &&
+          (!["slide.create", "template.create"].includes(first.type) ||
+            !("id" in first) ||
+            first.id !== page.slideId)
+        )
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "New page groups must begin with slide.create using the group's explicit slideId.",
+            undefined,
+            undefined,
+            { pageIndex },
+          );
+        if (
+          existing &&
+          (first.type === "slide.create" ||
+            first.type === "template.create" ||
+            first.type === "slide.duplicate")
+        )
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "Existing page groups target their inspected slideId. Declare a new group ID for creation.",
+            undefined,
+            undefined,
+            { pageIndex },
+          );
+        if (
+          page.operations.some(
+            (op) => op.type === "slide.delete" || op.type === "slide.duplicate",
+          )
+        )
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "Slide deletion/duplication use the existing single-page form.",
+            undefined,
+            undefined,
+            { pageIndex },
+          );
+        const contextId = existing ? page.slideId : candidate.deck.slideIds[0];
+        const pageProjection = {
+          ...projection,
+          deck: candidate.deck,
+          slide: candidate.slides[contextId] ?? {
+            ...candidate.templates[contextId],
+            notes: "",
+          },
+          templates: candidate.templates,
+        };
+        let result: Awaited<ReturnType<typeof stagePage>>;
+        try {
+          result = await stagePage(pageProjection, {
+            ...request,
+            slideId: contextId,
+            operations: page.operations,
+          });
+        } catch (error) {
+          if (error instanceof AgentMutationError)
+            throw new AgentMutationError(
+              error.code,
+              error.message,
+              error.stepIndex,
+              error.actualRevision,
+              { ...error.details, pageIndex },
             );
-            check();
-            return result;
-          }
-        : undefined,
-      this.dependencies.asset
-        ? (assetId) => this.dependencies.asset!(request.documentId, assetId)
-        : undefined,
-      replacementSlide,
-    );
+          throw error;
+        }
+        const changes = editorOperations(result.snapshot);
+        if (changes.length)
+          candidate = applyDocumentOperations(candidate, changes);
+        operations.push(...changes);
+        results.push(result);
+        pageResults.push({
+          slideId: page.slideId,
+          createdIds: result.createdIds,
+          createdSlideIds: result.createdSlideIds,
+          createdBlockIds: result.createdBlockIds,
+          createdTrackIds: result.createdTrackIds,
+          createdStageIds: result.createdStageIds,
+        });
+      }
+      const combined = <
+        K extends Exclude<
+          keyof (typeof results)[number],
+          "snapshot" | "changed" | "resourceChanges"
+        >,
+      >(
+        key: K,
+      ) => [...new Set(results.flatMap((result) => result[key] as string[]))];
+      const affected = new Set(
+        results.flatMap((result) => [
+          ...result.createdIds,
+          ...result.changedIds,
+          ...result.removedIds,
+        ]),
+      );
+      if (affected.size > (request.budget === "expanded" ? 512 : 128))
+        throw new AgentMutationError(
+          "PAYLOAD_TOO_LARGE",
+          "At most 128 affected elements across all page groups.",
+        );
+      staged = {
+        ...results[0],
+        snapshot: setEditorOperations(
+          {
+            deck: candidate.deck,
+            slide: candidate.slides[request.slideId] ?? {
+              ...candidate.templates[request.slideId],
+              notes: "",
+            },
+            templates: candidate.templates,
+          },
+          operations,
+        ),
+        changed: operations.length > 0,
+        resourceChanges: results.flatMap(result => result.resourceChanges),
+        createdIds: combined("createdIds"),
+        changedIds: combined("changedIds"),
+        removedIds: combined("removedIds"),
+        createdSlideIds: combined("createdSlideIds"),
+        createdTemplateIds: combined("createdTemplateIds"),
+        updatedSlideIds: combined("updatedSlideIds"),
+        createdEffectInstanceIds: combined("createdEffectInstanceIds"),
+        updatedEffectInstanceIds: combined("updatedEffectInstanceIds"),
+        createdStageIds: combined("createdStageIds"),
+        createdBlockIds: combined("createdBlockIds"),
+        createdTrackIds: combined("createdTrackIds"),
+        createdKeyframeIds: combined("createdKeyframeIds"),
+        createdTextStyleIds: combined("createdTextStyleIds"),
+        createdLayerIds: combined("createdLayerIds"),
+        idMap: Object.assign({}, ...results.map((result) => result.idMap)),
+      };
+    } else staged = await stagePage(projection, request);
+    if (editorOperations(staged.snapshot).length > 256)
+      throw new AgentMutationError(
+        "PAYLOAD_TOO_LARGE",
+        "The assembled intent exceeds 256 native operations. Split it into coherent transactions.",
+      );
     check();
     const base = {
       documentId: request.documentId,
       epoch: request.epoch,
       slideId: request.slideId,
+      requestSlideId: request.slideId,
+      ...(pages ? { pageResults } : {}),
+      authoredSlideIds: [
+        ...new Set([...staged.createdSlideIds, ...staged.updatedSlideIds]),
+      ],
       mutationId: request.mutationId,
       previousRevision: request.expectedRevision,
       replayed: false,
@@ -371,7 +565,14 @@ export class AgentEditingService {
       changedIds: staged.changedIds,
       removedIds: staged.removedIds,
       createdSlideIds: staged.createdSlideIds,
+      createdTemplateIds: staged.createdTemplateIds,
       updatedSlideIds: staged.updatedSlideIds,
+      resourceChanges: staged.resourceChanges,
+      authoredPages: [...new Set([...staged.createdSlideIds, ...staged.createdTemplateIds, ...staged.updatedSlideIds])].map(id => ({ id, kind: staged.snapshot.deck.templateIds.includes(id) ? "template" : "slide" })),
+      createdStageIds: staged.createdStageIds,
+      createdBlockIds: staged.createdBlockIds,
+      createdTrackIds: staged.createdTrackIds,
+      createdKeyframeIds: staged.createdKeyframeIds,
       createdEffectInstanceIds: staged.createdEffectInstanceIds,
       updatedEffectInstanceIds: staged.updatedEffectInstanceIds,
       idMap: staged.idMap,
@@ -418,6 +619,18 @@ export class AgentEditingService {
     const warnings: Array<{ code: string; message: string }> = [];
     try {
       await session.refreshProjection(request.slideId, false);
+      {
+        // Multi-page structural commands need native scope derivation against all
+        // accepted pages. Reuse the session's lease admission/renewal/commit path.
+        check();
+        const scopes = scopesForOperations(
+          runtime.fullSnapshot(request.documentId).document,
+          editorOperations(staged.snapshot),
+        );
+        if (!(await session.acquireScopes(scopes, signal)))
+          throw new EditorLeaseDeniedError();
+        check();
+      }
       session.apply(staged.snapshot);
       await session.flush();
     } catch (error) {

@@ -43,6 +43,7 @@ interface IpcRouterDependencies {
   getEditor: () => BrowserWindow | null;
   getExportWindow: () => BrowserWindow | null;
   getPreviewWindow: () => BrowserWindow | null;
+  getAgentRuntimeWindow?: () => BrowserWindow | null;
   getPreviewDocumentId: () => string | null;
   getAudienceWindow: () => BrowserWindow | null;
   getPresenterConsole: () => BrowserWindow | null;
@@ -56,6 +57,7 @@ export function registerIpcRouter({
   getEditor,
   getExportWindow,
   getPreviewWindow,
+  getAgentRuntimeWindow,
   getPreviewDocumentId,
   getAudienceWindow,
   getPresenterConsole,
@@ -152,14 +154,16 @@ export function registerIpcRouter({
       const state = getPresentationState();
       const activeDocumentId = getActiveDocumentId();
       const preview = getPreviewWindow();
-      const isPreview = preview && event.sender.id === preview.webContents.id;
-      const isEditor = editor && event.sender.id === editor.webContents.id;
+      const agentRuntime = getAgentRuntimeWindow?.();
+      const isAgentRuntime = !!agentRuntime && !agentRuntime.isDestroyed() && event.sender.id === agentRuntime.webContents.id;
+      const isPreview = preview && !preview.isDestroyed() && event.sender.id === preview.webContents.id;
+      const isEditor = editor && !editor.isDestroyed() && event.sender.id === editor.webContents.id;
       const isExport =
-        exportWindow && event.sender.id === exportWindow.webContents.id;
+        exportWindow && !exportWindow.isDestroyed() && event.sender.id === exportWindow.webContents.id;
       const isAudience =
-        presenter && event.sender.id === presenter.webContents.id;
+        presenter && !presenter.isDestroyed() && event.sender.id === presenter.webContents.id;
       const isConsole =
-        presenterConsole && event.sender.id === presenterConsole.webContents.id;
+        presenterConsole && !presenterConsole.isDestroyed() && event.sender.id === presenterConsole.webContents.id;
       const readMethods = [
         "preparedImage",
         "preparedSlideImages",
@@ -199,7 +203,8 @@ export function registerIpcRouter({
         "fullscreen",
       ];
       if (
-        (!isEditor && !isAudience && !isConsole && !isExport && !isPreview) ||
+        (!isEditor && !isAudience && !isConsole && !isExport && !isPreview && !isAgentRuntime) ||
+        (isAgentRuntime && !["assetUrl", "managedFonts"].includes(method)) ||
         (isPreview && !["assetUrl", "managedFonts", "preparedImage", "preparedSlideImages"].includes(method)) ||
         (isExport &&
           !["documentProjection", "assetUrl", "managedFonts", "exportReady"].includes(

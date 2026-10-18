@@ -34,6 +34,7 @@ export interface AgentDeckOutline extends AgentRevision {
     height: number;
     slideCount: number;
     hasStylesheet: boolean;
+    templates: Array<{ id: string; label: string }>;
     stylesheet?: string;
     transitionDefaults: Deck["transitionDefaults"];
     textStyles?: Array<{
@@ -71,6 +72,8 @@ export interface AgentElementOutline {
   name?: string;
   source: "slide" | "template";
   ownerPageId: string;
+  ownerPageKind: "slide" | "template";
+  inherited: boolean;
   parentId: string;
   layerId: string;
   layerIndex: number;
@@ -95,25 +98,39 @@ export interface AgentElementOutline {
 }
 
 export interface AgentSlideOutline extends AgentRevision {
+  timeline: Array<{
+    stageId: string;
+    stageIndex: number;
+    blockIds: string[];
+    trackIds: string[];
+  }>;
   slide: {
     id: string;
     index: number;
+    pageKind: "slide" | "template";
+    displayName: string;
     name: string;
     hidden: boolean;
     templateId: string | null;
     background: string;
+    backgroundOwnership: {
+      source: "slide" | "template";
+      ownerPageId: string;
+      suggestedOperation?: "slide.make_independent";
+    };
     transition: Deck["slideMeta"][string]["transition"] | null;
     notesLength: number;
     notes?: string;
     elementCount: number;
   };
   layers: Array<
-    Pick<
-      Deck["layers"][number],
-      "id" | "name" | "hidden" | "locked" | "color"
-    >
+    Pick<Deck["layers"][number], "id" | "name" | "hidden" | "locked" | "color">
   >;
   elements: AgentElementOutline[];
+  recipe: {
+    slots: Array<{ elementId: string; name: string; textPreview?: string }>;
+    notesPolicy: string;
+  };
 }
 
 type TextContent = Extract<Element["content"], { type: "text" }>;
@@ -146,6 +163,8 @@ export interface AgentEffectSummary extends ElementEffect {
   parameterContract?: ReturnType<typeof effectParameters>;
   timing: {
     defaults: EffectDefinition["timeControl"];
+    stageId?: string;
+    blockId?: string;
     stageIndex?: number;
     schedule?: EffectSchedule;
   };
@@ -161,11 +180,19 @@ export interface AgentElementDetail extends AgentElementOutline {
   motionStageIndices: number[];
   presenceStageIndices: number[];
   motion?: Array<{
+    stageId: string;
+    tracks: NonNullable<Slide["motion"]>["stages"][number]["tracks"];
+    blocks: NonNullable<Slide["motion"]>["stages"][number]["blocks"];
     stageIndex: number;
     properties: string[];
     blockCount: number;
   }>;
-  presence?: Array<{ stageIndex: number; schedule: PresenceSchedule }>;
+  presence?: Array<{
+    stageId: string;
+    blockId: string;
+    stageIndex: number;
+    schedule: PresenceSchedule;
+  }>;
   worldTransform?: { matrix: Matrix; corners: Point[] };
 }
 
@@ -211,6 +238,10 @@ export function projectAgentDeck(
       height: deck.height,
       slideCount: deck.slideIds.length,
       hasStylesheet: !!deck.stylesheet,
+      templates: deck.templateIds.map((id) => ({
+        id,
+        label: deck.templateMeta[id].label,
+      })),
       transitionDefaults: deck.transitionDefaults,
       ...(options.includeStylesheet
         ? { stylesheet: deck.stylesheet ?? "" }
@@ -238,13 +269,18 @@ export function projectAgentDeck(
 function resolved(projection: DocumentProjection) {
   const { deck, slide, templates = {} } = projection;
   const index = deck.slideIds.indexOf(slide.id);
-  if (index < 0)
+  if (index < 0 && !deck.templateIds.includes(slide.id))
     throw new AgentProjectionError(
       "UNKNOWN_SLIDE",
       "Projection must identify a presentation slide",
       [slide.id],
     );
-  const meta = deck.slideMeta[slide.id];
+  const meta = deck.slideMeta[slide.id] ?? {
+    name: deck.templateMeta[slide.id]?.label ?? "Template",
+    section: "",
+    hidden: false,
+    templateId: null,
+  };
   if (meta.templateId && !templates[meta.templateId])
     throw new AgentProjectionError(
       "MISSING_TEMPLATE",
@@ -325,6 +361,11 @@ function inspectSlide(
             ...(element.name !== undefined ? { name: element.name } : {}),
             source,
             ownerPageId: source === "template" ? meta.templateId! : slide.id,
+            ownerPageKind:
+              source === "template" || deck.templateIds.includes(slide.id)
+                ? "template"
+                : "slide",
+            inherited: source === "template",
             parentId,
             layerId: layer.id,
             layerIndex,
@@ -367,13 +408,32 @@ export function projectAgentSlide(
   const { slide, meta, index, entries } = inspectSlide(projection, options);
   return {
     ...revision(projection),
+    timeline: (slide.motion?.stages ?? []).map((stage, stageIndex) => ({
+      stageId: stage.id,
+      stageIndex,
+      blockIds: stage.blocks?.map(({ id }) => id) ?? [],
+      trackIds: stage.tracks.map(({ id }) => id),
+    })),
     slide: {
       id: slide.id,
       index,
+      pageKind: projection.deck.templateIds.includes(slide.id)
+        ? "template"
+        : "slide",
+      displayName: projection.deck.templateIds.includes(slide.id)
+        ? "Template " + meta.name + " (" + slide.id + ")"
+        : meta.name,
       name: meta.name,
       hidden: meta.hidden,
       templateId: meta.templateId,
       background: slide.background,
+      backgroundOwnership: meta.templateId
+        ? {
+            source: "template",
+            ownerPageId: meta.templateId,
+            suggestedOperation: "slide.make_independent",
+          }
+        : { source: "slide", ownerPageId: slide.id },
       transition: meta.transition ?? null,
       notesLength: projection.slide.notes.length,
       ...(options.includeNotes ? { notes: projection.slide.notes } : {}),
@@ -389,6 +449,21 @@ export function projectAgentSlide(
       }),
     ),
     elements: entries.map(({ outline }) => outline),
+    recipe: {
+      slots: entries
+        .filter(
+          ({ outline }) => outline.contentType === "text" && !outline.inherited,
+        )
+        .map(({ outline }) => ({
+          elementId: outline.id,
+          name: outline.name ?? outline.id,
+          ...(outline.textPreview !== undefined
+            ? { textPreview: outline.textPreview }
+            : {}),
+        })),
+      notesPolicy:
+        "Native duplication preserves source notes. Use slide.update with notes explicitly to replace them.",
+    },
   };
 }
 
@@ -460,7 +535,17 @@ function effectDetails(
       timing: {
         defaults: definition.timeControl,
         ...(range
-          ? { stageIndex: range.stageIndex, schedule: range.schedule }
+          ? {
+              stageIndex: range.stageIndex,
+              stageId: slide.motion!.stages[range.stageIndex].id,
+              blockId: slide.motion!.stages[range.stageIndex].blocks!.find(
+                (block) =>
+                  block.binding?.kind === "effect" &&
+                  block.binding.effectInstanceId === instance.id &&
+                  block.binding.elementId === element.id,
+              )?.id,
+              schedule: range.schedule,
+            }
           : {}),
       },
     };
@@ -469,7 +554,9 @@ function effectDetails(
 
 function motionSummary(slide: Slide, elementId: string) {
   return (slide.motion?.stages ?? []).flatMap((stage, stageIndex) => {
-    const tracks = stage.tracks.filter((track) => track.elementId === elementId);
+    const tracks = stage.tracks.filter(
+      (track) => track.elementId === elementId,
+    );
     const blocks = (stage.blocks ?? []).filter(
       (block) => block.binding?.elementId === elementId,
     );
@@ -477,6 +564,17 @@ function motionSummary(slide: Slide, elementId: string) {
       ? [
           {
             stageIndex,
+            stageId: stage.id,
+            tracks: structuredClone(tracks),
+            blocks: structuredClone(
+              (stage.blocks ?? []).filter(
+                (block) =>
+                  block.binding?.elementId === elementId ||
+                  block.members.some((member) =>
+                    tracks.some((track) => track.id === member.trackId),
+                  ),
+              ),
+            ),
             properties: [...new Set(tracks.map((track) => track.property))],
             blockCount: blocks.length,
           },
@@ -491,7 +589,14 @@ function presenceSummary(slide: Slide, elementId: string) {
       block.binding?.kind === "presence" &&
       block.binding.elementId === elementId &&
       block.presenceSchedule
-        ? [{ stageIndex, schedule: structuredClone(block.presenceSchedule) }]
+        ? [
+            {
+              stageIndex,
+              stageId: stage.id,
+              blockId: block.id,
+              schedule: structuredClone(block.presenceSchedule),
+            },
+          ]
         : [],
     ),
   );

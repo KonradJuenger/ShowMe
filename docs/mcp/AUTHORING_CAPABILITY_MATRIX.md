@@ -1,5 +1,10 @@
 # MCP authoring capability matrix
 
+Revision 1.4: all operation families export canonical schemas and validated
+examples through compact authoring discovery. Cold text measurement and shader,
+CSS and text-JS validation initialize independently. Apply receipts explicitly
+identify request/authored pages and separate historical replay from current state.
+
 This matrix records the normal persistent authoring actions available in the current
 ShowMe editor and the corresponding model-facing semantic operation. Interaction-only
 UI mechanics such as mouse handles, hover state and snapping indicators are
@@ -62,9 +67,7 @@ batch must refer to the object. Normal creation still generates IDs by default.
 
 ## Intentionally not exposed
 
-- Arbitrary filesystem paths, raw media bytes and direct Library imports. MCP can
-  inspect the managed Library and insert an existing asset ID, but importing a new
-  filesystem asset remains a human/host action.
+- Arbitrary filesystem paths and raw media bytes. Native managed imports are exposed through workspace, using the selected root or native file pickers.
 - Raw `DocumentOperation[]`, direct `.sme` editing, Electron IPC passthrough,
   renderer DOM mutation or arbitrary JavaScript execution.
 - Mouse/handle gestures, hover state, temporary snapping indicators and other
@@ -74,3 +77,25 @@ batch must refer to the object. Normal creation still generates IDs by default.
 
 The invariant remains: MCP is another ShowMe editor client, not a privileged scripting
 API over ShowMe internals.
+
+## Revision 1.6 additions
+
+| Area | MCP surface | State |
+| --- | --- | --- |
+| Native timeline schedules | Stable stage/block/track/keyframe IDs; Presence add/update/remove; Motion delays/settings/block edits; stage creation/reorder/removal; Effect schedule set/update | Implemented with current schedule versions and native validation |
+| Deterministic review | Timeline traces, finite-complete reference-time admission, production two-slide transitions, up to six frames / five megapixels | Implemented; static video; no audience smoothness claim |
+| Atomic page groups | Up to eight groups / 128 operations, staged shared deck state, one authority transaction | Implemented; deletion/duplication retain single-page form |
+| Typography feedback | Production layout extent, fixed-box overflow, managed/local-family loadability and fallback uncertainty | Implemented; exact fallback/glyph face unknown |
+| Native delivery | Accepted-only save / Save As / SMP package through existing services and path policy | Implemented; PDF/PPTX delivery not exposed |
+
+## Revision 1.7 additions
+
+| Area | MCP surface | State |
+| --- | --- | --- |
+| Templates | create, explicit visual editing, inspection, apply and unused-template deletion | Native inheritance; no template slide timelines |
+| Typography | text.style.define plus existing apply/override operations | Direct named style creation/update |
+| Shared Effects | capture / attach / update native page resources | Cross-slide reuse through templates |
+| Recipes | slide.duplicate with declared text slots and returned idMap | Native slide structure and references retained |
+| Workspace | create / open / close / managed import | Exact identity; save before switch; native root/pickers |
+| Capacity | Explicit standard / expanded profiles | 8/128/128 or 32/256/512; native bounds retained |
+| CSS | Scoped @supports | No reduced-motion cap |

@@ -1,5 +1,6 @@
-import { z } from "zod";
-import { idSchema } from "./ids";
+import { z } from "zod/v4";
+import { agentPreviewSampleSchema } from "./agentPreviewSample";
+const idSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 
 /** Output pixels; use the same bounds as the existing native capture service. */
 export const agentPreviewRequestSchema = z
@@ -10,8 +11,25 @@ export const agentPreviewRequestSchema = z
     slideId: idSchema,
     width: z.number().int().positive().max(2048),
     height: z.number().int().positive().max(2048),
+    sample: agentPreviewSampleSchema.optional(),
+    samples: z.array(agentPreviewSampleSchema).min(1).max(6).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.sample && value.samples)
+      context.addIssue({
+        code: "custom",
+        message: "Use sample or samples, not both.",
+      });
+    if (
+      value.samples &&
+      value.width * value.height * value.samples.length > 5242880
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Samples exceed the total 5-megapixel capture budget.",
+      });
+  });
 export type AgentPreviewRequest = z.infer<typeof agentPreviewRequestSchema>;
 
 export interface AgentPreviewWarning {
@@ -49,7 +67,9 @@ export type AgentPreviewResult =
       revision: number;
       slideId: string;
       mimeType: "image/png";
-      state: "base";
+      state: "base" | "sampled";
+      sample?: Record<string, unknown>;
+      frames?: Array<SlidePreviewCapture & { sample: Record<string, unknown> }>;
     })
   | {
       ok: false;

@@ -103,7 +103,13 @@ export async function bridgeRead(
     );
     const timer = setTimeout(
       () => request.destroy(new Error("Read timeout")),
-      value.command === "preview" || value.command === "apply" ? 31000 : 16000,
+      value.command === "deliver" || value.command === "workspace"
+        ? 121000
+        : value.command === "preview"
+          ? 61000
+          : value.command === "apply"
+            ? 31000
+            : 16000,
     );
     request.on("close", () => clearTimeout(timer));
     request.on("error", reject);
@@ -115,6 +121,13 @@ export async function bridgeRead(
  * bearer token and verifies the instance headers, so bridge revocation remains authoritative. */
 export class ShowMeClient {
   private cachedDescriptor: BridgeDescriptor | null = null;
+
+  private uncertainOutcome() {
+    return agentFailure(
+      "OUTCOME_UNKNOWN",
+      "The native operation may have completed. Read context and check the native library or destination before deliberately requesting new work; do not blindly retry.",
+    );
+  }
 
   private accessChanged(value: any) {
     return (
@@ -129,7 +142,9 @@ export class ShowMeClient {
     private readonly instanceId?: string,
   ) {}
 
-  private async discover(signal?: AbortSignal): Promise<
+  private async discover(
+    signal?: AbortSignal,
+  ): Promise<
     | { ok: true; descriptor: BridgeDescriptor; context: unknown }
     | { ok: false; failure: ReturnType<typeof agentFailure> }
   > {
@@ -226,11 +241,15 @@ export class ShowMeClient {
       const result = await bridgeRead(discovered.descriptor, value, signal);
       if (this.accessChanged(result)) {
         this.cachedDescriptor = null;
+        if (value.command === "workspace" || value.command === "deliver")
+          return result;
         return null;
       }
       return result;
     } catch {
       this.cachedDescriptor = null;
+      if (value.command === "workspace" || value.command === "deliver")
+        return this.uncertainOutcome();
       return null;
     }
   }
@@ -241,8 +260,12 @@ export class ShowMeClient {
         const result = await bridgeRead(this.cachedDescriptor, value, signal);
         if (!this.accessChanged(result)) return result;
         this.cachedDescriptor = null;
+        if (value.command === "workspace" || value.command === "deliver")
+          return result;
       } catch {
         this.cachedDescriptor = null;
+        if (value.command === "workspace" || value.command === "deliver")
+          return this.uncertainOutcome();
       }
     }
 
@@ -261,4 +284,3 @@ export class ShowMeClient {
     );
   }
 }
-

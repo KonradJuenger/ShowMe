@@ -7,6 +7,14 @@ import {
   effectAffects,
 } from "./effectAuthoring";
 import { motionProperties } from "./motionModel";
+import {
+  agentOperationContracts,
+  agentOperationFamilies,
+  agentContractDigest,
+} from "./agentOperationContracts";
+import { agentPreviewRequestSchema } from "./agentPreview";
+import { agentWorkspaceRequestSchema } from "./agentWorkspace";
+import { agentDeliveryRequestSchema } from "./agentDelivery";
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 
@@ -27,6 +35,12 @@ export const agentAuthoringKinds = [
   "media",
   ...agentEffectAuthoringKinds,
   "motion",
+  "operations",
+  "deck",
+  "timeline",
+  "preview",
+  "delivery",
+  "workspace",
 ] as const;
 export type AgentAuthoringKind = (typeof agentAuthoringKinds)[number];
 
@@ -39,6 +53,9 @@ export function isAgentEffectAuthoringKind(
 export const agentAuthoringRequestSchema = z
   .object({
     kind: z.enum(agentAuthoringKinds),
+    detail: z.enum(["compact", "full"]).optional(),
+    family: z.enum(agentOperationFamilies).optional(),
+    operation: z.string().min(1).max(100).optional(),
     documentId: id.optional(),
     epoch: z.string().min(1).max(100).optional(),
     revision: z.number().int().nonnegative().optional(),
@@ -48,6 +65,15 @@ export const agentAuthoringRequestSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (
+      value.operation &&
+      !agentOperationContracts(value.family, value.operation).operations.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Use an operation and matching family from the operations catalog.",
+      });
     const scoped = value.documentId !== undefined;
     if (
       scoped &&
@@ -77,10 +103,7 @@ export const agentAuthoringRequestSchema = z
         code: "custom",
         message: "effectInstanceId requires elementId.",
       });
-    if (
-      value.effectInstanceId &&
-      !isAgentEffectAuthoringKind(value.kind)
-    )
+    if (value.effectInstanceId && !isAgentEffectAuthoringKind(value.kind))
       ctx.addIssue({
         code: "custom",
         message: "effectInstanceId requires an Effect authoring kind.",
@@ -120,6 +143,44 @@ function starter(kind: AgentEffectAuthoringKind) {
 function normalAuthoringGuide(
   kind: Exclude<AgentAuthoringKind, AgentEffectAuthoringKind>,
 ) {
+  const serviceSchema =
+    kind === "preview"
+      ? z.toJSONSchema(agentPreviewRequestSchema)
+      : kind === "delivery"
+        ? z.toJSONSchema(agentDeliveryRequestSchema)
+        : undefined;
+  if (kind === "workspace")
+    return {
+      kind,
+      schema: z.toJSONSchema(agentWorkspaceRequestSchema),
+      rules: [
+        "Save before switching or closing. Exact current identity/revision is required.",
+        "create/open/close use native lifecycle services; import-assets returns managed asset IDs. Supplied paths stay within the user-selected root (realpath checked); omit paths for native pickers.",
+        "close ends the editor window; start a new app session to reopen. Create/open return complete native identity and initial page IDs. Replace the COMPLETE identity after open; poll context until availability=ready and editor.documentId matches the receipt. Drafts, active leases and focused editing block switches. Imports report non-atomic per-item prepared/pending/failed recovery receipts using production raster/SVG/video decoding.",
+      ],
+    };
+  if (kind === "preview" || kind === "delivery")
+    return {
+      kind,
+      contractVersion: 1,
+      schema: serviceSchema!,
+      schemaDigest: agentContractDigest(JSON.stringify(serviceSchema)),
+      rules:
+        kind === "preview"
+          ? [
+              "Omitted sample renders authored base state, explicitly unsampled.",
+              "Timeline captures derive paused clocks from actual reached activation/click times. Use explicit previousSlideId for backward or jump navigation.",
+              "Finite-complete requires a reference captureTimeMs at or after known finite deadlines; it never invents future clicks or slide-end events. Unbounded effects use that reference time.",
+              "Transition mode requires distinct previous/current slides and their explicit incoming/outgoing traces, shared presentation origin and capture time. Incoming activation plus elapsedMs equals captureTimeMs.",
+              "Use samples for 1-6 frames, at most 5 megapixels total. Static video posters. Sampling does not establish playback smoothness.",
+            ]
+          : [
+              "Only accepted state is delivered; human editor drafts are not flushed.",
+              "Exact epoch and expectedRevision are checked inside the native persistence lock after any picker.",
+              "Save uses its associated destination or the native picker for an untitled document. Save-as/package use native dialogs or the host-authorized SHOWME_DOCUMENT_DIR policy.",
+              "For unattended package export, provide packageOptions {mediaLocked:boolean, speakerNotes:include/remove}. Native destination/overwrite policy still applies. Font warnings are returned; human callers without options keep native questions. Native SME and SMP preserve animation. This tool does not expose static PDF/PPTX export or arbitrary filesystem paths.",
+            ],
+    };
   if (kind === "layout")
     return {
       kind,
@@ -310,10 +371,44 @@ export function buildAgentAuthoringGuide(
     previewElementName?: string;
     elementId?: string;
     effectInstanceId?: string;
+    detail?: "compact" | "full";
+    family?: string;
+    operation?: string;
   } = {},
 ) {
-  if (!isAgentEffectAuthoringKind(kind))
+  if (kind === "preview" || kind === "delivery" || kind === "workspace")
     return normalAuthoringGuide(kind);
+  const family =
+    options.family ??
+    (kind === "deck" ? "deck" : kind === "timeline" ? "timeline" : undefined);
+  if (
+    options.detail === "compact" ||
+    kind === "operations" ||
+    kind === "deck" ||
+    kind === "timeline"
+  ) {
+    const inferred =
+      family ??
+      (kind === "text"
+        ? "text"
+        : kind === "motion"
+          ? "motion"
+          : kind === "frame"
+            ? "frame"
+            : kind === "layout"
+              ? "element"
+              : kind === "media"
+                ? "element"
+                : "effect");
+    return {
+      kind,
+      ...agentOperationContracts(
+        kind === "operations" && !family ? undefined : inferred,
+        options.operation,
+      ),
+    };
+  }
+  if (!isAgentEffectAuthoringKind(kind)) return normalAuthoringGuide(kind);
 
   const definition = options.definition ?? starter(kind);
   return {

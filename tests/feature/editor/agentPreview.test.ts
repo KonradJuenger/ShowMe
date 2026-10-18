@@ -7,6 +7,140 @@ import type {
 } from "../../../src/core/agentPreview";
 import { newPresentationDocument } from "../../../src/core/document";
 import type { DocumentProjection } from "../../../src/core/documentProjection";
+import { addPresence } from "../../../src/core/presence";
+import { addParameterAnimation } from "../../../src/core/motion";
+import { createBasicShape } from "../../../src/core/elementFactory";
+import { resolveAgentTimelineSample } from "../../../src/core/agentPreviewSample";
+
+it("event traces derive frozen production clocks and reject invented clicks or premature completion", async () => {
+  const f = fixture();
+  const slide = f.projection.slide;
+  f.projection.deck.slideMeta[slide.id].templateId = null;
+  slide.nodes[0].children = [createBasicShape("sample", "rectangle")];
+  slide.motion = addParameterAnimation(
+    undefined,
+    0,
+    "sample",
+    "transform.x",
+    "Move",
+    0,
+    100,
+    500,
+  );
+  slide.motion = addPresence(slide.motion, 0, ["sample"], {
+    kind: "fade",
+    durationMs: 500,
+    easing: "linear",
+  });
+  slide.motion.stages.push({ id: "second", tracks: [], blocks: [] });
+  const trace = {
+    presentationOriginMs: 50,
+    activationMs: 100,
+    clickTimesMs: [800],
+    captureTimeMs: 1050,
+  };
+  const resolved = resolveAgentTimelineSample(f.projection, trace);
+  expect(resolved.metadata).toMatchObject({
+    stageId: "second",
+    stageIndex: 1,
+    stageTimeMs: 250,
+    clocks: {
+      presentationTime: 1,
+      slideTime: 0.95,
+      stepTime: 0.25,
+      stageStarts: [0, 0.7],
+    },
+  });
+  expect(resolved.playback).toMatchObject({ time: 250, running: false });
+  expect(resolveAgentTimelineSample(f.projection, trace)).toEqual(resolved);
+  expect(() =>
+    resolveAgentTimelineSample(f.projection, {
+      ...trace,
+      clickTimesMs: [800, 900],
+    }),
+  ).toThrow("nonexistent");
+  expect(() =>
+    resolveAgentTimelineSample(f.projection, {
+      ...trace,
+      clickTimesMs: [1100],
+    }),
+  ).toThrow("capture");
+  expect(() =>
+    resolveAgentTimelineSample(
+      f.projection,
+      { ...trace, clickTimesMs: [], captureTimeMs: 300 },
+      true,
+    ),
+  ).toThrow("at least 600");
+  const before = structuredClone(f.projection);
+  expect(
+    await f.service.preview({
+      ...f.request,
+      sample: { mode: "timeline", ...trace },
+    }),
+  ).toMatchObject({ ok: true, state: "sampled", sample: resolved.metadata });
+  expect(f.projection).toEqual(before);
+  expect(
+    code(
+      await f.service.preview({
+        ...f.request,
+        sample: { mode: "timeline", ...trace, clickTimesMs: [2000] },
+      }),
+    ),
+  ).toBe("INVALID_REQUEST");
+  expect(f.counts().captures).toBe(1);
+});
+
+it("multi-sample previews bound total work and discard partial output when access or revision changes", async () => {
+  const f = fixture();
+  const sample = {
+    mode: "timeline",
+    presentationOriginMs: 0,
+    activationMs: 0,
+    clickTimesMs: [],
+    captureTimeMs: 100,
+  };
+  expect(
+    await f.service.preview({
+      ...f.request,
+      samples: [sample, { ...sample, captureTimeMs: 200 }],
+    }),
+  ).toMatchObject({
+    ok: true,
+    frames: [
+      { sample: { stageTimeMs: 100 } },
+      { sample: { stageTimeMs: 200 } },
+    ],
+  });
+  expect(f.counts().captures).toBe(2);
+  expect(
+    code(
+      await f.service.preview({
+        ...f.request,
+        width: 2048,
+        height: 2048,
+        samples: Array(4).fill(sample),
+      }),
+    ),
+  ).toBe("INVALID_REQUEST");
+  expect(
+    code(
+      await f.service.preview({ ...f.request, samples: Array(7).fill(sample) }),
+    ),
+  ).toBe("INVALID_REQUEST");
+  let captures = 0;
+  f.capture(async () => {
+    if (++captures === 2) f.projection.revision++;
+    return f.pixels;
+  });
+  const result = await f.service.preview({
+    ...f.request,
+    samples: [sample, sample, sample],
+  });
+  expect(code(result)).toBe("REVISION_CONFLICT");
+  expect(result).not.toHaveProperty("frames");
+  expect(captures).toBe(2);
+});
 
 it("preview cancellation rejects before reads and propagates disconnect and opt-out aborts to native work", async () => {
   const model = newPresentationDocument("Cancellation"),

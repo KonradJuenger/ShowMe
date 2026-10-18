@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { installLazySlidePreview } from "./components/slidePreviewStartup";
 import "./presentation.css";
 import "./style.css";
 import "./editor.css";
@@ -16,18 +17,7 @@ if (parameters.has("slidePreview")) {
     ));
   // Electron may request capture as soon as the entry script loads. Keep that
   // asynchronous API available while its canonical surface module is loading.
-  window.composeSlidePreview = async (...args) => {
-    await install();
-    return window.composeSlidePreview!(...args);
-  };
-  window.composeEffectThumbnail = async (...args) => {
-    await install();
-    return window.composeEffectThumbnail!(...args);
-  };
-  window.measureAgentText = async (...args) => {
-    await install();
-    return window.measureAgentText!(...args);
-  };
+  installLazySlidePreview(install);
 } else {
   const Page = parameters.has("exportPdf")
     ? (await import("./export/pdf/ExportPage")).ExportPage

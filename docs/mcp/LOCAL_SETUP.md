@@ -11,7 +11,9 @@ path in your client configuration).
    normally. A desktop package already includes the built helper.
 2. Open the intended presentation and **Settings → MCP · Experimental**.
 3. Turn on **Enable MCP** and wait for **Local connection is ready**.
-4. Select **Copy client configuration**, add the JSON to your MCP host's local-server
+4. Select **Copy for Codex (TOML)** for `~/.codex/config.toml`, **Copy for MCP clients (JSON)**
+   for an `mcpServers` configuration, or **Copy for VS Code (JSON)** for `.vscode/mcp.json`.
+   Each button copies a complete server entry in that format. Add it to the matching
    configuration, then restart or reconnect that host. Most IDE/agent hosts discover
    MCP tools only when an agent session starts; adding the configuration mid-session
    will not make the tools appear in that already-running session.
@@ -32,6 +34,12 @@ The copied configuration uses the current app's actual absolute paths:
   }
 }
 ```
+
+Codex uses `[mcp_servers.showme]`, `command` and an `args` string array, as specified
+in the [official MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+Settings escapes paths and individual arguments for the selected format; do not add
+shell quotes around paths inside the argument array. VS Code uses `servers` and
+`type: "stdio"`; the generic JSON format above remains supported.
 
 The angle-bracket values above are placeholders; prefer the Settings action. Hosts
 with a different configuration format should use the same command/argument array
@@ -239,6 +247,11 @@ lease, including structural changes to a shared parent; ShowMe will not overwrit
 - **PAYLOAD_TOO_LARGE:** narrow the scope (at most 128 explicit element IDs), or use
   a smaller preview. Full slide/deck payloads are not silently truncated or paginated.
 - **BUSY / PREVIEW_FAILED:** wait for existing work and retry deliberately.
+- **OUTCOME_UNKNOWN:** a workspace/delivery response was lost after dispatch. The
+  operation may have completed. Read context, refresh the complete identity after
+  open/create, and check the native library/destination before deciding on new work.
+  The helper never automatically resends these non-idempotent calls. Apply retains
+  its existing mutation-ID replay protection.
 
 The private bridge binds only `127.0.0.1`, authenticates each read and rejects browser
 origins/fetch requests. Tokens rotate on every enable cycle. Disabling MCP immediately
@@ -250,3 +263,16 @@ as the current OS user, not an isolation boundary against that user's own proces
 Crashes may leave descriptor files behind. The helper probes identity/authentication
 and ignores unreachable/stale descriptors. A PID alone is never trusted. It will not
 delete another instance's descriptor or automatically switch/open a document.
+
+## Authoring revision 1.6
+
+- Discover canonical operation families with `showme.authoring` (`kind: "operations"`, then `family` or `operation`, `detail: "compact"`). Use effect kinds with `detail: "full"` for creative-code ABI guidance. `kind: "preview"` and `kind: "delivery"` expose those complete contracts.
+- Preview accepts deterministic timeline/finite-complete/transition traces and up to six bounded samples. Omitted sampling still returns authored base state. Video stays a static poster; screenshots do not establish smoothness.
+- Motion/Presence inspection includes stable native IDs and opt-in track/keyframe details. `slideId` in apply remains request context; use `createdSlideIds` and `authoredSlideIds` for construction results. Replay's historical revision is distinct from `currentObservation`.
+- `showme.deliver` saves accepted state or exports native SMP using existing destinations/pickers and exact revision admission. No editor draft is flushed. Reconnect the host after rebuilding/restarting ShowMe to refresh the seven-tool catalog.
+
+The earlier base-only and six-tool descriptions above describe the initial release; the current normative contract is [TOOL_CONTRACT.md](TOOL_CONTRACT.md).
+
+## Current 1.7 authoring surface
+
+Rebuild/restart and reconnect the host to discover all eight tools, including `showme.workspace`. Use authoring kind workspace for its request schema. Template operations, direct text styles, shared page resources and slide recipe slots are in canonical operation discovery. Context advertises standard/expanded budgets and scoped CSS support. Use a fresh context after create/open; it may initially report loading. Save before switching or closing. Raster import prepares native dimensions; video/SVG metadata may still need preparation.

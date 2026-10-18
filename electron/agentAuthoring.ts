@@ -34,7 +34,7 @@ export class AgentAuthoringService {
     if (!request.documentId)
       return {
         ok: true as const,
-        data: buildAgentAuthoringGuide(request.kind),
+        data: buildAgentAuthoringGuide(request.kind, request),
       };
     if (this.dependencies.activeDocumentId() !== request.documentId)
       return agentFailure(
@@ -67,10 +67,25 @@ export class AgentAuthoringService {
           "UNKNOWN_SLIDE",
           "The requested slide is unavailable.",
         );
+      const scope = {
+        documentId: projection.documentId,
+        epoch: projection.epoch,
+        revision: projection.revision,
+        slideId: projection.slide.id,
+        backgroundOwnership: projection.deck.slideMeta[projection.slide.id]
+          ?.templateId
+          ? {
+              source: "template",
+              ownerPageId:
+                projection.deck.slideMeta[projection.slide.id].templateId,
+              suggestedOperation: "slide.make_independent",
+            }
+          : { source: "slide", ownerPageId: projection.slide.id },
+      };
       if (!isAgentEffectAuthoringKind(request.kind))
         return {
           ok: true as const,
-          data: buildAgentAuthoringGuide(request.kind),
+          data: { ...buildAgentAuthoringGuide(request.kind, request), scope },
         };
       const visual = resolveVisualSlide(
         projection.deck,
@@ -90,8 +105,7 @@ export class AgentAuthoringService {
         const instance = element?.effects?.find(
           ({ id }) => id === request.effectInstanceId,
         );
-        definition =
-          instance && visual.effectResources?.[instance.resourceId];
+        definition = instance && visual.effectResources?.[instance.resourceId];
         if (!definition)
           return agentFailure(
             "UNKNOWN_EFFECT",
@@ -106,14 +120,18 @@ export class AgentAuthoringService {
       }
       return {
         ok: true as const,
-        data: buildAgentAuthoringGuide(request.kind, {
-          ...(definition ? { definition } : {}),
-          ...(element?.name ? { previewElementName: element.name } : {}),
-          ...(request.elementId ? { elementId: request.elementId } : {}),
-          ...(request.effectInstanceId
-            ? { effectInstanceId: request.effectInstanceId }
-            : {}),
-        }),
+        data: {
+          ...buildAgentAuthoringGuide(request.kind, {
+            ...request,
+            ...(definition ? { definition } : {}),
+            ...(element?.name ? { previewElementName: element.name } : {}),
+            ...(request.elementId ? { elementId: request.elementId } : {}),
+            ...(request.effectInstanceId
+              ? { effectInstanceId: request.effectInstanceId }
+              : {}),
+          }),
+          scope,
+        },
       };
     } catch {
       return agentFailure(

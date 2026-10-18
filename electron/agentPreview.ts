@@ -6,6 +6,11 @@ import {
   type SlidePreviewCapture,
 } from "../src/core/agentPreview";
 import type { DocumentProjection } from "../src/core/documentProjection";
+import {
+  resolveAgentTimelineSample,
+  type AgentPreviewSample,
+} from "../src/core/agentPreviewSample";
+import { resolveSlideTransition } from "../src/core/slideTransitions";
 
 interface AgentPreviewDependencies {
   /** null while disabled; changes on each successful MCP setting transition. */
@@ -17,6 +22,8 @@ interface AgentPreviewDependencies {
     width: number,
     height: number,
     signal?: AbortSignal,
+    sample?: AgentPreviewSample,
+    previous?: DocumentProjection,
   ): Promise<SlidePreviewCapture | null>;
 }
 
@@ -107,6 +114,30 @@ export class AgentPreviewService {
     if (signal?.aborted) cancel();
     this.pending.add(controller);
     try {
+      const parsed = agentPreviewRequestSchema.safeParse(input);
+      if (parsed.success && parsed.data.samples) {
+        const { samples, ...request } = parsed.data;
+        const frames: Array<
+          SlidePreviewCapture & { sample: Record<string, unknown> }
+        > = [];
+        let first: Extract<AgentPreviewResult, { ok: true }> | undefined;
+        for (const sample of samples) {
+          const result = await this.performPreview(
+            { ...request, sample },
+            controller.signal,
+          );
+          if (!result.ok) return result;
+          first ??= result;
+          frames.push({
+            width: result.width,
+            height: result.height,
+            pngDataUrl: result.pngDataUrl,
+            warnings: result.warnings,
+            sample: result.sample!,
+          });
+        }
+        return { ...first!, pngDataUrl: "", frames };
+      }
       return await this.performPreview(input, controller.signal);
     } finally {
       this.pending.delete(controller);
@@ -122,7 +153,7 @@ export class AgentPreviewService {
     if (!parsed.success)
       return failure(
         "INVALID_REQUEST",
-        "Use document/slide IDs, epoch, revision and integer output dimensions from 1 to 2048. Timeline samples are not supported yet.",
+        "Use exact document/slide/revision, output dimensions from 1 to 2048, and a bounded event trace for optional sampling.",
       );
     const request = parsed.data;
     const access = this.dependencies.access();
@@ -153,6 +184,69 @@ export class AgentPreviewService {
       if (before) return before;
       if (projection.slide.id !== request.slideId)
         return failure("UNKNOWN_SLIDE", "The requested slide is unavailable.");
+      let sampleMetadata: Record<string, unknown> | undefined,
+        previous: DocumentProjection | undefined;
+      if (request.sample) {
+        try {
+          const sample = request.sample;
+          if (sample.mode === "transition") {
+            if (
+              sample.previousSlideId === request.slideId ||
+              !projection.deck.slideIds.includes(sample.previousSlideId)
+            )
+              throw new Error(
+                "Use a distinct existing previous slide for a transition.",
+              );
+            previous = await this.dependencies.projection(
+              request.documentId,
+              sample.previousSlideId,
+            );
+            const invalid =
+              this.accessFailure(request, access, signal) ??
+              this.projectionFailure(request, previous);
+            if (invalid) return invalid;
+            if (previous.slide.id !== sample.previousSlideId)
+              throw new Error("Previous slide is unavailable.");
+            if (
+              sample.incoming.captureTimeMs !==
+                sample.incoming.activationMs + sample.elapsedMs ||
+              sample.outgoing.captureTimeMs !== sample.incoming.captureTimeMs ||
+              sample.outgoing.presentationOriginMs !==
+                sample.incoming.presentationOriginMs ||
+              sample.incoming.previousSlideId !== sample.previousSlideId
+            )
+              throw new Error(
+                "Transition traces must share presentation origin and capture time; incoming activation plus elapsedMs must equal captureTimeMs, with the explicit previousSlideId.",
+              );
+            const incoming = resolveAgentTimelineSample(
+                projection,
+                sample.incoming,
+              ),
+              outgoing = resolveAgentTimelineSample(previous, sample.outgoing);
+            sampleMetadata = {
+              mode: "transition",
+              elapsedMs: sample.elapsedMs,
+              previousSlideId: sample.previousSlideId,
+              transition: resolveSlideTransition(
+                projection.deck.slideMeta[projection.slide.id].transition,
+                projection.deck.transitionDefaults,
+              ),
+              incoming: incoming.metadata,
+              outgoing: outgoing.metadata,
+            };
+          } else
+            sampleMetadata = resolveAgentTimelineSample(
+              projection,
+              sample,
+              sample.mode === "finite-complete",
+            ).metadata;
+        } catch (error) {
+          return failure(
+            "INVALID_REQUEST",
+            error instanceof Error ? error.message : "Invalid sampling trace.",
+          );
+        }
+      }
       let capture: SlidePreviewCapture | null;
       try {
         capture = await this.dependencies.capture(
@@ -160,6 +254,8 @@ export class AgentPreviewService {
           request.width,
           request.height,
           signal,
+          request.sample,
+          previous,
         );
       } catch {
         capture = null;
@@ -183,7 +279,8 @@ export class AgentPreviewService {
         revision: request.revision,
         slideId: request.slideId,
         mimeType: "image/png",
-        state: "base",
+        state: request.sample ? "sampled" : "base",
+        ...(sampleMetadata ? { sample: sampleMetadata } : {}),
         ...capture,
       };
     } catch {

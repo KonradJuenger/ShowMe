@@ -175,6 +175,19 @@ export class EditorSession {
     return this.historyStateValue.canRedo;
   }
 
+  get hasUnacceptedWork() {
+    return (
+      this.hasFailedIntent ||
+      !!this.draftConflictValue ||
+      this.pendingTransactionIds.size > 0 ||
+      this.queuedOperations.length > 0 ||
+      !!this.historyGroupId ||
+      this.leaseHold ||
+      this.activeLeaseTokens.length > 0 ||
+      !!(this.snapshot && editorOperations(this.snapshot).length)
+    );
+  }
+
   get isDirty() {
     return (
       this.hasFailedIntent ||

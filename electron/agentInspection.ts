@@ -141,7 +141,10 @@ export class AgentInspectionService {
           : target.type === "selection"
             ? selection!.editor!.page.id
             : target.slideId;
-      if (!pageId || !head.deck.slideIds.includes(pageId))
+      if (
+        !pageId ||
+        !head.deck.slideIds.concat(head.deck.templateIds).includes(pageId)
+      )
         return agentFailure(
           "UNKNOWN_SLIDE",
           "Inspect an existing presentation slide.",
@@ -161,7 +164,12 @@ export class AgentInspectionService {
         target.type === "deck"
           ? projectAgentDeck(p, target)
           : target.type === "slide"
-            ? projectAgentSlide(p, target)
+            ? {
+                ...projectAgentSlide(p, target),
+                ...(target.includeEffectResources
+                  ? { effectResources: p.slide.effectResources ?? {} }
+                  : {}),
+              }
             : projectAgentElements(
                 p,
                 target.type === "selection"

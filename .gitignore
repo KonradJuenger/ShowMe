@@ -9,6 +9,8 @@ test-results*/
 playwright-report*/
 *.log
 /.agenttmp/
+/.codex/
+/artifacts/
 /.scratch/
 /.cache/
 /.vite/

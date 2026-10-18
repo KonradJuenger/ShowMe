@@ -1,8 +1,15 @@
 import type { Asset } from "../core/assets";
 import { platform } from "../platform";
 
-export async function enrichAsset(asset: Asset) {
-  const url = await platform.assetUrl(asset.id);
+export async function enrichAsset(
+  asset: Asset,
+  services: Pick<
+    typeof platform,
+    "assetUrl" | "updateAsset" | "storePreview" | "releaseUrl"
+  > = platform,
+  timeoutMs = 15000,
+) {
+  const url = await services.assetUrl(asset.id);
   if (!url) return;
   const media =
     asset.type === "video" ? document.createElement("video") : new Image();
@@ -11,7 +18,7 @@ export async function enrichAsset(asset: Asset) {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error("Metadata timeout")),
-        15000,
+        timeoutMs,
       );
       const done = () => {
         clearTimeout(timer);
@@ -24,7 +31,11 @@ export async function enrichAsset(asset: Asset) {
       if (media instanceof HTMLVideoElement) {
         media.muted = true;
         media.preload = "metadata";
-        media.onloadeddata = done;
+        media.onloadeddata = () => {
+          // loadeddata can precede a drawable frame in offscreen Chromium.
+          media.onseeked = done;
+          media.currentTime = Math.min(0.001, Math.max(0, media.duration / 2));
+        };
       } else media.onload = done;
       media.src = url;
     });
@@ -44,7 +55,7 @@ export async function enrichAsset(asset: Asset) {
         ? { duration: media.duration }
         : {}),
     };
-    await platform.updateAsset(next);
+    await services.updateAsset(next);
     if (width && height) {
       const canvas = document.createElement("canvas"),
         previewSize = asset.type === "video" ? 1280 : 256,
@@ -58,7 +69,7 @@ export async function enrichAsset(asset: Asset) {
         canvas.toBlob(r, "image/jpeg", 0.8),
       );
       if (blob)
-        await platform.storePreview(
+        await services.storePreview(
           asset.id,
           new Uint8Array(await blob.arrayBuffer()),
         );
@@ -70,7 +81,7 @@ export async function enrichAsset(asset: Asset) {
       media.removeAttribute("src");
       media.load();
     } else media.src = "";
-    platform.releaseUrl(url);
+    services.releaseUrl(url);
   }
 }
 

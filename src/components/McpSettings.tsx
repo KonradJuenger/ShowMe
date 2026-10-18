@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import type { McpConnectionInfo } from "../core/agentRead";
 import { platform } from "../platform";
+import {
+  formatMcpConfiguration,
+  mcpConfigurationFormats,
+} from "../core/mcpConfiguration";
 import { useMcpEnabled } from "./useAgentContextPublisher";
 
 export function McpSettings() {
@@ -9,7 +13,7 @@ export function McpSettings() {
   const [pending, setPending] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [connection, setConnection] = useState<McpConnectionInfo | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState("");
   const [editing, setEditing] = useState(false);
   useEffect(() => {
     let current = true;
@@ -57,7 +61,7 @@ export function McpSettings() {
             setPending(next);
             setBusy(true);
             setError("");
-            setCopied(false);
+            setCopied("");
             setConnection(null);
             void platform.setMcpEnabled!(next)
               .catch(() => {
@@ -114,22 +118,29 @@ export function McpSettings() {
       </p>
       {enabled && connection?.configuration && !busy && (
         <>
-          <button
-            type="button"
-            onClick={() => {
-              setError("");
-              void platform.writeTextClipboard!(connection.configuration!)
-                .then(() => setCopied(true))
-                .catch(() =>
-                  setError("Could not copy the configuration. Try again."),
-                );
-            }}
-          >
-            Copy client configuration
-          </button>
+          {mcpConfigurationFormats.map((format) => (
+            <button
+              key={format.id}
+              type="button"
+              onClick={() => {
+                setError("");
+                setCopied("");
+                void platform.writeTextClipboard!(
+                  formatMcpConfiguration(connection.configuration!, format.id),
+                )
+                  .then(() => setCopied(format.label))
+                  .catch(() =>
+                    setError("Could not copy the configuration. Try again."),
+                  );
+              }}
+            >
+              Copy for {format.label}
+            </button>
+          ))}
           {copied && (
             <p role="status">
-              Configuration copied. Add it to your MCP client, then reconnect.
+              {copied} configuration copied. Add it to your client, then
+              reconnect.
             </p>
           )}
           <p>

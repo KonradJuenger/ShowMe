@@ -1,7 +1,9 @@
+import { validateApplyInput } from "../../../mcp/inputValidation";
 import { expect, it } from "vitest";
 import { AgentEditingService } from "../../../electron/agentEditing";
 import {
   agentApplyRequestSchema,
+  agentSingleApplyRequestSchema,
   assembleAgentMutation,
 } from "../../../src/core/agentMutation";
 import { newPresentationDocument } from "../../../src/core/document";
@@ -25,6 +27,610 @@ import {
 } from "../../../src/core/editorCommands";
 import type { EffectDefinition } from "../../../src/core/effects";
 import type { EffectValidationResult } from "../../../src/core/effectValidation";
+import {
+  agentOperationContracts,
+  agentOperationFamilies,
+  agentOperationSchema,
+} from "../../../src/core/agentOperationContracts";
+import { buildAgentAuthoringGuide } from "../../../src/core/agentAuthoring";
+
+it("canonical discovery exports every operation and validated examples in bounded families", () => {
+  const all = agentOperationContracts();
+  const variants = agentOperationSchema.options.map(
+    (variant) => variant.shape.type.value,
+  );
+  expect(all.operations.map((item) => item.operation)).toEqual(variants);
+  const discovered: string[] = [];
+  for (const family of agentOperationFamilies) {
+    const contract = agentOperationContracts(family);
+    for (const item of contract.operations) {
+      expect(item).toHaveProperty("schema.required");
+      expect(item).toHaveProperty("example");
+      if ("example" in item)
+        expect(agentOperationSchema.safeParse(item.example).success).toBe(true);
+      discovered.push(item.operation);
+    }
+    expect(agentOperationContracts(family).schemaDigest).toBe(
+      contract.schemaDigest,
+    );
+  }
+  expect(discovered.sort()).toEqual([...variants].sort());
+  expect(
+    buildAgentAuthoringGuide("workspace", { detail: "compact" }),
+  ).toHaveProperty("schema.anyOf");
+  const compact = buildAgentAuthoringGuide("background-shader", {
+    detail: "compact",
+  });
+  expect(compact).not.toHaveProperty("authoringPrompt");
+  expect(buildAgentAuthoringGuide("background-shader")).toHaveProperty(
+    "authoringPrompt",
+  );
+  expect(
+    buildAgentAuthoringGuide("preview", { detail: "compact" }),
+  ).toMatchObject({
+    kind: "preview",
+    schema: {
+      required: expect.arrayContaining(["width", "height", "revision"]),
+    },
+  });
+  expect(
+    buildAgentAuthoringGuide("delivery", { detail: "compact" }),
+  ).toMatchObject({
+    kind: "delivery",
+    schema: {
+      required: expect.arrayContaining(["action", "expectedRevision"]),
+    },
+  });
+});
+
+it("replay preserves the historical receipt and separately observes subsequent accepted revisions", async () => {
+  const f = fixture();
+  const input = f.request(
+    [{ type: "deck.rename", name: "First" }],
+    "historical",
+  );
+  const accepted = await f.service.apply(input);
+  expect(accepted).toMatchObject({
+    ok: true,
+    requestSlideId: f.slide.id,
+    revision: 1,
+  });
+  await f.service.apply({
+    ...f.request([{ type: "deck.rename", name: "Later" }], "later"),
+    expectedRevision: 1,
+  });
+  expect(await f.service.apply(input)).toEqual({
+    ...accepted,
+    replayed: true,
+    currentObservation: { epoch: "epoch", revision: 2 },
+  });
+  expect((await f.projection()).deck.name).toBe("Later");
+  expect(
+    await f.service.apply({ ...input, mutationId: "stale" }),
+  ).toMatchObject({ error: { code: "REVISION_CONFLICT", actualRevision: 2 } });
+});
+
+it("native timeline IDs support automatic stagger revision removal and actor history without rebuilding blocks", async () => {
+  const f = fixture(),
+    parentId = f.slide.nodes[0].id;
+  const authored = await f.service.apply(
+    f.request(
+      [
+        {
+          type: "element.insert_frame",
+          id: "column-a",
+          parentId,
+          frame: { x: 0, y: 0, width: 200, height: 400 },
+        },
+        {
+          type: "element.insert_frame",
+          id: "column-b",
+          parentId,
+          frame: { x: 220, y: 0, width: 200, height: 400 },
+        },
+        {
+          type: "element.insert_frame",
+          id: "column-c",
+          parentId,
+          frame: { x: 440, y: 0, width: 200, height: 400 },
+        },
+        {
+          type: "element.insert_text",
+          id: "column-copy",
+          parentId: "column-b",
+          frame: { x: 20, y: 30, width: 160, height: 80 },
+          text: "Parent-local",
+        },
+        {
+          type: "presence.add",
+          elementIds: ["column-a"],
+          startOffsetMs: 0,
+          transition: "move",
+          durationMs: 400,
+        },
+        {
+          type: "presence.add",
+          elementIds: ["column-b"],
+          startOffsetMs: 150,
+          transition: "move",
+          durationMs: 400,
+        },
+        {
+          type: "presence.add",
+          elementIds: ["column-c"],
+          startOffsetMs: 300,
+          transition: "move",
+          durationMs: 400,
+        },
+        {
+          type: "motion.animate",
+          elementId: "column-a",
+          property: "transform.scaleX",
+          from: 0.5,
+          to: 1,
+          durationMs: 600,
+          delayMs: 80,
+        },
+        { type: "timeline.stage.create", id: "click-stage" },
+      ],
+      "stagger",
+    ),
+  );
+  expect(authored).toMatchObject({
+    ok: true,
+    createdStageIds: [expect.any(String), "click-stage"],
+    createdBlockIds: expect.any(Array),
+    createdTrackIds: [expect.any(String)],
+    createdKeyframeIds: [expect.any(String), expect.any(String)],
+  });
+  const before = await f.projection(),
+    motion = before.slide.motion!;
+  const middle = motion.stages[0].blocks!.find(
+    (block) => block.binding?.elementId === "column-b",
+  )!;
+  const numeric = motion.stages[0].blocks!.find(
+    (block) => block.members.length,
+  )!;
+  const revise = await f.service.apply({
+    ...f.request(
+      [
+        {
+          type: "presence.update",
+          blockId: middle.id,
+          startOffsetMs: 225,
+          end: { mode: "click", stageId: "click-stage" },
+        },
+        {
+          type: "motion.block.update",
+          blockId: numeric.id,
+          delayMs: 120,
+          durationMs: 700,
+        },
+      ],
+      "revise-stagger",
+    ),
+    expectedRevision: 1,
+  });
+  expect(revise).toMatchObject({
+    ok: true,
+    createdBlockIds: [],
+    createdTrackIds: [],
+    createdKeyframeIds: [],
+  });
+  const revised = await f.projection();
+  expect(
+    revised.slide.motion!.stages[0].blocks!.find(({ id }) => id === middle.id)!
+      .presenceSchedule,
+  ).toMatchObject({
+    startOffsetMs: 225,
+    end: { mode: "click", stageId: "click-stage" },
+  });
+  expect(findElement(revised.slide, "column-copy")!.frame).toMatchObject({
+    x: 20,
+    y: 30,
+  });
+  const noop = await f.service.apply({
+    ...f.request(
+      [{ type: "presence.update", blockId: middle.id, startOffsetMs: 225 }],
+      "noop-stagger",
+    ),
+    expectedRevision: 2,
+  });
+  expect(noop).toMatchObject({
+    ok: true,
+    changed: false,
+    revision: 2,
+    transactionId: null,
+  });
+  expect(
+    await f.service.apply({
+      ...f.request(
+        [{ type: "presence.remove", blockId: middle.id }],
+        "remove-stagger",
+      ),
+      expectedRevision: 2,
+    }),
+  ).toMatchObject({ ok: true, revision: 3 });
+  expect(
+    (await f.projection()).slide.motion!.stages[0].blocks!.map(({ id }) => id),
+  ).not.toContain(middle.id);
+  expect(
+    await f.service.undo({ documentId: f.model.documentId, redo: false }),
+  ).toMatchObject({ ok: true });
+  expect((await f.projection()).slide.motion).toEqual(revised.slide.motion);
+  expect(
+    await f.service.undo({ documentId: f.model.documentId, redo: true }),
+  ).toMatchObject({ ok: true });
+  const accepted = await f.projection();
+  expect(
+    await f.service.apply({
+      ...f.request(
+        [
+          { type: "deck.rename", name: "Must not commit" },
+          { type: "presence.update", blockId: middle.id, startOffsetMs: 1 },
+        ],
+        "deleted-block",
+      ),
+      expectedRevision: accepted.revision,
+    }),
+  ).toMatchObject({ error: { code: "UNKNOWN_BLOCK" }, stepIndex: 1 });
+  expect(await f.projection()).toEqual(accepted);
+});
+
+it("page groups stage shared deck changes and seven new slides into one replayable atomic transaction", async () => {
+  const f = fixture();
+  const { operations: _operations, ...identity } = f.request([]);
+  const pages = Array.from({ length: 7 }, (_, index) => ({
+    slideId: `page-${index}`,
+    operations: [
+      {
+        type: "slide.create",
+        id: `page-${index}`,
+        name: `Page ${index}`,
+        afterId: index ? `page-${index - 1}` : f.slide.id,
+      },
+      ...(index === 0
+        ? [
+            { type: "deck.rename", name: "Atomic deck" },
+            { type: "layer.create", id: "shared-layer" },
+          ]
+        : []),
+      {
+        type: "element.insert_text",
+        id: `copy-${index}`,
+        parentId: "shared-layer",
+        frame: { x: 20, y: 30, width: 300, height: 100 },
+        text: "Shared staged layer",
+      },
+    ],
+  }));
+  const request = { ...identity, pages };
+  const before = await f.projection();
+  const failedPages = structuredClone(pages);
+  failedPages[6].operations.push({
+    type: "text.set",
+    elementId: "missing",
+    text: "Late failure",
+  } as never);
+  expect(
+    await f.service.apply({
+      ...request,
+      mutationId: "late-page",
+      pages: failedPages,
+    }),
+  ).toMatchObject({
+    error: { code: "UNKNOWN_ELEMENT", details: { pageIndex: 6 } },
+  });
+  expect(await f.projection()).toEqual(before);
+  expect(f.counts().writes).toBe(0);
+  const result = await f.service.apply(request);
+  expect(result).toMatchObject({
+    ok: true,
+    revision: 1,
+    requestSlideId: f.slide.id,
+    createdSlideIds: pages.map(({ slideId }) => slideId),
+    authoredSlideIds: pages.map(({ slideId }) => slideId),
+    pageResults: expect.any(Array),
+  });
+  expect(f.counts().writes).toBe(1);
+  for (const page of pages) {
+    const projection = await f.runtime.projection(
+      f.model.documentId,
+      page.slideId,
+    );
+    expect(projection.deck.name).toBe("Atomic deck");
+    expect(
+      projection.slide.nodes.find(({ id }) => id === "shared-layer")!.children,
+    ).toHaveLength(1);
+  }
+  expect((await f.projection()).slide).toEqual({
+    ...before.slide,
+    nodes: [
+      ...before.slide.nodes,
+      { type: "layer", id: "shared-layer", children: [] },
+    ],
+  });
+  expect(await f.service.apply(request)).toEqual({
+    ...result,
+    replayed: true,
+    currentObservation: { epoch: "epoch", revision: 1 },
+  });
+  expect(
+    await f.service.undo({ documentId: f.model.documentId, redo: false }),
+  ).toMatchObject({ ok: true });
+  expect((await f.projection()).deck.slideIds).toEqual(before.deck.slideIds);
+  expect(
+    await f.service.undo({ documentId: f.model.documentId, redo: true }),
+  ).toMatchObject({ ok: true });
+  expect((await f.projection()).deck.slideIds).toHaveLength(8);
+});
+
+it("new-slide timeline receipts compare IDs with the authored page and deletion creates no replacement IDs", async () => {
+  const f = fixture();
+  expect(
+    await f.service.apply(
+      f.request(
+        [{ type: "timeline.stage.create", id: "shared-local-stage" }],
+        "source-stages",
+      ),
+    ),
+  ).toMatchObject({ ok: true });
+  const created = await f.service.apply({
+    ...f.request(
+      [
+        {
+          type: "slide.create",
+          id: "timeline-page",
+          afterId: f.slide.id,
+          name: "Timeline",
+        },
+        { type: "timeline.stage.create", id: "shared-local-stage" },
+      ],
+      "new-stages",
+    ),
+    expectedRevision: 1,
+  });
+  expect(created).toMatchObject({
+    ok: true,
+    createdStageIds: [expect.any(String), "shared-local-stage"],
+  });
+  const removed = await f.service.apply({
+    ...f.request([{ type: "slide.delete" }], "remove-timeline-page"),
+    slideId: "timeline-page",
+    expectedRevision: 2,
+  });
+  expect(removed).toMatchObject({
+    ok: true,
+    createdStageIds: [],
+    createdBlockIds: [],
+    createdTrackIds: [],
+    createdKeyframeIds: [],
+  });
+});
+
+it("multi-page structural animation uses native full-document scopes and respects a lease on a later page", async () => {
+  const f = fixture();
+  expect(
+    await f.service.apply(
+      f.request(
+        [
+          {
+            type: "slide.create",
+            id: "existing-page",
+            afterId: f.slide.id,
+            name: "Existing",
+          },
+        ],
+        "existing-page",
+      ),
+    ),
+  ).toMatchObject({ ok: true });
+  const { operations: _operations, ...identity } = f.request([]);
+  const request = {
+    ...identity,
+    expectedRevision: 1,
+    mutationId: "animate-existing",
+    pages: [
+      {
+        slideId: f.slide.id,
+        operations: [
+          { type: "presence.add", elementIds: ["title"], transition: "fade" },
+        ],
+      },
+      {
+        slideId: "existing-page",
+        operations: [
+          {
+            type: "background.shader.create",
+            name: "Native background",
+            source:
+              "#version 300 es\nprecision highp float;\nin vec2 v_uv; out vec4 outColor;\nvoid main(){ outColor=vec4(1.0); }",
+          },
+        ],
+      },
+    ],
+  };
+  const before = f.runtime.fullSnapshot(f.model.documentId);
+  const lease = f.runtime.acquireForActor(f.model.documentId, "local", [
+    { kind: "slide", slideId: "existing-page" },
+  ]);
+  expect(lease.denied).toBe(false);
+  expect(
+    await f.service.apply({ ...request, mutationId: "leased-later-page" }),
+  ).toMatchObject({ error: { code: "LEASE_DENIED" } });
+  expect(f.runtime.fullSnapshot(f.model.documentId)).toEqual(before);
+  f.runtime.releaseForActor(f.model.documentId, "local");
+  expect(await f.service.apply(request)).toMatchObject({
+    ok: true,
+    revision: 2,
+    createdIds: [expect.any(String)],
+    createdBlockIds: [expect.any(String)],
+  });
+  expect(f.counts().writes).toBe(2);
+  expect((await f.projection()).slide.motion!.stages[0].blocks).toHaveLength(1);
+  expect(
+    await f.service.undo({ documentId: f.model.documentId, redo: false }),
+  ).toMatchObject({ ok: true });
+  expect(f.runtime.fullSnapshot(f.model.documentId).document).toEqual(
+    before.document,
+  );
+});
+
+it("effect schedule editing retains native identity and validates later-click stops and slide-end exits atomically", async () => {
+  const f = fixture();
+  const applied = await f.service.apply(
+    f.request(
+      [
+        {
+          type: "effect.apply_code",
+          elementId: "title",
+          name: "Continuous",
+          effectType: "css",
+          affects: "element",
+          source: ":scope { opacity: 0.9; }",
+        },
+        { type: "timeline.stage.create", id: "stop-click" },
+      ],
+      "scheduled-effect",
+    ),
+  );
+  expect(applied.ok).toBe(true);
+  const effectInstanceId = applied.createdEffectInstanceIds[0];
+  const scheduled = await f.service.apply({
+    ...f.request(
+      [
+        {
+          type: "effect.schedule.set",
+          elementId: "title",
+          effectInstanceId,
+          start: "click",
+          startOffsetMs: 150,
+          stop: { mode: "click", stageId: "stop-click" },
+          progressEasing: "Ease Out",
+        },
+      ],
+      "effect-delay",
+    ),
+    expectedRevision: 1,
+  });
+  expect(scheduled).toMatchObject({
+    ok: true,
+    createdBlockIds: [expect.any(String)],
+  });
+  const blockId = scheduled.createdBlockIds[0];
+  const revised = await f.service.apply({
+    ...f.request(
+      [{ type: "effect.schedule.update", blockId, startOffsetMs: 225 }],
+      "effect-revise",
+    ),
+    expectedRevision: 2,
+  });
+  expect(revised).toMatchObject({ ok: true, createdBlockIds: [] });
+  const before = await f.projection();
+  expect(
+    before.slide.motion!.stages[0].blocks!.find(({ id }) => id === blockId)!
+      .effectSchedule,
+  ).toMatchObject({
+    startOffsetMs: 225,
+    stop: { mode: "click", stageId: "stop-click" },
+  });
+  expect(
+    await f.service.apply({
+      ...f.request(
+        [
+          { type: "deck.rename", name: "No partial write" },
+          {
+            type: "presence.add",
+            elementIds: ["shape"],
+            end: { mode: "slide-end" },
+            exitTransition: { kind: "fade" },
+          },
+        ],
+        "bad-exit",
+      ),
+      expectedRevision: 3,
+    }),
+  ).toMatchObject({ ok: false, stepIndex: 1 });
+  expect(await f.projection()).toEqual(before);
+});
+
+it("page staging discards every page on cancellation access revocation or runtime replacement", async () => {
+  for (const reason of ["cancel", "access", "runtime"] as const) {
+    const f = fixture(),
+      held = deferred(),
+      entered = deferred(),
+      controller = new AbortController();
+    f.measure(async () => {
+      entered.resolve();
+      await held.promise;
+      return { width: 100, height: 30 };
+    });
+    const { operations: _operations, ...identity } = f.request([]);
+    const pending = f.service.apply(
+      {
+        ...identity,
+        pages: [
+          {
+            slideId: "first-page",
+            operations: [
+              {
+                type: "slide.create",
+                id: "first-page",
+                afterId: f.slide.id,
+                name: "First",
+              },
+              { type: "deck.rename", name: "Staged only" },
+            ],
+          },
+          {
+            slideId: "last-page",
+            operations: [
+              {
+                type: "slide.create",
+                id: "last-page",
+                afterId: "first-page",
+                name: "Last",
+              },
+              {
+                type: "element.insert_text",
+                parentId: f.slide.nodes[0].id,
+                frame: { x: 0, y: 0, width: 100, height: 40 },
+                text: "Held",
+                autoSize: "height",
+              },
+            ],
+          },
+        ],
+      },
+      controller.signal,
+    );
+    await entered.promise;
+    if (reason === "cancel") controller.abort();
+    else if (reason === "access") f.access(2);
+    else
+      f.current(
+        new DocumentRuntime(f.model, {
+          actorId: "local",
+          epoch: "replacement",
+          durableCommit: async () => {},
+        }),
+      );
+    held.resolve();
+    expect(await pending).toMatchObject({
+      error: {
+        code:
+          reason === "cancel"
+            ? "REQUEST_CANCELLED"
+            : reason === "access"
+              ? "MCP_ACCESS_CHANGED"
+              : "EPOCH_CONFLICT",
+      },
+    });
+    expect(f.counts().writes).toBe(0);
+    expect((await f.projection()).deck.slideIds).toEqual([f.slide.id]);
+    expect((await f.projection()).deck.name).toBe("Agent editing");
+  }
+});
 
 function deferred() {
   let resolve!: () => void;
@@ -185,13 +791,27 @@ it("agent slide creation returns stable IDs preserves the projected slide and is
     templateId: null,
   });
   expect((await f.projection()).slide).toEqual(before.slide);
-  expect(await f.service.apply(request)).toEqual({ ...result, replayed: true });
+  expect(await f.service.apply(request)).toEqual({
+    ...result,
+    replayed: true,
+    currentObservation: {
+      epoch: "epoch",
+      revision: f.runtime.metadata(f.model.documentId).revision,
+    },
+  });
   expect(f.counts().writes).toBe(1);
   expect(
     await f.service.undo({ documentId: f.model.documentId, redo: false }),
   ).toMatchObject({ ok: true });
   expect((await f.projection()).deck.slideIds).toEqual([f.slide.id]);
-  expect(await f.service.apply(request)).toEqual({ ...result, replayed: true });
+  expect(await f.service.apply(request)).toEqual({
+    ...result,
+    replayed: true,
+    currentObservation: {
+      epoch: "epoch",
+      revision: f.runtime.metadata(f.model.documentId).revision,
+    },
+  });
   expect(
     await f.service.undo({ documentId: f.model.documentId, redo: true }),
   ).toMatchObject({ ok: true });
@@ -259,7 +879,10 @@ it("slide creation can author a complete new slide atomically and invalid anchor
     createdSlideIds: ["agent-slide"],
     createdIds: expect.arrayContaining(["background", "headline", "rule"]),
   });
-  const authored = await f.runtime.projection(f.model.documentId, "agent-slide");
+  const authored = await f.runtime.projection(
+    f.model.documentId,
+    "agent-slide",
+  );
   expect(authored.slide.background).toBe("#000000");
   expect(findElement(authored.slide, "headline")).toMatchObject({
     frame: { x: 140, y: 210, width: 1400, height: 180 },
@@ -400,7 +1023,9 @@ it("deck naming and independent slide styling commit without element changes and
       ]),
     ),
   ).toMatchObject({ ok: true });
-  expect((await f.projection()).deck.slideMeta[f.slide.id].templateId).toBeNull();
+  expect(
+    (await f.projection()).deck.slideMeta[f.slide.id].templateId,
+  ).toBeNull();
   expect((await f.projection()).slide.background).toBe("#123456");
   const result = await f.service.apply(
     f.request([
@@ -779,7 +1404,9 @@ it("builds composite cards with local children and parent Presence in one atomic
       y: 28,
       width: 436,
     });
-    expect(findElement(p.slide, `${id}-label`)!.frame.height).toBeGreaterThan(0);
+    expect(findElement(p.slide, `${id}-label`)!.frame.height).toBeGreaterThan(
+      0,
+    );
   }
   const presenceParents = (p.slide.motion?.stages[0].blocks ?? [])
     .flatMap((block) =>
@@ -788,10 +1415,11 @@ it("builds composite cards with local children and parent Presence in one atomic
     .sort();
   expect(presenceParents).toEqual(["card-a", "card-b", "card-c"]);
   expect(
-    (p.slide.motion?.stages[0].tracks ?? []).some((track) =>
-      track.elementId.includes("-label") ||
-      track.elementId.includes("-metric") ||
-      track.elementId.includes("-background"),
+    (p.slide.motion?.stages[0].tracks ?? []).some(
+      (track) =>
+        track.elementId.includes("-label") ||
+        track.elementId.includes("-metric") ||
+        track.elementId.includes("-background"),
     ),
   ).toBe(false);
 });
@@ -1061,7 +1689,9 @@ it("managed media can be inserted by asset ID and exposes semantic fit fill cent
     ok: true,
     createdIds: ["inserted-media"],
   });
-  expect(findElement((await f.projection()).slide, "inserted-media")).toMatchObject({
+  expect(
+    findElement((await f.projection()).slide, "inserted-media"),
+  ).toMatchObject({
     name: "Managed image",
     frame: { x: 200, y: 180, width: 720, height: 480 },
     content: {
@@ -1106,12 +1736,14 @@ it("managed media can be inserted by asset ID and exposes semantic fit fill cent
   p.slide.nodes[0].children.push(media);
   const fit = await assembleAgentMutation(
     p,
-    agentApplyRequestSchema.parse(
+    agentSingleApplyRequestSchema.parse(
       f.request([{ type: "frame.fit", elementId: "managed-media" }]),
     ),
     async () => null,
   );
-  expect(findElement(fit.snapshot.slide, "managed-media")!.content).toMatchObject({
+  expect(
+    findElement(fit.snapshot.slide, "managed-media")!.content,
+  ).toMatchObject({
     transform: { rule: "fit", intrinsicWidth: 1200, intrinsicHeight: 800 },
   });
   const moved = await assembleAgentMutation(
@@ -1121,7 +1753,7 @@ it("managed media can be inserted by asset ID and exposes semantic fit fill cent
       slide: fit.snapshot.slide,
       templates: fit.snapshot.templates,
     },
-    agentApplyRequestSchema.parse(
+    agentSingleApplyRequestSchema.parse(
       f.request([
         {
           type: "frame.content_transform.set",
@@ -1141,7 +1773,9 @@ it("managed media can be inserted by asset ID and exposes semantic fit fill cent
     ),
     async () => null,
   );
-  expect(findElement(moved.snapshot.slide, "managed-media")!.content).toMatchObject({
+  expect(
+    findElement(moved.snapshot.slide, "managed-media")!.content,
+  ).toMatchObject({
     transform: {
       rule: "fill",
       intrinsicWidth: 1200,
@@ -1168,7 +1802,7 @@ it("managed media can be inserted by asset ID and exposes semantic fit fill cent
   await expect(
     assembleAgentMutation(
       free,
-      agentApplyRequestSchema.parse(
+      agentSingleApplyRequestSchema.parse(
         f.request([{ type: "frame.fill", elementId: "managed-media" }]),
       ),
       async () => null,
@@ -1203,8 +1837,7 @@ void main() {
   });
   const p = await f.projection();
   const created = findElement(p.slide, accepted.createdIds[0])!;
-  const definition =
-    p.slide.effectResources?.[created.effects![0].resourceId];
+  const definition = p.slide.effectResources?.[created.effects![0].resourceId];
   expect(definition?.parameters).toMatchObject([
     { key: "movement", default: 0.6, min: 0, max: 1 },
   ]);
@@ -1420,10 +2053,24 @@ it("deduplicates concurrent and reconnected retries with canonical fingerprints 
   });
   held.resolve();
   const accepted = await first;
-  expect(await second).toEqual({ ...accepted, replayed: true });
+  expect(await second).toEqual({
+    ...accepted,
+    replayed: true,
+    currentObservation: {
+      epoch: "epoch",
+      revision: f.runtime.metadata(f.model.documentId).revision,
+    },
+  });
   f.access(null);
   f.access(2);
-  expect(await f.service.apply(input)).toEqual({ ...accepted, replayed: true });
+  expect(await f.service.apply(input)).toEqual({
+    ...accepted,
+    replayed: true,
+    currentObservation: {
+      epoch: "epoch",
+      revision: f.runtime.metadata(f.model.documentId).revision,
+    },
+  });
   expect(
     await f.service.apply({ ...input, expectedRevision: 1 }),
   ).toMatchObject({ error: { code: "MUTATION_ID_REUSED" } });
@@ -1693,7 +2340,7 @@ it("locked layers inherited targets invalid scopes and ancestor-descendant trans
           type: "element.insert_text",
           parentId: "missing",
           frame: { x: 0, y: 0, width: 800, height: 180 },
-        autoSize: "both",
+          autoSize: "both",
           text: "Bad",
         },
       ]),
@@ -1701,7 +2348,7 @@ it("locked layers inherited targets invalid scopes and ancestor-descendant trans
   ).toMatchObject({ error: { code: "INVALID_SCOPE" } });
   const p = await f.projection();
   p.deck.layers[0].locked = true;
-  const request = agentApplyRequestSchema.parse(
+  const request = agentSingleApplyRequestSchema.parse(
     f.request([{ type: "elements.remove", elementIds: ["title"] }]),
   );
   await expect(
@@ -1747,7 +2394,7 @@ it("frame sizing preserves Free media world placement under a rotated scaled par
   );
   const result = await assembleAgentMutation(
     p,
-    agentApplyRequestSchema.parse(
+    agentSingleApplyRequestSchema.parse(
       f.request([
         {
           type: "elements.frame.set",
@@ -1869,4 +2516,365 @@ it("closing a runtime while measuring rejects staged writes and reopening requir
     ),
   ).toMatchObject({ error: { code: "EPOCH_CONFLICT" } });
   expect(f.counts().writes).toBe(0);
+});
+
+it("MCP template authoring shares one native background and preserves ownership and undo", async () => {
+  const f = fixture();
+  const created = await f.service.apply(
+    f.request([
+      { type: "template.create", id: "shared-theme", background: "#101020" },
+      {
+        type: "element.insert_text",
+        id: "theme-label",
+        parentId: f.model.deck.layers[0].id,
+        frame: { x: 30, y: 20, width: 400, height: 70 },
+        text: "Shared label",
+      },
+    ]),
+  );
+  expect(created).toMatchObject({
+    ok: true,
+    createdTemplateIds: ["shared-theme"],
+  });
+  let p = await f.runtime.projection(f.model.documentId, "shared-theme");
+  expect(p.slide.background).toBe("#101020");
+  expect(findElement(p.slide, "theme-label")).toBeTruthy();
+  expect(
+    await f.service.apply({
+      ...f.request([
+        { type: "template.background.set", background: "#202040" },
+      ]),
+      slideId: "shared-theme",
+    }),
+  ).toMatchObject({ ok: true });
+  expect(
+    await f.service.apply(
+      f.request([{ type: "slide.template.apply", templateId: "shared-theme" }]),
+    ),
+  ).toMatchObject({ ok: true });
+  expect(
+    await f.service.apply(
+      f.request([
+        { type: "text.set", elementId: "theme-label", text: "Wrong owner" },
+      ]),
+    ),
+  ).toMatchObject({ error: { code: "TEMPLATE_OWNED" } });
+  expect(
+    await f.service.apply(
+      f.request([{ type: "template.delete", templateId: "shared-theme" }]),
+    ),
+  ).toMatchObject({ ok: false });
+  p = await f.runtime.projection(f.model.documentId, "shared-theme");
+  expect(p.slide.background).toBe("#202040");
+  expect(
+    await f.service.apply({
+      ...f.request([{ type: "slide.update", notes: "invalid" }]),
+      slideId: "shared-theme",
+    }),
+  ).toMatchObject({ error: { code: "INVALID_SCOPE" } });
+});
+
+it("MCP direct text styles and native slide recipes retain shared references and replace only declared slots", async () => {
+  const f = fixture();
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "text.style.define",
+          styleId: "design-title",
+          name: "Design title",
+          typography: { fontFamily: "Arial", fontSize: 96, color: "#AACCEE" },
+        },
+        {
+          type: "text.style.apply",
+          elementIds: ["title"],
+          styleId: "design-title",
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true, createdTextStyleIds: ["design-title"] });
+  const result = await f.service.apply(
+    f.request([
+      {
+        type: "slide.duplicate",
+        id: "recipe-copy",
+        name: "Recipe instance",
+        textReplacements: { title: "New narrative" },
+      },
+    ]),
+  );
+  expect(result).toMatchObject({ ok: true, createdSlideIds: ["recipe-copy"] });
+  const p = await f.runtime.projection(f.model.documentId, "recipe-copy");
+  expect(findElement(p.slide, result.idMap.title)?.content).toMatchObject({
+    text: "New narrative",
+    format: { kind: "style", styleId: "design-title" },
+  });
+  expect(
+    (await f.projection()).slide.nodes[0].children[0].content,
+  ).toMatchObject({ text: "Original" });
+  const revision = f.runtime.currentRevision(f.model.documentId);
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "slide.duplicate",
+          id: "bad-recipe",
+          textReplacements: { missing: "bad" },
+        },
+      ]),
+    ),
+  ).toMatchObject({ error: { code: "UNKNOWN_ELEMENT" } });
+  expect(f.runtime.currentRevision(f.model.documentId)).toBe(revision);
+});
+
+it("MCP named native effect resources share source with independent instances and validate updates atomically", async () => {
+  const f = fixture();
+  const applied = await f.service.apply(
+    f.request([
+      {
+        type: "effect.apply_code",
+        elementId: "shape",
+        name: "Shared CSS",
+        effectType: "css",
+        affects: "element",
+        source: ":scope {opacity:0.8}",
+      },
+    ]),
+  );
+  expect(applied).toMatchObject({ ok: true });
+  const instanceId = applied.createdEffectInstanceIds[0];
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "effect.resource.capture",
+          elementId: "shape",
+          effectInstanceId: instanceId,
+          resourceId: "shared-css",
+        },
+        {
+          type: "effect.resource.attach",
+          elementId: "title",
+          resourceId: "shared-css",
+        },
+        {
+          type: "effect.resource.update",
+          resourceId: "shared-css",
+          source: ":scope {opacity:0.6}",
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  const p = await f.projection();
+  expect(findElement(p.slide, "shape")?.effects?.[0].resourceId).toBe(
+    "shared-css",
+  );
+  expect(findElement(p.slide, "title")?.effects?.[0].resourceId).toBe(
+    "shared-css",
+  );
+  expect(p.slide.effectResources?.["shared-css"].source).toBe(
+    ":scope {opacity:0.6}",
+  );
+});
+
+it("MCP expanded budget admits larger semantic intents without exceeding native transaction bounds", () => {
+  const f = fixture();
+  const operations = Array.from({ length: 129 }, () => ({
+    type: "deck.rename",
+    name: "Design",
+  }));
+  expect(agentApplyRequestSchema.safeParse(f.request(operations)).success).toBe(
+    false,
+  );
+  expect(
+    agentApplyRequestSchema.safeParse({
+      ...f.request(operations),
+      budget: "expanded",
+    }).success,
+  ).toBe(true);
+  expect(
+    agentApplyRequestSchema.safeParse({
+      ...f.request([...operations, ...operations]),
+      budget: "expanded",
+    }).success,
+  ).toBe(false);
+});
+
+it("SDK semantic diagnostics bound malformed known and unknown operation issues without echoing source", () => {
+  const f = fixture();
+  const known = validateApplyInput(
+    f.request([
+      { type: "deck.transition_defaults.set", kind: "fade", durationMs: 750 },
+    ]),
+  );
+  expect(known).toMatchObject({
+    success: false,
+    error: {
+      error: {
+        code: "INVALID_REQUEST",
+        details: {
+          issues: expect.arrayContaining([
+            expect.objectContaining({ path: "operations.0.value" }),
+          ]),
+        },
+      },
+    },
+  });
+  expect(JSON.stringify(known).length).toBeLessThan(2000);
+  const missingRevision = {
+    ...f.request([{ type: "deck.rename", name: "Safe" }]),
+    expectedRevision: undefined,
+  };
+  expect(validateApplyInput(missingRevision)).toMatchObject({
+    success: false,
+    error: {
+      error: {
+        details: {
+          issues: expect.arrayContaining([
+            expect.objectContaining({ path: "expectedRevision" }),
+          ]),
+        },
+      },
+    },
+  });
+  expect(
+    validateApplyInput(
+      f.request([{ type: "unknown.operation", source: "private-source" }]),
+    ),
+  ).toMatchObject({
+    success: false,
+    error: { error: { details: { issues: [{ path: "operations.0.type" }] } } },
+  });
+  expect(
+    JSON.stringify(
+      validateApplyInput(
+        f.request([{ type: "unknown.operation", source: "private-source" }]),
+      ),
+    ),
+  ).not.toContain("private-source");
+});
+it("MCP style collisions return the native conflicting identity and keep the batch atomic", async () => {
+  const f = fixture();
+  const result = await f.service.apply(
+    f.request([
+      { type: "deck.rename", name: "Unaccepted" },
+      {
+        type: "text.style.define",
+        styleId: "collision",
+        name: "Heading",
+        typography: { fontSize: 72 },
+      },
+    ]),
+  );
+  expect(result).toMatchObject({
+    ok: false,
+    error: {
+      code: "INVALID_REQUEST",
+      details: {
+        conflictingStyle: { name: "Heading", id: expect.any(String) },
+      },
+    },
+  });
+  expect(f.runtime.currentRevision(f.model.documentId)).toBe(0);
+  expect((await f.projection()).deck.name).not.toBe("Unaccepted");
+});
+it("MCP resource rename prunes only orphaned definitions and reports native users", async () => {
+  const f = fixture();
+  const applied = await f.service.apply(
+    f.request([
+      {
+        type: "effect.apply_code",
+        elementId: "shape",
+        name: "Prune CSS",
+        effectType: "css",
+        affects: "element",
+        source: ":scope {opacity: var(--amount)}",
+        parameters: [
+          {
+            key: "amount",
+            label: "Amount",
+            type: "number",
+            default: 0.8,
+            min: 0,
+            max: 1,
+          },
+        ],
+      },
+    ]),
+  );
+  const instanceId = applied.createdEffectInstanceIds[0];
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "motion.animate",
+          stageIndex: 0,
+          elementId: "shape",
+          property: "effects." + instanceId + ".parameters.amount",
+          from: 0.3,
+          to: 0.8,
+          durationMs: 600,
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  const before = await f.projection();
+  const old = findElement(before.slide, "shape")!.effects![0].resourceId;
+  const renamed = await f.service.apply(
+    f.request([
+      {
+        type: "effect.resource.capture",
+        elementId: "shape",
+        effectInstanceId: instanceId,
+        resourceId: "named-css",
+      },
+    ]),
+  );
+  expect(renamed).toMatchObject({
+    ok: true,
+    resourceChanges: expect.arrayContaining([
+      {
+        pageId: before.slide.id,
+        resourceId: old,
+        kind: "removed",
+        elementIds: [],
+      },
+      {
+        pageId: before.slide.id,
+        resourceId: "named-css",
+        kind: "created",
+        elementIds: ["shape"],
+      },
+    ]),
+  });
+  expect((await f.projection()).slide.effectResources?.[old]).toBeUndefined();
+  expect((await f.projection()).slide.motion).toEqual(before.slide.motion);
+  const update = await f.service.apply(
+    f.request([
+      {
+        type: "effect.resource.update",
+        resourceId: "named-css",
+        source: ":scope {opacity: calc(var(--amount) * 0.9)}",
+      },
+    ]),
+  );
+  expect(update).toMatchObject({
+    ok: true,
+    changedIds: [],
+    resourceChanges: [
+      {
+        pageId: before.slide.id,
+        resourceId: "named-css",
+        kind: "changed",
+        elementIds: ["shape"],
+      },
+    ],
+  });
+  const prune = await f.service.apply(
+    f.request([{ type: "effect.resource.prune" }]),
+  );
+  expect(prune).toMatchObject({ ok: true, changed: false });
+  expect(
+    findElement((await f.projection()).slide, "shape")!.effects![0].id,
+  ).toBe(instanceId);
 });

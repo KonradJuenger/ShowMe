@@ -1,793 +1,124 @@
-# MCP tool and resource contract
-
-This document describes the model-facing contract implemented on the current MCP branch.
-It is intentionally smaller than ShowMe's internal API.
-
-The public MCP contract should remain stable even when internal editor command functions change.
-
-## Design rules
-
-1. Prefer a few broad semantic tools over one MCP tool per backend method.
-2. Do not expose raw `DocumentOperation` as the normal model-facing API.
-3. Every mutation identifies its document and expected revision.
-4. Resolve convenience context such as "current selection" into stable IDs before mutation.
-5. Make one coherent request atomic whenever practical.
-6. Return exact IDs and accepted revisions after every mutation.
-7. Return errors that tell an agent how to recover.
-8. Avoid prose-only success responses. Use structured outputs.
-9. Read tools are read-only and marked as such.
-10. ShowMe never asks an internal model to reinterpret an already model-authored request.
-
-## 1. showme_context
-
-Purpose: cheaply answer "what am I looking at?"
-
-Input:
-
-```ts
-{}
-```
-
-Output:
-
-```ts
-interface ShowMeContext {
-  document: {
-    id: string;
-    name: string;
-    revision: number;
-    savedRevision: number;
-    dirty: boolean;
-    width: number;
-    height: number;
-  } | null;
-
-  editor: {
-    slideId: string | null;
-    selectionScopeId: string | null;
-    selectionIds: string[];
-  };
-
-  presentation?: {
-    active: boolean;
-    slideIndex?: number;
-    stepIndex?: number;
-  };
-}
-```
-
-Annotations:
-
-```text
-readOnlyHint: true
-destructiveHint: false
-idempotentHint: true
-openWorldHint: false
-```
-
-Notes:
-
-- This is ephemeral editor context.
-- It is not an identity mechanism.
-- Subsequent writes should use resolved IDs.
-- If no document is open, return a successful structured result with `document: null`.
-
-## 2. showme_inspect
-
-Purpose: retrieve only the document context required for the task.
-
-Proposed input:
-
-```ts
-interface InspectInput {
-  documentId: string;
-
-  target:
-    | { type: "deck" }
-    | { type: "slide"; slideId: string }
-    | { type: "elements"; slideId: string; elementIds: string[] }
-    | { type: "current-selection" };
-
-  include?: Array<
-    | "outline"
-    | "content"
-    | "geometry"
-    | "appearance"
-    | "hierarchy"
-    | "motion"
-    | "presence"
-    | "effects"
-    | "notes"
-    | "stylesheet"
-  >;
-
-  depth?: number;
-}
-```
-
-Defaults should be sparse.
-
-A slide outline could return:
-
-```json
-{
-  "documentId": "doc_1",
-  "revision": 42,
-  "slide": {
-    "id": "slide_3",
-    "name": "Results",
-    "elements": [
-      {
-        "id": "title_1",
-        "name": "Title",
-        "type": "text",
-        "frame": { "x": 120, "y": 100, "width": 800, "height": 140 },
-        "textPreview": "Revenue accelerated"
-      },
-      {
-        "id": "metric_1",
-        "name": "Metric",
-        "type": "text",
-        "frame": { "x": 1130, "y": 280, "width": 420, "height": 220 },
-        "textPreview": "26%"
-      }
-    ]
-  }
-}
-```
-
-Do not inline media bytes, giant Effect source, or every nested style property unless explicitly requested.
-
-Annotations:
-
-```text
-readOnlyHint: true
-destructiveHint: false
-idempotentHint: true
-openWorldHint: false
-```
-
-## 3. showme_apply
-
-Purpose: perform one atomic semantic change.
-
-Proposed input:
-
-```ts
-interface ApplyInput {
-  documentId: string;
-  expectedRevision: number;
-
-  operations: ShowMeSemanticOperation[];
-
-  label?: string;
-}
-```
-
-The semantic operation union should mirror things a user can intentionally do in ShowMe, not low-level storage mechanics.
-
-Initial set:
-
-```ts
-type ShowMeSemanticOperation =
-  | {
-      type: "text.set";
-      slideId: string;
-      elementId: string;
-      text: string;
-    }
-  | {
-      type: "elements.move";
-      slideId: string;
-      elementIds: string[];
-      dx: number;
-      dy: number;
-      scopeId?: string;
-    }
-  | {
-      type: "elements.frame.set";
-      slideId: string;
-      elementId: string;
-      frame: {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-        rotation?: number;
-      };
-    }
-  | {
-      type: "elements.appearance.patch";
-      slideId: string;
-      elementIds: string[];
-      fill?: string | null;
-      strokeColor?: string;
-      strokeWidth?: number;
-      opacity?: number;
-      radius?: number;
-    }
-  | {
-      type: "element.insert_text";
-      slideId: string;
-      parentId: string;
-      frame: { x: number; y: number; width: number; height: number };
-      text: string;
-      name?: string;
-      typography?: Partial<TextTypography>;
-      autoSize?: "none" | "height" | "both";
-    }
-  | {
-      type: "element.insert_shape";
-      slideId: string;
-      parentId: string;
-      shape: "rectangle" | "ellipse";
-      frame?: Partial<Frame>;
-      appearance?: Partial<Appearance>;
-      name?: string;
-    }
-  | {
-      type: "elements.remove";
-      slideId: string;
-      elementIds: string[];
-    }
-  | {
-      type: "elements.duplicate";
-      slideId: string;
-      elementIds: string[];
-    }
-  | {
-      type: "elements.reparent";
-      slideId: string;
-      elementIds: string[];
-      parentId: string;
-      index?: number;
-    }
-  | {
-      type: "slide.background.set";
-      slideId: string;
-      color: string;
-    }
-  | {
-      type: "slide.notes.set";
-      slideId: string;
-      notes: string;
-    }
-  | {
-      type: "motion.add_preset";
-      slideId: string;
-      stageIndex: number;
-      elementIds: string[];
-      preset: "Move" | "Scale" | "Rotate" | "Fade" | "Pulse";
-    }
-  | {
-      type: "presence.add";
-      slideId: string;
-      stageIndex: number;
-      elementIds: string[];
-      schedule?: PresenceSchedulePatch;
-    }
-  | {
-      type: "effect.apply";
-      slideId: string;
-      elementId: string;
-      definition: EffectDefinition;
-      existingInstanceId?: string;
-      stageIndex?: number;
-    }
-  | {
-      type: "effect.parameter.set";
-      slideId: string;
-      elementId: string;
-      instanceId: string;
-      key: string;
-      value: number | boolean | string;
-    };
-```
-
-This union should grow only when a real workflow needs it.
-
-Do not start by exposing every current editor feature.
-
-### Internal mapping
-
-Examples:
-
-```text
-text.set
-  -> updateText()
-
-elements.move
-  -> translateElements()
-
-element.insert_text
-  -> insertText() + updateText()
-
-motion.add_preset
-  -> addMotionPreset() + setSlideMotion()
-
-presence.add
-  -> addPresence() / editPresenceSchedule() + setSlideMotion()
-
-effect.apply
-  -> validateEffectDefinition()
-  -> setElementEffectDefinition()
-
-effect.parameter.set
-  -> setElementEffectParameterValue()
-```
-
-The resulting editor changes already accumulate `DocumentOperation[]`. Commit the final combined result once.
-
-### Output
-
-```ts
-interface ApplyResult {
-  documentId: string;
-  previousRevision: number;
-  revision: number;
-  transactionId: string;
-
-  changes: Array<{
-    kind: string;
-    slideId?: string;
-    elementIds?: string[];
-    effectInstanceIds?: string[];
-  }>;
-
-  warnings: Array<{
-    code: string;
-    message: string;
-  }>;
-}
-```
-
-Return created IDs. An agent should never have to re-inspect just to discover what it created.
-
-Annotations:
-
-```text
-readOnlyHint: false
-destructiveHint: true
-idempotentHint: false
-openWorldHint: false
-```
-
-The tool is marked destructive because the union contains removal/replacement operations. If clients benefit from finer risk hints later, split additive creation from destructive editing only if evaluation shows a real benefit.
-
-## 4. showme_render
-
-Purpose: visual verification.
-
-Input:
-
-```ts
-interface RenderInput {
-  documentId: string;
-  slideId: string;
-
-  width?: number;
-  height?: number;
-
-  state?: {
-    stageIndex?: number;
-    stageTimeMs?: number;
-    previewMode?: boolean;
-  };
-}
-```
-
-Output:
-
-- structured metadata;
-- image content block with PNG.
-
-Example metadata:
-
-```json
-{
-  "documentId": "doc_1",
-  "slideId": "slide_3",
-  "revision": 43,
-  "width": 960,
-  "height": 540,
-  "stageIndex": 1,
-  "stageTimeMs": 350
-}
-```
-
-Use ShowMe's real renderer. Do not create an MCP-specific approximation.
-
-The first implementation can render a static slide. Click/timing state can follow once the deterministic renderer input is cleanly factored.
-
-Annotations:
-
-```text
-readOnlyHint: true
-destructiveHint: false
-idempotentHint: true
-openWorldHint: false
-```
-
-## 5. showme_history
-
-Optional first-release tool.
-
-If the MCP uses a distinct authority actor:
-
-```ts
-interface HistoryInput {
-  documentId: string;
-  action: "undo" | "redo";
-}
-```
-
-This acts only on MCP-owned actor history.
-
-Never silently undo human/local history.
-
-Annotations:
-
-```text
-readOnlyHint: false
-destructiveHint: true
-idempotentHint: false
-openWorldHint: false
-```
-
-## Current creative extensions
-
-The current semantic union additionally exposes:
-
-```ts
-{ type: "slide.make_independent" }
-{ type: "deck.stylesheet.set"; source: string }
-{ type: "elements.css_classes.set"; elementIds: string[]; classes: string[] }
-{ type: "elements.reorder"; parentId: string; elementIds: string[];
-  mode: "front" | "back" | "forward" | "backward" }
-
-{ type: "effect.apply_code"; elementId: string; name: string;
-  effectType: "shader" | "css" | "text-js";
-  affects: "pixels" | "backdrop" | "generated" | "element" | "text";
-  source: string; styleSource?: string; speed?: number;
-  timeControl?: EffectTimeControl; parameters?: EffectParameter[];
-  existingInstanceId?: string; stageIndex?: number }
-
-{ type: "effect.parameter.set"; elementId: string; effectInstanceId: string;
-  key: string; value: number | boolean | string }
-{ type: "effect.enabled.set"; elementId: string; effectInstanceId: string; enabled: boolean }
-{ type: "effect.remove"; elementId: string; effectInstanceId: string }
-
-{ type: "background.shader.create"; name: string; source: string;
-  speed?: number; timeControl?: EffectTimeControl; parameters?: EffectParameter[];
-  stageIndex?: number }
-
-{ type: "motion.add_preset"; stageIndex: number; elementIds: string[];
-  preset: "Move" | "Scale" | "Rotate" | "Fade" | "Pulse" }
-{ type: "motion.animate"; stageIndex: number; elementId: string; property: string;
-  from: number; to: number; durationMs: number; ease?: NamedMotionEase }
-{ type: "presence.add"; stageIndex: number; elementIds: string[];
-  transition?: "none" | "fade" | "move" | "scale" | "rotate";
-  direction?: "Left" | "Right" | "Up" | "Down" | "Clockwise" | "Counter-clockwise";
-  distance?: number; durationMs?: number; easing?: NamedMotionEase | CubicBezier;
-  enterTransition?: PresenceTransitionInput; exitTransition?: PresenceTransitionInput }
-```
-
-Shader operations reconcile `uniform float ... // @param ...` declarations through the
-same source reconciliation used by Effect Studio. Effect code is then validated using
-the real WebGL2 program linker, scoped CSS compiler, or isolated text-JS worker. Failed
-validation returns structured diagnostics and does not mutate the document.
-
-### showme.authoring
-
-`showme.authoring` accepts one of
-`background-shader`, `content-shader`, `backdrop-shader`, `css-effect`,
-`text-effect` or `motion`. With no document scope it returns a creation contract and
-starter. With exact document/epoch/revision/slide scope plus element/effect IDs it also
-returns the current authored source. The Effect ABI comes from
-`buildEffectAuthoringPrompt()`, not a duplicated MCP-only specification.
-
-## Effect authoring resource
-
-The current `buildEffectAuthoringPrompt()` already exports a complete authoring ABI without requiring repository access.
-
-Expose it through a dynamic resource rather than repeating it in tool descriptions.
-
-Concept:
-
-```text
-showme://effect-authoring/{documentId}/{slideId}/{elementId}
-```
-
-The resource should include:
-
-- current Effect definition or a blank definition;
-- Effect family and affects mode;
-- existing source;
-- existing parameter contract;
-- timing;
-- preview element name;
-- current ShowMe Effect runtime rules.
-
-The agent then writes source itself and sends the complete definition through `showme_apply`.
-
-## Capabilities resource
-
-Expose a cheap machine-readable resource:
-
-```text
-showme://capabilities
-```
-
-Example:
-
-```json
-{
-  "documentVersion": 1,
-  "effectApiVersion": 1,
-  "supports": {
-    "motion": true,
-    "presence": true,
-    "shaderEffects": true,
-    "cssEffects": true,
-    "textJsEffects": true,
-    "renderPreview": true,
-    "templates": true,
-    "pptxExport": true,
-    "pdfExport": true
-  }
-}
-```
-
-This is better than teaching clients behavior from server version strings.
-
-## Error model
-
-Errors need stable codes plus human-readable messages.
-
-Examples:
-
-```json
-{
-  "code": "REVISION_CONFLICT",
-  "message": "Presentation changed from revision 42 to 43. Re-inspect the affected slide and retry.",
-  "documentId": "doc_1",
-  "expectedRevision": 42,
-  "actualRevision": 43,
-  "recoverable": true
-}
-```
-
-```json
-{
-  "code": "LEASE_DENIED",
-  "message": "The selected element is currently being edited by another actor.",
-  "slideId": "slide_3",
-  "elementId": "title_1",
-  "recoverable": true
-}
-```
-
-```json
-{
-  "code": "EFFECT_VALIDATION_ERROR",
-  "message": "Shader compilation failed.",
-  "diagnostics": [
-    {
-      "line": 47,
-      "severity": "error",
-      "message": "..."
-    }
-  ],
-  "recoverable": true
-}
-```
-
-Other useful codes:
-
-- `NO_ACTIVE_DOCUMENT`;
-- `UNKNOWN_SLIDE`;
-- `UNKNOWN_ELEMENT`;
-- `INVALID_SCOPE`;
-- `UNSUPPORTED_OPERATION`;
-- `PREVIEW_FAILED`;
-- `MISSING_MEDIA`;
-- `DOCUMENT_CLOSED`.
-
-Do not ask the model to parse arbitrary exception strings when a stable code is possible.
-
-## Tool result discipline
-
-Every tool with structured data should declare an output schema.
-
-Return both:
-
-- `structuredContent` for machines;
-- concise text only where it helps humans.
-
-Do not return giant success prose.
-
-Stable ordering matters for cacheability and model consistency.
-
-## Expected revision
-
-All writes should include `expectedRevision`.
-
-The MCP layer may internally need to refresh its projection, but it must not silently apply an intent to materially different state.
-
-For a revision mismatch:
-
-1. reject;
-2. return the current revision;
-3. identify whether the requested targets still exist when cheap;
-4. let the agent inspect and retry.
-
-Do not implement hidden "best effort" mutation against stale state.
-
-## Current selection
-
-`current-selection` is a convenience only.
-
-A write request should resolve it to explicit IDs before the transaction is constructed, and the result should report those resolved IDs.
-
-This prevents a delayed tool call from accidentally following a user's later selection change.
-
-## Stable IDs
-
-ShowMe generates IDs by default and returns them in the apply receipt. Creation and
-grouping operations may also accept an optional validated ID when a later operation
-in the same atomic batch must target the newly created object. IDs remain opaque
-document identities, not presentation content.
-
-Duplication returns an `idMap` from every duplicated source identity to its new
-identity. Slide duplication includes mappings for the duplicated element hierarchy.
-Text Style and Layer creation return their own stable ID lists.
-
-## Why not dozens of tools?
-
-A tool catalog is part of model context and tool choice is itself a reliability problem.
-
-Bad:
-
-```text
-set_x
-set_y
-set_width
-set_height
-set_fill
-set_opacity
-create_shader
-set_shader_source
-set_effect_start
-set_effect_stop
-...
-```
-
-Better:
-
-```text
-showme_context
-showme_inspect
-showme_apply
-showme_render
-showme_history (optional)
-```
-
-Internal APIs stay granular. The MCP contract stays semantic.
-
-
-## Implemented normal-authoring vocabulary
-
-The current public MCP has six tools:
-`showme.context`, `showme.inspect`, `showme.authoring`,
-`showme.measure_text`, `showme.apply` and `showme.preview`. Normal editor parity is expressed as variants
-inside `showme.apply`, not additional tools.
-
-Implemented semantic groups:
-
-- slide: `slide.create`, `slide.duplicate`, `slide.delete`,
-  `slide.move`, `slide.update`, `slide.template.apply`,
-  `slide.make_independent`;
-- deck/layers: `deck.rename`, `deck.dimensions.set`,
-  `deck.stylesheet.set`, `layer.create`, `layer.update`,
-  `layer.delete`, `layer.reorder`;
-- insertion: `element.insert_text`, `element.insert_shape`,
-  `element.insert_frame`, `element.insert_media` for a ShowMe-managed asset ID;
-- geometry/appearance: `elements.move`, `elements.frame.set`,
-  `elements.appearance.patch`, `elements.css_classes.set`,
-  `elements.align`, `elements.distribute`;
-- structure: `elements.reorder`, `elements.duplicate`,
-  `elements.group`, `elements.ungroup`, `elements.reparent`,
-  `elements.remove`;
-- text: `text.set`, `text.style`, `text.style.apply`,
-  `text.style.clear_overrides`, `text.style.create`;
-- existing managed media: `frame.fit`, `frame.fill`,
-  `frame.content_transform.set`, `frame.content_center`,
-  `frame.content_reset`;
-- creative code/timing: the existing Effect, background shader, Motion and Presence
-  variants remain supported.
-
-All persisted Element geometry is parent-local. `showme.inspect` can derive world
-bounds/transforms on request but MCP never persists redundant world coordinates.
-Layer IDs and container Element IDs are the only authoring parents.
-
-`showme.inspect` exposes the corresponding hierarchy, frame, appearance,
-typography, Text Style reference, media transform, CSS classes, Effects and optional
-Motion/Presence/world detail. Deck inspection can opt into Text Style definitions.
-
-Managed media discovery is available through bounded `showme.inspect` asset queries.
-The result exposes only managed asset IDs, display names, media type and prepared
-dimensions/duration. `element.insert_media` then resolves the chosen ID through
-ShowMe's document asset authority. Importing a new filesystem asset is intentionally
-outside MCP. Arbitrary paths, raw bytes and fabricated asset records are not accepted.
-
-## Current text measurement query
-
-`showme.measure_text` is the one additional dedicated query tool in the current
-contract because production typography measurement is a service, not a persistent
-document mutation.
-
-Input:
-
-```ts
-{
-  documentId: string;
-  epoch: string;
-  revision: number;
-  items: Array<{
-    text: string;
-    width: number;
-    typography?: Partial<TextTypography>;
-  }>; // 1..64
-}
-```
-
-Output preserves item order:
-
-```ts
-{
-  ok: true;
-  documentId: string;
-  epoch: string;
-  revision: number;
-  measurements: Array<{ width: number; height: number }>;
-}
-```
-
-The implementation uses the document font environment and production DOM text
-measurement. A stale epoch/revision is rejected. Measurement never mutates the
-document.
-
-## Presence and Motion contract
-
-`presence.add` supports integrated enter/exit transitions. Its model-facing
-transition kinds are `none`, `fade`, `move`, `scale`, and `rotate`.
-Transition configuration can include direction, distance/scale/angle, duration,
-and easing, with explicit enter and exit transitions when required.
-
-Named easing is consistent with Motion:
-
-```text
-Linear
-Ease In
-Ease Out
-Ease In Out
-Hold
-```
-
-Presence is the lifecycle system. Motion is for animating properties while an
-element exists. A model should not combine a Move Motion preset with a move
-Presence transition just to create an entrance.
-
-## Composite authoring contract
-
-ShowMe does not expose MCP-only Card/container primitives. Use
-`element.insert_frame`, `elements.group`, reparenting and parent-local
-coordinates. Give the parent a stable ID, insert children beneath it, and animate
-the parent with Presence when the full component should move together.
-
-## Apply batching
-
-A single `showme.apply` request accepts at most 128 semantic operations. It stays
-one atomic staged mutation and, when changed, one durable accepted transaction.
-The request byte limit, exact revision, leases and normal document authority are
-not weakened for throughput.
+# Current ShowMe MCP contract
+
+Server 1.8.0. Document, SME/SMP, effect API and native schedule formats remain public v1. Canonical schemas returned by tools/list and showme.authoring are authoritative.
+
+## Discovery and context
+
+Call showme.context first. Accepted document identity includes id, epoch, revision, savedRevision and dirty. Editor context is ephemeral and includes the human's page, selection and UI epoch. Reading context never flushes drafts or warms the agent runtime.
+
+Capabilities describe supported operations. services.agentRuntime separately reports uninitialized/initializing/ready/failed, queue occupancy and lazy initialization. An uninitialized service can initialize on its first request.
+
+Use showme.authoring with kind=operations for the operation catalog, then family or operation and detail=compact for canonical JSON Schemas, validated examples, limits and target/result rules. Families include template, slide, deck, layer, element, elements, text, frame, media, video, background, effect, motion, presence and timeline. Workspace, preview and delivery have dedicated authoring kinds with canonical request schemas. Unknown operations and mismatched families reject.
+
+Omitting detail preserves earlier guides and full creative-code prompts. Request a shader/CSS/text effect kind with detail=full when writing executable effect source. contractVersion and schemaDigest cover static operation contracts only. Scoped discovery requires documentId, epoch, revision and slideId; its scope/ownership observation is revision-bound and must not be cached as document state by digest.
+
+Raw SDK tools/list retains the canonical nested operation shapes. The SDK adds top-level type=object to the union of request forms. This session cannot directly inspect host normalization internals; a host's unknown nested alternatives are not evidence that the server omitted the schema. Compact discovery is an independent usable path.
+
+## Accepted-state inspection
+
+showme.inspect requires documentId, epoch, revision and a target: deck, slide, elements, selection or assets. Selection additionally requires the observed uiEpoch. Notes, effect source, stylesheet, world transforms, Motion and Presence details are opt-in. Hidden text remains withheld unless requested.
+
+Elements expose owner, parent-local frame, hierarchy, appearance and content. Slide backgroundOwnership identifies inherited template ownership and suggests slide.make_independent. Template-owned content still rejects unauthorized edits. Timeline inspection exposes stable stage/block/track IDs; requested element Motion includes native tracks/blocks/keyframe IDs and Presence includes its block/stage IDs.
+
+## Semantic mutation
+
+showme.apply requires documentId, epoch, expectedRevision, mutationId and request-context slideId, plus exactly one form:
+
+- operations: 1-128 semantic operations on the inspected page. slide.create/duplicate may be first; following operations author the new page.
+- pages: 1-8 groups of {slideId, operations}, at most 128 operations and 128 affected elements total. A new group must begin with slide.create whose explicit id equals its group slideId. Existing groups target inspected pages. Deletion/duplication retain the single-page form.
+
+The request/source bridge budget remains 256 KiB; at most 32 renderer effect validations run per transaction. Later page groups see earlier staged layer/style/deck changes. Native semantic commands stage against a detached current document, then one EditorSession submits one transaction through the existing DocumentAuthority and durable recovery. A late failure commits no pages or deck changes. No separately committed writes are presented as atomic.
+
+Exact epoch/revision admission, ownership, assets, leases, cancellation and access generation checks apply to all pages. Human navigation and selection are not moved by construction. Agent history uses the existing mcp-local actor and preserves human history.
+
+Receipts contain historical revision/previousRevision/transactionId, mutationId, changed, replayed, created/changed/removed identities and created timeline IDs. slideId retains request context, duplicated explicitly as requestSlideId. authoredSlideIds identifies transaction page targets; createdSlideIds is authoritative for new pages. Page batches add per-page results. Replaying an identical mutationId returns the original historical transaction plus a separate currentObservation. That observation is not a guarantee that the next write will succeed. Reusing an ID for changed intent rejects. No-ops retain revision and have no transaction ID.
+
+Validation errors include bounded field paths/issues or operation stepIndex; page failures include pageIndex. Errors do not echo full requests or effect source.
+
+## Native timeline authoring
+
+Use Presence for lifecycle/entrances/exits and Motion for property values while present. Parent Frames animate grouped components with child geometry remaining parent-local.
+
+- presence.add accepts stageId or stageIndex, startOffsetMs, end and entrance/exit transitions. presence.update/remove target one blockId and preserve unrelated blocks.
+- motion.animate accepts numeric native/effect properties, delayMs, durationMs, named easing and stable stageId. motion.add_preset additionally accepts supported native settings: Move distance/cardinal direction, Scale/Pulse scale, Rotate angle/rotation direction, Fade opacity.
+- motion.block.update/remove targets blockId; update can revise delay, duration, easing and destination stageId.
+- timeline.stage.create returns a stable stage ID; timeline.stages.reorder requires all stage IDs exactly once and retains entry first. timeline.stage.remove accepts an empty click stage or explicit mergePrevious. Entry cannot be removed.
+- effect.schedule.set creates or edits the native trigger of an element/effect instance; effect.schedule.update targets its blockId. Start offset, native stops and progress easing remain separate from effect time and numeric Motion.
+
+Schedules keep current versions. Native validation rejects property conflicts, overlapping Presence intervals, deleted/foreign identities and stops referencing an earlier click. Presence slide-end supports Exit None only. Native non-click effect schedules have zero offset; use click start at entry for a delayed slide entrance. Stage-index inputs remain supported under exact revision checks; prefer stable IDs after reordering.
+
+## Text measurement and fit
+
+showme.measure_text requires documentId, epoch, revision and 1-64 items of text, width, optional authored height and typography. It awaits production managed fonts and DOM text layout, including explicit line breaks, without adding document state.
+
+Results retain width/height and add laid-out contentExtent, overflow against the authored box, requested family availability/source and fallback uncertainty. Managed and platform-loadable local families are distinguished. Exact fallback/glyph identity is not established and resolvedFamily is null. A failed local-family load reports unavailable to this renderer; it is not an inventory assertion about every OS face. Font-family lists remain uncertain. No width guessing or second layout engine is used.
+
+## Production preview and deterministic samples
+
+showme.preview requires exact documentId/epoch/revision/slideId and output width/height, each integer 1-2048. Omitted sample returns state=base, an explicitly unsampled authored composition.
+
+sample.mode=timeline supplies presentationOriginMs, activationMs, strictly increasing reached clickTimesMs, captureTimeMs, and optional explicit previousSlideId. Clicks must exist and occur after activation and no later than capture. Native playback navigation derives stages; paused production clocks freeze Motion, Presence, CSS effects, shaders, text workers and raster preparation independently of queue delay.
+
+finite-complete uses the same trace and an explicit reference captureTimeMs at or after known finite deadlines. It never invents future clicks or slide-end events. Unbounded effects are sampled at that reference time and have no promised final frame. This admission requirement is a deliberate refinement of the proposed implicit completion design: one coherent reference time avoids contradictory clocks.
+
+transition supplies distinct previousSlideId, elapsedMs and explicit incoming/outgoing traces sharing presentation origin and capture time. Incoming activation plus elapsedMs equals captureTimeMs, and incoming previousSlideId must identify the actual prior page. Both slides compose through the production audience transition hook. Backward/jump origins are explicit rather than inferred from ordering.
+
+samples requests 1-6 frames, at most 5 megapixels total, under the same cancellation/revision/access checks and native capture queue. Each frame returns image content and resolved metadata. Partial output is discarded on failure. Native capture acknowledgement and readiness checks remain required. Video is a static poster. Numerical shader tolerance is appropriate; cross-GPU byte identity and audience smoothness are not promised.
+
+Preview never navigates the human editor, advances real playback, persists sampled text, adds history or dirties a document.
+
+## Native delivery
+
+showme.deliver requires documentId, epoch, expectedRevision and action=save/save-as/package. It returns a structured written/cancelled result, actual accepted revision, format, destination, overwrite=native-policy and a separate current observation when available.
+
+Save uses an associated destination or native picker for an untitled document. Save As and SMP package export use existing native dialogs; a host may explicitly configure the existing SHOWME_DOCUMENT_DIR destination policy. Arbitrary model-provided filesystem paths, raw serialization and automatic overwrite outside native policy are unavailable.
+
+Delivery never flushes another actor's unaccepted drafts. Exact identity/revision/access/cancellation is checked inside the existing authority persistence lock, after any picker. The accepted snapshot is written by native storage/package services; saving adds no synthetic authoring revision/history. Later accepted edits remain dirty. Cancellation before persistence writes nothing. After admission, native durability may complete even if access changes; clients must refresh context instead of blindly overwriting/retrying.
+
+SME and SMP preserve native animation/effects. SMP is the initial export format. Static PDF/PPTX delivery is not exposed by this tool and must not be described as preserving arbitrary shader/CSS/JS playback.
+
+## Boundaries retained
+
+Transport loss after dispatch of workspace or delivery returns `OUTCOME_UNKNOWN`;
+the helper does not resend the operation. Read context and inspect the native
+library/destination before deliberately requesting new work. An explicit access
+rejection is returned unchanged without resending. Safe reads retain bounded
+rediscovery and apply retains native mutation-ID replay. This does not add durable
+workspace/delivery receipts or an exactly-once guarantee across process restart.
+
+One current document model, DocumentAuthority, renderer and persistence path. No raw DocumentOperation tool, direct document JSON writes, arbitrary JavaScript execution, filesystem browsing or Electron IPC passthrough. Managed assets are inspected/inserted by authorized asset IDs; importing new files remains a supported human/host workflow.
+
+## Reusable design and native workspace (1.7)
+
+`template.create` starts a batch and subsequent visual operations target its new template. Use the returned `createdTemplateIds`; `template.background.set` edits an existing explicitly targeted template. Inspect `deck.templates`, then inspect the template ID through slide/elements inspection. Apply templates through `slide.template.apply`. Editing their content updates dependent slides through native inheritance; inherited elements remain protected when targeting a slide. Template timelines and slide-only metadata are not accepted. Delete only unused non-default templates with `template.delete`.
+
+`text.style.define` creates or updates a named style directly by ID and typography. Names are unique ignoring case. Apply by stable style ID. Existing native overrides and clear-overrides remain available.
+
+`effect.resource.capture` names an existing instance's definition on its native page. `effect.resource.attach` creates another independent instance of that resource on the same page. `effect.resource.update` validates new source once and updates its users atomically, respecting editable scopes and native parameter Motion invariants. Sources remain page-owned; shared template elements provide cross-slide reuse. Opt into `includeEffectResources` on slide inspection to read page resources. Native per-page resource and per-element instance bounds remain in force.
+
+A reusable slide recipe is an ordinary authored slide. `slide.duplicate` accepts `textReplacements`, keyed by source slide-owned text element IDs. It preserves template/style references and native motion, returns cloned element `idMap`, and rejects a missing/non-text slot atomically. No parallel recipe schema is persisted.
+
+`budget: "expanded"` explicitly raises admission to 32 page groups, 256 semantic operations and 512 affected elements. Standard remains 8/128/128. Both enforce the native 256-operation transaction, 32 renderer validations and 256KiB transport bounds. Expanded limits do not guarantee that a complex semantic intent fits the native transaction; split coherent intents when necessary. New template groups, like new slide groups, start with their create operation and matching explicit ID.
+
+`showme.workspace` requires current documentId/epoch/expectedRevision and editing opt-in. Actions: create(name), open(optional path), close, import-assets(optional paths). Save before create/open/close; it never discards dirty content. Supplied paths must resolve inside the user-selected root, including symlink resolution. Omitted paths invoke native pickers. Create/open notify the existing editor and require a fresh context; the first observation can be loading. Open reuses an already loaded runtime. Close drains the native authority and closes the editor after its receipt. Import uses native managed storage and prepares raster dimensions when Electron decodes the image; unsupported metadata still needs native preparation before insertion. Library imports do not add an authoring revision and are not an atomic document transaction.
+
+CSS effects support scoped `@supports`, including privately scoped keyframes, in addition to `:scope` and `@keyframes`. Global/descendant selectors and other at-rules remain unsupported. There is no reduced-motion cap; ShowMe supplies the full authored clocks.
+
+
+## Diagnostics, receipts and native preparation (1.8)
+
+SDK input admission returns bounded structured INVALID_REQUEST errors (at most eight issues, 300-character paths and 200-character messages). Canonical Standard Schema JSON metadata remains unchanged in tools/list. SDK 2.3 converts schema failures to text-only results, so the adapter retains the canonical advertised schemas and validates through those same Zod schemas in the callback before bridge dispatch. Matching operation/form schemas supply field diagnostics; full request refinements remain authoritative. Unknown operations identify the type path. No input source is echoed.
+
+Workspace create/open return result.document (id, name, epoch, revision, savedRevision, dirty), initialPageIds.slides/templates, and readiness guidance. Authority readiness does not imply editor acknowledgement. Poll context until availability=ready and editor.documentId matches the receipt; replace the COMPLETE document identity after every open, including SMP's new native ID. Accepted dirty state, unaccepted editor work, focused editing and active leases block lifecycle switches. No draft is flushed. Native open/create recheck admission before activation; close rechecks after authority draining.
+
+For action=package, optional packageOptions requires both mediaLocked:boolean and speakerNotes:include/remove. Choices use the existing package writer and authority admission lock; omission preserves human native questions. Native destination/overwrite policy still applies. Explicit unattended choices return fontWarnings instead of opening informational font questions. They do not embed unavailable font licenses or alter source notes. Package options on save/save-as reject.
+
+Import uses production media enrichment in the isolated native runtime for raster, SVG and video, including browser orientation, dimensions, duration and prepared video posters. The isolated surface returns preparation data; native storage persists catalog/poster updates after admission. It has only scoped asset/font read IPC, no catalog write capability. Imported assets can outlive a failed request: result.atomic=false, result.items preserves indexed imported/failed/not-attempted receipts, preparation state, managed asset identity when available, and recovery errors. result.assets includes successful imports even if preparation failed. Retry only the indicated items. These are library operations, not atomic document transactions.
+
+Inspection adds slide.pageKind/displayName and element.ownerPageKind/inherited without changing native page ownership or the relative source field. Native templates retain ordinal labels; their display name includes label and authored ID. No new persisted naming field is introduced. slide.recipe.slots derives owned text IDs, element names and withheld-safe previews; inherited text is excluded. Native duplication preserves notes; use slide.update with notes to replace them.
+
+Apply receipts add authoredPages (id and slide/template kind) and resourceChanges (owning page, resource ID, created/changed/removed kind and current element users). Replays retain these historical changes. Resource capture removes its previous definition only if the renamed instance was its last user, preserving instance IDs and parameter Motion. effect.resource.prune removes other unused page definitions through native slide.effects.set and native animation validation. Referenced definitions are retained.
+
+Style-name collisions include conflictingStyle.id/name and remediation: reuse that ID or choose a unique name. Full native typography still owns its color; no separate color-role or global resource model is implied.
+
+Production static previews prepare native video posters before mounting/capture. Offscreen media preparation waits for a seek-completed drawable frame, avoiding black posters captured immediately at loadeddata. Video remains a static poster in sampled previews; no live playback performance claim follows.

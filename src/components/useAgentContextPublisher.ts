@@ -34,12 +34,43 @@ export function useMcpEnabled() {
   return enabled;
 }
 
+declare global {
+  interface Window {
+    agentWorkspaceIdle?: (documentId: string) => boolean;
+  }
+}
+
 export function useAgentContextPublisher(
   controller: ReturnType<typeof useEditorSession>,
   selection: CanvasSelection,
   workspace: ReturnType<typeof useMotionWorkspace>,
   mediaPreview: boolean,
 ) {
+  useEffect(() => {
+    const idle = (id: string) => {
+      const focused = document.activeElement;
+      return (
+        controller.snapshotRef.current?.deck.id === id &&
+        !controller.session.hasUnacceptedWork &&
+        !workspace.draft &&
+        !workspace.preview &&
+        !(
+          focused instanceof HTMLElement &&
+          (focused.isContentEditable ||
+            focused.matches("input,textarea,[role=textbox]"))
+        )
+      );
+    };
+    window.agentWorkspaceIdle = idle;
+    return () => {
+      if (window.agentWorkspaceIdle === idle) delete window.agentWorkspaceIdle;
+    };
+  }, [
+    controller.session,
+    controller.snapshotRef,
+    workspace.draft,
+    workspace.preview,
+  ]);
   const enabled = useMcpEnabled();
   const current = controller.snapshot;
   const documentId = current?.deck.id;

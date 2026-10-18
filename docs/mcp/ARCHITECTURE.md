@@ -506,6 +506,10 @@ hot-path work without introducing a second transport.
 
 ## Renderer services
 
+The fixed `slidePreviewStartup` entry-point registry includes batch measurement
+and effect validation. The agent surface awaits an installation handshake before
+reporting ready. Context observes service state without creating a surface.
+
 Renderer-dependent agent work is split into two logical services while reusing
 ShowMe's production renderer code:
 
@@ -582,3 +586,14 @@ layout. It does not mutate the document.
 validation, exact revision check, actor separation, leases, detached staging and
 single durable transaction remain unchanged. A late invalid operation rejects the
 whole batch.
+
+## Reusable authoring and workspace
+
+Version 1.7 exposes editable native template projections through the existing actor session. Page groups stage slides and templates against the full detached candidate, derive native scopes against the full accepted document, and commit once. Shared effect definitions remain native page resources; inheritance composes template resources at render time. Recipes duplicate native slides and substitute declared text slots. Neither introduces a persisted schema.
+
+Workspace is a separate native lifecycle/library service with exact current identity, access and cancellation admission. It reuses document storage, activation notifications and close coordination. Save precedes switching/closing; imports prepare raster metadata through nativeImage and update the existing asset catalog. Library imports are distinct from atomic document edits. Context advertises standard/expanded budgets and supported CSS rules.
+
+
+### 1.8 boundary refinements
+
+The SDK adapter exposes canonical JSON Schema metadata while returning structured canonical-Zod admission failures before bridge dispatch. Native workspace receipts distinguish authority identity from editor readiness. Lifecycle activation checks renderer-local work and native leases without flushing drafts. Typed package choices feed the existing native service and snapshot lock. Production media enrichment executes in the isolated runtime; only main-process native storage persists metadata/posters. Resource pruning uses native effects operations and retains parameter Motion bindings. These changes add no document format, authority, renderer or persistence path.

@@ -2,8 +2,11 @@ import { z } from "zod/v4";
 import { agentApplyRequestSchema } from "./agentMutation";
 import { agentAuthoringRequestSchema } from "./agentAuthoring";
 import { agentMeasureTextRequestSchema } from "./agentTextMeasure";
+import { agentPreviewRequestSchema } from "./agentPreview";
+import { agentWorkspaceRequestSchema } from "./agentWorkspace";
+import { agentDeliveryRequestSchema } from "./agentDelivery";
 
-export const SHOWME_MCP_SERVER_VERSION = "1.3.0" as const;
+export const SHOWME_MCP_SERVER_VERSION = "1.8.0" as const;
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const scope = {
@@ -26,6 +29,7 @@ export const agentInspectRequestSchema = z
       z
         .object({
           type: z.literal("slide"),
+          includeEffectResources: z.boolean().optional(),
           slideId: id,
           ...hidden,
           includeNotes: z.boolean().optional(),
@@ -66,15 +70,20 @@ export const agentInspectRequestSchema = z
   })
   .strict();
 export type AgentInspectRequest = z.infer<typeof agentInspectRequestSchema>;
-export const agentPreviewInputSchema = z
-  .object({
-    ...scope,
-    slideId: id,
-    width: z.number().int().min(1).max(2048),
-    height: z.number().int().min(1).max(2048),
-  })
-  .strict();
+export const agentPreviewInputSchema = agentPreviewRequestSchema;
 export const agentBridgeRequestSchema = z.discriminatedUnion("command", [
+  z
+    .object({
+      command: z.literal("workspace"),
+      params: agentWorkspaceRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal("deliver"),
+      params: agentDeliveryRequestSchema,
+    })
+    .strict(),
   z
     .object({ command: z.literal("apply"), params: agentApplyRequestSchema })
     .strict(),

@@ -35,8 +35,11 @@ import type {
   AgentPreviewResult,
 } from "../../src/core/agentPreview";
 import { readyEditor } from "../helpers/startup";
+import { addPresence, editPresenceSchedule } from "../../src/core/presence";
+import { addParameterAnimation } from "../../src/core/motion";
+import { effectProperty } from "../../src/core/effects";
 
-async function launch() {
+async function launch(sampled = false) {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-agent-preview-"));
   const root = path.join(folder, "root"),
     user = path.join(folder, "user");
@@ -147,6 +150,81 @@ async function launch() {
     },
     bad: { ...blankEffect("shader"), source: "PRIVATE_INVALID_SHADER_SOURCE" },
   };
+  if (sampled) {
+    slide.motion = addPresence(undefined, 0, ["group"], {
+      kind: "fade",
+      durationMs: 400,
+      easing: "linear",
+    });
+    slide.motion = editPresenceSchedule(
+      slide.motion,
+      0,
+      slide.motion.stages[0].blocks![0].id,
+      (schedule) => {
+        schedule.startOffsetMs = 100;
+      },
+    );
+    slide.motion = addParameterAnimation(
+      slide.motion,
+      0,
+      "shader",
+      "transform.x",
+      "Move",
+      250,
+      350,
+      800,
+      true,
+    );
+    slide.effectResources.shader.source =
+      "#version 300 es\nprecision highp float;\nuniform float u_t; uniform float gain; // @param 0 [0, 1]\nin vec2 v_uv; out vec4 outColor;\nvoid main() { outColor = vec4(0.0, gain, min(0.5 + u_t * 0.5, 1.0), 1.0); }";
+    slide.effectResources.shader.parameters = [{ type: "number", key: "gain", label: "Gain", default: 0, min: 0, max: 1 }];
+    shader.effects![0].parameters.gain = 0;
+    slide.motion = addParameterAnimation(slide.motion, 0, "shader", effectProperty("shader-instance", "gain"), "GLSL parameter", 0, 1, 1000, true);
+    slide.effectResources.css = {
+      ...blankEffect("css-js"),
+      source:
+        ":scope { animation: sampled 1s linear both; } @keyframes sampled { from { opacity: 0; } to { opacity: 1; } }",
+      timeControl: {
+        start: "slide",
+        stop: { mode: "after", durationMs: 1000 },
+      },
+    };
+    slide.effectResources.counter = {
+      ...blankEffect("css-js"),
+      kind: "text-js",
+      target: "text",
+      source: "function render({ t }) { return String(Math.round(t * 100)); }",
+      timeControl: {
+        start: "slide",
+        stop: { mode: "after", durationMs: 1000 },
+      },
+    };
+    text.effects = [
+      {
+        id: "counter",
+        resourceId: "counter",
+        enabled: true,
+        placement: "content",
+        parameters: {},
+      },
+    ];
+    const next = structuredClone(slide);
+    next.id = "sample-next";
+    next.nodes.forEach((root) => {
+      root.children = [];
+    });
+    delete next.motion;
+    delete next.effectResources;
+    next.background = "#FF4D16";
+    model.slides[next.id] = next;
+    model.deck.slideIds.push(next.id);
+    model.deck.slideMeta[next.id] = {
+      ...model.deck.slideMeta[slide.id],
+      name: "Transition target",
+      templateId: null,
+      transition: { kind: "fade", durationMs: 1000, easing: "linear" },
+    };
+  }
   slide.notes = "PRIVATE_SPEAKER_NOTES";
   const file = path.join(root, "Preview.sme");
   await writeFile(
@@ -213,6 +291,159 @@ function code(result: AgentPreviewResult) {
   expect(result).not.toHaveProperty("pngDataUrl");
   return result.error.code;
 }
+
+test("native sampled previews freeze delayed Presence Motion CSS GLSL and text-worker output at requested clocks", async () => {
+  const { app, page, folder, documentId } = await launch(true);
+  try {
+    await page.evaluate(() => window.desktop!.setMcpEnabled!(true));
+    const request = await requestFor(page, documentId);
+    const before = await page.evaluate(
+      (id) => window.desktop!.documentProjection!(id),
+      documentId,
+    );
+    // Install an observer only; capture still runs through the native production service.
+    expect((await capture(page, request)).ok).toBe(true);
+    const preview = app
+      .windows()
+      .find((surface) => surface.url().includes("slidePreview=1"))!;
+    await preview.evaluate(() => {
+      const clear = window.clearSlidePreview!;
+      window.clearSlidePreview = () => {
+        Object.assign(window, {
+          sampledCounterText: document.querySelector('[data-element-id="text"]')
+            ?.textContent,
+        });
+        clear();
+      };
+    });
+    const images: Buffer[] = [];
+    for (const time of [0, 300, 1000, 300]) {
+      const result = await capture(page, {
+        ...request,
+        sample: {
+          mode: "timeline",
+          presentationOriginMs: 0,
+          activationMs: 0,
+          clickTimesMs: [],
+          captureTimeMs: time,
+        },
+      });
+      if (!result.ok) throw new Error(JSON.stringify(result.error));
+      expect(result).toMatchObject({
+        state: "sampled",
+        sample: {
+          stageIndex: 0,
+          stageTimeMs: time,
+          clocks: { slideTime: time / 1000 },
+        },
+      });
+      expect(
+        result.warnings
+          .filter(({ code }) => code === "EFFECT_FALLBACK")
+          .flatMap(({ effectInstanceIds }) => effectInstanceIds ?? []),
+      ).toEqual(["bad-instance"]);
+      images.push(
+        await sharp(Buffer.from(result.pngDataUrl.split(",")[1], "base64"))
+          .ensureAlpha()
+          .raw()
+          .toBuffer(),
+      );
+      expect(
+        await preview.evaluate(
+          () =>
+            (window as unknown as { sampledCounterText: string })
+              .sampledCounterText,
+        ),
+      ).toContain(String(Math.min(time, 1000) / 10));
+    }
+    expect(images[0].equals(images[1])).toBe(false);
+    expect(images[1].equals(images[2])).toBe(false);
+    // Same-machine shader tolerance; no cross-GPU byte identity claim.
+    expect(
+      images[1].every(
+        (value, index) => Math.abs(value - images[3][index]) <= 1,
+      ),
+    ).toBe(true);
+    const pixel = (frame: number, x: number, y: number) => [
+      ...images[frame].subarray((y * 320 + x) * 4, (y * 320 + x) * 4 + 4),
+    ];
+    expect(pixel(0, 40, 45)).toEqual([17, 34, 51, 255]);
+    expect(pixel(2, 40, 45)).toEqual([255, 0, 0, 255]);
+    expect(
+      pixel(1, 160, 45).every(
+        (value, index) => Math.abs(value - [0, 77, 166, 255][index]) <= 1,
+      ),
+    ).toBe(true);
+    expect(pixel(2, 190, 45)).toEqual([0, 255, 255, 255]);
+    expect(
+      await page.evaluate(
+        (id) => window.desktop!.documentProjection!(id),
+        documentId,
+      ),
+    ).toEqual(before);
+  } finally {
+    await close(app, folder);
+  }
+});
+
+test("native transition sampling composes previous and next slides before midway and after a fade", async () => {
+  const { app, page, folder, documentId } = await launch(true);
+  try {
+    await page.evaluate(() => window.desktop!.setMcpEnabled!(true));
+    const request = await requestFor(page, documentId);
+    for (const [elapsed, expected] of [
+      [0, [17, 34, 51]],
+      [500, [136, 56, 37]],
+      [1000, [255, 77, 22]],
+    ] as const) {
+      const result = await capture(page, {
+        ...request,
+        slideId: "sample-next",
+        sample: {
+          mode: "transition",
+          previousSlideId: request.slideId,
+          elapsedMs: elapsed,
+          incoming: {
+            presentationOriginMs: 0,
+            activationMs: 1000,
+            clickTimesMs: [],
+            captureTimeMs: 1000 + elapsed,
+            previousSlideId: request.slideId,
+          },
+          outgoing: {
+            presentationOriginMs: 0,
+            activationMs: 0,
+            clickTimesMs: [],
+            captureTimeMs: 1000 + elapsed,
+          },
+        },
+      });
+      if (!result.ok) throw new Error(JSON.stringify(result.error));
+      expect(result).toMatchObject({
+        state: "sampled",
+        sample: {
+          mode: "transition",
+          elapsedMs: elapsed,
+          previousSlideId: request.slideId,
+        },
+      });
+      const bytes = await sharp(
+        Buffer.from(result.pngDataUrl.split(",")[1], "base64"),
+      )
+        .ensureAlpha()
+        .raw()
+        .toBuffer();
+      const pixel = [
+        ...bytes.subarray((5 * 320 + 5) * 4, (5 * 320 + 5) * 4 + 3),
+      ];
+      expect(
+        pixel.every((value, index) => Math.abs(value - expected[index]) <= 1),
+      ).toBe(true);
+    }
+  } finally {
+    await close(app, folder);
+  }
+});
 
 test("HTTP disconnect and MCP opt-out abort native preview work and release the capture queue", async () => {
   const { app, page, folder, documentId } = await launch();
@@ -444,7 +675,7 @@ test("native preview waits for surface readiness and discards revoked or stale i
     await page.evaluate(() => window.desktop!.setMcpEnabled!(true));
     const request = await requestFor(page, documentId);
     expect((await capture(page, request)).ok).toBe(true);
-    const preview = app
+    let preview = app
       .windows()
       .find((value) => value.url().includes("slidePreview=1"))!;
     // Model an Effect surface whose preparation completes after initial layout.
@@ -513,17 +744,19 @@ test("native preview waits for surface readiness and discards revoked or stale i
           ).readinessResult,
       ),
     ).toMatchObject({ ok: true });
-    await preview.evaluate(() => {
-      const compose = window.composeSlidePreview!;
-      Object.assign(window, { previewEntered: false, releasePreview: null });
-      window.composeSlidePreview = async (...args) => {
-        Object.assign(window, { previewEntered: true });
-        await new Promise<void>((resolve) =>
-          Object.assign(window, { releasePreview: resolve }),
-        );
-        return compose(...args);
-      };
-    });
+    const holdComposition = () =>
+      preview.evaluate(() => {
+        const compose = window.composeSlidePreview!;
+        Object.assign(window, { previewEntered: false, releasePreview: null });
+        window.composeSlidePreview = async (...args) => {
+          Object.assign(window, { previewEntered: true });
+          await new Promise<void>((resolve) =>
+            Object.assign(window, { releasePreview: resolve }),
+          );
+          return compose(...args);
+        };
+      });
+    await holdComposition();
     const begin = async () => {
       await preview.evaluate(() =>
         Object.assign(window, { previewEntered: false }),
@@ -543,9 +776,12 @@ test("native preview waits for surface readiness and discards revoked or stale i
         .toBe(true);
     };
     const finish = async () => {
-      await preview.evaluate(() =>
-        (window as unknown as { releasePreview: () => void }).releasePreview(),
-      );
+      if (!preview.isClosed())
+        await preview.evaluate(() =>
+          (
+            window as unknown as { releasePreview: () => void }
+          ).releasePreview(),
+        );
       return page.evaluate(
         () =>
           (window as unknown as { pendingPreview: Promise<AgentPreviewResult> })
@@ -557,7 +793,16 @@ test("native preview waits for surface readiness and discards revoked or stale i
       await window.desktop!.setMcpEnabled!(false);
       await window.desktop!.setMcpEnabled!(true);
     });
-    expect(code(await finish())).toBe("MCP_ACCESS_CHANGED");
+    const revoked = await finish();
+    expect(["MCP_DISABLED", "MCP_ACCESS_CHANGED"]).toContain(code(revoked));
+    expect(preview.isClosed()).toBe(true);
+    expect((await capture(page, request)).ok).toBe(true);
+    preview = app
+      .windows()
+      .find(
+        (value) => value.url().includes("slidePreview=1") && !value.isClosed(),
+      )!;
+    await holdComposition();
     await begin();
     await page.evaluate(async (id) => {
       const api = window.desktop!,

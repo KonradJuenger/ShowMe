@@ -258,6 +258,7 @@ it("projects ordered deck metadata without unavailable counts or document bodies
       height: 1080,
       slideCount: 2,
       hasStylesheet: true,
+      templates: [{ id: "template", label: "A" }],
       transitionDefaults: DEFAULT_TRANSITION,
       slides: [
         {
@@ -392,6 +393,13 @@ it("preserves template ownership and composed background without treating inheri
   const projection = fixture();
   const result = projectAgentSlide(projection);
   expect(result.slide).toEqual({
+    pageKind: "slide",
+    displayName: "Results",
+    backgroundOwnership: {
+      source: "template",
+      ownerPageId: "template",
+      suggestedOperation: "slide.make_independent",
+    },
     id: "slide",
     index: 1,
     name: "Results",
@@ -455,9 +463,9 @@ it("withholds notes by default and returns them only on explicit inspection", ()
   const sparse = projectAgentSlide(projection);
   expect(sparse.slide.notesLength).toBe("PRIVATE_SPEAKER_NOTES".length);
   expect(sparse.slide).not.toHaveProperty("notes");
-  expect(projectAgentSlide(projection, { includeNotes: true }).slide.notes).toBe(
-    "PRIVATE_SPEAKER_NOTES",
-  );
+  expect(
+    projectAgentSlide(projection, { includeNotes: true }).slide.notes,
+  ).toBe("PRIVATE_SPEAKER_NOTES");
 });
 
 it("withholds hidden content by default while exposing structural state and locked visible content", () => {
@@ -765,5 +773,24 @@ it("keeps default payload independent of full Effect source and text beyond the 
   expect(normalized).toEqual(small);
   expect(JSON.stringify(projectAgentElements(long, ["title"]))).not.toContain(
     "L".repeat(100),
+  );
+});
+
+it("template inspection identifies its page kind and exposes only owned recipe text slots", () => {
+  const p = fixture();
+  const templateId = p.deck.templateIds[0];
+  const template = p.templates![templateId];
+  const result = projectAgentSlide({ ...p, slide: { ...template, notes: "" } });
+  expect(result.slide).toMatchObject({
+    pageKind: "template",
+    displayName: expect.stringContaining(templateId),
+  });
+  expect(
+    result.elements.every(
+      (e) => e.ownerPageKind === "template" && !e.inherited,
+    ),
+  ).toBe(true);
+  expect(result.recipe.slots.map((s) => s.elementId)).toEqual(
+    result.elements.filter((e) => e.contentType === "text").map((e) => e.id),
   );
 });

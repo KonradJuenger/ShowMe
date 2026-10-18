@@ -9,7 +9,10 @@ const agentTextTypographyPatchSchema = z
     fontWeight: z.number().int().min(100).max(900).optional(),
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
-    color: z.string().regex(/^#[a-fA-F0-9]{6}$/).optional(),
+    color: z
+      .string()
+      .regex(/^#[a-fA-F0-9]{6}$/)
+      .optional(),
     align: z.enum(["left", "center", "right"]).optional(),
     verticalAlign: z.enum(["top", "middle", "bottom"]).optional(),
     lineHeight: number.min(0.5).max(5).optional(),
@@ -21,6 +24,7 @@ export const agentTextMeasureItemSchema = z
   .object({
     text: z.string().max(100000),
     width: number.positive().max(100000),
+    height: number.positive().max(100000).optional(),
     typography: agentTextTypographyPatchSchema.optional(),
   })
   .strict();
@@ -35,6 +39,19 @@ export const agentMeasureTextRequestSchema = z
   .strict();
 
 export type AgentTextMeasureItem = z.infer<typeof agentTextMeasureItemSchema>;
+export interface AgentTextFitMeasurement {
+  width: number;
+  height: number;
+  contentExtent?: { width: number; height: number };
+  overflow?: { horizontal: boolean; vertical: boolean };
+  font?: {
+    requested: string;
+    availability: "available" | "unavailable" | "unknown";
+    source: "managed" | "platform" | "generic" | "unknown";
+    fallback: "possible" | "unknown";
+    resolvedFamily: null;
+  };
+}
 export type AgentMeasureTextRequest = z.infer<
   typeof agentMeasureTextRequestSchema
 >;

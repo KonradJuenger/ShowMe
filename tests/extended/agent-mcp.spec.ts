@@ -19,13 +19,16 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
-import { managedFilename } from "../../electron/mediaLibrary";
 import { newPresentationDocument } from "../../src/core/document";
 import { createTextElement } from "../../src/core/text";
 import { readyEditor } from "../helpers/startup";
 import { bridgeRead, ShowMeClient } from "../../mcp/showmeClient";
 import type { BridgeDescriptor } from "../../electron/agentBridge";
 import type { AgentContext } from "../../src/core/agentContext";
+import { DocumentStorage } from "../../electron/storage";
+import { z } from "zod/v4";
+import { agentApplyRequestSchema } from "../../src/core/agentMutation";
+import { SHOWME_MCP_SERVER_VERSION } from "../../src/core/agentRead";
 
 const helperPath = () =>
   path.resolve(process.env.SHOWME_MCP_HELPER ?? "dist-electron/showme-mcp.cjs");
@@ -116,6 +119,357 @@ async function context(client: Client): Promise<AgentContext> {
   return (result.structuredContent as { data: AgentContext }).data;
 }
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires fixture destructuring to access testInfo.
+test("raw SDK tools list retains canonical operation schemas", async ({}, testInfo) => {
+  const f = await fixture();
+  const { client } = await connect(f.user, f.folder);
+  try {
+    const catalog = await client.listTools();
+    const raw = catalog.tools.find((tool) => tool.name === "showme.apply")!;
+    expect(raw.inputSchema).toEqual({
+      ...z.toJSONSchema(agentApplyRequestSchema),
+      type: "object",
+    });
+    const bytes = Buffer.byteLength(JSON.stringify(raw.inputSchema));
+    await writeFile(
+      testInfo.outputPath("tools-list.json"),
+      JSON.stringify(catalog, null, 2),
+    );
+    await testInfo.attach("schema-size", {
+      body: `${bytes} bytes`,
+      contentType: "text/plain",
+    });
+  } finally {
+    await client.close();
+    await rm(f.folder, { recursive: true, force: true });
+  }
+});
+
+async function coldRuntime(first: "measure" | "shader" | "css" | "text-js") {
+  const f = await fixture();
+  let app: ElectronApplication | undefined, client: Client | undefined;
+  try {
+    const launched = await launch(f.user, f.file);
+    app = launched.app;
+    await launched.page.evaluate(async () => {
+      await window.desktop!.setMcpEnabled!(true);
+      await window.desktop!.setMcpEditingEnabled!(true);
+    });
+    client = (await connect(f.user, f.folder)).client;
+    const initial = await context(client);
+    // Startup thumbnails may have their own surface; no agent runtime request has run.
+    const existingSurfaces = new Set(app.windows());
+    const identity = {
+      documentId: initial.document!.id,
+      epoch: initial.document!.epoch,
+    };
+    const request =
+      first === "measure"
+        ? {
+            name: "showme.measure_text",
+            arguments: {
+              ...identity,
+              revision: initial.document!.revision,
+              items: [{ text: "Cold production layout", width: 400 }],
+            },
+          }
+        : {
+            name: "showme.apply",
+            arguments: {
+              ...identity,
+              expectedRevision: initial.document!.revision,
+              mutationId: `cold-${first}`,
+              slideId: initial.editor!.page.id,
+              operations: [
+                {
+                  type: "effect.apply_code",
+                  elementId: "title",
+                  name: "Cold effect",
+                  effectType: first,
+                  affects:
+                    first === "shader"
+                      ? "generated"
+                      : first === "css"
+                        ? "element"
+                        : "text",
+                  source:
+                    first === "shader"
+                      ? "#version 300 es\nprecision highp float;\nin vec2 v_uv; out vec4 outColor;\nvoid main() { outColor = vec4(1.0, 0.2, 0.0, 1.0); }"
+                      : first === "css"
+                        ? ":scope { opacity: 0.9; }"
+                        : "function render({ text }) { return text.toUpperCase(); }",
+                },
+              ],
+            },
+          };
+    const result = await client.callTool(request);
+    expect(result.isError, JSON.stringify(result)).toBe(false);
+    const after = await context(client);
+    expect(after.editor!.page).toEqual(initial.editor!.page);
+    expect(after.editor!.selectionIds).toEqual(initial.editor!.selectionIds);
+    if (first === "measure") {
+      expect(result.structuredContent).toMatchObject({
+        ok: true,
+        measurements: [
+          { width: expect.any(Number), height: expect.any(Number) },
+        ],
+      });
+      expect(after.document!.revision).toBe(initial.document!.revision);
+    }
+    const runtime = app
+      .windows()
+      .find(
+        (page) =>
+          page.url().includes("slidePreview=1") && !existingSurfaces.has(page),
+      )!;
+    await runtime.close();
+    const next = await client.callTool({
+      name: "showme.measure_text",
+      arguments: {
+        ...identity,
+        revision: after.document!.revision,
+        items: [{ text: "Recovered layout", width: 400 }],
+      },
+    });
+    expect(next.isError, JSON.stringify(next.structuredContent)).toBe(false);
+  } finally {
+    await client?.close();
+    await close(app);
+    await rm(f.folder, { recursive: true, force: true });
+  }
+}
+
+test("cold runtime measures text without insertion or preview and recovers after renderer loss", async () => {
+  await coldRuntime("measure");
+});
+test("cold runtime validates shader as its first renderer mutation", async () => {
+  await coldRuntime("shader");
+});
+test("cold runtime validates CSS as its first renderer mutation", async () => {
+  await coldRuntime("css");
+});
+test("cold runtime validates text-JS as its first renderer mutation", async () => {
+  await coldRuntime("text-js");
+});
+
+// eslint-disable-next-line no-empty-pattern -- Playwright requires fixture destructuring to access testInfo.
+test("MCP page batching and font fit feedback use the native document and layout services", async ({}, testInfo) => {
+  const f = await fixture();
+  let app: ElectronApplication | undefined, client: Client | undefined;
+  try {
+    const launched = await launch(f.user, f.file);
+    app = launched.app;
+    await launched.page.evaluate(async () => {
+      await window.desktop!.setMcpEnabled!(true);
+      await window.desktop!.setMcpEditingEnabled!(true);
+    });
+    client = (await connect(f.user, f.folder)).client;
+    const initial = await context(client);
+    const identity = {
+      documentId: initial.document!.id,
+      epoch: initial.document!.epoch,
+    };
+    const measured = await client.callTool({
+      name: "showme.measure_text",
+      arguments: {
+        ...identity,
+        revision: initial.document!.revision,
+        items: [
+          {
+            text: "First line\nSecond line",
+            width: 200,
+            height: 10,
+            typography: { fontFamily: "Arial", fontSize: 32 },
+          },
+          {
+            text: "Fallback",
+            width: 200,
+            typography: { fontFamily: "ShowMe-Missing-Font-829148" },
+          },
+        ],
+      },
+    });
+    expect(measured.isError, JSON.stringify(measured.structuredContent)).toBe(
+      false,
+    );
+    expect(measured.structuredContent).toMatchObject({
+      measurements: [
+        {
+          overflow: { vertical: true },
+          font: {
+            availability: "available",
+            source: "platform",
+            resolvedFamily: null,
+          },
+        },
+        {
+          font: {
+            availability: "unavailable",
+            fallback: "possible",
+            resolvedFamily: null,
+          },
+        },
+      ],
+    });
+    const discovery: Record<string, number> = {};
+    for (const family of [
+      "slide",
+      "deck",
+      "element",
+      "motion",
+      "presence",
+      "effect",
+      "timeline",
+    ]) {
+      const result = await client.callTool({
+        name: "showme.authoring",
+        arguments: { kind: "operations", family, detail: "compact" },
+      });
+      expect(result.isError, JSON.stringify(result)).toBe(false);
+      discovery[family] = Buffer.byteLength(
+        JSON.stringify(result.structuredContent),
+      );
+    }
+    const full = await client.callTool({
+      name: "showme.authoring",
+      arguments: { kind: "background-shader", detail: "full" },
+    });
+    discovery.fullShaderPrompt = Buffer.byteLength(
+      JSON.stringify(full.structuredContent),
+    );
+    await testInfo.attach("discovery-bytes", {
+      body: JSON.stringify(discovery),
+      contentType: "application/json",
+    });
+    await writeFile(
+      testInfo.outputPath("discovery-bytes.json"),
+      JSON.stringify(discovery),
+    );
+    const outline = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        ...identity,
+        revision: 0,
+        target: { type: "slide", slideId: initial.editor!.page.id },
+      },
+    });
+    const parentId = (outline.structuredContent as any).data.layers[0].id;
+    const request = {
+      ...identity,
+      expectedRevision: 0,
+      mutationId: "native-pages",
+      slideId: initial.editor!.page.id,
+      pages: Array.from({ length: 7 }, (_, index) => ({
+        slideId: `native-page-${index}`,
+        operations: [
+          {
+            type: "slide.create",
+            id: `native-page-${index}`,
+            afterId: index
+              ? `native-page-${index - 1}`
+              : initial.editor!.page.id,
+            name: `Native page ${index}`,
+          },
+          {
+            type: "element.insert_text",
+            id: `native-copy-${index}`,
+            parentId,
+            frame: { x: 80, y: 100, width: 800, height: 100 },
+            text: `Native page ${index}`,
+          },
+        ],
+      })),
+    };
+    const started = performance.now();
+    const result = await client.callTool({
+      name: "showme.apply",
+      arguments: request,
+    });
+    expect(result.isError, JSON.stringify(result)).toBe(false);
+    expect(result.structuredContent).toMatchObject({
+      revision: 1,
+      createdSlideIds: request.pages.map(({ slideId }) => slideId),
+      pageResults: expect.any(Array),
+    });
+    await testInfo.attach("page-batch", {
+      body: JSON.stringify({
+        elapsedMs: performance.now() - started,
+        requestBytes: Buffer.byteLength(JSON.stringify(request)),
+        pages: 7,
+        calls: 1,
+      }),
+      contentType: "application/json",
+    });
+    expect((await context(client)).editor!.page).toEqual(initial.editor!.page);
+    const replay = await client.callTool({
+      name: "showme.apply",
+      arguments: request,
+    });
+    expect(replay.structuredContent).toMatchObject({
+      replayed: true,
+      revision: 1,
+      currentObservation: { revision: 1 },
+    });
+    expect(
+      (
+        await client.callTool({
+          name: "showme.deliver",
+          arguments: { ...identity, expectedRevision: 0, action: "save" },
+        })
+      ).structuredContent,
+    ).toMatchObject({ error: { code: "REVISION_CONFLICT" } });
+    const saved = await client.callTool({
+      name: "showme.deliver",
+      arguments: { ...identity, expectedRevision: 1, action: "save" },
+    });
+    expect(saved.isError, JSON.stringify(saved.structuredContent)).toBe(false);
+    expect(saved.structuredContent).toMatchObject({
+      ok: true,
+      data: {
+        revision: 1,
+        written: true,
+        cancelled: false,
+        destination: f.file,
+        format: "sme",
+        preservesAnimation: true,
+        overwritten: true,
+      },
+    });
+    await expect
+      .poll(async () => (await context(client!)).editor?.page.id)
+      .toBe(initial.editor!.page.id);
+    expect((await context(client)).editor!.selectionIds).toEqual(
+      initial.editor!.selectionIds,
+    );
+    await close(app);
+    const reopened = await launch(f.user, f.file);
+    app = reopened.app;
+    const fresh = await context(client);
+    expect(fresh.document!.dirty).toBe(false);
+    const deck = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: fresh.document!.id,
+        epoch: fresh.document!.epoch,
+        revision: fresh.document!.revision,
+        target: { type: "deck" },
+      },
+    });
+    expect(
+      (deck.structuredContent as any).data.deck.slides.map(
+        ({ id }: { id: string }) => id,
+      ),
+    ).toEqual([
+      initial.editor!.page.id,
+      ...request.pages.map(({ slideId }) => slideId),
+    ]);
+  } finally {
+    await client?.close();
+    await close(app);
+    await rm(f.folder, { recursive: true, force: true });
+  }
+});
+
 test("MCP builds multiple styled slides with production text measurement and real pixels after capture resizing", async () => {
   const f = await fixture();
   const mediaBytes = await sharp({
@@ -129,18 +483,30 @@ test("MCP builds multiple styled slides with production text measurement and rea
     .png()
     .toBuffer();
   const mediaId = createHash("sha256").update(mediaBytes).digest("hex");
-  const mediaDir = path.join(f.root, "ShowMe Library", "images");
-  await mkdir(mediaDir, { recursive: true });
-  await writeFile(
-    path.join(mediaDir, managedFilename("mcp-sample.png", mediaId)),
+  const fixtureStorage = new DocumentStorage(
+    path.join(f.root, "ShowMe Library"),
+    path.join(f.folder, "fixture-cache"),
+    "keep-all",
+  );
+  await fixtureStorage.init();
+  const imported = await fixtureStorage.importAssetData(
+    "mcp-sample.png",
     mediaBytes,
   );
+  await fixtureStorage.updateAsset({ ...imported, width: 64, height: 64 });
+  await fixtureStorage.dispose();
 
   let app: ElectronApplication | undefined, client: Client | undefined;
   try {
     const launched = await launch(f.user, f.file);
     app = launched.app;
     const page = launched.page;
+    // Dimensions are runtime-derived metadata, not persisted by updateAsset across
+    // storage instances. Model the native imported-media enrichment in this host.
+    await page.evaluate(async (assetId) => {
+      const asset = await window.desktop!.getAsset(assetId);
+      await window.desktop!.updateAsset({ ...asset, width: 64, height: 64 });
+    }, mediaId);
     client = (await connect(f.user, f.folder)).client;
     await page.evaluate(async () => {
       await window.desktop!.setMcpEnabled!(true);
@@ -156,7 +522,9 @@ test("MCP builds multiple styled slides with production text measurement and rea
         target: { type: "assets", query: "mcp-sample", limit: 10 },
       },
     });
-    expect(assets.isError, JSON.stringify(assets.structuredContent)).toBe(false);
+    expect(assets.isError, JSON.stringify(assets.structuredContent)).toBe(
+      false,
+    );
     expect(assets.structuredContent).toMatchObject({
       data: {
         assets: {
@@ -190,9 +558,7 @@ test("MCP builds multiple styled slides with production text measurement and rea
           operations,
         },
       });
-      expect(result.isError, JSON.stringify(result.structuredContent)).toBe(
-        false,
-      );
+      expect(result.isError, JSON.stringify(result)).toBe(false);
       return result.structuredContent as any;
     };
     const anchor = initial.editor!.page.id;
@@ -320,9 +686,7 @@ test("MCP builds multiple styled slides with production text measurement and rea
           height,
         },
       });
-      expect(result.isError, JSON.stringify(result.structuredContent)).toBe(
-        false,
-      );
+      expect(result.isError, JSON.stringify(result)).toBe(false);
       const image = result.content.find((item) => item.type === "image");
       if (!image || image.type !== "image")
         throw new Error("Missing preview image");
@@ -552,7 +916,11 @@ test("MCP builds multiple styled slides with production text measurement and rea
       ]),
     });
 
-    const cardIds = ["dashboard-card-a", "dashboard-card-b", "dashboard-card-c"];
+    const cardIds = [
+      "dashboard-card-a",
+      "dashboard-card-b",
+      "dashboard-card-c",
+    ];
     const cardInspection = await client.callTool({
       name: "showme.inspect",
       arguments: {
@@ -562,10 +930,7 @@ test("MCP builds multiple styled slides with production text measurement and rea
         target: {
           type: "elements",
           slideId: dashboardId,
-          elementIds: [
-            ...cardIds,
-            ...cardIds.map((id) => `${id}-label`),
-          ],
+          elementIds: [...cardIds, ...cardIds.map((id) => `${id}-label`)],
           includeMotion: true,
           includePresence: true,
         },
@@ -716,7 +1081,7 @@ test("local opt-in enables atomic MCP editing with production text sizing explic
           type: "element.insert_text",
           parentId: root,
           frame: { x: 500, y: 400, width: 800, height: 180 },
-        autoSize: "both",
+          autoSize: "both",
           text: "Native measured label",
           name: "Agent label",
         },
@@ -805,7 +1170,14 @@ test("local opt-in enables atomic MCP editing with production text sizing explic
             arguments: request,
           })
         ).structuredContent,
-      ).toEqual({ ...receipt, replayed: true });
+      ).toEqual({
+        ...receipt,
+        replayed: true,
+        currentObservation: {
+          epoch: before.document!.epoch,
+          revision: receipt.revision,
+        },
+      });
     } finally {
       await reconnect.client.close();
     }
@@ -914,18 +1286,23 @@ test("real stdio client reads context inspection and production PNG with Setting
     ).toMatchObject({ error: { code: "APP_UNAVAILABLE" } });
     const catalog = await client.listTools();
     expect(catalog.tools.map((value) => value.name)).toEqual([
+      "showme.workspace",
       "showme.context",
       "showme.authoring",
       "showme.inspect",
       "showme.measure_text",
       "showme.apply",
+      "showme.deliver",
       "showme.preview",
     ]);
     expect(
       catalog.tools.every(
         (value) =>
           value.outputSchema &&
-          value.annotations?.readOnlyHint === (value.name !== "showme.apply"),
+          value.annotations?.readOnlyHint ===
+            !["showme.apply", "showme.deliver", "showme.workspace"].includes(
+              value.name,
+            ),
       ),
     ).toBe(true);
     await settings(page);
@@ -934,7 +1311,7 @@ test("real stdio client reads context inspection and production PNG with Setting
       page.getByText("Local connection is ready.", { exact: true }),
     ).toBeVisible();
     await page
-      .getByRole("button", { name: "Copy client configuration", exact: true })
+      .getByRole("button", { name: "Copy for MCP clients (JSON)", exact: true })
       .click();
     const configuration = JSON.parse(
       await page.evaluate(() => window.desktop!.readTextClipboard!()),
@@ -944,6 +1321,18 @@ test("real stdio client reads context inspection and production PNG with Setting
       args: [helperPath(), "--user-data", f.user],
     });
     expect(JSON.stringify(configuration)).not.toContain("token");
+    await expect(page.getByText("MCP clients (JSON) configuration copied. Add it to your client, then reconnect.")).toBeVisible();
+    await page.getByRole("button", { name: "Copy for VS Code (JSON)", exact: true }).click();
+    expect(JSON.parse(await page.evaluate(() => window.desktop!.readTextClipboard!()))).toEqual({
+      servers: { showme: { type: "stdio", ...configuration.mcpServers.showme } },
+    });
+    await expect(page.getByText("VS Code (JSON) configuration copied. Add it to your client, then reconnect.")).toBeVisible();
+    await page.getByRole("button", { name: "Copy for Codex (TOML)", exact: true }).click();
+    const toml = await page.evaluate(() => window.desktop!.readTextClipboard!());
+    expect(toml.split("\n")[0]).toBe("[mcp_servers.showme]");
+    expect(JSON.parse(toml.split("\n")[1].replace("command = ", ""))).toBe("node");
+    expect(JSON.parse(toml.split("\n")[2].replace("args = ", ""))).toEqual(configuration.mcpServers.showme.args);
+    await expect(page.getByText("Codex (TOML) configuration copied. Add it to your client, then reconnect.")).toBeVisible();
     await page
       .getByRole("button", { name: "Close settings", exact: true })
       .click();
@@ -1091,7 +1480,7 @@ test("real stdio client reads context inspection and production PNG with Setting
       ok: false,
       error: { code: "APP_UNAVAILABLE" },
     });
-    await preview.evaluate(() => (window as any).release());
+    await expect.poll(() => preview.isClosed()).toBe(true);
     await page.getByLabel("Enable MCP", { exact: true }).check();
     await expect(
       page.getByText("Local connection is ready.", { exact: true }),
@@ -1139,7 +1528,7 @@ test("MCP creative authoring validates live GLSL CSS text-JS and native Effect M
       effectApiVersion?: number;
       capabilities?: Record<string, boolean>;
     };
-    expect(initial.serverVersion).toBe("1.2.0");
+    expect(initial.serverVersion).toBe(SHOWME_MCP_SERVER_VERSION);
     expect(initial.effectApiVersion).toBe(1);
     expect(initial.capabilities).toMatchObject({
       shaderEffects: true,
@@ -1165,7 +1554,9 @@ test("MCP creative authoring validates live GLSL CSS text-JS and native Effect M
         operationTemplate: { type: "background.shader.create" },
       },
     });
-    expect(JSON.stringify(guide.structuredContent)).toContain("#version 300 es");
+    expect(JSON.stringify(guide.structuredContent)).toContain(
+      "#version 300 es",
+    );
 
     const slideId = initial.editor!.page.id;
     const slide = await client.callTool({
@@ -1261,15 +1652,13 @@ void main() {
     });
     const titleDetail = (title.structuredContent as any).data.elements[0];
     expect(titleDetail.cssClasses).toEqual(["agent-accent"]);
-    expect(titleDetail.effects.map((effect: any) => effect.kind).sort()).toEqual([
-      "css",
-      "text-js",
-    ]);
+    expect(
+      titleDetail.effects.map((effect: any) => effect.kind).sort(),
+    ).toEqual(["css", "text-js"]);
     expect(
       titleDetail.effects.some(
         (effect: any) =>
-          effect.kind === "text-js" &&
-          effect.source.includes("toUpperCase"),
+          effect.kind === "text-js" && effect.source.includes("toUpperCase"),
       ),
     ).toBe(true);
 
@@ -1301,9 +1690,7 @@ void main() {
     ]);
     expect(shaderEffect.source).toBe(shader);
     const property = shaderEffect.motionProperties[0];
-    expect(property).toBe(
-      `effects.${shaderEffect.id}.parameters.brightness`,
-    );
+    expect(property).toBe(`effects.${shaderEffect.id}.parameters.brightness`);
 
     const motion = await client.callTool({
       name: "showme.apply",
@@ -1327,7 +1714,9 @@ void main() {
         ],
       },
     });
-    expect(motion.isError, JSON.stringify(motion.structuredContent)).toBe(false);
+    expect(motion.isError, JSON.stringify(motion.structuredContent)).toBe(
+      false,
+    );
     const motionReceipt = motion.structuredContent as any;
     const animated = await client.callTool({
       name: "showme.inspect",
@@ -1537,6 +1926,523 @@ test("stdio discovery survives an app crash restart and explicit document replac
     expect(
       await new ShowMeClient(f.user).read({ command: "context", params: {} }),
     ).toMatchObject({ error: { code: "APP_UNAVAILABLE" } });
+  } finally {
+    await client?.close();
+    await close(app);
+    await rm(f.folder, { recursive: true, force: true });
+  }
+});
+
+test("MCP native templates shared resources recipes and workspace lifecycle", async () => {
+  const f = await fixture();
+  let app: ElectronApplication | undefined, client: Client | undefined;
+  try {
+    const launched = await launch(f.user, f.file);
+    app = launched.app;
+    await launched.page.evaluate(async () => {
+      await window.desktop!.setMcpEnabled!(true);
+      await window.desktop!.setMcpEditingEnabled!(true);
+    });
+    client = (await connect(f.user, f.folder)).client;
+    const initial = await context(client);
+    let revision = initial.document!.revision;
+    const identity = {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+      },
+      slideId = initial.editor!.page.id;
+    const inspect = await client.callTool({
+      name: "showme.inspect",
+      arguments: { ...identity, revision, target: { type: "slide", slideId } },
+    });
+    const layerId = (inspect.structuredContent as any).data.layers[0].id;
+    for (const operation of [
+      { type: "deck.transition_defaults.set", kind: "fade" },
+      { type: "unknown.operation" },
+    ]) {
+      const invalid = await client.callTool({
+        name: "showme.apply",
+        arguments: {
+          ...identity,
+          expectedRevision: revision,
+          mutationId: crypto.randomUUID(),
+          slideId,
+          operations: [operation],
+        },
+      });
+      expect(invalid).toMatchObject({
+        isError: true,
+        structuredContent: { ok: false, error: { code: "INVALID_REQUEST" } },
+      });
+      expect(JSON.stringify(invalid).length).toBeLessThan(2500);
+    }
+    const apply = async (operations: unknown[], pageId = slideId) => {
+      const result = await client!.callTool({
+        name: "showme.apply",
+        arguments: {
+          ...identity,
+          expectedRevision: revision,
+          mutationId: crypto.randomUUID(),
+          slideId: pageId,
+          operations,
+        },
+      });
+      expect(result.isError, JSON.stringify(result)).toBe(false);
+      revision = (result.structuredContent as any).revision;
+      return result.structuredContent as any;
+    };
+    const created = await apply([
+      { type: "template.create", id: "native-theme", background: "#101020" },
+      {
+        type: "element.insert_text",
+        id: "native-label",
+        parentId: layerId,
+        text: "One shared theme",
+        frame: { x: 40, y: 30, width: 700, height: 90 },
+      },
+      {
+        type: "effect.apply_code",
+        elementId: "native-label",
+        effectType: "css",
+        affects: "element",
+        name: "Supports CSS",
+        source:
+          ":scope {opacity:0.9} @supports (color: color(display-p3 1 0 0)) { :scope { color: #aaffdd; } }",
+      },
+    ]);
+    expect(created.createdTemplateIds).toEqual(["native-theme"]);
+    const templ = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        ...identity,
+        revision,
+        target: {
+          type: "slide",
+          slideId: "native-theme",
+          includeEffectResources: true,
+        },
+      },
+    });
+    expect(templ.isError, JSON.stringify(templ.structuredContent)).toBe(false);
+    expect((templ.structuredContent as any).data.slide.background).toBe(
+      "#101020",
+    );
+    await apply([
+      { type: "slide.template.apply", templateId: "native-theme" },
+      {
+        type: "text.style.define",
+        styleId: "native-style",
+        name: "Modern heading",
+        typography: { fontSize: 90, color: "#aaffdd" },
+      },
+      {
+        type: "text.style.apply",
+        elementIds: ["title"],
+        styleId: "native-style",
+      },
+    ]);
+    const duplicate = await apply([
+      {
+        type: "slide.duplicate",
+        id: "native-recipe",
+        name: "Recipe",
+        textReplacements: { title: "New content" },
+      },
+    ]);
+    expect(duplicate.createdSlideIds).toEqual(["native-recipe"]);
+    const preview = await client.callTool({
+      name: "showme.preview",
+      arguments: {
+        ...identity,
+        revision,
+        slideId: "native-recipe",
+        width: 640,
+        height: 360,
+      },
+    });
+    expect(preview.isError, JSON.stringify(preview.structuredContent)).toBe(
+      false,
+    );
+    const dirty = await client.callTool({
+      name: "showme.workspace",
+      arguments: {
+        ...identity,
+        expectedRevision: revision,
+        action: "create",
+        name: "Blocked dirty switch",
+      },
+    });
+    expect(dirty.structuredContent).toMatchObject({
+      error: { code: "DOCUMENT_DIRTY" },
+    });
+    expect(
+      (
+        await client.callTool({
+          name: "showme.deliver",
+          arguments: {
+            ...identity,
+            expectedRevision: revision,
+            action: "save",
+          },
+        })
+      ).isError,
+    ).toBe(false);
+    const media = path.join(f.root, "workspace-image.png");
+    await sharp({
+      create: { width: 24, height: 24, channels: 4, background: "#80ffcc" },
+    })
+      .png()
+      .toFile(media);
+    const svg = path.join(f.root, "workspace-vector.svg");
+    await writeFile(
+      svg,
+      '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="45"><rect width="90" height="45" fill="red"/></svg>',
+    );
+    const video = path.join(f.root, "prepared-red.webm");
+    await fsCopyFixture(video);
+    const oriented = path.join(f.root, "oriented.jpg");
+    await sharp({
+      create: { width: 120, height: 60, channels: 3, background: "red" },
+    })
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toFile(oriented);
+    const undecodable = path.join(f.root, "undecodable.png");
+    await writeFile(undecodable, "not a decodable image");
+    const imported = await client.callTool({
+      name: "showme.workspace",
+      arguments: {
+        ...identity,
+        expectedRevision: revision,
+        action: "import-assets",
+        paths: [
+          media,
+          svg,
+          video,
+          oriented,
+          undecodable,
+          path.join(f.root, "missing.png"),
+        ],
+      },
+    });
+    expect(imported.structuredContent).toMatchObject({
+      ok: true,
+      data: {
+        result: {
+          atomic: false,
+          assets: [
+            { mediaType: "image", width: 24, height: 24 },
+            { type: "svg", width: 90, height: 45 },
+            {
+              type: "video",
+              width: 160,
+              height: 90,
+              duration: expect.any(Number),
+            },
+            { type: "image", width: 60, height: 120 },
+            { type: "image", id: expect.any(String) },
+          ],
+          items: [
+            { status: "imported", preparation: "prepared" },
+            { status: "imported", preparation: "prepared" },
+            { status: "imported", preparation: "prepared" },
+            { status: "imported", preparation: "prepared" },
+            {
+              status: "imported",
+              preparation: "unsupported",
+              error: { code: "MEDIA_PREPARATION_UNSUPPORTED" },
+            },
+            { status: "failed", preparation: "not-attempted" },
+          ],
+        },
+      },
+    });
+    const assetId = (imported.structuredContent as any).data.result.assets[0]
+      .id;
+    await apply([
+      {
+        type: "element.insert_media",
+        id: "native-imported",
+        assetId,
+        parentId: layerId,
+        frame: { x: 500, y: 400, width: 120, height: 120 },
+      },
+    ]);
+    const videoId = (imported.structuredContent as any).data.result.assets[2]
+      .id;
+    const poster = await sharp(
+      await readFile(path.join(f.user, "cache", "assets", videoId + ".jpg")),
+    )
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const center = (45 * poster.info.width + 80) * poster.info.channels;
+    expect(poster.data[center]).toBeGreaterThan(220);
+    expect(poster.data[center + 1]).toBeLessThan(35);
+    await apply([
+      {
+        type: "element.insert_media",
+        id: "native-video",
+        assetId: videoId,
+        parentId: layerId,
+        frame: { x: 700, y: 400, width: 160, height: 90 },
+      },
+    ]);
+    const mediaPreview = await client.callTool({
+      name: "showme.preview",
+      arguments: { ...identity, revision, slideId, width: 640, height: 360 },
+    });
+    expect(
+      mediaPreview.isError,
+      JSON.stringify(mediaPreview.structuredContent),
+    ).toBe(false);
+    expect(
+      await client.callTool({
+        name: "showme.deliver",
+        arguments: { ...identity, expectedRevision: revision, action: "save" },
+      }),
+    ).toMatchObject({ isError: false });
+    await app.evaluate((_electron, root) => {
+      process.env.SHOWME_DOCUMENT_DIR = root;
+    }, f.root);
+    const packaged = await client.callTool({
+      name: "showme.deliver",
+      arguments: {
+        ...identity,
+        expectedRevision: revision,
+        action: "package",
+        packageOptions: { mediaLocked: false, speakerNotes: "remove" },
+      },
+    });
+    expect(packaged.structuredContent, JSON.stringify(packaged)).toMatchObject({
+      ok: true,
+      data: {
+        written: true,
+        format: "smp",
+        packageOptions: { mediaLocked: false, speakerNotes: "remove" },
+      },
+    });
+    const packagePath = (packaged.structuredContent as any).data.destination;
+    await launched.page
+      .getByRole("button", { name: "Speaker Notes", exact: true })
+      .click();
+    const notesEditor = launched.page.getByLabel("Presenter notes", {
+      exact: true,
+    });
+    await notesEditor.focus();
+    const humanNotes = await notesEditor.inputValue();
+    const busySwitch = await client.callTool({
+      name: "showme.workspace",
+      arguments: {
+        ...identity,
+        expectedRevision: revision,
+        action: "create",
+        name: "Must preserve focused editing",
+      },
+    });
+    expect(busySwitch.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: "EDITOR_BUSY" },
+    });
+    expect(await notesEditor.inputValue()).toBe(humanNotes);
+    expect((await context(client)).document!.id).toBe(identity.documentId);
+    await launched.page
+      .getByRole("button", { name: "Speaker Notes", exact: true })
+      .click();
+    const createdDoc = await client.callTool({
+      name: "showme.workspace",
+      arguments: {
+        ...identity,
+        expectedRevision: revision,
+        action: "create",
+        name: "Native MCP creation",
+      },
+    });
+    expect(
+      createdDoc.isError,
+      JSON.stringify(createdDoc.structuredContent),
+    ).toBe(false);
+    expect(createdDoc.structuredContent).toMatchObject({
+      data: {
+        result: {
+          document: {
+            id: expect.any(String),
+            epoch: expect.any(String),
+            revision: 0,
+            savedRevision: 0,
+            dirty: false,
+          },
+          initialPageIds: {
+            slides: [expect.any(String)],
+            templates: [expect.any(String)],
+          },
+          readiness: { authority: "ready", editor: "poll-context" },
+        },
+      },
+    });
+    await expect
+      .poll(async () => (await context(client!)).availability)
+      .toBe("ready");
+    const current = await context(client);
+    const opened = await client.callTool({
+      name: "showme.workspace",
+      arguments: {
+        documentId: current.document!.id,
+        epoch: current.document!.epoch,
+        expectedRevision: current.document!.revision,
+        action: "open",
+        path: f.file,
+      },
+    });
+    expect(opened.isError, JSON.stringify(opened.structuredContent)).toBe(
+      false,
+    );
+    await expect
+      .poll(async () => (await context(client!)).document?.id)
+      .toBe(identity.documentId);
+    const reopened = await context(client);
+    const closed = await client.callTool({
+      name: "showme.workspace",
+      arguments: {
+        documentId: reopened.document!.id,
+        epoch: reopened.document!.epoch,
+        expectedRevision: reopened.document!.revision,
+        action: "close",
+      },
+    });
+    expect(closed.isError, JSON.stringify(closed.structuredContent)).toBe(
+      false,
+    );
+    await client.close();
+    client = undefined;
+    await close(app);
+    app = undefined;
+    const freshRoot = path.join(f.folder, "fresh-root"),
+      freshUser = path.join(f.folder, "fresh-user");
+    await mkdir(path.join(freshRoot, "ShowMe Library"), { recursive: true });
+    await mkdir(freshUser);
+    await writeFile(
+      path.join(freshUser, "settings.json"),
+      JSON.stringify({
+        showMeRootPath: freshRoot,
+        libraryLifecycleMode: "keep-all",
+        storageWarningSeen: true,
+      }),
+    );
+    const cold = await launch(freshUser, packagePath);
+    app = cold.app;
+    await cold.page.evaluate(async () => {
+      await window.desktop!.setMcpEnabled!(true);
+      await window.desktop!.setMcpEditingEnabled!(true);
+    });
+    client = (await connect(freshUser, f.folder)).client;
+    const coldContext = await context(client);
+    expect(coldContext.document!.id).not.toBe(identity.documentId);
+    const coldIdentity = {
+      documentId: coldContext.document!.id,
+      epoch: coldContext.document!.epoch,
+      revision: coldContext.document!.revision,
+    };
+    const coldSlide = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        ...coldIdentity,
+        target: { type: "slide", slideId, includeNotes: true },
+      },
+    });
+    expect(coldSlide.structuredContent).toMatchObject({
+      ok: true,
+      data: { slide: { notes: "" } },
+    });
+    const coldPreview = await client.callTool({
+      name: "showme.preview",
+      arguments: { ...coldIdentity, slideId, width: 640, height: 360 },
+    });
+    expect(coldPreview.structuredContent).toMatchObject({
+      ok: true,
+      warnings: [],
+    });
+    const image = coldPreview.content.find((c) => c.type === "image")!;
+    const decoded = await sharp(Buffer.from((image as any).data, "base64"))
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const pixel = (148 * decoded.info.width + 260) * decoded.info.channels;
+    expect(decoded.data[pixel]).toBeGreaterThan(220);
+    expect(decoded.data[pixel + 1]).toBeLessThan(35);
+  } finally {
+    await client?.close();
+    await close(app);
+    await rm(f.folder, { recursive: true, force: true });
+  }
+});
+
+async function fsCopyFixture(destination: string) {
+  await writeFile(
+    destination,
+    await readFile(path.resolve("tests/fixtures/media/prepared-red.webm")),
+  );
+}
+
+
+test("native media revocation during a held second decoder retains exact import receipts", async () => {
+  const f = await fixture();
+  let app: ElectronApplication | undefined, client: Client | undefined;
+  try {
+    const launched = await launch(f.user, f.file);
+    app = launched.app;
+    const page = launched.page;
+    await page.evaluate(async () => {
+      await window.desktop!.setMcpEnabled!(true);
+      await window.desktop!.setMcpEditingEnabled!(true);
+    });
+    client = (await connect(f.user, f.folder)).client;
+    const initial = await context(client);
+    const before = await page.evaluate(id => window.desktop!.documentProjection!(id), initial.document!.id);
+    const priorSurfaces = new Set(app.windows());
+    const primed = await client.callTool({ name: "showme.measure_text", arguments: {
+      documentId: initial.document!.id, epoch: initial.document!.epoch, revision: initial.document!.revision,
+      items: [{ text: "Initialize media runtime", width: 400 }],
+    } });
+    expect(primed.isError, JSON.stringify(primed.structuredContent)).toBe(false);
+    const runtime = app.windows().find(surface => surface.url().includes("slidePreview=1") && !priorSurfaces.has(surface))!;
+    await runtime.evaluate(() => {
+      const w = window as any;
+      const prepare = w.prepareAgentMedia;
+      w.mediaTestCalls = 0;
+      w.prepareAgentMedia = async (asset: unknown) => {
+        if (++w.mediaTestCalls === 2) {
+          w.mediaTestHeld = true;
+          await new Promise<void>(resolve => w.releaseMediaTest = resolve);
+        }
+        return prepare(asset);
+      };
+    });
+    const paths: string[] = [];
+    for (const color of ["red", "green", "blue"]) {
+      const file = path.join(path.dirname(f.file), color + ".png");
+      await sharp({ create: { width: 20, height: 20, channels: 3, background: color } }).png().toFile(file);
+      paths.push(file);
+    }
+    const pending = client.callTool({ name: "showme.workspace", arguments: {
+      documentId: initial.document!.id, epoch: initial.document!.epoch, expectedRevision: initial.document!.revision,
+      action: "import-assets", paths,
+    } });
+    await expect.poll(() => runtime.evaluate(() => (window as any).mediaTestHeld)).toBe(true);
+    await page.evaluate(() => window.desktop!.setMcpEditingEnabled!(false));
+    await runtime.evaluate(() => (window as any).releaseMediaTest());
+    const response = await pending;
+    expect(response.isError, JSON.stringify(response.structuredContent)).toBe(false);
+    expect(response.structuredContent).toMatchObject({ ok: true, data: { result: {
+      atomic: false, assets: [{ id: expect.any(String) }, { id: expect.any(String) }],
+      items: [
+        { index: 0, status: "imported", preparation: "prepared" },
+        { index: 1, status: "imported", preparation: "pending", error: { code: "MCP_ACCESS_CHANGED" } },
+        { index: 2, status: "not-attempted", preparation: "not-attempted" },
+      ],
+    } } });
+    expect(await runtime.evaluate(() => (window as any).mediaTestCalls)).toBe(2);
+    expect(await page.evaluate(id => window.desktop!.documentProjection!(id), initial.document!.id)).toEqual(before);
+    const after = await context(client);
+    expect(after.document).toEqual(initial.document);
   } finally {
     await client?.close();
     await close(app);

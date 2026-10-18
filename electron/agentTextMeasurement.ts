@@ -1,9 +1,10 @@
 import {
   agentMeasureTextRequestSchema,
   type AgentTextMeasureItem,
+  type AgentTextFitMeasurement,
 } from "../src/core/agentTextMeasure";
 import { agentFailure } from "../src/core/agentRead";
-import type { TextMeasurement } from "../src/core/text";
+import { AgentMutationError } from "../src/core/agentMutation";
 
 interface AgentTextMeasurementDependencies {
   access(): number | null;
@@ -16,11 +17,13 @@ interface AgentTextMeasurementDependencies {
   measure(
     documentId: string,
     items: readonly AgentTextMeasureItem[],
-  ): Promise<readonly TextMeasurement[] | null>;
+  ): Promise<readonly AgentTextFitMeasurement[] | null>;
 }
 
 export class AgentTextMeasurementService {
-  constructor(private readonly dependencies: AgentTextMeasurementDependencies) {}
+  constructor(
+    private readonly dependencies: AgentTextMeasurementDependencies,
+  ) {}
 
   async measure(input: unknown) {
     const parsed = agentMeasureTextRequestSchema.safeParse(input);
@@ -42,7 +45,10 @@ export class AgentTextMeasurementService {
 
     const checkState = async () => {
       const state = await d.state(request.documentId);
-      if (state.documentId !== request.documentId || state.epoch !== request.epoch)
+      if (
+        state.documentId !== request.documentId ||
+        state.epoch !== request.epoch
+      )
         return agentFailure(
           "EPOCH_CONFLICT",
           "The document was replaced. Read context again.",
@@ -94,12 +100,24 @@ export class AgentTextMeasurementService {
         documentId: request.documentId,
         epoch: request.epoch,
         revision: request.revision,
-        measurements: measurements.map(({ width, height }) => ({
-          width,
-          height,
-        })),
+        measurements: measurements.map(
+          ({ width, height, font, overflow, contentExtent }) => ({
+            width,
+            height,
+            ...(font ? { font } : {}),
+            ...(overflow ? { overflow } : {}),
+            ...(contentExtent ? { contentExtent } : {}),
+          }),
+        ),
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof AgentMutationError)
+        return agentFailure(
+          error.code,
+          error.message,
+          error.actualRevision,
+          error.details,
+        );
       return agentFailure(
         "MEASUREMENT_UNAVAILABLE",
         "Production text measurement is unavailable. Retry when the renderer is ready.",
