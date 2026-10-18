@@ -35,6 +35,12 @@ export interface AgentDeckOutline extends AgentRevision {
     slideCount: number;
     hasStylesheet: boolean;
     stylesheet?: string;
+    textStyles?: Array<{
+      id: string;
+      name: string;
+      defaultKind?: "heading" | "text";
+      typography: import("./textTypography").TextTypography;
+    }>;
     slides: Array<{
       id: string;
       index: number;
@@ -184,7 +190,7 @@ function revision(projection: DocumentProjection): AgentRevision {
 /** Metadata only: a DocumentProjection has no bodies/counts for other slides. */
 export function projectAgentDeck(
   projection: DocumentProjection,
-  options: { includeStylesheet?: boolean } = {},
+  options: { includeStylesheet?: boolean; includeTextStyles?: boolean } = {},
 ): AgentDeckOutline {
   const { deck } = projection;
   return {
@@ -198,6 +204,18 @@ export function projectAgentDeck(
       hasStylesheet: !!deck.stylesheet,
       ...(options.includeStylesheet
         ? { stylesheet: deck.stylesheet ?? "" }
+        : {}),
+      ...(options.includeTextStyles
+        ? {
+            textStyles: deck.textStyles.map(
+              ({ id, name, defaultKind, typography }) => ({
+                id,
+                name,
+                ...(defaultKind === undefined ? {} : { defaultKind }),
+                typography,
+              }),
+            ),
+          }
         : {}),
       slides: deck.slideIds.map((id, index) => {
         const { name, section, hidden, templateId } = deck.slideMeta[id];
