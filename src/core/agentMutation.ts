@@ -1837,8 +1837,19 @@ export async function assembleAgentMutation(
         JSON.stringify(projection.deck.slideMeta[projection.slide.id]))
       ? [projection.slide.id]
       : [];
+  const snapshot =
+    next.slide.id === projection.slide.id
+      ? next
+      : setEditorOperations(
+          {
+            deck: next.deck,
+            slide: projection.slide,
+            templates: next.templates,
+          },
+          editorOperations(next),
+        );
   return {
-    snapshot: next,
+    snapshot,
     ...changes,
     createdSlideIds,
     updatedSlideIds,
