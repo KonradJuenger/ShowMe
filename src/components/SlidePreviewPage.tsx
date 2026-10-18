@@ -11,7 +11,13 @@ import { flushEffectSurfaces } from "./effectRuntime";
 import type { AgentPreviewWarning } from "../core/agentPreview";
 import { measureText } from "./editor/textLayout";
 import type { Element as SceneElement } from "../core/element";
-import type { TextContent, TextMeasurement } from "../core/text";
+import {
+  createTextElement,
+  type TextContent,
+  type TextMeasurement,
+} from "../core/text";
+import { DEFAULT_TEXT_TYPOGRAPHY } from "../core/textTypography";
+import type { AgentTextMeasureItem } from "../core/agentTextMeasure";
 import { validateEffectDefinitionProduction } from "./effectValidation";
 import type { EffectValidationResult } from "../core/effectValidation";
 
@@ -21,6 +27,10 @@ declare global {
       documentId: string,
       element: SceneElement & { content: TextContent },
     ) => Promise<TextMeasurement | null>;
+    measureAgentTextBatch?: (
+      documentId: string,
+      items: readonly AgentTextMeasureItem[],
+    ) => Promise<TextMeasurement[] | null>;
     composeEffectThumbnail?: (definition: EffectDefinition) => Promise<boolean>;
     validateAgentEffect?: (
       definition: EffectDefinition,
@@ -55,6 +65,47 @@ export function installSlidePreviewPage() {
     );
     await document.fonts.ready;
     return measureText(element);
+  };
+  window.measureAgentTextBatch = async (documentId, items) => {
+    await platform.managedFonts?.(documentId);
+    const elements = items.map((item, index) => {
+      const element = createTextElement(
+        `agent-measure-${index}`,
+      ) as SceneElement & { content: TextContent };
+      element.frame = { ...element.frame, width: item.width };
+      element.content = {
+        ...element.content,
+        text: item.text,
+        placeholder: false,
+        autoSize: "height",
+        format: {
+          kind: "local",
+          typography: {
+            ...DEFAULT_TEXT_TYPOGRAPHY,
+            ...(item.typography ?? {}),
+          },
+        },
+      };
+      return element;
+    });
+    await Promise.all(
+      elements.map((element) => {
+        const typography = element.content.format.kind === "local"
+          ? element.content.format.typography
+          : DEFAULT_TEXT_TYPOGRAPHY;
+        return document.fonts.load(
+          `${typography.italic ? "italic " : ""}${typography.fontWeight} ${typography.fontSize}px ${typography.fontFamily}`,
+          element.content.text || " ",
+        );
+      }),
+    );
+    await document.fonts.ready;
+    const measurements = elements.map((element) => measureText(element));
+    return measurements.every(
+      (measurement): measurement is TextMeasurement => measurement !== null,
+    )
+      ? measurements
+      : null;
   };
   window.validateAgentEffect = (definition, sampleText) =>
     validateEffectDefinitionProduction(definition, { sampleText });
