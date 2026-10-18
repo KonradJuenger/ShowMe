@@ -1356,6 +1356,7 @@ function runAgentRuntime<T>(
 ): Promise<T | null> {
   const owner = editor;
   if (
+    !agentContext.isEnabled ||
     !previewOwnerAlive(owner) ||
     pendingAgentRuntime >= AGENT_RUNTIME_MAX_ADMITTED
   )
@@ -1363,13 +1364,16 @@ function runAgentRuntime<T>(
   pendingAgentRuntime++;
   const task = agentRuntimeQueue.then(async () => {
     for (let attempt = 0; attempt < 2; attempt++) {
-      if (!previewOwnerAlive(owner)) return null;
-      const window = await agentRuntimeSurface(owner);
-      if (!window) return null;
-      const timeout = setTimeout(() => resetAgentRuntimeWindow(window), 10000);
+      if (!agentContext.isEnabled || !previewOwnerAlive(owner)) return null;
+      let window: BrowserWindow | null = null;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
       try {
+        window = await agentRuntimeSurface(owner);
+        if (!window) return null;
+        timeout = setTimeout(() => resetAgentRuntimeWindow(window), 10000);
         const result = await execute(window);
         if (
+          !agentContext.isEnabled ||
           !previewOwnerAlive(owner) ||
           window.isDestroyed() ||
           agentRuntimeWindow !== window
@@ -1380,7 +1384,7 @@ function runAgentRuntime<T>(
         resetAgentRuntimeWindow(window);
         if (attempt === 1) return null;
       } finally {
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
       }
     }
     return null;
@@ -1750,7 +1754,10 @@ const operations: Record<string, (...args: any[]) => any> = {
     await writeSettings(app.getPath("userData"), settings);
     if (agentContext.isEnabled !== enabled) { mcpAccessVersion++; mcpWriteAccessVersion++; }
     agentContext.setEnabled(enabled);
-    if (!enabled) agentPreview.cancelAll();
+    if (!enabled) {
+      agentPreview.cancelAll();
+      resetAgentRuntimeWindow();
+    }
     await agentBridge.setEnabled(enabled);
     editor?.webContents.send("mcp-enabled-changed", enabled);
     return enabled;
