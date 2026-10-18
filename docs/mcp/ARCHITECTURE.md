@@ -486,3 +486,99 @@ remote MCP
 That is a separate product problem.
 
 The local MCP should not be burdened with cloud infrastructure before the editing contract is proven.
+
+## Current MCP performance model
+
+The persistent stdio helper keeps the last verified ShowMe bridge descriptor in
+memory and uses a keep-alive HTTP agent for loopback requests. The first request
+discovers and verifies the running instance. Ordinary later requests go directly
+to that instance without rescanning descriptor files or probing `showme.context`.
+
+Every request still carries the bearer token and validates ShowMe's instance
+headers. A closed connection, wrong instance response, authorization/access
+generation change, stale process or stale descriptor clears the cache. The helper
+then rediscovers and retries once. Disabling MCP remains authoritative because the
+app closes all bridge connections, removes the descriptor and rotates both
+instance identity and token when MCP is enabled again.
+
+This is intentionally still loopback HTTP. Persistent HTTP removes the avoidable
+hot-path work without introducing a second transport.
+
+## Renderer services
+
+Renderer-dependent agent work is split into two logical services while reusing
+ShowMe's production renderer code:
+
+```text
+Agent Runtime
+  -> production text measurement
+  -> GLSL validation
+  -> CSS Effect validation
+  -> text-JS Effect validation
+
+Slide Preview
+  -> production slide composition
+  -> native raster capture
+  -> PNG encoding
+```
+
+The Agent Runtime owns a small persistent hidden Chromium surface with
+`backgroundThrottling: false`. It has its own bounded queue, is created lazily,
+is reused across requests and is recreated once after destruction/runtime failure.
+Effect source is still accepted only after production validation.
+
+Slide Preview keeps its separate production capture surface and queue. Full PNG
+capture remains intentionally expensive and does not block ordinary text
+measurement or Effect validation.
+
+## Model-facing animation semantics
+
+Presence owns element lifecycle:
+
+```text
+absent -> entering -> present -> exiting -> absent
+```
+
+Use Presence for enter/exit visibility and entrance/exit movement. Use Motion for
+property animation while the element is present. Do not add a Move Motion preset
+merely to reproduce a move Presence entrance.
+
+Motion and Presence expose the same model-facing named easing vocabulary:
+`Linear`, `Ease In`, `Ease Out`, `Ease In Out`, and `Hold`. The MCP
+semantic layer translates those names to ShowMe's canonical internal easing values.
+Presence may also accept an explicit cubic-bezier tuple where a custom curve is
+needed.
+
+## Composite construction
+
+Composite visual objects should use ShowMe's existing Frame/group structure, not
+MCP-only component primitives:
+
+```text
+Frame/group
+  -> background
+  -> icon
+  -> title
+  -> body
+```
+
+Create the parent with a stable ID, insert children using that ID as `parentId`,
+author child frames in parent-local coordinates, and apply Presence to the parent
+when the component should enter or exit as one visual object.
+
+## Batched text measurement
+
+`showme.measure_text` is a read-only production-layout query. It requires exact
+`documentId`, `epoch` and `revision`, accepts up to 64 text items in one
+renderer round trip, loads the document's managed fonts, and returns measured
+width/height using the same DOM measurement semantics as ShowMe text auto-sizing.
+
+Use it before construction when wrapping or measured paragraph height affects
+layout. It does not mutate the document.
+
+## Atomic batch size
+
+`showme.apply` accepts 1-128 semantic operations. The byte limit, semantic
+validation, exact revision check, actor separation, leases, detached staging and
+single durable transaction remain unchanged. A late invalid operation rejects the
+whole batch.
