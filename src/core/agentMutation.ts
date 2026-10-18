@@ -45,7 +45,7 @@ import {
   type TextContent,
   type TextPatch,
 } from "./text";
-import { resolveTextTypography } from "./textTypography";
+import { resolveTextTypography, textStyleNameKey } from "./textTypography";
 import type { DocumentProjection } from "./documentProjection";
 import { applyTemplate, makeIndependent } from "./templateCommands";
 import { alignSelection, distributeSelection } from "./arrangeCommands";
@@ -1138,6 +1138,14 @@ export async function assembleAgentMutation(
           throw new AgentMutationError("UNKNOWN_TEXT_STYLE", "Inspect Text Styles and use an existing style ID.");
         if (style.defaultKind)
           throw new AgentMutationError("UNSUPPORTED_OPERATION", "Built-in Heading/Text styles cannot be renamed.");
+        if (
+          next.deck.textStyles.some(
+            (value) =>
+              value.id !== style.id &&
+              textStyleNameKey(value.name) === textStyleNameKey(op.name),
+          )
+        )
+          throw new AgentMutationError("INVALID_REQUEST", "A Text Style with that name already exists.");
         next = setTextStyle(next, {
           styleId: style.id,
           value: { ...style, name: op.name },
@@ -1302,42 +1310,96 @@ export async function assembleAgentMutation(
         requireEditable(op.elementId);
         if (!Object.keys(op.patch).length)
           throw new AgentMutationError("INVALID_REQUEST", "Supply a nonempty media transform patch.");
-        const mapping = {
-          rotation: "content.media.rotation",
-          flipX: "content.media.flipX",
-          flipY: "content.media.flipY",
-          zoom: "content.media.zoom",
-          anchorX: "content.media.anchorX",
-          anchorY: "content.media.anchorY",
-        } as const;
-        for (const [key, property] of Object.entries(mapping) as Array<
-          [keyof typeof mapping, (typeof mapping)[keyof typeof mapping]]
-        >) {
-          const value = op.patch[key];
-          if (value !== undefined)
-            next = setSelectionProperty(next, [op.elementId], property as any, value as any);
-        }
+        if (op.patch.rotation !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.media.rotation",
+            op.patch.rotation,
+          );
+        if (op.patch.flipX !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.media.flipX",
+            op.patch.flipX,
+          );
+        if (op.patch.flipY !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.media.flipY",
+            op.patch.flipY,
+          );
+        if (op.patch.zoom !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.media.zoom",
+            op.patch.zoom,
+          );
+        if (op.patch.anchorX !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.media.anchorX",
+            op.patch.anchorX,
+          );
+        if (op.patch.anchorY !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.media.anchorY",
+            op.patch.anchorY,
+          );
       } else if (op.type === "video.playback.patch") {
         const element = requireEditable(op.elementId);
         if (element.content?.type !== "video")
           throw new AgentMutationError("INVALID_MEDIA", "Video playback settings require a video element.");
         if (!Object.keys(op.patch).length)
           throw new AgentMutationError("INVALID_REQUEST", "Supply a nonempty video playback patch.");
-        const mapping = {
-          volume: "content.video.volume",
-          mute: "content.video.mute",
-          loop: "content.video.loop",
-          autoplay: "content.video.autoplay",
-          startTime: "content.video.startTime",
-          endTime: "content.video.endTime",
-        } as const;
-        for (const [key, property] of Object.entries(mapping) as Array<
-          [keyof typeof mapping, (typeof mapping)[keyof typeof mapping]]
-        >) {
-          const value = op.patch[key];
-          if (value !== undefined)
-            next = setSelectionProperty(next, [op.elementId], property as any, value as any);
-        }
+        if (op.patch.volume !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.video.volume",
+            op.patch.volume,
+          );
+        if (op.patch.mute !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.video.mute",
+            op.patch.mute,
+          );
+        if (op.patch.loop !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.video.loop",
+            op.patch.loop,
+          );
+        if (op.patch.autoplay !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.video.autoplay",
+            op.patch.autoplay,
+          );
+        if (op.patch.startTime !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.video.startTime",
+            op.patch.startTime,
+          );
+        if (op.patch.endTime !== undefined)
+          next = setSelectionProperty(
+            next,
+            [op.elementId],
+            "content.video.endTime",
+            op.patch.endTime,
+          );
       } else if (op.type === "effect.apply_code") {
         const target = requireEditable(op.elementId);
         const existing = op.existingInstanceId
