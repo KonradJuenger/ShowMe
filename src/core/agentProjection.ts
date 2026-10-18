@@ -103,7 +103,10 @@ export interface AgentSlideOutline extends AgentRevision {
     elementCount: number;
   };
   layers: Array<
-    Pick<Deck["layers"][number], "id" | "name" | "hidden" | "locked">
+    Pick<
+      Deck["layers"][number],
+      "id" | "name" | "hidden" | "locked" | "color"
+    >
   >;
   elements: AgentElementOutline[];
 }
@@ -366,12 +369,15 @@ export function projectAgentSlide(
       background: slide.background,
       elementCount: entries.length,
     },
-    layers: projection.deck.layers.map(({ id, name, hidden, locked }) => ({
-      id,
-      name,
-      hidden,
-      locked,
-    })),
+    layers: projection.deck.layers.map(
+      ({ id, name, hidden, locked, color }) => ({
+        id,
+        name,
+        hidden,
+        locked,
+        color,
+      }),
+    ),
     elements: entries.map(({ outline }) => outline),
   };
 }
