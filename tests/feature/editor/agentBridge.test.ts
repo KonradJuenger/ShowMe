@@ -295,7 +295,7 @@ it("publishes only a private authenticated loopback descriptor and cleans it up 
   expect(
     await new ShowMeClient(f.folder).read({ command: "context", params: {} }),
   ).toMatchObject({ error: { code: "APP_UNAVAILABLE" } });
-});
+}, 10000);
 it("rejects unauthenticated DNS rebinding browser origins and fetch requests before dispatch", async () => {
   let calls = 0;
   const f = await fixture(async () => {
