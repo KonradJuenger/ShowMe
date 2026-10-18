@@ -16,6 +16,7 @@ import {
 import { DocumentRuntime } from "../src/core/documentRuntime";
 import type { AcceptedTransaction } from "../src/core/documentTransactions";
 import type { Element } from "../src/core/element";
+import type { Asset } from "../src/core/assets";
 import type { TextContent } from "../src/core/text";
 
 const ACTOR = "mcp-local";
@@ -33,6 +34,7 @@ interface Dependencies {
     documentId: string,
     ...args: Parameters<AgentEffectValidate>
   ) => ReturnType<AgentEffectValidate>;
+  asset?: (documentId: string, assetId: string) => Promise<Asset> | Asset;
   changed(): void;
   maxIdentities?: number;
   maxReceiptBytes?: number;
@@ -351,6 +353,9 @@ export class AgentEditingService {
             check();
             return result;
           }
+        : undefined,
+      this.dependencies.asset
+        ? (assetId) => this.dependencies.asset!(request.documentId, assetId)
         : undefined,
       replacementSlide,
     );
