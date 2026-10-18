@@ -1,7 +1,7 @@
 import type { DocumentProjection } from "./documentProjection";
 import type { Deck, Slide } from "./document";
 import type { Element, Matrix } from "./element";
-import { transformPoint } from "./element";
+import { resolveMediaFrame, transformPoint } from "./element";
 import type { Box, Point } from "./geometry";
 import {
   effectExecutionRange,
@@ -122,6 +122,7 @@ export type AgentContentDetail =
       MediaContent,
       "type" | "assetId" | "mediaType" | "opacity" | "lockAspect" | "transform"
     > & {
+      contentFrame?: Element["frame"];
       playback?: Pick<
         Extract<MediaContent, { type: "video" }>,
         "autoplay" | "loop" | "mute" | "volume" | "startTime" | "endTime"
@@ -394,6 +395,9 @@ function contentDetail(element: Element, deck: Deck): AgentContentDetail {
     opacity: content.opacity,
     lockAspect: content.lockAspect,
     transform: content.transform,
+    ...(resolveMediaFrame(element)
+      ? { contentFrame: resolveMediaFrame(element)! }
+      : {}),
     ...(content.type === "video"
       ? {
           playback: {
