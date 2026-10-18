@@ -438,6 +438,44 @@ it("deck naming and independent slide styling commit without element changes and
   ).toBe("#007F73");
 });
 
+it("slide notes transitions and deck transition defaults use canonical slide metadata", async () => {
+  const f = fixture();
+  const result = await f.service.apply(
+    f.request([
+      {
+        type: "slide.update",
+        notes: "Speaker note",
+        transition: {
+          kind: "fade",
+          durationMs: 180,
+          easing: "ease-out",
+        },
+      },
+      {
+        type: "deck.transition_defaults.set",
+        value: {
+          kind: "wipe",
+          durationMs: 240,
+          easing: "linear",
+        },
+      },
+    ]),
+  );
+  expect(result).toMatchObject({ ok: true, updatedSlideIds: [f.slide.id] });
+  const p = await f.projection();
+  expect(p.slide.notes).toBe("Speaker note");
+  expect(p.deck.slideMeta[f.slide.id].transition).toEqual({
+    kind: "fade",
+    durationMs: 180,
+    easing: "ease-out",
+  });
+  expect(p.deck.transitionDefaults).toEqual({
+    kind: "wipe",
+    durationMs: 240,
+    easing: "linear",
+  });
+});
+
 it("creative semantic operations reuse deck CSS Effects z-order and native Motion", async () => {
   const f = fixture();
   const root = f.slide.nodes[0].id;
