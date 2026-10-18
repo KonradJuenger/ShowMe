@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AgentContextService } from "../../../electron/agentContext";
+import { AgentTextMeasurementService } from "../../../electron/agentTextMeasurement";
 import { readSettings, writeSettings } from "../../../electron/settings";
 import { newPresentationDocument } from "../../../src/core/document";
 import type { DocumentProjection } from "../../../src/core/documentProjection";
@@ -433,3 +434,75 @@ it("persists the MCP preference in app settings while preserving unrelated setti
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+it("text measurement batches exact-scope reads and rejects stale or disabled access", async () => {
+  let access: number | null = 1;
+  let active: string | null = "document";
+  const state = { documentId: "document", epoch: "epoch", revision: 3 };
+  let calls = 0;
+  const service = new AgentTextMeasurementService({
+    access: () => access,
+    activeDocumentId: () => active,
+    state: async () => ({ ...state }),
+    measure: async (_documentId, items) => {
+      calls++;
+      return items.map((item) => ({
+        width: item.width,
+        height: item.text.length * 2,
+      }));
+    },
+  });
+  const request = {
+    documentId: "document",
+    epoch: "epoch",
+    revision: 3,
+    items: [
+      {
+        text: "One",
+        width: 320,
+        typography: { fontFamily: "Arial", fontSize: 32 },
+      },
+      { text: "Second", width: 420 },
+    ],
+  };
+
+  expect(await service.measure(request)).toEqual({
+    ok: true,
+    documentId: "document",
+    epoch: "epoch",
+    revision: 3,
+    measurements: [
+      { width: 320, height: 6 },
+      { width: 420, height: 12 },
+    ],
+  });
+  expect(calls).toBe(1);
+
+  state.revision = 4;
+  expect(await service.measure(request)).toMatchObject({
+    error: { code: "REVISION_CONFLICT", actualRevision: 4 },
+  });
+  expect(calls).toBe(1);
+
+  state.revision = 3;
+  state.epoch = "replacement";
+  expect(await service.measure(request)).toMatchObject({
+    error: { code: "EPOCH_CONFLICT" },
+  });
+  expect(calls).toBe(1);
+
+  state.epoch = "epoch";
+  access = null;
+  expect(await service.measure(request)).toMatchObject({
+    error: { code: "MCP_DISABLED" },
+  });
+  expect(calls).toBe(1);
+
+  access = 2;
+  active = "other";
+  expect(await service.measure(request)).toMatchObject({
+    error: { code: "DOCUMENT_NOT_ACTIVE" },
+  });
+  expect(calls).toBe(1);
+});
+
