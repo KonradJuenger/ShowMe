@@ -1,27 +1,35 @@
 import { z } from "zod/v4";
-import { createBasicShape } from "./elementFactory";
+import { createBasicShape, createEmptyFrame } from "./elementFactory";
 import {
   insertElements,
   removeElements,
   replaceElement,
   setElementAppearances,
   setElementFramesPreservingContent,
+  setElementContents,
   translateElements,
   createSlide,
+  duplicateSlide,
+  deleteSlide,
   setSlideBackground,
   updateSlideMeta,
   setDeckProperties,
+  reorderSlides,
   reorderElements,
+  reparentElements,
+  frameElements,
+  unframeElement,
+  duplicateElementsWithResult,
   setElementEffectDefinition,
   setElementEffectParameterValue,
   setSlideEffects,
   setSlideMotion,
   type EditorSnapshot,
 } from "./editorCommands";
-import { editorOperations } from "./editorChange";
+import { editorOperations, setEditorOperations } from "./editorChange";
 import { getChildren, getOwningLayer, locateElement } from "./scene";
 import { getWorldMatrix } from "./scene";
-import { transformPoint, type Element } from "./element";
+import { transformPoint, isNeutralFrame, type Element, type MediaContent } from "./element";
 import { IDENTITY } from "./element";
 import {
   insertText,
@@ -32,7 +40,19 @@ import {
 } from "./text";
 import { resolveTextTypography } from "./textTypography";
 import type { DocumentProjection } from "./documentProjection";
-import { makeIndependent } from "./templateCommands";
+import { applyTemplate, makeIndependent } from "./templateCommands";
+import { alignSelection, distributeSelection } from "./arrangeCommands";
+import {
+  centerMedia,
+  convertMediaRule,
+  isMediaContent,
+  resetMedia,
+  setMediaContent,
+  updateMediaFromResolved,
+} from "./media";
+import {
+  createTextStyleFromElement,
+} from "./textStyleCommands";
 import {
   addMotionPreset,
   addParameterAnimation,
@@ -65,8 +85,17 @@ const frame = point
   .extend({
     width: number.positive().max(100000),
     height: number.positive().max(100000),
+    rotation: number.min(-360000).max(360000).optional(),
+    scaleX: number.positive().max(10000).optional(),
+    scaleY: number.positive().max(10000).optional(),
+    originX: number.min(0).max(1).optional(),
+    originY: number.min(0).max(1).optional(),
+    flipX: z.boolean().optional(),
+    flipY: z.boolean().optional(),
   })
   .strict();
+const optionalId = id.optional();
+const childIndex = z.number().int().min(0).max(100000);
 const color = z.string().regex(/^#[a-fA-F0-9]{6}(?:[a-fA-F0-9]{2})?$/);
 const appearance = z
   .object({
@@ -194,6 +223,22 @@ export const agentApplyRequestSchema = z
               afterId: id.nullable(),
               name: z.string().trim().min(1).max(200),
               background: background.optional(),
+              id: optionalId,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("slide.duplicate"),
+              afterId: id.nullable().optional(),
+              name: z.string().trim().min(1).max(200).optional(),
+              id: optionalId,
+            })
+            .strict(),
+          z.object({ type: z.literal("slide.delete") }).strict(),
+          z
+            .object({
+              type: z.literal("slide.move"),
+              afterId: id.nullable(),
             })
             .strict(),
           z
@@ -201,6 +246,13 @@ export const agentApplyRequestSchema = z
               type: z.literal("slide.update"),
               name: z.string().trim().min(1).max(200).optional(),
               background: background.optional(),
+              hidden: z.boolean().optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("slide.template.apply"),
+              templateId: id,
             })
             .strict(),
           z.object({ type: z.literal("slide.make_independent") }).strict(),
@@ -214,6 +266,34 @@ export const agentApplyRequestSchema = z
             .object({
               type: z.literal("deck.stylesheet.set"),
               source: z.string().max(100000),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("deck.dimensions.set"),
+              width: number.positive().max(100000),
+              height: number.positive().max(100000),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("text.style.apply"),
+              elementIds: ids,
+              styleId: id.nullable(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("text.style.clear_overrides"),
+              elementIds: ids,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("text.style.create"),
+              elementId: id,
+              name: z.string().trim().min(1).max(200),
+              styleId: optionalId,
             })
             .strict(),
           z
@@ -267,6 +347,82 @@ export const agentApplyRequestSchema = z
               parentId: id,
               elementIds: ids,
               mode: z.enum(["front", "back", "forward", "backward"]),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("elements.align"),
+              scopeId: id,
+              elementIds: ids,
+              axis: z.enum(["left", "center", "right", "top", "middle", "bottom"]),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("elements.distribute"),
+              scopeId: id,
+              elementIds: ids,
+              axis: z.enum(["evenly", "horizontal", "vertical"]),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("elements.duplicate"),
+              elementIds: ids,
+              offset: point.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("elements.reparent"),
+              elementIds: ids,
+              parentId: id,
+              index: childIndex.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("elements.group"),
+              elementIds: ids.min(2),
+              id: optionalId,
+              name: z.string().max(200).optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("elements.ungroup"),
+              elementId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("frame.fit"),
+              elementId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("frame.fill"),
+              elementId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("frame.content_center"),
+              elementId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("frame.content_reset"),
+              elementId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("frame.content_transform.set"),
+              elementId: id,
+              frame,
             })
             .strict(),
           z
@@ -364,6 +520,7 @@ export const agentApplyRequestSchema = z
               name: z.string().max(200).optional(),
               typography: typography.optional(),
               autoSize: autoSize.optional(),
+              id: optionalId,
             })
             .strict(),
           z
@@ -374,6 +531,17 @@ export const agentApplyRequestSchema = z
               frame,
               appearance: appearance.optional(),
               name: z.string().max(200).optional(),
+              id: optionalId,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("element.insert_frame"),
+              parentId: id,
+              frame,
+              appearance: appearance.optional(),
+              name: z.string().max(200).optional(),
+              id: optionalId,
             })
             .strict(),
           z
@@ -428,6 +596,7 @@ export async function assembleAgentMutation(
   measure: AgentTextMeasure,
   newId = () => crypto.randomUUID(),
   validateEffect?: AgentEffectValidate,
+  replacementSlide?: import("./document").Slide,
 ) {
   if (
     !projection.deck.slideIds.includes(request.slideId) ||
@@ -455,9 +624,12 @@ export async function assembleAgentMutation(
       "Target at most 128 existing elements per request.",
     );
   const initialIds = new Set(forest(projection).keys());
+  const createdThisBatch = new Set<string>();
+  const idMap: Record<string, string> = {};
+  const createdTextStyleIds: string[] = [];
   const requireEditable = (elementId: string) => {
     const location = locateElement(next.slide, elementId);
-    if (!initialIds.has(elementId) || !location)
+    if ((!initialIds.has(elementId) && !createdThisBatch.has(elementId)) || !location)
       throw new AgentMutationError(
         "UNKNOWN_ELEMENT",
         "Inspect the slide-owned element IDs again.",
@@ -643,38 +815,83 @@ export async function assembleAgentMutation(
       if ("elementIds" in op) op.elementIds.forEach(requireEditable);
       if ("elementId" in op) requireEditable(op.elementId);
       if (op.type === "slide.create") {
-        if (request.operations.length !== 1)
+        if (stepIndex !== 0)
           throw new AgentMutationError(
             "INVALID_REQUEST",
-            "Create a slide in its own request, then inspect its returned ID before editing content.",
+            "slide.create must be the first operation so following operations target the created slide.",
           );
         if (op.afterId !== null && !next.deck.slideIds.includes(op.afterId))
           throw new AgentMutationError(
             "UNKNOWN_SLIDE",
             "Use an inspected slide anchor, or null to insert first.",
           );
-        const slideId = newId();
-        next = createSlide(
+        const slideId = op.id ?? newId();
+        if (next.deck.slideIds.includes(slideId))
+          throw new AgentMutationError("INVALID_REQUEST", "Slide ID already exists.");
+        const createdSlide = {
+          version: 1 as const,
+          id: slideId,
+          background: op.background ?? "#ffffff",
+          notes: "",
+          nodes: next.deck.layers.map((layer) => ({
+            type: "layer" as const,
+            id: layer.id,
+            children: [],
+          })),
+        };
+        const created = createSlide(
           next,
-          {
-            version: 1,
-            id: slideId,
-            background: op.background ?? "#ffffff",
-            notes: "",
-            nodes: next.deck.layers.map((layer) => ({
-              type: "layer" as const,
-              id: layer.id,
-              children: [],
-            })),
-          },
+          createdSlide,
           { name: op.name, section: "", hidden: false, templateId: null },
           op.afterId,
         );
-      } else if (op.type === "slide.update") {
-        if (!op.name && !op.background)
+        next = setEditorOperations(
+          { ...created, slide: createdSlide },
+          editorOperations(created),
+        );
+      } else if (op.type === "slide.duplicate") {
+        if (stepIndex !== 0)
           throw new AgentMutationError(
             "INVALID_REQUEST",
-            "Supply a slide name or background.",
+            "slide.duplicate must be the first operation so following operations target the duplicate.",
+          );
+        const slideId = op.id ?? newId();
+        const sourceMeta = next.deck.slideMeta[next.slide.id];
+        const afterId = op.afterId === undefined ? next.slide.id : op.afterId;
+        if (afterId !== null && !next.deck.slideIds.includes(afterId))
+          throw new AgentMutationError("UNKNOWN_SLIDE", "Use an inspected slide anchor or null.");
+        const duplicated = duplicateSlide(
+          next,
+          next.slide,
+          slideId,
+          { ...sourceMeta, name: op.name ?? sourceMeta.name },
+          afterId,
+          newId,
+        );
+        const operation = editorOperations(duplicated).findLast(
+          (value) => value.type === "slide.duplicate",
+        ) as Extract<ReturnType<typeof editorOperations>[number], { type: "slide.duplicate" }> | undefined;
+        const createdSlide = operation?.type === "slide.duplicate" ? operation.slide : undefined;
+        if (!createdSlide)
+          throw new AgentMutationError("COMMIT_FAILED", "The duplicated slide was not staged.");
+        next = setEditorOperations(
+          { ...duplicated, slide: createdSlide },
+          editorOperations(duplicated),
+        );
+      } else if (op.type === "slide.delete") {
+        if (request.operations.length !== 1 || !replacementSlide)
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "Delete a slide in its own request so ShowMe can select a surviving replacement.",
+          );
+        next = deleteSlide(next, next.slide.id, replacementSlide);
+      } else if (op.type === "slide.move") {
+        next = reorderSlides(next, next.slide.id, op.afterId);
+      } else if (op.type === "slide.update") {
+        if (op.name === undefined && op.background === undefined && op.hidden === undefined)
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "Supply a slide name, background, or hidden state.",
           );
         if (op.background) {
           if (next.deck.slideMeta[request.slideId]?.templateId)
@@ -688,13 +905,46 @@ export async function assembleAgentMutation(
           next = setSlideBackground(next, op.background);
         }
         if (op.name)
-          next = updateSlideMeta(next, request.slideId, { name: op.name });
+          next = updateSlideMeta(next, next.slide.id, { name: op.name });
+        if (op.hidden !== undefined)
+          next = updateSlideMeta(next, next.slide.id, { hidden: op.hidden });
+      } else if (op.type === "slide.template.apply") {
+        next = applyTemplate(next, op.templateId);
       } else if (op.type === "slide.make_independent") {
         next = makeIndependent(next);
       } else if (op.type === "deck.rename") {
         next = setDeckProperties(next, { name: op.name });
       } else if (op.type === "deck.stylesheet.set") {
         next = setDeckProperties(next, { stylesheet: op.source });
+      } else if (op.type === "deck.dimensions.set") {
+        next = setDeckProperties(next, { width: op.width, height: op.height });
+      } else if (op.type === "text.style.apply") {
+        if (op.styleId && !next.deck.textStyles.some((style) => style.id === op.styleId))
+          throw new AgentMutationError("UNKNOWN_TEXT_STYLE", "Inspect the deck and use an existing Text Style ID.");
+        for (const elementId of op.elementIds) {
+          const element = requireEditable(elementId);
+          if (element.content?.type !== "text")
+            throw new AgentMutationError("UNSUPPORTED_OPERATION", "Text Style assignment requires text elements.");
+          await setText(elementId, {
+            format: op.styleId
+              ? { kind: "style", styleId: op.styleId, overrides: {} }
+              : { kind: "local", typography: resolveTextTypography(next.deck, element.content) },
+          });
+        }
+      } else if (op.type === "text.style.clear_overrides") {
+        for (const elementId of op.elementIds) {
+          const element = requireEditable(elementId);
+          if (element.content?.type !== "text")
+            throw new AgentMutationError("UNSUPPORTED_OPERATION", "Text Style override reset requires text elements.");
+          if (element.content.format.kind === "style")
+            await setText(elementId, {
+              format: { ...element.content.format, overrides: {} },
+            });
+        }
+      } else if (op.type === "text.style.create") {
+        const styleId = op.styleId ?? newId();
+        next = createTextStyleFromElement(next, op.elementId, op.name, styleId);
+        createdTextStyleIds.push(styleId);
       } else if (op.type === "text.style") {
         if (
           !Object.keys(op.typography ?? {}).length &&
@@ -759,6 +1009,69 @@ export async function assembleAgentMutation(
             { requiredParentId: op.parentId, elementIds: invalid },
           );
         next = reorderElements(next, op.parentId, op.elementIds, op.mode);
+      } else if (op.type === "elements.align") {
+        requireParent(op.scopeId);
+        next = alignSelection(next, op.elementIds, op.scopeId, op.axis);
+      } else if (op.type === "elements.distribute") {
+        requireParent(op.scopeId);
+        next = distributeSelection(next, op.elementIds, op.scopeId, op.axis);
+      } else if (op.type === "elements.duplicate") {
+        const duplicated = duplicateElementsWithResult(
+          next,
+          op.elementIds,
+          newId,
+          op.offset ?? { x: 20, y: 20 },
+        );
+        next = duplicated.snapshot;
+        Object.assign(idMap, duplicated.idMap);
+        for (const value of Object.values(duplicated.idMap))
+          createdThisBatch.add(value);
+      } else if (op.type === "elements.reparent") {
+        requireParent(op.parentId);
+        next = reparentElements(next, op.elementIds, op.parentId, op.index);
+      } else if (op.type === "elements.group") {
+        const groupId = op.id ?? newId();
+        if (forest(next).has(groupId))
+          throw new AgentMutationError("INVALID_REQUEST", "Group ID already exists.");
+        next = frameElements(next, op.elementIds, groupId);
+        createdThisBatch.add(groupId);
+        if (op.name !== undefined) {
+          const group = locateElement(next.slide, groupId)!.element;
+          next = replaceElement(next, groupId, { ...group, name: op.name });
+        }
+      } else if (op.type === "elements.ungroup") {
+        const group = requireEditable(op.elementId);
+        if (!isNeutralFrame(group))
+          throw new AgentMutationError(
+            "UNSUPPORTED_OPERATION",
+            "Only a neutral Group can be ungrouped without visual loss.",
+          );
+        next = unframeElement(next, op.elementId);
+      } else if (
+        op.type === "frame.fit" ||
+        op.type === "frame.fill" ||
+        op.type === "frame.content_center" ||
+        op.type === "frame.content_reset" ||
+        op.type === "frame.content_transform.set"
+      ) {
+        const element = requireEditable(op.elementId);
+        if (!isMediaContent(element.content))
+          throw new AgentMutationError("INVALID_MEDIA", "The target has no image, SVG, or video content.");
+        let content: MediaContent;
+        if (op.type === "frame.fit")
+          content = convertMediaRule(element, "fit");
+        else if (op.type === "frame.fill")
+          content = convertMediaRule(element, "fill");
+        else if (op.type === "frame.content_center")
+          content = centerMedia(element);
+        else if (op.type === "frame.content_reset")
+          content = resetMedia(element);
+        else
+          content = updateMediaFromResolved(element, {
+            ...resolveMediaFrame(element)!,
+            ...op.frame,
+          });
+        next = setMediaContent(next, op.elementId, content);
       } else if (op.type === "effect.apply_code") {
         const target = requireEditable(op.elementId);
         const existing = op.existingInstanceId
@@ -986,7 +1299,7 @@ export async function assembleAgentMutation(
         next = removeElements(next, op.elementIds);
       else {
         requireParent(op.parentId);
-        const elementId = newId();
+        const elementId = op.id ?? newId();
         if (forest(next).has(elementId))
           throw new AgentMutationError(
             "INVALID_REQUEST",
@@ -1031,12 +1344,17 @@ export async function assembleAgentMutation(
             ...op.typography,
             autoSize: op.autoSize ?? "none",
           });
+          createdThisBatch.add(elementId);
         } else {
-          const element = createBasicShape(elementId, op.shape, op.frame);
+          const element =
+            op.type === "element.insert_frame"
+              ? createEmptyFrame(elementId, op.frame)
+              : createBasicShape(elementId, op.shape, op.frame);
           element.frame = { ...element.frame, ...op.frame };
           element.appearance = { ...element.appearance, ...op.appearance };
           if (op.name !== undefined) element.name = op.name;
           next = insertElements(next, [element], op.parentId);
+          createdThisBatch.add(elementId);
         }
       }
       if (editorOperations(next).length > 256)
@@ -1060,7 +1378,12 @@ export async function assembleAgentMutation(
       );
     }
   }
-  const changes = mutationChanges(projection, next);
+  const changes =
+    projection.slide.id === next.slide.id
+      ? mutationChanges(projection, next)
+      : projection.deck.slideIds.includes(next.slide.id)
+        ? { createdIds: [], removedIds: [], changedIds: [] }
+        : { createdIds: [...forest(next).keys()], removedIds: [], changedIds: [] };
   if (
     new Set([
       ...changes.createdIds,
@@ -1088,6 +1411,8 @@ export async function assembleAgentMutation(
     updatedSlideIds,
     createdEffectInstanceIds: [...new Set(createdEffectInstanceIds)],
     updatedEffectInstanceIds: [...new Set(updatedEffectInstanceIds)],
+    idMap,
+    createdTextStyleIds: [...new Set(createdTextStyleIds)],
     changed: editorOperations(next).length > 0,
   };
 }
