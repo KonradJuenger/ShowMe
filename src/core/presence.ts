@@ -20,17 +20,21 @@ import {
 
 export function defaultPresenceTransition(
   kind: PresenceTransition["kind"] = "none",
+  direction?: PresenceTransition["direction"],
 ): PresenceTransition {
   return {
     kind,
     durationMs: motionDefaults.duration,
     easing: motionDefaults.ease,
+    ...(direction ? { direction } : {}),
   };
 }
 export function addPresence(
   input: SlideMotion | undefined,
   index: number,
   elementIds: readonly string[],
+  enterTransition?: PresenceTransition,
+  exitTransition?: PresenceTransition,
 ) {
   const motion = structuredClone(
     input ?? { stages: [{ id: uid(), tracks: [] }] },
@@ -45,8 +49,8 @@ export function addPresence(
         version: PRESENCE_SCHEDULE_VERSION,
         startOffsetMs: 0,
         end: { mode: "none" },
-        enterTransition: defaultPresenceTransition(),
-        exitTransition: defaultPresenceTransition(),
+        enterTransition: enterTransition ?? defaultPresenceTransition(),
+        exitTransition: exitTransition ?? defaultPresenceTransition(),
       },
     });
   return slideMotionSchema.parse(motion);

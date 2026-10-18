@@ -77,10 +77,11 @@ import {
   addParameterAnimation,
   motionEaseFromName,
 } from "./motion";
-import { addPresence } from "./presence";
+import { addPresence, defaultPresenceTransition } from "./presence";
 import {
   motionProperties,
   type MotionProperty,
+  type PresenceTransition,
 } from "./motionModel";
 import {
   EFFECT_STRING_LIMIT,
@@ -166,6 +167,24 @@ const transitionDefaultsSchema = z
     kind: transitionKind,
     durationMs: transitionDuration,
     easing: transitionEasing,
+  })
+  .strict();
+const presenceEasingSchema = z.union([
+  z.literal("linear"),
+  z.literal("hold"),
+  z.tuple([z.number(), z.number(), z.number(), z.number()]),
+]);
+const presenceTransitionInputSchema = z
+  .object({
+    kind: z.enum(["none", "fade", "move", "scale", "rotate"]),
+    durationMs: z.number().int().nonnegative().max(86400000).optional(),
+    easing: presenceEasingSchema.optional(),
+    direction: z
+      .enum(["Left", "Right", "Up", "Down", "Clockwise", "Counter-clockwise"])
+      .optional(),
+    distance: z.number().finite().nonnegative().optional(),
+    scale: z.number().finite().nonnegative().optional(),
+    angle: z.number().finite().nonnegative().optional(),
   })
   .strict();
 const layerPatch = z
@@ -651,6 +670,24 @@ export const agentApplyRequestSchema = z
               type: z.literal("presence.add"),
               stageIndex,
               elementIds: ids,
+              transition: z
+                .enum(["none", "fade", "move", "scale", "rotate"])
+                .optional(),
+              direction: z
+                .enum([
+                  "Left",
+                  "Right",
+                  "Up",
+                  "Down",
+                  "Clockwise",
+                  "Counter-clockwise",
+                ])
+                .optional(),
+              distance: z.number().finite().nonnegative().optional(),
+              durationMs: z.number().int().nonnegative().max(86400000).optional(),
+              easing: presenceEasingSchema.optional(),
+              enterTransition: presenceTransitionInputSchema.optional(),
+              exitTransition: presenceTransitionInputSchema.optional(),
             })
             .strict(),
           z
@@ -1698,9 +1735,41 @@ export async function assembleAgentMutation(
         }
         next = setSlideMotion(next, motion);
       } else if (op.type === "presence.add") {
+        const resolveTransition = (
+          explicit?: z.infer<typeof presenceTransitionInputSchema>,
+          fallbackKind?: "none" | "fade" | "move" | "scale" | "rotate",
+        ): PresenceTransition | undefined => {
+          const kind = explicit?.kind ?? fallbackKind;
+          if (!kind) return undefined;
+          const def = defaultPresenceTransition(
+            kind,
+            explicit?.direction ?? op.direction,
+          );
+          return {
+            kind,
+            durationMs: explicit?.durationMs ?? op.durationMs ?? def.durationMs,
+            easing: (explicit?.easing ?? op.easing ?? def.easing) as PresenceTransition["easing"],
+            ...(explicit?.direction ?? op.direction
+              ? { direction: explicit?.direction ?? op.direction }
+              : {}),
+            ...(explicit?.distance !== undefined || op.distance !== undefined
+              ? { distance: explicit?.distance ?? op.distance }
+              : {}),
+            ...(explicit?.scale !== undefined ? { scale: explicit.scale } : {}),
+            ...(explicit?.angle !== undefined ? { angle: explicit.angle } : {}),
+          };
+        };
+        const enter = resolveTransition(op.enterTransition, op.transition);
+        const exit = resolveTransition(op.exitTransition);
         next = setSlideMotion(
           next,
-          addPresence(ensureStages(op.stageIndex), op.stageIndex, op.elementIds),
+          addPresence(
+            ensureStages(op.stageIndex),
+            op.stageIndex,
+            op.elementIds,
+            enter,
+            exit,
+          ),
         );
       } else if (op.type === "elements.remove")
         next = removeElements(next, op.elementIds);
