@@ -375,6 +375,274 @@ test("MCP builds multiple styled slides with production text measurement and rea
       name: "ShowMe MCP deck",
       slideCount: 3,
     });
+
+    const beforeDashboard = await context(client);
+    const measured = await client.callTool({
+      name: "showme.measure_text",
+      arguments: {
+        documentId: beforeDashboard.document!.id,
+        epoch: beforeDashboard.document!.epoch,
+        revision: beforeDashboard.document!.revision,
+        items: [
+          {
+            text: "Three signals, one system.",
+            width: 1080,
+            typography: {
+              fontFamily: "Arial",
+              fontSize: 68,
+              fontWeight: 700,
+              lineHeight: 1.05,
+              letterSpacing: 0,
+            },
+          },
+          {
+            text: "Each card is one structural component, not a pile of independently animated children.",
+            width: 1080,
+            typography: {
+              fontFamily: "Arial",
+              fontSize: 30,
+              fontWeight: 400,
+              lineHeight: 1.2,
+              letterSpacing: 0,
+            },
+          },
+        ],
+      },
+    });
+    expect(measured.isError, JSON.stringify(measured.structuredContent)).toBe(
+      false,
+    );
+    const dashboardMeasurements = (measured.structuredContent as any)
+      .measurements;
+    expect(dashboardMeasurements).toHaveLength(2);
+    expect(dashboardMeasurements.every((value: any) => value.height > 0)).toBe(
+      true,
+    );
+
+    const dashboardId = "mcp-dashboard-slide";
+    const dashboard = await apply(secondId, [
+      {
+        type: "slide.create",
+        id: dashboardId,
+        afterId: secondId,
+        name: "Composite dashboard",
+        background: "#101820",
+      },
+      {
+        type: "element.insert_text",
+        id: "dashboard-title",
+        parentId,
+        frame: {
+          x: 120,
+          y: 80,
+          width: 1080,
+          height: Math.ceil(dashboardMeasurements[0].height) + 8,
+        },
+        autoSize: "none",
+        text: "Three signals, one system.",
+        typography: {
+          fontFamily: "Arial",
+          fontSize: 68,
+          fontWeight: 700,
+          color: "#FFFFFF",
+          lineHeight: 1.05,
+        },
+      },
+      {
+        type: "element.insert_text",
+        id: "dashboard-subtitle",
+        parentId,
+        frame: {
+          x: 120,
+          y: 166,
+          width: 1080,
+          height: Math.ceil(dashboardMeasurements[1].height) + 8,
+        },
+        autoSize: "none",
+        text: "Each card is one structural component, not a pile of independently animated children.",
+        typography: {
+          fontFamily: "Arial",
+          fontSize: 30,
+          color: "#BFC7CE",
+          lineHeight: 1.2,
+        },
+      },
+      ...["a", "b", "c"].flatMap((suffix, index) => {
+        const cardId = `dashboard-card-${suffix}`;
+        return [
+          {
+            type: "element.insert_frame",
+            id: cardId,
+            parentId,
+            frame: {
+              x: 120 + index * 540,
+              y: 300,
+              width: 480,
+              height: 360,
+            },
+            name: `Dashboard card ${index + 1}`,
+          },
+          {
+            type: "element.insert_shape",
+            id: `${cardId}-background`,
+            parentId: cardId,
+            shape: "rectangle",
+            frame: { x: 0, y: 0, width: 480, height: 360 },
+            appearance: { fill: "#F5F6F7", strokeWidth: 0, radius: 22 },
+          },
+          {
+            type: "element.insert_text",
+            id: `${cardId}-label`,
+            parentId: cardId,
+            frame: { x: 32, y: 30, width: 416, height: 44 },
+            autoSize: "none",
+            text: `Signal ${index + 1}`,
+            typography: { fontSize: 24, color: "#58636C" },
+          },
+          {
+            type: "element.insert_text",
+            id: `${cardId}-metric`,
+            parentId: cardId,
+            frame: { x: 32, y: 105, width: 416, height: 90 },
+            autoSize: "none",
+            text: `${28 + index * 17}%`,
+            typography: {
+              fontSize: 64,
+              fontWeight: 700,
+              color: "#101820",
+            },
+          },
+          {
+            type: "element.insert_shape",
+            id: `${cardId}-progress`,
+            parentId: cardId,
+            shape: "rectangle",
+            frame: {
+              x: 32,
+              y: 270,
+              width: 150 + index * 95,
+              height: 12,
+            },
+            appearance: { fill: "#007F73", strokeWidth: 0, radius: 6 },
+          },
+        ];
+      }),
+      {
+        type: "presence.add",
+        stageIndex: 1,
+        elementIds: [
+          "dashboard-card-a",
+          "dashboard-card-b",
+          "dashboard-card-c",
+        ],
+        transition: "move",
+        direction: "Up",
+        distance: 48,
+        durationMs: 400,
+        easing: "Ease Out",
+      },
+    ]);
+    expect(dashboard).toMatchObject({
+      ok: true,
+      createdSlideIds: [dashboardId],
+      createdIds: expect.arrayContaining([
+        "dashboard-card-a",
+        "dashboard-card-b",
+        "dashboard-card-c",
+      ]),
+    });
+
+    const cardIds = ["dashboard-card-a", "dashboard-card-b", "dashboard-card-c"];
+    const cardInspection = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: beforeDashboard.document!.id,
+        epoch: beforeDashboard.document!.epoch,
+        revision: dashboard.revision,
+        target: {
+          type: "elements",
+          slideId: dashboardId,
+          elementIds: [
+            ...cardIds,
+            ...cardIds.map((id) => `${id}-label`),
+          ],
+          includeMotion: true,
+          includePresence: true,
+        },
+      },
+    });
+    expect(
+      cardInspection.isError,
+      JSON.stringify(cardInspection.structuredContent),
+    ).toBe(false);
+    const cardDetails = (cardInspection.structuredContent as any).data.elements;
+    for (const cardId of cardIds) {
+      const card = cardDetails.find((value: any) => value.id === cardId);
+      const label = cardDetails.find(
+        (value: any) => value.id === `${cardId}-label`,
+      );
+      expect(card).toMatchObject({
+        parentId,
+        container: true,
+        childCount: 4,
+        hasPresence: true,
+        hasMotion: false,
+        presenceStageIndices: [1],
+      });
+      expect(card.presence).toHaveLength(1);
+      expect(card.presence[0]).toMatchObject({
+        stageIndex: 1,
+        schedule: {
+          enterTransition: {
+            kind: "move",
+            direction: "Up",
+            distance: 48,
+            durationMs: 400,
+          },
+        },
+      });
+      expect(label).toMatchObject({
+        parentId: cardId,
+        depth: 1,
+        hasPresence: false,
+        hasMotion: false,
+      });
+      expect(label.presence).toEqual([]);
+      expect(label.motion).toEqual([]);
+    }
+
+    const dashboardPreview = await client.callTool({
+      name: "showme.preview",
+      arguments: {
+        documentId: beforeDashboard.document!.id,
+        epoch: beforeDashboard.document!.epoch,
+        revision: dashboard.revision,
+        slideId: dashboardId,
+        width: 640,
+        height: 360,
+      },
+    });
+    expect(
+      dashboardPreview.isError,
+      JSON.stringify(dashboardPreview.structuredContent),
+    ).toBe(false);
+    expect(
+      dashboardPreview.content.some((value) => value.type === "image"),
+    ).toBe(true);
+
+    const dashboardDeck = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: beforeDashboard.document!.id,
+        epoch: beforeDashboard.document!.epoch,
+        revision: dashboard.revision,
+        target: { type: "deck" },
+      },
+    });
+    expect((dashboardDeck.structuredContent as any).data.deck).toMatchObject({
+      name: "ShowMe MCP deck",
+      slideCount: 4,
+    });
   } finally {
     await client?.close();
     await close(app);
