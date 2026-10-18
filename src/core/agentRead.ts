@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import { agentApplyRequestSchema } from "./agentMutation";
 import { agentAuthoringRequestSchema } from "./agentAuthoring";
 
-export const SHOWME_MCP_SERVER_VERSION = "1.1.0" as const;
+export const SHOWME_MCP_SERVER_VERSION = "1.2.0" as const;
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const scope = {
@@ -19,6 +19,7 @@ export const agentInspectRequestSchema = z
         .object({
           type: z.literal("deck"),
           includeStylesheet: z.boolean().optional(),
+          includeTextStyles: z.boolean().optional(),
         })
         .strict(),
       z.object({ type: z.literal("slide"), slideId: id, ...hidden }).strict(),
