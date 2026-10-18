@@ -32,6 +32,7 @@ import {
   transformPoint,
   isNeutralFrame,
   resolveMediaFrame,
+  walkElements,
   type Element,
   type MediaContent,
 } from "./element";
@@ -670,13 +671,45 @@ export async function assembleAgentMutation(
       "Target at most 128 existing elements per request.",
     );
   const initialIds = new Set(forest(projection).keys());
+  const templateElementIds = new Set(
+    Object.values(projection.templates ?? {}).flatMap((template) =>
+      walkElements(template.nodes.flatMap((root) => root.children)).map(
+        ({ id }) => id,
+      ),
+    ),
+  );
   const createdThisBatch = new Set<string>();
   const idMap: Record<string, string> = {};
   const createdTextStyleIds: string[] = [];
   const createdLayerIds: string[] = [];
   const requireEditable = (elementId: string) => {
     const location = locateElement(next.slide, elementId);
-    if ((!initialIds.has(elementId) && !createdThisBatch.has(elementId)) || !location)
+    if (!location) {
+      const templateId = next.deck.slideMeta[next.slide.id]?.templateId;
+      const template = templateId ? next.templates?.[templateId] : undefined;
+      const templateOwns = template
+        ? walkElements(template.nodes.flatMap((root) => root.children)).some(
+            ({ id }) => id === elementId,
+          )
+        : false;
+      if (templateOwns)
+        throw new AgentMutationError(
+          "TEMPLATE_OWNED",
+          "The target belongs to the applied Template.",
+          undefined,
+          undefined,
+          { suggestedOperation: "slide.make_independent" },
+        );
+      throw new AgentMutationError(
+        "UNKNOWN_ELEMENT",
+        "Inspect the slide-owned element IDs again.",
+      );
+    }
+    if (
+      !initialIds.has(elementId) &&
+      !createdThisBatch.has(elementId) &&
+      !templateElementIds.has(elementId)
+    )
       throw new AgentMutationError(
         "UNKNOWN_ELEMENT",
         "Inspect the slide-owned element IDs again.",
@@ -1131,6 +1164,14 @@ export async function assembleAgentMutation(
         if (!isMediaContent(element.content))
           throw new AgentMutationError("INVALID_MEDIA", "The target has no image, SVG, or video content.");
         let content: MediaContent;
+        if (
+          (op.type === "frame.fit" || op.type === "frame.fill") &&
+          element.content.transform.rule === "free"
+        )
+          throw new AgentMutationError(
+            "INVALID_MEDIA",
+            "Fit/fill from a Free media transform requires managed asset dimensions that are not available through the current MCP boundary.",
+          );
         if (op.type === "frame.fit")
           content = convertMediaRule(element, "fit");
         else if (op.type === "frame.fill")
