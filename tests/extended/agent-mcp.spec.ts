@@ -649,6 +649,7 @@ test("real stdio client reads context inspection and production PNG with Setting
       "showme.context",
       "showme.authoring",
       "showme.inspect",
+      "showme.measure_text",
       "showme.apply",
       "showme.preview",
     ]);
@@ -777,6 +778,45 @@ test("real stdio client reads context inspection and production PNG with Setting
     await expect
       .poll(() => preview.evaluate(() => (window as any).entered))
       .toBe(true);
+    const measuredWhilePreviewBlocked = await client.callTool({
+      name: "showme.measure_text",
+      arguments: {
+        ...scope,
+        items: [
+          {
+            text: "A paragraph that should wrap over several lines at this narrow width.",
+            width: 220,
+            typography: {
+              fontFamily: "Arial",
+              fontSize: 32,
+              fontWeight: 400,
+              lineHeight: 1.2,
+              letterSpacing: 0,
+            },
+          },
+          {
+            text: "Short line",
+            width: 800,
+            typography: {
+              fontFamily: "Arial",
+              fontSize: 32,
+              fontWeight: 400,
+              lineHeight: 1.2,
+              letterSpacing: 0,
+            },
+          },
+        ],
+      },
+    });
+    expect(
+      measuredWhilePreviewBlocked.isError,
+      JSON.stringify(measuredWhilePreviewBlocked.structuredContent),
+    ).toBe(false);
+    const measurements = (measuredWhilePreviewBlocked.structuredContent as any)
+      .measurements;
+    expect(measurements).toHaveLength(2);
+    expect(measurements[0].height).toBeGreaterThan(measurements[1].height);
+    expect(measurements.every((value: any) => value.width > 0)).toBe(true);
     await settings(page);
     await page.getByLabel("Enable MCP", { exact: true }).uncheck();
     expect((await pending).structuredContent).toMatchObject({
