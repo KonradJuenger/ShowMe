@@ -81,3 +81,34 @@ before integration into main. Saving/exporting files, slide deletion/reordering,
 template authoring, media insertion and Motion/Effect authoring remain outside the
 current MCP operation set. Rebuild/restart ShowMe and reconnect the MCP host to use
 the refined schemas and host implementation together.
+
+## MCP authoring and latency refinement, 2026-10-18
+
+External MCP use confirmed that integrated Presence transitions and the strict
+`showme.apply` receipt schema were already present before this refinement. They
+were preserved rather than replaced.
+
+This pass changed the model-facing and hot-path behavior:
+
+- Presence and Motion now share the same named easing vocabulary at the MCP layer.
+- Layout authoring explicitly teaches Frame/group composition and parent-level
+  Presence animation.
+- `showme.apply` is bounded at 128 operations instead of 32.
+- The stdio helper caches a verified bridge descriptor and uses HTTP keep-alive.
+  Discovery/context probing is no longer on the ordinary request hot path.
+- Text measurement and Effect validation moved off the PNG preview queue onto a
+  separate persistent Agent Runtime Chromium surface with one recreation retry.
+- `showme.measure_text` measures up to 64 text items per call using managed fonts
+  and ShowMe's production DOM measurement.
+- Full PNG preview remains on the production capture path and retains its existing
+  correctness guarantees.
+
+Focused regression coverage was added for named Presence easing on a grouped parent,
+50-operation atomic commits, late-batch atomic failure, the 128-operation bound,
+exact-scope text measurement, and text measurement completing while a production
+PNG preview is deliberately blocked.
+
+Transport, mutation, renderer-service and preview before/after timing numbers are
+intentionally not recorded from this remote pass. Those measurements require the
+real local Electron process and machine and should be filled in from the focused
+local benchmark rather than fabricated from CI timing.
