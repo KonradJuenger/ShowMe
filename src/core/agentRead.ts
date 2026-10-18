@@ -1,8 +1,9 @@
 import { z } from "zod/v4";
 import { agentApplyRequestSchema } from "./agentMutation";
 import { agentAuthoringRequestSchema } from "./agentAuthoring";
+import { agentMeasureTextRequestSchema } from "./agentTextMeasure";
 
-export const SHOWME_MCP_SERVER_VERSION = "1.2.0" as const;
+export const SHOWME_MCP_SERVER_VERSION = "1.3.0" as const;
 
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const scope = {
@@ -90,6 +91,12 @@ export const agentBridgeRequestSchema = z.discriminatedUnion("command", [
     .object({
       command: z.literal("inspect"),
       params: agentInspectRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      command: z.literal("measure_text"),
+      params: agentMeasureTextRequestSchema,
     })
     .strict(),
   z
