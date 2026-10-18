@@ -1,4 +1,4 @@
-import { readdir, readFile, lstat } from "node:fs/promises";
+import { readdir, readFile, lstat, rm } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import path from "node:path";
 import { z } from "zod/v4";
@@ -19,6 +19,20 @@ const descriptorSchema = z
     token: z.string().regex(/^[a-f0-9]{64}$/),
   })
   .strict();
+
+function processIsAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (
+      error instanceof Error &&
+      "code" in error &&
+      (error as Error & { code?: string }).code === "EPERM"
+    );
+  }
+}
+
 export async function bridgeRead(
   descriptor: BridgeDescriptor,
   value: AgentBridgeRequest,
@@ -102,11 +116,6 @@ export class ShowMeClient {
       const files = (await readdir(directory)).filter((file) =>
         /^[a-f0-9-]{36}\.json$/.test(file),
       );
-      if (files.length > 128)
-        return agentFailure(
-          "APP_UNAVAILABLE",
-          "Too many connection descriptors. Restart ShowMe and review its connection directory.",
-        );
       const available: Array<{
         descriptor: BridgeDescriptor;
         context: unknown;
@@ -125,11 +134,22 @@ export class ShowMeClient {
                 ((stat.mode & 0o077) !== 0 || stat.uid !== process.getuid?.()))
             )
               return;
-            const parsed = descriptorSchema.safeParse(
-              JSON.parse(await readFile(filename, "utf8")),
-            );
-            if (!parsed.success || file !== `${parsed.data.instanceId}.json`)
+            let raw: unknown;
+            try {
+              raw = JSON.parse(await readFile(filename, "utf8"));
+            } catch {
+              await rm(filename, { force: true });
               return;
+            }
+            const parsed = descriptorSchema.safeParse(raw);
+            if (!parsed.success || file !== `${parsed.data.instanceId}.json`) {
+              await rm(filename, { force: true });
+              return;
+            }
+            if (!processIsAlive(parsed.data.pid)) {
+              await rm(filename, { force: true });
+              return;
+            }
             const timeout = AbortSignal.timeout(1500);
             const context = await bridgeRead(
               parsed.data,
@@ -139,7 +159,7 @@ export class ShowMeClient {
             if (context?.ok === true)
               available.push({ descriptor: parsed.data, context });
           } catch {
-            /* Stale, unauthorized and incomplete descriptors are unavailable. */
+            /* Unauthorized or temporarily unavailable descriptors remain untouched. */
           }
         }),
       );

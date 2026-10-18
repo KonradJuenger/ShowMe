@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import {
   AgentBridge,
   BRIDGE_JSON_LIMIT,
+  BRIDGE_REQUEST_LIMIT,
   type BridgeDescriptor,
 } from "../../../electron/agentBridge";
 import { ShowMeClient, bridgeRead } from "../../../mcp/showmeClient";
@@ -279,9 +280,10 @@ it("rejects unknown commands raw IPC malformed JSON routes and oversized payload
   expect((await raw(f.descriptor, {}, "{}", "POST", "/elsewhere")).status).toBe(
     400,
   );
-  expect((await raw(f.descriptor, {}, "x".repeat(65537))).body.error.code).toBe(
-    "PAYLOAD_TOO_LARGE",
-  );
+  expect(
+    (await raw(f.descriptor, {}, "x".repeat(BRIDGE_REQUEST_LIMIT + 1))).body.error
+      .code,
+  ).toBe("PAYLOAD_TOO_LARGE");
   expect(calls).toBe(0);
 });
 it("bounds response size without truncating data and preserves safe service errors", async () => {
@@ -344,6 +346,29 @@ it("revokes pending output and old tokens across disable and rapid startup trans
     bridgeRead(f.descriptor, { command: "context", params: {} }),
   ).rejects.toThrow();
 });
+it("prunes accumulated dead descriptors before discovery becomes unusable", async () => {
+  const f = await fixture();
+  const directory = path.dirname(f.file);
+  for (let index = 0; index < 140; index++) {
+    const instanceId = crypto.randomUUID();
+    await writeFile(
+      path.join(directory, `${instanceId}.json`),
+      JSON.stringify({
+        version: 1,
+        instanceId,
+        pid: 2147483647,
+        port: 1,
+        token: "0".repeat(64),
+      }),
+      { mode: 0o600 },
+    );
+  }
+  expect(
+    await new ShowMeClient(f.folder).read({ command: "context", params: {} }),
+  ).toMatchObject({ ok: true });
+  expect((await readdir(directory)).length).toBe(1);
+});
+
 it("discovers only authenticated live instances and refuses ambiguity or explicit instance fallback", async () => {
   const f = await fixture(),
     second = await fixture(undefined, f.folder);
