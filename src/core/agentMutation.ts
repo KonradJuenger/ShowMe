@@ -1027,6 +1027,8 @@ export async function assembleAgentMutation(
             "slide.duplicate must be the first operation so following operations target the duplicate.",
           );
         const slideId = op.id ?? newId();
+        if (next.deck.slideIds.includes(slideId))
+          throw new AgentMutationError("INVALID_REQUEST", "Slide ID already exists.");
         const sourceMeta = next.deck.slideMeta[next.slide.id];
         const afterId = op.afterId === undefined ? next.slide.id : op.afterId;
         if (afterId !== null && !next.deck.slideIds.includes(afterId))
@@ -1096,6 +1098,11 @@ export async function assembleAgentMutation(
             transition: op.transition ?? undefined,
           });
       } else if (op.type === "slide.template.apply") {
+        if (!next.deck.templateIds.includes(op.templateId))
+          throw new AgentMutationError(
+            "UNKNOWN_TEMPLATE",
+            "Inspect the deck and use an existing Template ID.",
+          );
         next = applyTemplate(next, op.templateId);
       } else if (op.type === "slide.make_independent") {
         next = makeIndependent(next);
@@ -1157,7 +1164,15 @@ export async function assembleAgentMutation(
         next = createTextStyleFromElement(next, op.elementId, op.name, styleId);
         createdTextStyleIds.push(styleId);
       } else if (op.type === "text.style.update") {
-        requireEditable(op.elementId);
+        const element = requireEditable(op.elementId);
+        if (
+          element.content?.type !== "text" ||
+          element.content.format.kind !== "style"
+        )
+          throw new AgentMutationError(
+            "UNSUPPORTED_OPERATION",
+            "Update Text Style requires one text element with an applied style.",
+          );
         next = updateTextStyleFromElement(next, op.elementId);
       } else if (op.type === "text.style.rename") {
         const style = next.deck.textStyles.find((value) => value.id === op.styleId);
@@ -1334,9 +1349,27 @@ export async function assembleAgentMutation(
           }, await intrinsic());
         next = setMediaContent(next, op.elementId, content);
       } else if (op.type === "media.transform.patch") {
-        requireEditable(op.elementId);
+        const element = requireEditable(op.elementId);
+        if (!isMediaContent(element.content))
+          throw new AgentMutationError(
+            "INVALID_MEDIA",
+            "Media transform settings require an image, SVG, or video element.",
+          );
         if (!Object.keys(op.patch).length)
           throw new AgentMutationError("INVALID_REQUEST", "Supply a nonempty media transform patch.");
+        if (op.patch.zoom !== undefined && element.content.transform.rule !== "fill")
+          throw new AgentMutationError(
+            "UNSUPPORTED_OPERATION",
+            "Media zoom is available only in Fill mode.",
+          );
+        if (
+          (op.patch.anchorX !== undefined || op.patch.anchorY !== undefined) &&
+          element.content.transform.rule === "free"
+        )
+          throw new AgentMutationError(
+            "UNSUPPORTED_OPERATION",
+            "Media anchors are available only in Fit or Fill mode.",
+          );
         if (op.patch.rotation !== undefined)
           next = setSelectionProperty(
             next,
