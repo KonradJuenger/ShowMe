@@ -855,6 +855,7 @@ export function unframeElement(
 export interface DuplicateElementsResult {
   snapshot: EditorSnapshot;
   elementIds: string[];
+  idMap: Record<string, string>;
 }
 
 export function duplicateElementsWithResult(
@@ -864,7 +865,7 @@ export function duplicateElementsWithResult(
   offset: { x: number; y: number } = { x: 20, y: 20 },
 ): DuplicateElementsResult {
   const selected = distinctElementIds(ids, "Duplicate selection");
-  if (!selected.length) return { snapshot, elementIds: [] };
+  if (!selected.length) return { snapshot, elementIds: [], idMap: {} };
   const locations = selected.map((id) => locateElement(snapshot.slide, id));
   if (locations.some((location) => !location))
     throw new Error("Unknown Element in duplicate selection");
@@ -904,7 +905,11 @@ export function duplicateElementsWithResult(
         ),
       ),
     );
-  return { snapshot: next, elementIds: copies.map(({ id }) => id) };
+  return {
+    snapshot: next,
+    elementIds: copies.map(({ id }) => id),
+    idMap: Object.fromEntries(elementMap),
+  };
 }
 
 export function duplicateElements(
