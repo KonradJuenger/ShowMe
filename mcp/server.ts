@@ -97,7 +97,7 @@ export function createShowMeServer(
     "showme.apply",
     {
       description:
-        "Apply an atomic batch of ordinary edits to one slide of the active locally owned document. Requires Allow agent editing. Inspect first and supply explicit IDs, epoch and exact expectedRevision; selection is never retargeted. Reuse the identical mutationId/request after a lost response to recover its receipt; never assume a timeout means no edit. One changed batch is one agent undo unit. No templates, Effect source, Motion, raw transactions or file operations.",
+        "Apply an atomic batch to the active locally owned presentation. Requires Allow agent editing. Inspect first and supply explicit slideId, epoch and exact expectedRevision; selection is never retargeted. slide.create must be the only operation: supply an inspected afterId (null inserts first), name and optional background; it creates an independent blank slide and returns createdSlideIds without navigating the editor. Inspect that ID before adding content. Supports text/style, shapes, movement, resizing, appearance, removal, slide.update and deck.rename. Coordinates and font sizes are slide units. text.style and insert_text accept typography and autoSize; fixed text frames use autoSize none. Reuse identical mutationId/request after lost responses. One changed batch is one agent undo unit. No templates, Effect source, Motion, raw transactions or file operations.",
       inputSchema: schema(agentApplyRequestSchema),
       outputSchema: schema(
         z.union([
@@ -116,6 +116,9 @@ export function createShowMeServer(
               createdIds: z.array(z.string()),
               changedIds: z.array(z.string()),
               removedIds: z.array(z.string()),
+              createdSlideIds: z.array(z.string()),
+              updatedSlideIds: z.array(z.string()),
+              deckChanged: z.boolean(),
               changes: z.array(
                 z
                   .object({

@@ -341,10 +341,12 @@ test("context inspection and native preview preserve production pixels diagnosti
       width: innerWidth,
       height: innerHeight,
     }));
-    // Windows display scaling may round the native logical viewport by one pixel;
-    // the PNG dimensions above remain exact and capture never uses deck resolution.
-    expect(Math.abs(viewport.width - request.width)).toBeLessThanOrEqual(1);
-    expect(Math.abs(viewport.height - request.height)).toBeLessThanOrEqual(1);
+    // The native viewport can include OS padding and an acknowledgement strip.
+    // Returned pixels/dimensions above are exact; capture stays below deck resolution.
+    expect(viewport.width).toBeGreaterThanOrEqual(request.width);
+    expect(viewport.width).toBeLessThan(projection.deck.width);
+    expect(viewport.height).toBeGreaterThanOrEqual(request.height + 48);
+    expect(viewport.height).toBeLessThan(projection.deck.height);
     await expect(preview.locator(".slide-renderer")).toHaveCount(0);
     const denied = await preview.evaluate(async (request) => {
       try {

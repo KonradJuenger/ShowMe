@@ -2,6 +2,9 @@
 
 Date: 2026-10-18. Execution: local-codex, existing shared branch/check-out.
 
+The subsequent [deck-building refinement](./REFINEMENT_FINDINGS.md) extends this
+initial slice with slide creation, naming/backgrounds, typography and native capture fixes.
+
 ## Scope and local authorization
 
 The developer authorized explicit local editing opt-in while keeping cross-host model

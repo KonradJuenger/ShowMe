@@ -4,6 +4,16 @@ Status: Phases 1–6 are implemented for local development: inspection, producti
 previews and ordinary editing through the local MCP server. Editing requires both
 Enable MCP and Allow agent editing. Cross-host model evaluation remains pending.
 
+Deck-building refinement adds `slide.create`, `slide.update`, `deck.rename` and
+`text.style` through `showme.apply`, including typography at insertion. See
+[local setup](./LOCAL_SETUP.md#build-a-deck-through-mcp) for the exact creation loop.
+New slides are independent, and creating one does not navigate the human editor.
+The capture page now initializes text measurement on a cold surface. A new native
+test reproduced the blank PNG after a size transition and editor minimization.
+Capture now uses a fresh surface for a changed size and verifies a completed
+composition before returning its cropped PNG. Native tests check actual pixels,
+not merely the presence of an image. See [refinement findings](./REFINEMENT_FINDINGS.md).
+
 Start with [local client setup](./LOCAL_SETUP.md). See the
 [Phase 4 plan](./CODEX_PHASE4_PLAN.md) and [verification/evaluation record](./CODEX_PHASE4_READONLY_EVAL.md).
 The Phase 4 contract takes precedence over broader, differently named research proposals.
@@ -200,7 +210,8 @@ now implemented below; timeline sampling and Effect validation remain later work
 `showme.apply` stages up to 32 semantic operations against one explicit presentation
 slide and expected document epoch/revision. Supported operations are `text.set`,
 `elements.move`, `elements.frame.set`, `elements.appearance.patch`,
-`element.insert_text`, `element.insert_shape` and `elements.remove`.
+`element.insert_text`, `element.insert_shape` and `elements.remove`, extended by
+`slide.create`, `slide.update`, `deck.rename` and `text.style` as described above.
 
 `electron/agentEditing.ts` uses an ordinary actor-scoped `EditorSession` and the
 existing runtime/authority/durable writer. Exact revision/access checks run inside

@@ -114,6 +114,180 @@ async function context(client: Client): Promise<AgentContext> {
   return (result.structuredContent as { data: AgentContext }).data;
 }
 
+test("MCP builds multiple styled slides with production text measurement and real pixels after capture resizing", async () => {
+  const f = await fixture();
+  let app: ElectronApplication | undefined, client: Client | undefined;
+  try {
+    const launched = await launch(f.user, f.file);
+    app = launched.app;
+    const page = launched.page;
+    client = (await connect(f.user, f.folder)).client;
+    await page.evaluate(async () => {
+      await window.desktop!.setMcpEnabled!(true);
+      await window.desktop!.setMcpEditingEnabled!(true);
+    });
+    const initial = await context(client);
+    const apply = async (
+      slideId: string,
+      operations: unknown[],
+      mutationId = crypto.randomUUID(),
+    ) => {
+      const current = await context(client!);
+      const result = await client!.callTool({
+        name: "showme.apply",
+        arguments: {
+          documentId: current.document!.id,
+          epoch: current.document!.epoch,
+          expectedRevision: current.document!.revision,
+          mutationId,
+          slideId,
+          operations,
+        },
+      });
+      expect(result.isError, JSON.stringify(result.structuredContent)).toBe(
+        false,
+      );
+      return result.structuredContent as any;
+    };
+    const anchor = initial.editor!.page.id;
+    const first = await apply(anchor, [
+      {
+        type: "slide.create",
+        afterId: anchor,
+        name: "A local creative partner",
+        background: "#152F32",
+      },
+    ]);
+    const firstId = first.createdSlideIds[0];
+    const second = await apply(anchor, [
+      {
+        type: "slide.create",
+        afterId: firstId,
+        name: "Keep a way back",
+        background: "#F6F3EB",
+      },
+    ]);
+    const secondId = second.createdSlideIds[0];
+    const inspect = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: initial.document!.id,
+        epoch: initial.document!.epoch,
+        revision: second.revision,
+        target: { type: "slide", slideId: firstId },
+      },
+    });
+    const parentId = (inspect.structuredContent as any).data.layers[0].id;
+    await apply(firstId, [
+      { type: "deck.rename", name: "ShowMe MCP deck" },
+      {
+        type: "element.insert_text",
+        parentId,
+        center: { x: 520, y: 300 },
+        text: "Create locally.",
+        typography: { fontSize: 100, color: "#F6F3EB", bold: true },
+      },
+      {
+        type: "element.insert_shape",
+        parentId,
+        shape: "rectangle",
+        frame: { x: 1200, y: 200, width: 400, height: 600 },
+        appearance: { fill: "#D6ED88" },
+      },
+    ]);
+    const styled = await apply(secondId, [
+      {
+        type: "slide.update",
+        name: "Your edits stay recoverable",
+        background: "#007F73",
+      },
+      {
+        type: "element.insert_text",
+        parentId,
+        center: { x: 520, y: 300 },
+        text: "Keep a way back.",
+        typography: { fontSize: 90, color: "#FFFFFF" },
+      },
+    ]);
+    const after = await context(client);
+    expect(after.editor!.page).toEqual(initial.editor!.page);
+    expect(after.editor!.selectionIds).toEqual(initial.editor!.selectionIds);
+    const capture = async (
+      slideId: string,
+      width: number,
+      height: number,
+      point: [number, number],
+      expected: number[],
+    ) => {
+      const result = await client!.callTool({
+        name: "showme.preview",
+        arguments: {
+          documentId: after.document!.id,
+          epoch: after.document!.epoch,
+          revision: styled.revision,
+          slideId,
+          width,
+          height,
+        },
+      });
+      expect(result.isError, JSON.stringify(result.structuredContent)).toBe(
+        false,
+      );
+      const image = result.content.find((item) => item.type === "image");
+      if (!image || image.type !== "image")
+        throw new Error("Missing preview image");
+      const { data, info } = await sharp(Buffer.from(image.data, "base64"))
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      expect([info.width, info.height]).toEqual([width, height]);
+      const start = (point[1] * width + point[0]) * 4;
+      expect([...data.subarray(start, start + 4)]).toEqual(expected);
+      return data;
+    };
+    const data = await capture(
+      firstId,
+      960,
+      540,
+      [700, 200],
+      [214, 237, 136, 255],
+    );
+    expect([
+      ...data.subarray((10 * 960 + 10) * 4, (10 * 960 + 10) * 4 + 4),
+    ]).toEqual([21, 47, 50, 255]);
+    expect(
+      [...data].some(
+        (v, i) =>
+          i % 4 === 0 && v > 230 && data[i + 1] > 230 && data[i + 2] > 220,
+      ),
+    ).toBe(true);
+    await capture(secondId, 480, 270, [10, 10], [0, 127, 115, 255]);
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()
+        .find((win) => !win.webContents.getURL().includes("slidePreview=1"))
+        ?.minimize();
+    });
+    await capture(firstId, 720, 405, [525, 150], [214, 237, 136, 255]);
+    const deck = await client.callTool({
+      name: "showme.inspect",
+      arguments: {
+        documentId: after.document!.id,
+        epoch: after.document!.epoch,
+        revision: styled.revision,
+        target: { type: "deck" },
+      },
+    });
+    expect((deck.structuredContent as any).data.deck).toMatchObject({
+      name: "ShowMe MCP deck",
+      slideCount: 3,
+    });
+  } finally {
+    await client?.close();
+    await close(app);
+    await rm(f.folder, { recursive: true, force: true });
+  }
+});
+
 test("local opt-in enables atomic MCP editing with production text sizing explicit targets preview and separate human agent undo", async () => {
   const f = await fixture();
   let app: ElectronApplication | undefined, client: Client | undefined;

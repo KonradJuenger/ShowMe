@@ -9,19 +9,24 @@ import "./frame.css";
 const parameters = new URLSearchParams(location.search);
 const role = parameters.get("present");
 if (parameters.has("slidePreview")) {
+  let installation: Promise<void> | undefined;
+  const install = () =>
+    (installation ??= import("./components/SlidePreviewPage").then(
+      ({ installSlidePreviewPage }) => installSlidePreviewPage(),
+    ));
   // Electron may request capture as soon as the entry script loads. Keep that
   // asynchronous API available while its canonical surface module is loading.
   window.composeSlidePreview = async (...args) => {
-    const { installSlidePreviewPage } =
-      await import("./components/SlidePreviewPage");
-    installSlidePreviewPage();
+    await install();
     return window.composeSlidePreview!(...args);
   };
   window.composeEffectThumbnail = async (...args) => {
-    const { installSlidePreviewPage } =
-      await import("./components/SlidePreviewPage");
-    installSlidePreviewPage();
+    await install();
     return window.composeEffectThumbnail!(...args);
+  };
+  window.measureAgentText = async (...args) => {
+    await install();
+    return window.measureAgentText!(...args);
   };
 } else {
   const Page = parameters.has("exportPdf")

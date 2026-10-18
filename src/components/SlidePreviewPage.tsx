@@ -2,6 +2,7 @@ import { EffectThumbnailPreview } from "./EffectThumbnailPreview";
 import type { EffectDefinition } from "../core/effects";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
+import { createRef } from "react";
 import type { DocumentProjection } from "../core/documentProjection";
 import { platform } from "../platform";
 import { SlideRenderer } from "./SlideRenderer";
@@ -25,6 +26,7 @@ declare global {
       projection: DocumentProjection,
       width: number,
       height: number,
+      captureToken: string,
     ) => Promise<boolean>;
   }
 }
@@ -104,28 +106,52 @@ export function installSlidePreviewPage() {
     );
     return ready && !host.querySelector('[role="status"]');
   };
-  window.composeSlidePreview = async (projection, width, height) => {
+  window.composeSlidePreview = async (
+    projection,
+    width,
+    height,
+    captureToken,
+  ) => {
     const profile = { width, height, mode: "live" as const };
+    const marker = createRef<HTMLCanvasElement>();
     await platform.managedFonts?.(projection.documentId);
     flushSync(() =>
       root.render(
-        <div
-          style={{
-            width: projection.deck.width,
-            height: projection.deck.height,
-            transform: `scale(${width / projection.deck.width}, ${height / projection.deck.height})`,
-            transformOrigin: "top left",
-          }}
-        >
-          <SlideRenderer
-            slide={projection.slide}
-            deck={projection.deck}
-            templates={projection.templates}
-            staticVideo
-            preparedImages
-            renderProfile={profile}
+        <>
+          <div
+            style={{
+              width: projection.deck.width,
+              height: projection.deck.height,
+              transform: `scale(${width / projection.deck.width}, ${height / projection.deck.height})`,
+              transformOrigin: "top left",
+            }}
+          >
+            <SlideRenderer
+              slide={projection.slide}
+              deck={projection.deck}
+              templates={projection.templates}
+              staticVideo
+              preparedImages
+              renderProfile={profile}
+            />
+          </div>
+          <canvas
+            aria-hidden="true"
+            width={1}
+            height={12}
+            style={{
+              position: "fixed",
+              left: 0,
+              top: height,
+              width,
+              height: 48,
+              zIndex: 2147483647,
+              imageRendering: "pixelated",
+              pointerEvents: "none",
+            }}
+            ref={marker}
           />
-        </div>,
+        </>,
       ),
     );
     const abort = new AbortController();
@@ -144,7 +170,18 @@ export function installSlidePreviewPage() {
       // A native resize can publish fresh surface density after the first flush.
       // Wait on the actual readiness contract within the existing capture deadline.
       while (!abort.signal.aborted) {
-        if (await flushEffectSurfaces(host)) return !abort.signal.aborted;
+        if (await flushEffectSurfaces(host)) {
+          if (abort.signal.aborted) return false;
+          // A frame from the initial DOM commit must not qualify before readiness.
+          const context = marker.current?.getContext("2d");
+          if (!context) return false;
+          const value = parseInt(captureToken, 16);
+          for (let row = 0; row < 12; row++) {
+            context.fillStyle = `rgb(${[0, 1, 2].map((channel) => (Math.floor(value / 2 ** (35 - row * 3 - channel)) % 2 ? 224 : 32)).join(",")})`;
+            context.fillRect(0, row, 1, 1);
+          }
+          return true;
+        }
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => resolve()),
         );

@@ -99,9 +99,9 @@ export function McpSettings() {
         Allow agent editing
       </label>
       <p id="mcp-editing-description">
-        Agents can change text, move and resize objects, change appearance,
-        insert text or shapes, and delete objects. Accepted edits have separate
-        agent undo controls.
+        Agents can add slides, name the deck, style text, move and resize
+        objects, change appearance, insert text or shapes, and delete objects.
+        Accepted edits have separate agent undo controls.
       </p>
       <p role="status">
         {!enabled

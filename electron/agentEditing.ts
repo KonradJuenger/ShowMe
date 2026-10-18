@@ -181,8 +181,18 @@ export class AgentEditingService {
         .then(() => this.execute(request, runtime, access, signal))
         .catch((error) => this.failure(error))
         .then((value) => {
-          if (value.ok && value.changed)
-            ownedLedger.summary = `Agent changed ${new Set([...value.createdIds, ...value.changedIds, ...value.removedIds]).size} elements`;
+          if (value.ok && value.changed) {
+            const count = new Set([
+              ...value.createdIds,
+              ...value.changedIds,
+              ...value.removedIds,
+            ]).size;
+            ownedLedger.summary = value.createdSlideIds.length
+              ? "Agent added a slide"
+              : count
+                ? `Agent changed ${count} ${count === 1 ? "element" : "elements"}`
+                : "Agent updated the presentation";
+          }
           ownedLedger.bytes +=
             Buffer.byteLength(JSON.stringify(value)) + 64 - RESERVATION_BYTES;
           this.notify();
@@ -292,12 +302,11 @@ export class AgentEditingService {
       createdIds: staged.createdIds,
       changedIds: staged.changedIds,
       removedIds: staged.removedIds,
+      createdSlideIds: staged.createdSlideIds,
+      updatedSlideIds: staged.updatedSlideIds,
+      deckChanged: projection.deck !== staged.snapshot.deck,
     };
-    const changed =
-      staged.createdIds.length +
-        staged.changedIds.length +
-        staged.removedIds.length >
-      0;
+    const changed = staged.changed;
     if (!changed)
       return {
         ok: true,

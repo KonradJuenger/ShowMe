@@ -8,7 +8,7 @@
     "runtime": "unit",
     "created": "2026-10-18",
     "lastReviewed": "2026-10-18",
-    "reason": "Seven semantic edits stage atomically through an actor-scoped EditorSession with exact in-queue revision admission, native resize/media preservation, replay and capacity bounds, human/LAN lease conflicts, durable failure and post-acceptance refresh recovery, and separate guarded agent undo/redo"
+      "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery"
   },
   {
     "id": "editor-agent-mcp",
@@ -19,7 +19,7 @@
     "runtime": "electron",
     "created": "2026-10-17",
     "lastReviewed": "2026-10-18",
-    "reason": "Real SDK stdio client uses Settings configuration for context inspection and production image reads, preserves editor/document state, rejects revoked captures and old identities, and recovers from application crash/restart; explicit local editing opt-in exposes atomic apply with production text sizing and independent guarded user/agent history even while external access is off"
+      "reason": "Real SDK stdio client builds multiple styled slides with cold text measurement and pixel-verified previews after resize and minimize; covers Settings opt-in, context/inspection, stable UI state, revocation, crash/restart, atomic editing and independent guarded user/agent history even with external access off"
   },
   {
     "id": "editor-agent-bridge",
@@ -62,8 +62,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-17",
-    "reason": "Context/inspection/native preview loop captures template/nested/text/image/alpha/GLSL/CSS output with real missing-media and Effect-fallback diagnostics, excludes editor overlays, waits for surface readiness, preserves UI/document state, rejects unauthorized preview callers and discards revoked or stale in-flight output"
+      "lastReviewed": "2026-10-18",
+      "reason": "Context/inspection/native preview loop captures template/nested/text/image/alpha/GLSL/CSS pixels through an acknowledged bounded native surface, crops compositor acknowledgement and OS padding, preserves exact output size and editor state, reports missing-media/Effect diagnostics, waits for readiness and discards revoked or stale output"
   },
   {
     "id": "editor-agent-context",

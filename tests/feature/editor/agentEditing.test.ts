@@ -33,6 +33,7 @@ function deferred() {
 }
 function fixture(
   options: { maxIdentities?: number; maxReceiptBytes?: number } = {},
+  styleTitle = false,
 ) {
   const model = newPresentationDocument("Agent editing"),
     slide = model.slides[model.deck.slideIds[0]];
@@ -41,6 +42,12 @@ function fixture(
     title.content.text = "Original";
     title.content.placeholder = false;
     title.content.autoSize = "none";
+    if (styleTitle)
+      title.content.format = {
+        kind: "style",
+        styleId: model.deck.textStyles[0].id,
+        overrides: {},
+      };
   }
   const group = createEmptyFrame("group");
   group.children = [createBasicShape("child", "ellipse")];
@@ -120,6 +127,218 @@ function fixture(
     },
   };
 }
+it("agent slide creation returns stable IDs preserves the projected slide and is replayable and undoable", async () => {
+  const f = fixture();
+  const before = await f.projection();
+  const request = f.request([
+    {
+      type: "slide.create",
+      afterId: f.slide.id,
+      name: "Second slide",
+      background: "#123456",
+    },
+  ]);
+  const result = await f.service.apply(request);
+  expect(result).toMatchObject({
+    ok: true,
+    changed: true,
+    createdSlideIds: [expect.any(String)],
+    createdIds: [],
+  });
+  const id = result.createdSlideIds[0];
+  const p = await f.runtime.projection(f.model.documentId, id);
+  expect(p.slide).toMatchObject({ id, background: "#123456", notes: "" });
+  expect(p.slide.nodes.every((root) => root.children.length === 0)).toBe(true);
+  expect(p.deck.slideIds).toEqual([f.slide.id, id]);
+  expect(p.deck.slideMeta[id]).toMatchObject({
+    name: "Second slide",
+    templateId: null,
+  });
+  expect((await f.projection()).slide).toEqual(before.slide);
+  expect(await f.service.apply(request)).toEqual({ ...result, replayed: true });
+  expect(f.counts().writes).toBe(1);
+  expect(
+    await f.service.undo({ documentId: f.model.documentId, redo: false }),
+  ).toMatchObject({ ok: true });
+  expect((await f.projection()).deck.slideIds).toEqual([f.slide.id]);
+  expect(await f.service.apply(request)).toEqual({ ...result, replayed: true });
+  expect(
+    await f.service.undo({ documentId: f.model.documentId, redo: true }),
+  ).toMatchObject({ ok: true });
+  expect((await f.projection()).deck.slideIds).toEqual([f.slide.id, id]);
+});
+
+it("slide anchors and isolated creation reject atomically and stale slide requests do not retarget", async () => {
+  const f = fixture();
+  expect(
+    await f.service.apply(
+      f.request([{ type: "slide.create", afterId: "missing", name: "Bad" }]),
+    ),
+  ).toMatchObject({ error: { code: "UNKNOWN_SLIDE" } });
+  expect(
+    await f.service.apply(
+      f.request([
+        { type: "slide.create", afterId: null, name: "Bad" },
+        { type: "text.set", elementId: "title", text: "No" },
+      ]),
+    ),
+  ).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+  expect(f.counts().writes).toBe(0);
+  const request = f.request([
+    { type: "slide.create", afterId: null, name: "First" },
+  ]);
+  const result = await f.service.apply(request);
+  expect((await f.projection()).deck.slideIds[0]).toBe(
+    result.createdSlideIds[0],
+  );
+  expect(
+    await f.service.apply({ ...request, mutationId: "different" }),
+  ).toMatchObject({ error: { code: "REVISION_CONFLICT" } });
+});
+
+it("agent typography uses native style overrides measurement fixed text frames and no-op history", async () => {
+  const f = fixture({}, true);
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "text.style",
+          elementId: "title",
+          typography: { color: "#007F73", fontSize: 90 },
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  expect(
+    findElement((await f.projection()).slide, "title")!.content,
+  ).toMatchObject({
+    format: {
+      kind: "style",
+      styleId: f.model.deck.textStyles[0].id,
+      overrides: { color: "#007F73", fontSize: 90 },
+    },
+  });
+  const inserted = await f.service.apply(
+    f.request([
+      {
+        type: "element.insert_text",
+        parentId: f.slide.nodes[0].id,
+        center: { x: 500, y: 300 },
+        text: "Design",
+        typography: { fontSize: 120, color: "#007F73", bold: true },
+        autoSize: "both",
+      },
+    ]),
+  );
+  expect(inserted.ok).toBe(true);
+  const id = inserted.createdIds[0];
+  let measuredSize = 0;
+  f.measure(async (element) => {
+    measuredSize =
+      element.content.format.kind === "local"
+        ? element.content.format.typography.fontSize
+        : 0;
+    return { width: 600, height: 130 };
+  });
+  const styled = await f.service.apply(
+    f.request([
+      { type: "text.style", elementId: id, typography: { fontSize: 100 } },
+    ]),
+  );
+  expect(styled.ok).toBe(true);
+  expect(measuredSize).toBe(100);
+  const p = await f.projection();
+  expect(findElement(p.slide, id)).toMatchObject({
+    frame: { width: 604, height: 134 },
+    content: {
+      format: { typography: { fontSize: 100, bold: true, color: "#007F73" } },
+    },
+  });
+  const fixed = await f.service.apply(
+    f.request([
+      { type: "text.style", elementId: id, autoSize: "none" },
+      {
+        type: "elements.frame.set",
+        elementId: id,
+        frame: { x: 120, y: 200, width: 900, height: 300 },
+      },
+    ]),
+  );
+  expect(fixed.ok).toBe(true);
+  const noop = await f.service.apply(
+    f.request([
+      { type: "text.style", elementId: id, typography: { fontSize: 100 } },
+    ]),
+  );
+  expect(noop).toMatchObject({ ok: true, changed: false, transactionId: null });
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "text.style",
+          elementId: "shape",
+          typography: { fontSize: 100 },
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: false });
+  expect(
+    await f.service.apply(
+      f.request([{ type: "text.style", elementId: id, typography: {} }]),
+    ),
+  ).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+  expect(
+    await f.service.apply(
+      f.request([
+        { type: "text.style", elementId: id, typography: { fontSize: 0 } },
+      ]),
+    ),
+  ).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+});
+
+it("deck naming and independent slide styling commit without element changes and protect template backgrounds", async () => {
+  const f = fixture();
+  expect(
+    await f.service.apply(
+      f.request([{ type: "slide.update", background: "#123456" }]),
+    ),
+  ).toMatchObject({ error: { code: "TARGET_NOT_EDITABLE" } });
+  const result = await f.service.apply(
+    f.request([
+      { type: "deck.rename", name: "A beautiful deck" },
+      { type: "slide.update", name: "Cover" },
+    ]),
+  );
+  expect(result).toMatchObject({
+    ok: true,
+    changed: true,
+    createdIds: [],
+    updatedSlideIds: [f.slide.id],
+    deckChanged: true,
+  });
+  expect((await f.projection()).deck.name).toBe("A beautiful deck");
+  expect(
+    await f.service.apply(
+      f.request([{ type: "deck.rename", name: "A beautiful deck" }]),
+    ),
+  ).toMatchObject({ ok: true, changed: false });
+  const created = await f.service.apply(
+    f.request([{ type: "slide.create", afterId: null, name: "Cover" }]),
+  );
+  const id = created.createdSlideIds[0];
+  expect(
+    await f.service.apply({
+      ...f.request([
+        { type: "slide.update", name: "New cover", background: "#007F73" },
+      ]),
+      slideId: id,
+    }),
+  ).toMatchObject({ ok: true, updatedSlideIds: [id] });
+  expect(
+    (await f.runtime.projection(f.model.documentId, id)).slide.background,
+  ).toBe("#007F73");
+});
+
 it("strict semantic requests reject raw document patches invalid numbers colors and implicit selection", async () => {
   const f = fixture();
   expect(

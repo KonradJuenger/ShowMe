@@ -7,6 +7,10 @@ import {
   setElementAppearances,
   setElementFramesPreservingContent,
   translateElements,
+  createSlide,
+  setSlideBackground,
+  updateSlideMeta,
+  setDeckProperties,
   type EditorSnapshot,
 } from "./editorCommands";
 import { editorOperations } from "./editorChange";
@@ -19,6 +23,7 @@ import {
   updateText,
   type TextMeasurement,
   type TextContent,
+  type TextPatch,
 } from "./text";
 import { resolveTextTypography } from "./textTypography";
 import type { DocumentProjection } from "./documentProjection";
@@ -43,6 +48,25 @@ const appearance = z
   })
   .strict();
 const ids = z.array(id).min(1).max(128);
+const typography = z
+  .object({
+    fontFamily: z.string().trim().min(1).max(200).optional(),
+    fontSize: number.positive().max(512).optional(),
+    fontWeight: z.number().int().min(100).max(900).optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    color: z
+      .string()
+      .regex(/^#[a-fA-F0-9]{6}$/)
+      .optional(),
+    align: z.enum(["left", "center", "right"]).optional(),
+    verticalAlign: z.enum(["top", "middle", "bottom"]).optional(),
+    lineHeight: number.min(0.5).max(5).optional(),
+    letterSpacing: number.min(-100).max(500).optional(),
+  })
+  .strict();
+const autoSize = z.enum(["none", "height", "both"]);
+const background = z.string().regex(/^#[a-fA-F0-9]{6}$/);
 export const agentApplyRequestSchema = z
   .object({
     documentId: id,
@@ -53,6 +77,35 @@ export const agentApplyRequestSchema = z
     operations: z
       .array(
         z.discriminatedUnion("type", [
+          z
+            .object({
+              type: z.literal("slide.create"),
+              afterId: id.nullable(),
+              name: z.string().trim().min(1).max(200),
+              background: background.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("slide.update"),
+              name: z.string().trim().min(1).max(200).optional(),
+              background: background.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("deck.rename"),
+              name: z.string().trim().min(1).max(200),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("text.style"),
+              elementId: id,
+              typography: typography.optional(),
+              autoSize: autoSize.optional(),
+            })
+            .strict(),
           z
             .object({
               type: z.literal("text.set"),
@@ -90,6 +143,8 @@ export const agentApplyRequestSchema = z
               center: point,
               text: z.string().max(100000),
               name: z.string().max(200).optional(),
+              typography: typography.optional(),
+              autoSize: autoSize.optional(),
             })
             .strict(),
           z
@@ -209,8 +264,8 @@ export async function assembleAgentMutation(
         "The parent layer must be visible and unlocked.",
       );
   };
-  const setText = async (elementId: string, text: string) => {
-    next = updateText(next, elementId, { text, placeholder: false });
+  const setText = async (elementId: string, patch: TextPatch) => {
+    next = updateText(next, elementId, patch);
     const element = locateElement(next.slide, elementId)!.element;
     if (element.content?.type !== "text")
       throw new AgentMutationError(
@@ -239,25 +294,79 @@ export async function assembleAgentMutation(
         "MEASUREMENT_UNAVAILABLE",
         "Production text measurement is unavailable. Retry when the editor is ready.",
       );
-    next = updateText(
-      next,
-      elementId,
-      { text, placeholder: false },
-      () => measured,
-    );
+    next = updateText(next, elementId, {}, () => measured);
   };
   for (let stepIndex = 0; stepIndex < request.operations.length; stepIndex++) {
     const op = request.operations[stepIndex];
     try {
       if ("elementIds" in op) op.elementIds.forEach(requireEditable);
       if ("elementId" in op) requireEditable(op.elementId);
-      if (op.type === "text.set") {
+      if (op.type === "slide.create") {
+        if (request.operations.length !== 1)
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "Create a slide in its own request, then inspect its returned ID before editing content.",
+          );
+        if (op.afterId !== null && !next.deck.slideIds.includes(op.afterId))
+          throw new AgentMutationError(
+            "UNKNOWN_SLIDE",
+            "Use an inspected slide anchor, or null to insert first.",
+          );
+        const slideId = newId();
+        next = createSlide(
+          next,
+          {
+            version: 1,
+            id: slideId,
+            background: op.background ?? "#ffffff",
+            notes: "",
+            nodes: next.deck.layers.map((layer) => ({
+              type: "layer" as const,
+              id: layer.id,
+              children: [],
+            })),
+          },
+          { name: op.name, section: "", hidden: false, templateId: null },
+          op.afterId,
+        );
+      } else if (op.type === "slide.update") {
+        if (!op.name && !op.background)
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "Supply a slide name or background.",
+          );
+        if (op.background) {
+          if (next.deck.slideMeta[request.slideId]?.templateId)
+            throw new AgentMutationError(
+              "TARGET_NOT_EDITABLE",
+              "The template owns this slide background. Create an independent slide to set its background.",
+            );
+          next = setSlideBackground(next, op.background);
+        }
+        if (op.name)
+          next = updateSlideMeta(next, request.slideId, { name: op.name });
+      } else if (op.type === "deck.rename") {
+        next = setDeckProperties(next, { name: op.name });
+      } else if (op.type === "text.style") {
+        if (
+          !Object.keys(op.typography ?? {}).length &&
+          op.autoSize === undefined
+        )
+          throw new AgentMutationError(
+            "INVALID_REQUEST",
+            "Supply typography or autoSize.",
+          );
+        await setText(op.elementId, {
+          ...op.typography,
+          ...(op.autoSize === undefined ? {} : { autoSize: op.autoSize }),
+        });
+      } else if (op.type === "text.set") {
         if (requireEditable(op.elementId).content?.type !== "text")
           throw new AgentMutationError(
             "UNSUPPORTED_OPERATION",
             "Text replacement requires a text element.",
           );
-        await setText(op.elementId, op.text);
+        await setText(op.elementId, { text: op.text, placeholder: false });
       } else if (op.type === "elements.move") {
         requireParent(op.scopeId);
         next = translateElements(next, op.elementIds, op.dx, op.dy, op.scopeId);
@@ -312,7 +421,12 @@ export async function assembleAgentMutation(
             const named = { ...element, name: op.name };
             next = replaceElement(next, elementId, named);
           }
-          await setText(elementId, op.text);
+          await setText(elementId, {
+            text: op.text,
+            placeholder: false,
+            ...op.typography,
+            ...(op.autoSize === undefined ? {} : { autoSize: op.autoSize }),
+          });
         } else {
           const element = createBasicShape(elementId, op.shape, op.frame);
           element.frame = { ...element.frame, ...op.frame };
@@ -353,5 +467,20 @@ export async function assembleAgentMutation(
       "PAYLOAD_TOO_LARGE",
       "Edit at most 128 affected elements, including descendants.",
     );
-  return { snapshot: next, ...changes };
+  const createdSlideIds = next.deck.slideIds.filter(
+    (id) => !projection.deck.slideIds.includes(id),
+  );
+  const updatedSlideIds =
+    next.slide !== projection.slide ||
+    JSON.stringify(next.deck.slideMeta[request.slideId]) !==
+      JSON.stringify(projection.deck.slideMeta[request.slideId])
+      ? [request.slideId]
+      : [];
+  return {
+    snapshot: next,
+    ...changes,
+    createdSlideIds,
+    updatedSlideIds,
+    changed: editorOperations(next).length > 0,
+  };
 }

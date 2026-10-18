@@ -41,6 +41,7 @@ import {
   screen,
   shell,
   type WebContents,
+  type NativeImage,
 } from "electron";
 
 export function mayAccessLocalFonts(contents: WebContents | null) {
@@ -1178,6 +1179,7 @@ async function performExportPresentation(
 }
 
 let previewWindow: BrowserWindow | null = null;
+let previewWindowSize = "";
 let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
@@ -1257,7 +1259,15 @@ function activeNativeLibraryBrowser() {
 
 async function compositionWindow(width: number, height: number, owner: BrowserWindow | null) {
   if (!previewOwnerAlive(owner)) return null;
+  const size = `${width}x${height}`;
+  if (previewWindow && !previewWindow.isDestroyed() && previewWindowSize !== size) {
+    // Resizing a hidden Windows compositor can retain the old cleared backing
+    // surface. Create the next bounded surface at its final size instead.
+    previewWindow.destroy();
+    previewWindow = null;
+  }
   if (!previewWindow || previewWindow.isDestroyed()) {
+    previewWindowSize = size;
     previewWindow = new BrowserWindow({
       ...windowOptions(),
       show: false,
@@ -1270,6 +1280,7 @@ async function compositionWindow(width: number, height: number, owner: BrowserWi
       webPreferences: {
         ...windowOptions().webPreferences,
         backgroundThrottling: false,
+        offscreen: true,
       },
     });
     secure(previewWindow);
@@ -1283,8 +1294,60 @@ async function compositionWindow(width: number, height: number, owner: BrowserWi
   }
   const window = previewWindow;
   if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
-  window.setContentSize(width, height);
   return window;
+}
+
+/** Accept only a compositor frame carrying this request's cropped-out acknowledgement. */
+function captureComposedFrame(window: BrowserWindow, width: number, height: number, token: string): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const contents = window.webContents;
+    let finished = false;
+    let checking = false;
+    let pendingFrame: NativeImage | null = null;
+    const finish = (image: Buffer | null) => {
+      if (finished) return;
+      finished = true;
+      pendingFrame = null;
+      clearTimeout(timer);
+      contents.removeListener("paint", painted);
+      contents.removeListener("destroyed", unavailable);
+      contents.removeListener("render-process-gone", unavailable);
+      resolve(image);
+    };
+    const unavailable = () => finish(null);
+    const timer = setTimeout(unavailable, 5000);
+    const painted = (_event: unknown, _rect: unknown, image: NativeImage) => {
+      if (finished) return;
+      if (checking) {
+        pendingFrame = image;
+        return;
+      }
+      checking = true;
+      void (async () => {
+        // Offscreen output uses one pixel per CSS pixel. Crop native padding,
+        // rather than scaling padding and acknowledgement pixels into the slide.
+        const {data, info} = await sharp(image.toPNG()).ensureAlpha().raw().toBuffer({resolveWithObject: true});
+        if (info.width < width || info.height < height + 48) return;
+        const value = parseInt(token, 16);
+        const matches = Array.from({length: 12}, (_, index) => index).every((index) => {
+          const offset = ((height + 2 + index * 4) * info.width + Math.floor(width / 2)) * info.channels;
+          return [0, 1, 2].every((channel) => Number(data[offset + channel] >= 128) === Math.floor(value / 2 ** (35 - index * 3 - channel)) % 2);
+        });
+        if (matches) finish(await sharp(data, {raw: info}).extract({left: 0, top: 0, width, height}).png().toBuffer());
+      })().catch(unavailable).finally(() => {
+        checking = false;
+        const pending = pendingFrame;
+        pendingFrame = null;
+        if (pending && !finished) painted(undefined, undefined, pending);
+      });
+    };
+    contents.once("destroyed", unavailable);
+    contents.once("render-process-gone", unavailable);
+    try {
+      contents.on("paint", painted);
+      contents.invalidate();
+    } catch { finish(null); }
+  });
 }
 
 async function effectCompositionWindow(width: number, height: number, owner: BrowserWindow | null) {
@@ -1366,9 +1429,12 @@ function captureSlidePreview(
     )
       return null;
     previewDocumentId = documentId;
+    const nonce = randomUUID().replaceAll("-", "").slice(0, 9);
+    // The leading dark bit prevents an empty light app surface from matching.
+    const captureToken = (parseInt(nonce[0], 16) & 7).toString(16) + nonce.slice(1);
     const window = await compositionWindow(
       requestedWidth,
-      requestedHeight,
+      requestedHeight + 48,
       owner,
     );
     if (!window) return null;
@@ -1380,12 +1446,12 @@ function captureSlidePreview(
           requestedWidth +
           "," +
           requestedHeight +
+          "," + JSON.stringify(captureToken) +
           ")",
       );
       if (!ready || !previewOwnerAlive(owner) || window.isDestroyed()) return null;
-      const image = await window.webContents.capturePage(undefined, {
-        stayHidden: true,
-      });
+      const image = await captureComposedFrame(window, requestedWidth, requestedHeight, captureToken);
+      if (!image) return null;
       if (!previewOwnerAlive(owner) || window.isDestroyed()) return null;
       const warnings: AgentPreviewWarning[] = diagnostics
         ? await window.webContents.executeJavaScript(
@@ -1396,19 +1462,14 @@ function captureSlidePreview(
         width: requestedWidth,
         height: requestedHeight,
         warnings,
-        pngDataUrl: image
-          .resize({
-            width: requestedWidth,
-            height: requestedHeight,
-            quality: "best",
-          })
-          .toDataURL(),
+        pngDataUrl: `data:image/png;base64,${image.toString("base64")}`,
       };
     } finally {
-      if (!window.isDestroyed())
+      if (!window.isDestroyed()) {
         await window.webContents
           .executeJavaScript("window.clearSlidePreview()")
           .catch(() => {});
+      }
     }
   });
   previewQueue = task.then(
@@ -1437,7 +1498,9 @@ function measureAgentText(documentId: string, element: import("../src/core/eleme
       const result = await window.webContents.executeJavaScript("window.measureAgentText(" + JSON.stringify(documentId) + "," + JSON.stringify(element) + ")");
       return previewOwnerAlive(owner) ? result : null;
     } catch { return null; }
-    finally { clearTimeout(timeout); }
+    finally {
+      clearTimeout(timeout);
+    }
   });
   previewQueue = task.then(() => undefined, () => undefined);
   void task.finally(() => { pendingPreviews--; }).catch(() => {});

@@ -131,8 +131,9 @@ configuration** to connect a stdio MCP host. Node.js 24 or 26 is required.
 
 The server exposes four tools: `showme.context`, `showme.inspect`, `showme.preview`
 and `showme.apply`. Agents can inspect accepted unsaved presentation state, capture
-slide PNGs, and—with **Allow agent editing** enabled—edit text, move or resize
-elements, change basic appearance, insert text or shapes, and remove elements.
+slide PNGs, and—with **Allow agent editing** enabled—add slides, name the deck,
+style text, move or resize elements, change basic appearance, insert text or
+shapes, and remove elements.
 Edits use the normal document authority and have separate Agent undo/redo controls.
 Both MCP and agent editing are off by default.
 

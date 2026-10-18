@@ -97,11 +97,15 @@ step; generated IDs can be targeted by a later request, with a new mutation ID/r
 
 | Operation | Additional input |
 | --- | --- |
+| `slide.create` | `afterId` (inspected slide ID, or null for first), `name`, optional `background`; must be the only operation |
+| `slide.update` | Nonempty `name` and/or `background` for the request's `slideId` |
+| `deck.rename` | New `name` for the presentation |
 | `text.set` | `elementId`, exact plain `text` |
+| `text.style` | `elementId`, nonempty `typography` and/or `autoSize` |
 | `elements.move` | `elementIds`, explicit `scopeId`, `dx`, `dy` in that scope's units |
 | `elements.frame.set` | `elementId`, parent-local `frame: {x,y,width,height}`; other transform fields are preserved |
 | `elements.appearance.patch` | `elementIds`, nonempty `patch` of fill, strokeColor, strokeWidth, opacity, radius |
-| `element.insert_text` | `parentId`, parent-local `center: {x,y}`, `text`, optional `name` |
+| `element.insert_text` | `parentId`, parent-local `center: {x,y}`, `text`, optional `name`, `typography`, `autoSize` |
 | `element.insert_shape` | `parentId`, `shape` rectangle/ellipse, parent-local frame, optional appearance/name |
 | `elements.remove` | Explicit `elementIds`; descendants removed by native behavior are included in the receipt |
 
@@ -114,16 +118,41 @@ at the current 100,000-unit element limit.
 
 Only slide-owned content on visible unlocked layers is editable. Template-derived
 objects, guest-owned documents, Motion/Presence/Effect authoring, raw transactions,
-slide creation and file operations are outside this slice. One request permits at
+file operations are outside this slice. One request permits at
 most 32 semantic steps, 128 targeted/affected elements (including descendants), the
 native 256-operation limit after expansion, and 64 KiB JSON at the private bridge.
 
 Success includes `changed`, `mutationId`, document/epoch/slide identity, previous and
 accepted revision, transaction ID, generated/changed/removed IDs, a compact change set,
 warnings and `replayed`. No-op success has no transaction and does not advance revision.
+Receipts also include `createdSlideIds`, `updatedSlideIds` and `deckChanged`.
 Preview the accepted revision after visual edits. Changing human selection/slide does
 not retarget the explicit request; deleting a selected object still invokes native
 selection cleanup.
+
+### Build a deck through MCP
+
+Keep `slideId` as an explicit existing presentation slide for every request. To add
+a blank independent slide, use a single `slide.create` operation, for example:
+
+```json
+{ "type": "slide.create", "afterId": "<existing slide ID>", "name": "A local creative partner", "background": "#152F32" }
+```
+
+The returned `createdSlideIds[0]` is the new slide's stable ID. This does not switch
+the human editor's slide or selection. Inspect the new slide at the accepted revision
+to obtain its layer IDs; use that slide ID in subsequent content requests. Repeat
+to build multiple slides. Creation is a separate atomic undo unit from its later content.
+New slides have no template; MCP does not silently copy or detach template content.
+Updating a template-owned background is rejected; renaming that slide is allowed.
+
+`typography` accepts `fontFamily`, `fontSize` (greater than zero through 512, in slide units),
+`fontWeight` (100–900), `bold`, `italic`, six-digit hex `color`, `align`, `verticalAlign`,
+`lineHeight` (0.5–5) and `letterSpacing` (-100–500). Text style references are preserved
+as native local overrides. Auto-size is `both`, `height` or `none`; the production font
+measurement path updates auto-sized frames after text/style changes. For a fixed text
+box, set `autoSize: "none"`, then use `elements.frame.set` to set its exact frame.
+Inspect and preview after layout changes; the API does not automatically fit text to a box.
 
 Keep the **same mutation ID and identical request** after a timeout/disconnection to
 recover its result. Concurrent/helper-reconnected retries share the original work;
