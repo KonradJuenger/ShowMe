@@ -1601,6 +1601,8 @@ const agentEditing = new AgentEditingService({
   runtime: documentRuntime,
   measure: measureAgentText,
   validateEffect: validateAgentEffect,
+  asset: (documentId, assetId) =>
+    requireStorage().assetForDocument(documentId, assetId),
   changed: notifyAgentHistory,
 });
 const documentClosing = new DocumentClosing(agentEditing);
