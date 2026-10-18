@@ -309,6 +309,23 @@ export class AgentEditingService {
       request.documentId,
       request.slideId,
     );
+    let replacementSlide: typeof projection.slide | undefined;
+    if (
+      request.operations.length === 1 &&
+      request.operations[0].type === "slide.delete"
+    ) {
+      const slideIds = runtime.presentationDeck(request.documentId).slideIds;
+      const index = slideIds.indexOf(request.slideId);
+      const replacementId = slideIds[index + 1] ?? slideIds[index - 1];
+      if (!replacementId)
+        throw new AgentMutationError(
+          "UNSUPPORTED_OPERATION",
+          "The final presentation slide cannot be deleted.",
+        );
+      replacementSlide = (
+        await runtime.projection(request.documentId, replacementId)
+      ).slide;
+    }
     check();
     const staged = await assembleAgentMutation(
       projection,
@@ -335,6 +352,7 @@ export class AgentEditingService {
             return result;
           }
         : undefined,
+      replacementSlide,
     );
     check();
     const base = {
@@ -351,6 +369,8 @@ export class AgentEditingService {
       updatedSlideIds: staged.updatedSlideIds,
       createdEffectInstanceIds: staged.createdEffectInstanceIds,
       updatedEffectInstanceIds: staged.updatedEffectInstanceIds,
+      idMap: staged.idMap,
+      createdTextStyleIds: staged.createdTextStyleIds,
       deckChanged: projection.deck !== staged.snapshot.deck,
     };
     const changed = staged.changed;
