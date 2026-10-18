@@ -455,6 +455,7 @@ it("withholds hidden content by default while exposing structural state and lock
     name: "Hidden",
     hidden: true,
     locked: false,
+    color: "#858f9c",
   });
   expect(result.layers[2].locked).toBe(true);
   expect(result.elements.find(({ id }) => id === "hiddenText")).toMatchObject({
