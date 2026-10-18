@@ -687,7 +687,7 @@ Implemented semantic groups:
   `deck.stylesheet.set`, `layer.create`, `layer.update`,
   `layer.delete`, `layer.reorder`;
 - insertion: `element.insert_text`, `element.insert_shape`,
-  `element.insert_frame`;
+  `element.insert_frame`, `element.insert_media` for a ShowMe-managed asset ID;
 - geometry/appearance: `elements.move`, `elements.frame.set`,
   `elements.appearance.patch`, `elements.css_classes.set`,
   `elements.align`, `elements.distribute`;
@@ -710,6 +710,6 @@ Layer IDs and container Element IDs are the only authoring parents.
 typography, Text Style reference, media transform, CSS classes, Effects and optional
 Motion/Presence/world detail. Deck inspection can opt into Text Style definitions.
 
-New media insertion is intentionally not implemented yet. It requires a bounded
-semantic operation over ShowMe's managed Library/asset authority. Arbitrary paths,
-raw bytes and fabricated asset records are not accepted.
+Managed media insertion is implemented only by asset ID through ShowMe's document
+asset authority. Importing a new filesystem asset is intentionally outside MCP.
+Arbitrary paths, raw bytes and fabricated asset records are not accepted.
