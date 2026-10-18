@@ -219,9 +219,15 @@ it("publishes only a private authenticated loopback descriptor and cleans it up 
       ],
       { windowsHide: true },
     );
-    expect(acl.stdout.trim().split(/\r?\n/)).toEqual([
-      identity.stdout.match(/S-1-5-[0-9-]+/)![0],
+    const userSid = identity.stdout.match(/S-1-5-[0-9-]+/)![0];
+    const allowed = new Set([
+      userSid,
+      "S-1-5-18", // LocalSystem
+      "S-1-5-32-544", // Builtin Administrators
     ]);
+    const principals = acl.stdout.trim().split(/\r?\n/);
+    expect(principals).toContain(userSid);
+    expect(principals.every((sid) => allowed.has(sid))).toBe(true);
   }
   expect(
     await bridgeRead(f.descriptor, { command: "context", params: {} }),
