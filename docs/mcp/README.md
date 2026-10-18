@@ -219,9 +219,9 @@ editor authoring model rather than only creative Effects:
   duplicate, group/ungroup, reparent and remove;
 - text: replace content, full persistent typography/autosize, apply/reset/create
   Text Styles;
-- Frames/media: preserve the outer Frame separately from the media content transform,
-  fit/fill, center/reset and explicit content-transform editing for existing managed
-  media;
+- Frames/media: insert existing ShowMe-managed image/SVG/video assets by asset ID,
+  preserve the outer Frame separately from the media content transform, fit/fill,
+  center/reset and explicit content-transform editing;
 - deck: name, dimensions and stylesheet;
 - Effects/Motion/Presence: the existing GLSL, CSS, text-JS, shader-background,
   parameter, native Motion and Presence authoring path remains unchanged.
@@ -238,10 +238,11 @@ the production DOM/font measurement path. Frame resizing shares ShowMe's native
 Free-media/text preservation. Group/reparent/align/distribute and slide/layer changes
 call the same core commands used by the human editor.
 
-Media insertion is the deliberate remaining boundary. MCP does not accept local file
-paths or fabricated asset metadata. Existing image/SVG/video elements are fully
-inspectable and their Frame/crop state is authorable, but inserting a new media asset
-will wait for a bounded operation over ShowMe's managed Library/asset authority.
+Media insertion remains bounded by ShowMe's Library/asset authority. MCP accepts
+`element.insert_media` only with an existing managed `assetId`; the Electron host
+resolves it through `assetForDocument`. Local file paths, raw bytes and fabricated
+asset metadata are never accepted. Importing a new file into the Library remains a
+human/host action.
 
 `electron/agentEditing.ts` uses an ordinary actor-scoped `EditorSession` and the
 existing runtime/authority/durable writer. Exact revision/access checks run inside
