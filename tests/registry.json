@@ -8,7 +8,7 @@
     "runtime": "unit",
     "created": "2026-10-18",
     "lastReviewed": "2026-10-18",
-      "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery"
+    "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery"
   },
   {
     "id": "editor-agent-mcp",
@@ -19,7 +19,7 @@
     "runtime": "electron",
     "created": "2026-10-17",
     "lastReviewed": "2026-10-18",
-      "reason": "Real SDK stdio client builds multiple styled slides with cold text measurement and pixel-verified previews after resize and minimize; covers Settings opt-in, context/inspection, stable UI state, revocation, crash/restart, atomic editing and independent guarded user/agent history even with external access off"
+    "reason": "Real SDK stdio client builds multiple styled slides with cold text measurement and pixel-verified previews after resize and minimize; covers Settings opt-in, context/inspection, stable UI state, revocation, crash/restart, atomic editing and independent guarded user/agent history even with external access off"
   },
   {
     "id": "editor-agent-bridge",
@@ -51,8 +51,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-17",
-    "reason": "Strict preview requests use accepted document/slide/epoch/revision and bounded pixels, reject disabled or stale access before/after capture, preserve explicit targeting and return structured failures without pixel/source leakage"
+    "lastReviewed": "2026-10-18",
+    "reason": "Strict preview requests use accepted document/slide/epoch/revision and bounded pixels, reject disabled or stale access before/after capture, preserve explicit targeting and return structured failures without pixel/source leakage; propagates client cancellation and opt-out aborts before and during native capture"
   },
   {
     "id": "editor-agent-preview-electron",
@@ -62,8 +62,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-17",
-      "lastReviewed": "2026-10-18",
-      "reason": "Context/inspection/native preview loop captures template/nested/text/image/alpha/GLSL/CSS pixels through an acknowledged bounded native surface, crops compositor acknowledgement and OS padding, preserves exact output size and editor state, reports missing-media/Effect diagnostics, waits for readiness and discards revoked or stale output"
+    "lastReviewed": "2026-10-18",
+    "reason": "Context/inspection/native preview loop captures template/nested/text/image/alpha/GLSL/CSS pixels through an acknowledged bounded native surface, crops compositor acknowledgement and OS padding, preserves exact output size and editor state, reports missing-media/Effect diagnostics, waits for readiness and discards revoked or stale output; real HTTP disconnect and MCP opt-out destroy held capture surfaces and release the serialized queue"
   },
   {
     "id": "editor-agent-context",
@@ -260,7 +260,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-10-18",
     "reason": "Failed package open publishes no fonts and simultaneous packages retain independent font ownership"
   },
   {
@@ -909,7 +909,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-17",
+    "lastReviewed": "2026-10-18",
     "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching; filename-encoded protection survives cleanup; folder protection bulk-renames current managed contents without creating inherited policy; filename protection is physical-copy-specific while document references retain all duplicate hashes; protection renames invalidate the cleanup fingerprint before collection; lifecycle restoration rejects case/NFC parent collisions without consuming Trash or running expiry"
   },
   {
@@ -933,5 +933,16 @@
     "created": "2026-10-13",
     "lastReviewed": "2026-10-13",
     "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership"
+  },
+  {
+    "id": "editor-agent-closing",
+    "path": "tests/feature/editor/agentClosing.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-18",
+    "lastReviewed": "2026-10-18",
+    "reason": "Actual storage/recovery integration holds MCP durability through Save, Dont Save and direct close, rejects new admissions, drains accepted publication, prevents retained runtime writes, and reopens admission on cancel or save failure"
   }
 ]

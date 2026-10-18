@@ -8,6 +8,63 @@ import type {
 import { newPresentationDocument } from "../../../src/core/document";
 import type { DocumentProjection } from "../../../src/core/documentProjection";
 
+it("preview cancellation rejects before reads and propagates disconnect and opt-out aborts to native work", async () => {
+  const model = newPresentationDocument("Cancellation"),
+    slideId = model.deck.slideIds[0];
+  const request = {
+    documentId: model.documentId,
+    epoch: "epoch",
+    revision: 0,
+    slideId,
+    width: 320,
+    height: 180,
+  };
+  let captures = 0;
+  let entered!: () => void;
+  let ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const service = new AgentPreviewService({
+    access: () => 1,
+    activeDocumentId: () => model.documentId,
+    projection: async () => ({
+      documentId: model.documentId,
+      epoch: "epoch",
+      revision: 0,
+      savedRevision: 0,
+      deck: model.deck,
+      slide: model.slides[slideId],
+      templates: model.templates,
+    }),
+    capture: async (_p, _w, _h, signal) => {
+      captures++;
+      entered();
+      return new Promise((resolve) =>
+        signal!.addEventListener("abort", () => resolve(null), { once: true }),
+      );
+    },
+  });
+  const cancelled = new AbortController();
+  cancelled.abort();
+  expect(code(await service.preview(request, cancelled.signal))).toBe(
+    "REQUEST_CANCELLED",
+  );
+  expect(captures).toBe(0);
+  const caller = new AbortController();
+  const pending = service.preview(request, caller.signal);
+  await ready;
+  caller.abort();
+  expect(code(await pending)).toBe("REQUEST_CANCELLED");
+  ready = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const disabled = service.preview(request);
+  await ready;
+  service.cancelAll();
+  expect(code(await disabled)).toBe("REQUEST_CANCELLED");
+  expect(captures).toBe(2);
+});
+
 function fixture() {
   const model = newPresentationDocument("Preview");
   const projection: DocumentProjection = {

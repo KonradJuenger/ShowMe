@@ -49,7 +49,7 @@ async function libraryFixture() {
     createMediaElement("library-image", { ...asset, width: 32, height: 32 }),
   );
   context.session.dispose();
-  context.storage.closeDocument(context.id);
+  await context.storage.closeDocument(context.id);
 
   let now = Date.parse("2026-10-12T12:00:00Z");
   const deleteTrash = vi.fn(async (file: string) => {

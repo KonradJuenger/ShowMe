@@ -54,6 +54,7 @@ function canonical(value: unknown): string {
 export class AgentEditingService {
   private ledgers = new Map<string, EpochLedger>();
   private closedRuntimes = new WeakSet<DocumentRuntime>();
+  private closing = new Map<string, DocumentRuntime>();
   constructor(private readonly dependencies: Dependencies) {}
   private notify() {
     try {
@@ -62,8 +63,22 @@ export class AgentEditingService {
       /* Notifications cannot reject an accepted edit. */
     }
   }
+  /** Starts before the close dialog or any save/discard decision. */
+  async beginClose(documentId: string) {
+    const runtime = this.dependencies.runtime(documentId);
+    this.closing.set(documentId, runtime);
+    const authority = runtime.authority.beginClose();
+    this.notify();
+    await Promise.all([authority, this.ledgers.get(documentId)?.queue]);
+  }
+  cancelClose(documentId: string) {
+    this.closing.get(documentId)?.authority.cancelClose();
+    this.closing.delete(documentId);
+    this.notify();
+  }
   /** Called when the existing host closes a document; does not cancel admitted durability. */
   forget(documentId: string) {
+    this.closing.delete(documentId);
     if (
       this.dependencies.eligibility(documentId) !== "GUEST_EDITING_UNSUPPORTED"
     ) {
@@ -77,6 +92,11 @@ export class AgentEditingService {
   }
   private requireAccess(documentId: string, access?: number) {
     const d = this.dependencies;
+    if (this.closing.has(documentId))
+      throw new AgentMutationError(
+        "DOCUMENT_CLOSING",
+        "The document is closing. Wait for the user to finish or cancel closing.",
+      );
     if (d.activeDocumentId() !== documentId)
       throw new AgentMutationError(
         "DOCUMENT_NOT_ACTIVE",
@@ -107,8 +127,10 @@ export class AgentEditingService {
     const id = this.dependencies.activeDocumentId();
     const reason = !id
       ? "DOCUMENT_UNAVAILABLE"
-      : (this.dependencies.eligibility(id) ??
-        (this.dependencies.access() === null ? "EDITING_DISABLED" : null));
+      : this.closing.has(id)
+        ? "DOCUMENT_CLOSING"
+        : (this.dependencies.eligibility(id) ??
+          (this.dependencies.access() === null ? "EDITING_DISABLED" : null));
     const ledger = id ? this.ledgers.get(id) : undefined;
     const full =
       !!ledger &&

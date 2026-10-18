@@ -23,3 +23,51 @@ jobs:
       - run: npm run lint
       - run: npm run test:audit
       - run: npm test
+
+  mcp:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: MCP domain, security and storage-close contracts
+        run: npx vitest run
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/editor/agentProjection.test.ts","tests/feature/editor/agentContext.test.ts","tests/feature/editor/agentPreview.test.ts","tests/feature/editor/agentInspection.test.ts","tests/feature/editor/agentBridge.test.ts","tests/feature/editor/agentEditing.test.ts","tests/feature/editor/agentClosing.test.ts"]'
+      - run: npm run build
+      - name: Real Electron MCP clients and native previews
+        run: npx playwright test --config playwright.electron.config.ts --output test-results-mcp-ci
+        env:
+          SHOWME_TEST_FILES: '["tests/extended/agent-context.spec.ts","tests/extended/agent-preview.spec.ts","tests/extended/agent-mcp.spec.ts"]'
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: mcp-failure
+          path: test-results-mcp-ci/
+          retention-days: 3
+
+  audience-navigation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Required audience navigation and dense-rendering gate
+        run: npx playwright test --config playwright.config.ts --output test-results-audience-ci
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/presenter/audience-navigation.spec.ts"]'
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: audience-navigation-failure
+          path: test-results-audience-ci/
+          retention-days: 3

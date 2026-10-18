@@ -90,7 +90,7 @@ it("two open packages retain independent fonts and closing one preserves the oth
   expect(
     (await storage.managedFonts(b.id)).map(({ family }) => family),
   ).toEqual(["Second"]);
-  storage.closeDocument(a.id);
+  await storage.closeDocument(a.id);
   expect(
     (await storage.managedFonts(b.id)).map(({ family }) => family),
   ).toEqual(["Second"]);

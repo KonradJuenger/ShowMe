@@ -5,7 +5,15 @@ import {
   type ElectronApplication,
   type Page,
 } from "@playwright/test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  writeFile,
+  readFile,
+  readdir,
+} from "node:fs/promises";
+import { bridgeRead } from "../../mcp/showmeClient";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
@@ -205,6 +213,74 @@ function code(result: AgentPreviewResult) {
   expect(result).not.toHaveProperty("pngDataUrl");
   return result.error.code;
 }
+
+test("HTTP disconnect and MCP opt-out abort native preview work and release the capture queue", async () => {
+  const { app, page, folder, documentId } = await launch();
+  try {
+    await page.evaluate(() => window.desktop!.setMcpEnabled!(true));
+    const request = await requestFor(page, documentId);
+    const block = async () => {
+      expect((await capture(page, request)).ok).toBe(true);
+      const preview = app
+        .windows()
+        .find((value) => value.url().includes("slidePreview=1"))!;
+      await preview.evaluate(() => {
+        Object.assign(window, { cancelPreviewEntered: false });
+        window.composeSlidePreview = async () => {
+          Object.assign(window, { cancelPreviewEntered: true });
+          await new Promise(() => {});
+          return false;
+        };
+      });
+      return preview;
+    };
+    const preview = await block();
+    const directory = path.join(folder, "user", "mcp", "instances");
+    const [file] = await readdir(directory);
+    const descriptor = JSON.parse(
+      await readFile(path.join(directory, file), "utf8"),
+    );
+    const caller = new AbortController();
+    const pending = bridgeRead(
+      descriptor,
+      { command: "preview", params: request },
+      caller.signal,
+    ).catch(() => null);
+    await expect
+      .poll(() =>
+        preview.evaluate(
+          () =>
+            (window as unknown as { cancelPreviewEntered: boolean })
+              .cancelPreviewEntered,
+        ),
+      )
+      .toBe(true);
+    const closed = preview.waitForEvent("close");
+    caller.abort();
+    expect(await pending).toBeNull();
+    await closed;
+    // A new ordinary request must run without releasing the held renderer work.
+    const next = await block();
+    const disabled = capture(page, request);
+    await expect
+      .poll(() =>
+        next.evaluate(
+          () =>
+            (window as unknown as { cancelPreviewEntered: boolean })
+              .cancelPreviewEntered,
+        ),
+      )
+      .toBe(true);
+    const stopped = next.waitForEvent("close");
+    await page.evaluate(() => window.desktop!.setMcpEnabled!(false));
+    expect(code(await disabled)).toBe("MCP_DISABLED");
+    await stopped;
+    await page.evaluate(() => window.desktop!.setMcpEnabled!(true));
+    expect((await capture(page, request)).ok).toBe(true);
+  } finally {
+    await close(app, folder);
+  }
+});
 
 test("context inspection and native preview preserve production pixels diagnostics and live editor state", async () => {
   const { app, page, folder, documentId } = await launch();

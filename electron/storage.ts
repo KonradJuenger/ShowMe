@@ -692,14 +692,15 @@ export class DocumentStorage {
     });
   }
 
-  closeDocument(id: string) {
-    this.entry(id);
+  async closeDocument(id: string) {
+    await this.entry(id).runtime.authority.beginClose();
     this.documents.delete(id);
     this.releaseDocumentAssets(id);
   }
 
   async discardDocumentChanges(id: string) {
-    const { handle } = this.entry(id);
+    const { handle, runtime } = this.entry(id);
+    await runtime.authority.beginClose();
     await this.recovery.discard(handle.recoveryPath);
     this.documents.delete(idSchema.parse(id));
     this.releaseDocumentAssets(id);
@@ -826,7 +827,7 @@ export class DocumentStorage {
       try {
         await this.recovery.checkpoint(entry.handle, document);
       } catch (error) {
-        this.closeDocument(document.documentId);
+        await this.closeDocument(document.documentId);
         throw error;
       }
       return this.summary(document.documentId);

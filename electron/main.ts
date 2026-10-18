@@ -109,6 +109,7 @@ import { AgentPreviewService } from "./agentPreview";
 import { AgentInspectionService } from "./agentInspection";
 import { AgentBridge } from "./agentBridge";
 import { AgentEditingService } from "./agentEditing";
+import { DocumentClosing } from "./documentClosing";
 import type { AgentPreviewWarning, SlidePreviewCapture } from "../src/core/agentPreview";
 import { PresentationRuntime } from "./presentationRuntime";
 import {
@@ -303,7 +304,7 @@ const agentPreview = new AgentPreviewService({
       throw new Error("Guest unavailable");
     return operations.renderProjection(id, slideId);
   },
-  capture: (projection, width, height) => captureSlidePreview(projection, width, height, true),
+  capture: (projection, width, height, signal) => captureSlidePreview(projection, width, height, true, signal),
 });
 const agentContext = new AgentContextService({
   activeDocumentId: activeAgentDocumentId,
@@ -1409,9 +1410,10 @@ function captureSlidePreview(
   width: unknown,
   height: unknown,
   diagnostics = false,
+  signal?: AbortSignal,
 ): Promise<SlidePreviewCapture | null> {
   const owner = editor;
-  if (!previewOwnerAlive(owner)) return Promise.resolve(null);
+  if (signal?.aborted || !previewOwnerAlive(owner)) return Promise.resolve(null);
   // Capture an isolated canonical surface, never editor UI overlays.
   const requestedWidth = z.number().int().positive().max(2048).parse(width);
   const requestedHeight = z.number().int().positive().max(2048).parse(height);
@@ -1420,10 +1422,10 @@ function captureSlidePreview(
   if (pendingPreviews >= 8) return Promise.resolve(null);
   pendingPreviews++;
   const task = previewQueue.then(async () => {
-    if (!previewOwnerAlive(owner)) return null;
+    if (signal?.aborted || !previewOwnerAlive(owner)) return null;
     const current = await operations.renderProjection(documentId, slideId);
     if (
-      !previewOwnerAlive(owner) ||
+      signal?.aborted || !previewOwnerAlive(owner) ||
       current.epoch !== projection.epoch ||
       current.revision !== projection.revision
     )
@@ -1438,8 +1440,13 @@ function captureSlidePreview(
       owner,
     );
     if (!window) return null;
+    let cancelled!: () => void;
+    const cancellation = new Promise<null>(resolve => { cancelled = () => resolve(null); });
+    const cancel = () => { cancelled(); if (!window.isDestroyed()) window.destroy(); };
+    signal?.addEventListener("abort", cancel, {once: true});
     try {
-      const ready = await window.webContents.executeJavaScript(
+      if (signal?.aborted) { cancel(); return null; }
+      const ready = await Promise.race([window.webContents.executeJavaScript(
         "window.composeSlidePreview(" +
           JSON.stringify(current) +
           "," +
@@ -1448,16 +1455,17 @@ function captureSlidePreview(
           requestedHeight +
           "," + JSON.stringify(captureToken) +
           ")",
-      );
+      ), cancellation]);
       if (!ready || !previewOwnerAlive(owner) || window.isDestroyed()) return null;
-      const image = await captureComposedFrame(window, requestedWidth, requestedHeight, captureToken);
+      const image = await Promise.race([captureComposedFrame(window, requestedWidth, requestedHeight, captureToken), cancellation]);
       if (!image) return null;
       if (!previewOwnerAlive(owner) || window.isDestroyed()) return null;
       const warnings: AgentPreviewWarning[] = diagnostics
-        ? await window.webContents.executeJavaScript(
+        ? await Promise.race([window.webContents.executeJavaScript(
             "window.slidePreviewWarnings()",
-          )
+          ), cancellation])
         : [];
+      if (signal?.aborted || !warnings) return null;
       return {
         width: requestedWidth,
         height: requestedHeight,
@@ -1465,6 +1473,7 @@ function captureSlidePreview(
         pngDataUrl: `data:image/png;base64,${image.toString("base64")}`,
       };
     } finally {
+      signal?.removeEventListener("abort", cancel);
       if (!window.isDestroyed()) {
         await window.webContents
           .executeJavaScript("window.clearSlidePreview()")
@@ -1527,12 +1536,13 @@ const agentEditing = new AgentEditingService({
   measure: measureAgentText,
   changed: notifyAgentHistory,
 });
+const documentClosing = new DocumentClosing(agentEditing);
 const agentContextRead = async () => ({ ...await agentContext.read(), editing: { enabled: mcpEditingEnabled, ...agentEditing.availability() } });
 const agentBridge = new AgentBridge(app.getPath("userData"), async (request, signal) => {
   if (request.command === "context") return { ok: true, data: await agentContextRead() };
   if (request.command === "inspect") return agentInspection.inspect(request.params);
   if (request.command === "apply") return agentEditing.apply(request.params, signal);
-  return agentPreview.preview(request.params);
+  return agentPreview.preview(request.params, signal);
 });
 const operations: Record<string, (...args: any[]) => any> = {
   getMcpEditingEnabled: () => mcpEditingEnabled,
@@ -1562,6 +1572,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     await writeSettings(app.getPath("userData"), settings);
     if (agentContext.isEnabled !== enabled) { mcpAccessVersion++; mcpWriteAccessVersion++; }
     agentContext.setEnabled(enabled);
+    if (!enabled) agentPreview.cancelAll();
     await agentBridge.setEnabled(enabled);
     editor?.webContents.send("mcp-enabled-changed", enabled);
     return enabled;
@@ -1743,13 +1754,14 @@ const operations: Record<string, (...args: any[]) => any> = {
   },
   async closeDocument(id: string) {
     const parsed = idSchema.parse(id);
-    agentEditing.forget(parsed);
     const clearsAgentContext = parsed === activeDocumentId || parsed === agentGuestDocumentId;
     if (collaboration.isGuest(parsed)) {
+      agentEditing.forget(parsed);
       collaboration.leave();
       if (clearsAgentContext) agentContext.invalidate();
       return;
     }
+    await documentClosing.run(parsed, async () => {
     documentNotifications.get(parsed)?.();
     documentNotifications.delete(parsed);
     imagePreparation.close(parsed);
@@ -1759,7 +1771,9 @@ const operations: Record<string, (...args: any[]) => any> = {
       storage.documentRuntime(parsed).authority.revision === 0
     )
       await storage.discardDocumentChanges(parsed);
-    else storage.closeDocument(parsed);
+    else await storage.closeDocument(parsed);
+    return true;
+    });
     if (clearsAgentContext) agentContext.invalidate();
   },
   documentProjection: (documentId: string, slideId?: string) => {
@@ -2051,6 +2065,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       collaboration.leave();
       return "closed";
     }
+    const closed = await documentClosing.run(id, async () => {
     const summary = requireStorage().summary(id);
     let response = summary.dirty ? 2 : 0;
     if (summary.dirty && !process.env.SHOWME_DOCUMENT_DIR) {
@@ -2068,17 +2083,17 @@ const operations: Record<string, (...args: any[]) => any> = {
     }
     if (response === 2) {
       closeRequestPending = false;
-      return "canceled";
+      return false;
     }
     if (response === 0 && summary.dirty) {
       const saved = await saveDocument(id);
       if (!saved) {
         closeRequestPending = false;
-        return "canceled";
+        return false;
       }
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
-      requireStorage().closeDocument(id);
+      await requireStorage().closeDocument(id);
     } else if (response === 1 && summary.dirty) {
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
@@ -2087,10 +2102,12 @@ const operations: Record<string, (...args: any[]) => any> = {
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
       if (summary.untitled) await requireStorage().discardDocumentChanges(id);
-      else requireStorage().closeDocument(id);
+      else await requireStorage().closeDocument(id);
     }
+    return true;
+    }).finally(() => { closeRequestPending = false; });
+    if (!closed) return "canceled";
     allowEditorClose = true;
-    agentEditing.forget(id);
     agentContext.invalidate();
     closeRequestPending = false;
     editor?.close();

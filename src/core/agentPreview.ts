@@ -38,7 +38,8 @@ export type AgentPreviewErrorCode =
   | "EPOCH_CONFLICT"
   | "REVISION_CONFLICT"
   | "UNKNOWN_SLIDE"
-  | "PREVIEW_FAILED";
+  | "PREVIEW_FAILED"
+  | "REQUEST_CANCELLED";
 
 export type AgentPreviewResult =
   | (SlidePreviewCapture & {

@@ -1663,8 +1663,25 @@ export class DocumentAuthority {
     return run;
   }
 
+  private closing = false;
+
+  /** Revoke admissions synchronously, then drain admitted durability/accepted publication. */
+  beginClose(): Promise<void> {
+    this.closing = true;
+    return this.enqueueCommit(async () => {});
+  }
+
+  cancelClose() {
+    this.closing = false;
+  }
+
+  private requireOpen() {
+    if (this.closing) throw new Error("Document is closing");
+  }
+
   commit(actorId: string, raw: DocumentTransaction, admit?: CommitAdmission) {
     return this.enqueueCommit(() => {
+      this.requireOpen();
       admit?.({
         documentId: this.current.documentId,
         epoch: this.epoch,
@@ -1698,6 +1715,7 @@ export class DocumentAuthority {
 
   undo(actorId: string, leaseTokens: string[] = [], admit?: CommitAdmission) {
     return this.enqueueCommit(async () => {
+      this.requireOpen();
       admit?.({
         documentId: this.current.documentId,
         epoch: this.epoch,
@@ -1750,6 +1768,7 @@ export class DocumentAuthority {
 
   redo(actorId: string, leaseTokens: string[] = [], admit?: CommitAdmission) {
     return this.enqueueCommit(async () => {
+      this.requireOpen();
       admit?.({
         documentId: this.current.documentId,
         epoch: this.epoch,
