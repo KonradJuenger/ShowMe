@@ -35,6 +35,7 @@ export interface AgentDeckOutline extends AgentRevision {
     slideCount: number;
     hasStylesheet: boolean;
     stylesheet?: string;
+    transitionDefaults: Deck["transitionDefaults"];
     textStyles?: Array<{
       id: string;
       name: string;
@@ -100,6 +101,8 @@ export interface AgentSlideOutline extends AgentRevision {
     hidden: boolean;
     templateId: string | null;
     background: string;
+    transition: Deck["slideMeta"][string]["transition"] | null;
+    notesLength: number;
     elementCount: number;
   };
   layers: Array<
@@ -206,6 +209,7 @@ export function projectAgentDeck(
       height: deck.height,
       slideCount: deck.slideIds.length,
       hasStylesheet: !!deck.stylesheet,
+      transitionDefaults: deck.transitionDefaults,
       ...(options.includeStylesheet
         ? { stylesheet: deck.stylesheet ?? "" }
         : {}),
@@ -368,6 +372,8 @@ export function projectAgentSlide(
       hidden: meta.hidden,
       templateId: meta.templateId,
       background: slide.background,
+      transition: meta.transition ?? null,
+      notesLength: projection.slide.notes.length,
       elementCount: entries.length,
     },
     layers: projection.deck.layers.map(
