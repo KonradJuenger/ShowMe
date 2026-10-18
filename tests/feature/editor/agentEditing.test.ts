@@ -681,6 +681,11 @@ it("large semantic batches commit once stay atomic and remain bounded", async ()
 
 it("builds composite cards with local children and parent Presence in one atomic batch", async () => {
   const f = fixture();
+  let measurementCalls = 0;
+  f.measure(async (element) => {
+    measurementCalls++;
+    return { width: element.frame.width, height: 48 };
+  });
   const root = f.slide.nodes[0].id;
   const operations: any[] = [
     {
@@ -720,8 +725,8 @@ it("builds composite cards with local children and parent Presence in one atomic
         id: `${id}-label`,
         parentId: id,
         frame: { x: 32, y: 28, width: 436, height: 48 },
-        autoSize: "none",
-        text: `Metric ${index + 1}`,
+        autoSize: "height",
+        text: "Metric",
         typography: { fontSize: 24 },
       },
       {
@@ -755,6 +760,7 @@ it("builds composite cards with local children and parent Presence in one atomic
     revision: 1,
   });
   expect(f.counts()).toEqual({ writes: 1, notifications: 1 });
+  expect(measurementCalls).toBe(1);
 
   const p = await f.projection();
   for (const id of ["card-a", "card-b", "card-c"]) {
