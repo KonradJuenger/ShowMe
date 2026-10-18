@@ -185,29 +185,79 @@ it("agent slide creation returns stable IDs preserves the projected slide and is
   expect((await f.projection()).deck.slideIds).toEqual([f.slide.id, id]);
 });
 
-it("slide anchors and isolated creation reject atomically and stale slide requests do not retarget", async () => {
+it("slide creation can author a complete new slide atomically and invalid anchors do not mutate", async () => {
   const f = fixture();
   expect(
     await f.service.apply(
       f.request([{ type: "slide.create", afterId: "missing", name: "Bad" }]),
     ),
   ).toMatchObject({ error: { code: "UNKNOWN_SLIDE" } });
-  expect(
-    await f.service.apply(
-      f.request([
-        { type: "slide.create", afterId: null, name: "Bad" },
-        { type: "text.set", elementId: "title", text: "No" },
-      ]),
-    ),
-  ).toMatchObject({ error: { code: "INVALID_REQUEST" } });
   expect(f.counts().writes).toBe(0);
+
+  const root = f.slide.nodes[0].id;
   const request = f.request([
-    { type: "slide.create", afterId: null, name: "First" },
+    {
+      type: "slide.create",
+      id: "agent-slide",
+      afterId: f.slide.id,
+      name: "Agent title slide",
+      background: "#000000",
+    },
+    {
+      type: "element.insert_shape",
+      id: "background",
+      parentId: root,
+      shape: "rectangle",
+      frame: { x: 0, y: 0, width: 1920, height: 1080 },
+      appearance: { fill: "#000000", strokeWidth: 0 },
+    },
+    {
+      type: "element.insert_text",
+      id: "headline",
+      parentId: root,
+      frame: { x: 140, y: 210, width: 1400, height: 180 },
+      text: "A complete slide",
+      typography: {
+        fontFamily: "Arial",
+        fontSize: 96,
+        color: "#ffffff",
+        align: "left",
+      },
+      autoSize: "none",
+    },
+    {
+      type: "element.insert_shape",
+      id: "rule",
+      parentId: root,
+      shape: "rectangle",
+      frame: { x: 140, y: 430, width: 720, height: 4 },
+      appearance: { fill: "#ffffff", strokeWidth: 0 },
+    },
+    {
+      type: "elements.reorder",
+      parentId: root,
+      elementIds: ["background"],
+      mode: "back",
+    },
   ]);
   const result = await f.service.apply(request);
-  expect((await f.projection()).deck.slideIds[0]).toBe(
-    result.createdSlideIds[0],
-  );
+  expect(result).toMatchObject({
+    ok: true,
+    createdSlideIds: ["agent-slide"],
+    createdIds: expect.arrayContaining(["background", "headline", "rule"]),
+  });
+  const authored = await f.runtime.projection(f.model.documentId, "agent-slide");
+  expect(authored.slide.background).toBe("#000000");
+  expect(findElement(authored.slide, "headline")).toMatchObject({
+    frame: { x: 140, y: 210, width: 1400, height: 180 },
+    content: {
+      type: "text",
+      text: "A complete slide",
+      format: { typography: { fontSize: 96, color: "#ffffff" } },
+    },
+  });
+  expect(authored.slide.nodes[0].children[0].id).toBe("background");
+  expect(f.counts().writes).toBe(1);
   expect(
     await f.service.apply({ ...request, mutationId: "different" }),
   ).toMatchObject({ error: { code: "REVISION_CONFLICT" } });
@@ -457,6 +507,176 @@ it("creative semantic operations reuse deck CSS Effects z-order and native Motio
         track.property === `effects.${effectId}.parameters.amount`,
     ),
   ).toBe(true);
+});
+
+it("structural authoring reuses native group duplicate reparent align distribute and Text Styles", async () => {
+  const f = fixture();
+  const root = f.slide.nodes[0].id;
+  const grouped = await f.service.apply(
+    f.request([
+      {
+        type: "elements.group",
+        elementIds: ["title", "shape"],
+        id: "cluster",
+        name: "Cluster",
+      },
+      {
+        type: "elements.frame.set",
+        elementId: "cluster",
+        frame: {
+          x: 160,
+          y: 160,
+          width: 640,
+          height: 360,
+          rotation: 12,
+        },
+      },
+    ]),
+  );
+  expect(grouped).toMatchObject({
+    ok: true,
+    createdIds: ["cluster"],
+  });
+  expect(findElement((await f.projection()).slide, "cluster")).toMatchObject({
+    name: "Cluster",
+    container: true,
+    clipChildren: false,
+    frame: { rotation: 12 },
+  });
+
+  const duplicated = await f.service.apply(
+    f.request([
+      {
+        type: "elements.duplicate",
+        elementIds: ["cluster"],
+        offset: { x: 40, y: 20 },
+      },
+    ]),
+  );
+  expect(duplicated).toMatchObject({
+    ok: true,
+    idMap: {
+      cluster: expect.any(String),
+      title: expect.any(String),
+      shape: expect.any(String),
+    },
+  });
+  const duplicateId = duplicated.idMap.cluster;
+  expect(findElement((await f.projection()).slide, duplicateId)).toBeTruthy();
+
+  expect(
+    await f.service.apply(
+      f.request([{ type: "elements.ungroup", elementId: "cluster" }]),
+    ),
+  ).toMatchObject({ ok: true, removedIds: ["cluster"] });
+
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "elements.align",
+          scopeId: root,
+          elementIds: ["title", "shape"],
+          axis: "left",
+        },
+        {
+          type: "elements.distribute",
+          scopeId: root,
+          elementIds: ["title", "shape", duplicateId],
+          axis: "horizontal",
+        },
+        {
+          type: "elements.reparent",
+          elementIds: ["shape"],
+          parentId: "group",
+        },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  expect(findElement((await f.projection()).slide, "group")!.children).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "shape" })]),
+  );
+
+  const headingId = f.model.deck.textStyles[0].id;
+  expect(
+    await f.service.apply(
+      f.request([
+        {
+          type: "text.style.apply",
+          elementIds: ["title"],
+          styleId: headingId,
+        },
+        {
+          type: "text.style",
+          elementId: "title",
+          typography: { fontSize: 88 },
+        },
+        {
+          type: "text.style.clear_overrides",
+          elementIds: ["title"],
+        },
+        {
+          type: "text.style.create",
+          elementId: "title",
+          name: "Agent Heading",
+          styleId: "agent-heading",
+        },
+      ]),
+    ),
+  ).toMatchObject({
+    ok: true,
+    createdTextStyleIds: ["agent-heading"],
+  });
+  expect(
+    (await f.projection()).deck.textStyles.some(
+      (style) => style.id === "agent-heading" && style.name === "Agent Heading",
+    ),
+  ).toBe(true);
+});
+
+it("slide duplicate move hide and delete preserve native slide semantics and return identity maps", async () => {
+  const f = fixture();
+  const duplicated = await f.service.apply(
+    f.request([
+      {
+        type: "slide.duplicate",
+        id: "copy-slide",
+        name: "Copy",
+      },
+    ]),
+  );
+  expect(duplicated).toMatchObject({
+    ok: true,
+    createdSlideIds: ["copy-slide"],
+    idMap: {
+      title: expect.any(String),
+      shape: expect.any(String),
+      group: expect.any(String),
+      child: expect.any(String),
+    },
+  });
+  const changed = await f.service.apply({
+    ...f.request([
+      { type: "slide.update", hidden: true, name: "Hidden copy" },
+      { type: "slide.move", afterId: null },
+    ]),
+    slideId: "copy-slide",
+  });
+  expect(changed).toMatchObject({ ok: true });
+  const copy = await f.runtime.projection(f.model.documentId, "copy-slide");
+  expect(copy.deck.slideIds[0]).toBe("copy-slide");
+  expect(copy.deck.slideMeta["copy-slide"]).toMatchObject({
+    name: "Hidden copy",
+    hidden: true,
+  });
+
+  expect(
+    await f.service.apply({
+      ...f.request([{ type: "slide.delete" }]),
+      slideId: "copy-slide",
+    }),
+  ).toMatchObject({ ok: true });
+  expect((await f.projection()).deck.slideIds).not.toContain("copy-slide");
 });
 
 it("shader parameters reconcile from source and validation failure is atomic", async () => {
