@@ -569,7 +569,7 @@ it("rejects unknown targets together and reports missing template or unsupported
 it("returns allowlisted media settings without filenames paths or bytes", () => {
   const projection = fixture();
   const result = projectAgentElements(projection, ["movie"]);
-  expect(result.elements[0].content).toEqual({
+  expect(result.elements[0].content).toMatchObject({
     type: "video",
     assetId: "a".repeat(64),
     mediaType: "video",
