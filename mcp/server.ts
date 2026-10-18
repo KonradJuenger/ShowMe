@@ -13,6 +13,7 @@ import {
   type AgentBridgeRequest,
 } from "../src/core/agentRead";
 import { agentAuthoringRequestSchema } from "../src/core/agentAuthoring";
+import { agentMeasureTextRequestSchema } from "../src/core/agentTextMeasure";
 
 const schema = <T extends z.ZodType>(value: T) =>
   fromJsonSchema<z.infer<T>>(z.toJSONSchema(value) as JsonSchemaType);
@@ -110,6 +111,43 @@ export function createShowMeServer(
     },
     async (params, ctx) =>
       json(await read({ command: "inspect", params }, ctx.mcpReq.signal)),
+  );
+  server.registerTool(
+    "showme.measure_text",
+    {
+      description:
+        "Measure 1-64 text runs at an exact document epoch/revision using ShowMe's production fonts and DOM text layout. Use this before construction when wrapping or measured paragraph height affects layout. This tool does not mutate the document.",
+      inputSchema: schema(agentMeasureTextRequestSchema),
+      outputSchema: schema(
+        z.union([
+          z
+            .object({
+              ok: z.literal(true),
+              documentId: z.string(),
+              epoch: z.string(),
+              revision: z.number(),
+              measurements: z.array(
+                z
+                  .object({
+                    width: z.number(),
+                    height: z.number(),
+                  })
+                  .strict(),
+              ),
+            })
+            .strict(),
+          z.object({ ok: z.literal(false), error: errorSchema }).strict(),
+        ]),
+      ),
+      annotations,
+    },
+    async (params, ctx) =>
+      json(
+        await read(
+          { command: "measure_text", params },
+          ctx.mcpReq.signal,
+        ),
+      ),
   );
   server.registerTool(
     "showme.apply",
