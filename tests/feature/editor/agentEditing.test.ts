@@ -778,8 +778,8 @@ it("builds composite cards with local children and parent Presence in one atomic
       x: 32,
       y: 28,
       width: 436,
-      height: 48,
     });
+    expect(findElement(p.slide, `${id}-label`)!.frame.height).toBeGreaterThan(0);
   }
   const presenceParents = (p.slide.motion?.stages[0].blocks ?? [])
     .flatMap((block) =>
