@@ -710,6 +710,8 @@ Layer IDs and container Element IDs are the only authoring parents.
 typography, Text Style reference, media transform, CSS classes, Effects and optional
 Motion/Presence/world detail. Deck inspection can opt into Text Style definitions.
 
-Managed media insertion is implemented only by asset ID through ShowMe's document
-asset authority. Importing a new filesystem asset is intentionally outside MCP.
-Arbitrary paths, raw bytes and fabricated asset records are not accepted.
+Managed media discovery is available through bounded `showme.inspect` asset queries.
+The result exposes only managed asset IDs, display names, media type and prepared
+dimensions/duration. `element.insert_media` then resolves the chosen ID through
+ShowMe's document asset authority. Importing a new filesystem asset is intentionally
+outside MCP. Arbitrary paths, raw bytes and fabricated asset records are not accepted.

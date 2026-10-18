@@ -1575,6 +1575,8 @@ const agentInspection = new AgentInspectionService({
     if (collaboration.isGuest(id) && collaboration.status().clientStatus !== "connected") throw new Error("Guest unavailable");
     return collaboration.isGuest(id) ? collaboration.projection(id, pageId) : documentRuntime(id).projection(id, pageId);
   },
+  listAssets: async (_documentId, query, offset, limit) =>
+    requireStorage().listAssets(query, offset, limit),
 });
 const agentAuthoring = new AgentAuthoringService({
   access: () => (agentContext.isEnabled ? mcpAccessVersion : null),

@@ -32,6 +32,14 @@ export const agentInspectRequestSchema = z
         .strict(),
       z
         .object({
+          type: z.literal("assets"),
+          query: z.string().max(200).optional(),
+          offset: z.number().int().min(0).max(100000).optional(),
+          limit: z.number().int().min(1).max(50).optional(),
+        })
+        .strict(),
+      z
+        .object({
           type: z.literal("elements"),
           slideId: id,
           elementIds: z.array(id).min(1).max(128),

@@ -520,9 +520,10 @@ with exact frames and typography. Render through the production preview and refi
 
 ### Task B: image + text layout
 
-Start with a ShowMe-managed image asset ID. Insert it through the bounded managed
-asset operation, build a large cropped image beside text, use Frame fill/crop
-semantics, and verify the content transform through structured inspection.
+Discover a ShowMe-managed image with the bounded asset inspection target. Insert the
+returned asset ID through the managed media operation, build a large cropped image
+beside text, use Frame fill/crop semantics, and verify the content transform through
+structured inspection and production preview.
 
 ### Task C: structured information slide
 
@@ -550,6 +551,6 @@ text/shape/Frame creation, parent-local transform/appearance, hierarchy/z-order,
 duplicate/group/ungroup/reparent, alignment/distribution, Text Styles, existing-media
 Frame/crop transforms, deck CSS, Effects, Motion, Presence and production preview.
 
-Managed image/SVG/video insertion is supported by existing authorized asset ID.
-Intentionally unsupported: importing arbitrary filesystem paths or raw bytes into the
-Library through MCP.
+Managed image/SVG/video discovery and insertion are supported through bounded Library
+inspection plus an authorized asset ID. Intentionally unsupported: importing arbitrary
+filesystem paths or raw bytes into the Library through MCP.

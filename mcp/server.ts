@@ -103,7 +103,7 @@ export function createShowMeServer(
     "showme.inspect",
     {
       description:
-        "Inspect accepted authoring state at an exact epoch/revision. Default output stays sparse; request Text Styles, deck stylesheet, Effect source, semantic Motion/Presence summaries or world transforms when needed. Element details expose parent-local frame, hierarchy, appearance, text/media state and CSS/Effect metadata. Hidden text is withheld by default.",
+        "Inspect accepted authoring state at an exact epoch/revision. Default output stays sparse; inspect the managed asset library by bounded query, or request Text Styles, deck stylesheet, Effect source, semantic Motion/Presence summaries or world transforms when needed. Element details expose parent-local frame, hierarchy, appearance, text/media state and CSS/Effect metadata. Hidden text is withheld by default.",
       inputSchema: schema(agentInspectRequestSchema),
       outputSchema: schema(envelopeSchema),
       annotations,
@@ -115,7 +115,7 @@ export function createShowMeServer(
     "showme.apply",
     {
       description:
-        "Apply an atomic semantic batch to the active locally owned presentation. Requires Allow agent editing and an exact inspected revision. Supports slide construction, text/shape/frame insertion, parent-local geometry, appearance, z-order, hierarchy, duplication, grouping, alignment/distribution, Text Styles, existing-media frame/crop controls, templates, deck CSS, Effects, Motion and Presence. Effect code is production-validated. Reuse an identical mutationId after a lost response. Raw document operations remain unavailable.",
+        "Apply an atomic semantic batch to the active locally owned presentation. Requires Allow agent editing and an exact inspected revision. Supports slide construction, text/shape/frame insertion, managed media insertion by assetId, parent-local geometry, appearance, z-order, hierarchy, duplication, grouping, alignment/distribution, Text Styles, media frame/crop/playback controls, templates, deck CSS, Effects, Motion and Presence. Effect code is production-validated. Reuse an identical mutationId after a lost response. Raw document operations remain unavailable.",
       inputSchema: schema(agentApplyRequestSchema),
       outputSchema: schema(
         z.union([

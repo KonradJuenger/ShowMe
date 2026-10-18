@@ -233,7 +233,7 @@ function normalAuthoringGuide(
       supported:
         "Managed image/SVG/video assets can be inserted by assetId. Existing media can be inspected, resized, fit/filled, centered, reset and have its content transform edited.",
       inspect:
-        "Element detail returns assetId, media type, lockAspect and the canonical semantic transform.",
+        "Use showme.inspect target=assets to discover ShowMe-managed asset IDs. Element detail returns assetId, media type, lockAspect, semantic transform and resolved content frame.",
       operations: [
         "element.insert_media",
         "elements.frame.set",

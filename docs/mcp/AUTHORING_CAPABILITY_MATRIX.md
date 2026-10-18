@@ -22,6 +22,7 @@ intentionally not MCP operations.
 | Elements | Rectangle / ellipse | `element.insert_shape` | Implemented |
 | Elements | Empty clipping Frame | `element.insert_frame` | Implemented |
 | Elements | Image / SVG / video | `element.insert_media` using a ShowMe-managed asset ID | Implemented |
+| Media library | Discover managed assets | `showme.inspect` target `assets` with bounded query/paging | Implemented; returns IDs/names/type/dimensions, never paths/bytes |
 | Geometry | x/y/width/height | `elements.frame.set`, `elements.move` | Implemented, parent-local |
 | Geometry | Rotation / scale / flip / origin | `elements.frame.set` | Implemented |
 | Geometry | Derived world geometry | `showme.inspect(...includeWorldTransform:true)` | Implemented, read-only derived state |
@@ -61,9 +62,9 @@ batch must refer to the object. Normal creation still generates IDs by default.
 
 ## Intentionally not exposed
 
-- Arbitrary filesystem paths, raw media bytes and direct Library imports. MCP media
-  insertion accepts only an existing asset ID resolved by ShowMe's document asset
-  authority.
+- Arbitrary filesystem paths, raw media bytes and direct Library imports. MCP can
+  inspect the managed Library and insert an existing asset ID, but importing a new
+  filesystem asset remains a human/host action.
 - Raw `DocumentOperation[]`, direct `.sme` editing, Electron IPC passthrough,
   renderer DOM mutation or arbitrary JavaScript execution.
 - Mouse/handle gestures, hover state, temporary snapping indicators and other
