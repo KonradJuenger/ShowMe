@@ -183,7 +183,7 @@ test("MCP builds multiple styled slides with production text measurement and rea
       {
         type: "element.insert_text",
         parentId,
-        center: { x: 520, y: 300 },
+        frame: { x: 520, y: 300 , width: 800, height: 180 },\n        autoSize: "both",
         text: "Create locally.",
         typography: { fontSize: 100, color: "#F6F3EB", bold: true },
       },
@@ -204,7 +204,7 @@ test("MCP builds multiple styled slides with production text measurement and rea
       {
         type: "element.insert_text",
         parentId,
-        center: { x: 520, y: 300 },
+        frame: { x: 520, y: 300 , width: 800, height: 180 },\n        autoSize: "both",
         text: "Keep a way back.",
         typography: { fontSize: 90, color: "#FFFFFF" },
       },
@@ -353,7 +353,7 @@ test("local opt-in enables atomic MCP editing with production text sizing explic
         {
           type: "element.insert_text",
           parentId: root,
-          center: { x: 500, y: 400 },
+          frame: { x: 500, y: 400 , width: 800, height: 180 },\n        autoSize: "both",
           text: "Native measured label",
           name: "Agent label",
         },
@@ -552,6 +552,7 @@ test("real stdio client reads context inspection and production PNG with Setting
     const catalog = await client.listTools();
     expect(catalog.tools.map((value) => value.name)).toEqual([
       "showme.context",
+      "showme.authoring",
       "showme.inspect",
       "showme.apply",
       "showme.preview",

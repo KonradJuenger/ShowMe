@@ -23,6 +23,8 @@ import {
   setElementAppearances,
   setSlideNotes,
 } from "../../../src/core/editorCommands";
+import type { EffectDefinition } from "../../../src/core/effects";
+import type { EffectValidationResult } from "../../../src/core/effectValidation";
 
 function deferred() {
   let resolve!: () => void;
@@ -76,6 +78,16 @@ function fixture(
       ConstructorParameters<typeof AgentEditingService>[0]["measure"]
     >[1],
   ) => ({ width: element.content.text.length * 10, height: 30 });
+  let validateEffect = async (
+    _documentId: string,
+    definition: EffectDefinition,
+    _sampleText?: string,
+  ): Promise<EffectValidationResult | null> => ({
+    ok: true,
+    kind: definition.kind,
+    definition,
+    diagnostics: [],
+  });
   const service = new AgentEditingService({
     ...options,
     access: () => access,
@@ -83,6 +95,8 @@ function fixture(
     activeDocumentId: () => active,
     runtime: () => current,
     measure: (_id, element) => measure(element),
+    validateEffect: (documentId, definition, sampleText) =>
+      validateEffect(documentId, definition, sampleText),
     changed: () => {
       notifications++;
     },
@@ -124,6 +138,9 @@ function fixture(
     },
     measure: (fn: typeof measure) => {
       measure = fn;
+    },
+    validateEffect: (fn: typeof validateEffect) => {
+      validateEffect = fn;
     },
   };
 }
@@ -223,7 +240,7 @@ it("agent typography uses native style overrides measurement fixed text frames a
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        center: { x: 500, y: 300 },
+        frame: { x: 500, y: 300 , width: 800, height: 180 },\n        autoSize: "both",
         text: "Design",
         typography: { fontSize: 120, color: "#007F73", bold: true },
         autoSize: "both",
@@ -232,6 +249,10 @@ it("agent typography uses native style overrides measurement fixed text frames a
   );
   expect(inserted.ok).toBe(true);
   const id = inserted.createdIds[0];
+  expect(findElement((await f.projection()).slide, id)?.frame).toMatchObject({
+    x: 500,
+    y: 300,
+  });
   let measuredSize = 0;
   f.measure(async (element) => {
     measuredSize =
@@ -302,7 +323,22 @@ it("deck naming and independent slide styling commit without element changes and
     await f.service.apply(
       f.request([{ type: "slide.update", background: "#123456" }]),
     ),
-  ).toMatchObject({ error: { code: "TARGET_NOT_EDITABLE" } });
+  ).toMatchObject({
+    error: {
+      code: "TEMPLATE_OWNED",
+      details: { suggestedOperation: "slide.make_independent" },
+    },
+  });
+  expect(
+    await f.service.apply(
+      f.request([
+        { type: "slide.make_independent" },
+        { type: "slide.update", background: "#123456" },
+      ]),
+    ),
+  ).toMatchObject({ ok: true });
+  expect((await f.projection()).deck.slideMeta[f.slide.id].templateId).toBeNull();
+  expect((await f.projection()).slide.background).toBe("#123456");
   const result = await f.service.apply(
     f.request([
       { type: "deck.rename", name: "A beautiful deck" },
@@ -337,6 +373,155 @@ it("deck naming and independent slide styling commit without element changes and
   expect(
     (await f.runtime.projection(f.model.documentId, id)).slide.background,
   ).toBe("#007F73");
+});
+
+it("creative semantic operations reuse deck CSS Effects z-order and native Motion", async () => {
+  const f = fixture();
+  const root = f.slide.nodes[0].id;
+  const first = await f.service.apply(
+    f.request([
+      {
+        type: "deck.stylesheet.set",
+        source: ".glass-card { box-shadow: 0 8px 24px #0008; }",
+      },
+      {
+        type: "elements.css_classes.set",
+        elementIds: ["shape"],
+        classes: ["glass-card"],
+      },
+      {
+        type: "elements.reorder",
+        parentId: root,
+        elementIds: ["shape"],
+        mode: "front",
+      },
+      {
+        type: "effect.apply_code",
+        elementId: "shape",
+        name: "Soft blur",
+        effectType: "css",
+        affects: "element",
+        source: ":scope { filter: blur(calc(var(--amount) * 1px)); }",
+        parameters: [
+          {
+            type: "number",
+            key: "amount",
+            label: "Amount",
+            default: 8,
+            min: 0,
+            max: 20,
+          },
+        ],
+      },
+    ]),
+  );
+  expect(first).toMatchObject({
+    ok: true,
+    createdEffectInstanceIds: [expect.any(String)],
+  });
+  const effectId = first.createdEffectInstanceIds[0];
+  const second = await f.service.apply(
+    f.request([
+      {
+        type: "effect.parameter.set",
+        elementId: "shape",
+        effectInstanceId: effectId,
+        key: "amount",
+        value: 6,
+      },
+      {
+        type: "motion.animate",
+        stageIndex: 0,
+        elementId: "shape",
+        property: `effects.${effectId}.parameters.amount`,
+        from: 8,
+        to: 1,
+        durationMs: 400,
+        ease: "Ease Out",
+      },
+    ]),
+  );
+  expect(second).toMatchObject({
+    ok: true,
+    updatedEffectInstanceIds: [effectId],
+  });
+  const p = await f.projection();
+  expect(p.deck.stylesheet).toContain(".glass-card");
+  expect(findElement(p.slide, "shape")?.cssClasses).toEqual(["glass-card"]);
+  expect(p.slide.nodes[0].children.at(-1)?.id).toBe("shape");
+  expect(findElement(p.slide, "shape")?.effects?.[0].parameters.amount).toBe(6);
+  expect(
+    p.slide.motion?.stages[0].tracks.some(
+      (track) =>
+        track.elementId === "shape" &&
+        track.property === `effects.${effectId}.parameters.amount`,
+    ),
+  ).toBe(true);
+});
+
+it("shader parameters reconcile from source and validation failure is atomic", async () => {
+  const shader = `#version 300 es
+precision highp float;
+uniform float movement; // @param 0.6 [0, 1]
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  outColor = vec4(v_uv.x * movement, 0.1, 0.2, 1.0);
+}`;
+  const f = fixture();
+  const accepted = await f.service.apply(
+    f.request([
+      {
+        type: "background.shader.create",
+        name: "Generated green",
+        source: shader,
+        timeControl: { start: "slide", stop: { mode: "none" } },
+      },
+    ]),
+  );
+  expect(accepted).toMatchObject({
+    ok: true,
+    createdIds: [expect.any(String)],
+    createdEffectInstanceIds: [expect.any(String)],
+  });
+  const p = await f.projection();
+  const created = findElement(p.slide, accepted.createdIds[0])!;
+  const definition =
+    p.slide.effectResources?.[created.effects![0].resourceId];
+  expect(definition?.parameters).toMatchObject([
+    { key: "movement", default: 0.6, min: 0, max: 1 },
+  ]);
+
+  const rejected = fixture();
+  const before = await rejected.projection();
+  rejected.validateEffect(async (_id, definition) => ({
+    ok: false,
+    kind: definition.kind,
+    diagnostics: [
+      { severity: "error", line: 7, message: "synthetic compile failure" },
+    ],
+  }));
+  expect(
+    await rejected.service.apply(
+      rejected.request([
+        {
+          type: "background.shader.create",
+          name: "Broken",
+          source: shader,
+        },
+      ]),
+    ),
+  ).toMatchObject({
+    error: {
+      code: "EFFECT_VALIDATION_ERROR",
+      details: {
+        kind: "fragment-glsl",
+        diagnostics: [{ line: 7, message: "synthetic compile failure" }],
+      },
+    },
+  });
+  expect(await rejected.projection()).toEqual(before);
+  expect(rejected.counts().writes).toBe(0);
 });
 
 it("strict semantic requests reject raw document patches invalid numbers colors and implicit selection", async () => {
@@ -406,7 +591,7 @@ it("all seven operations use one native transaction and return generated measure
       {
         type: "element.insert_text",
         parentId: root,
-        center: { x: 150, y: 100 },
+        frame: { x: 150, y: 100 , width: 800, height: 180 },\n        autoSize: "both",
         text: "Label",
         name: "Agent label",
       },
@@ -632,7 +817,7 @@ it("pre-admission measurement cancellation access changes guest and active-docum
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        center: { x: 0, y: 0 },
+        frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
         text: "Held",
       },
     ]),
@@ -788,7 +973,7 @@ it("locked layers inherited targets invalid scopes and ancestor-descendant trans
         {
           type: "element.insert_text",
           parentId: "missing",
-          center: { x: 0, y: 0 },
+          frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
           text: "Bad",
         },
       ]),
@@ -913,7 +1098,7 @@ it("access generation changes while measuring invalidate staged work before admi
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        center: { x: 0, y: 0 },
+        frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
         text: "Unaccepted",
       },
     ]),
@@ -941,7 +1126,7 @@ it("closing a runtime while measuring rejects staged writes and reopening requir
       {
         type: "element.insert_text",
         parentId: f.slide.nodes[0].id,
-        center: { x: 0, y: 0 },
+        frame: { x: 0, y: 0 , width: 800, height: 180 },\n        autoSize: "both",
         text: "Closing",
       },
     ]),
