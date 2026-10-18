@@ -895,6 +895,21 @@ export async function assembleAgentMutation(
         "The parent layer must be visible and unlocked.",
       );
   };
+  const measurementCache = new Map<string, TextMeasurement | null>();
+  const measureCached = async (
+    element: Element & { content: TextContent },
+  ): Promise<TextMeasurement | null> => {
+    const key = JSON.stringify({
+      width: element.frame.width,
+      text: element.content.text,
+      autoSize: element.content.autoSize,
+      format: element.content.format,
+    });
+    if (measurementCache.has(key)) return measurementCache.get(key) ?? null;
+    const measured = await measure(element);
+    measurementCache.set(key, measured);
+    return measured;
+  };
   const setText = async (elementId: string, patch: TextPatch) => {
     next = updateText(next, elementId, patch);
     const element = locateElement(next.slide, elementId)!.element;
@@ -904,7 +919,7 @@ export async function assembleAgentMutation(
         "Text replacement requires a text element.",
       );
     if (element.content.autoSize === "none") return;
-    const measured = await measure({
+    const measured = await measureCached({
       ...element,
       content: {
         ...element.content,
