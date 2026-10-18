@@ -48,6 +48,12 @@ import type { DocumentProjection } from "./documentProjection";
 import { applyTemplate, makeIndependent } from "./templateCommands";
 import { alignSelection, distributeSelection } from "./arrangeCommands";
 import {
+  addLayer,
+  changeLayer,
+  deleteLayer,
+  reorderLayers,
+} from "./layerActions";
+import {
   centerMedia,
   convertMediaRule,
   isMediaContent,
@@ -131,6 +137,14 @@ const typography = z
   .strict();
 const autoSize = z.enum(["none", "height", "both"]);
 const background = z.string().regex(/^#[a-fA-F0-9]{6}$/);
+const layerPatch = z
+  .object({
+    name: z.string().trim().min(1).max(200).optional(),
+    hidden: z.boolean().optional(),
+    locked: z.boolean().optional(),
+    color: background.optional(),
+  })
+  .strict();
 const cssClass = z
   .string()
   .regex(/^[a-zA-Z_][a-zA-Z0-9_-]*$/)
@@ -278,6 +292,33 @@ export const agentApplyRequestSchema = z
               type: z.literal("deck.dimensions.set"),
               width: number.positive().max(100000),
               height: number.positive().max(100000),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("layer.create"),
+              id: optionalId,
+              patch: layerPatch.optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("layer.update"),
+              layerId: id,
+              patch: layerPatch,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("layer.delete"),
+              layerId: id,
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("layer.reorder"),
+              layerIds: z.array(id).min(1).max(128),
+              index: childIndex,
             })
             .strict(),
           z
@@ -632,6 +673,7 @@ export async function assembleAgentMutation(
   const createdThisBatch = new Set<string>();
   const idMap: Record<string, string> = {};
   const createdTextStyleIds: string[] = [];
+  const createdLayerIds: string[] = [];
   const requireEditable = (elementId: string) => {
     const location = locateElement(next.slide, elementId);
     if ((!initialIds.has(elementId) && !createdThisBatch.has(elementId)) || !location)
@@ -927,6 +969,28 @@ export async function assembleAgentMutation(
         next = setDeckProperties(next, { stylesheet: op.source });
       } else if (op.type === "deck.dimensions.set") {
         next = setDeckProperties(next, { width: op.width, height: op.height });
+      } else if (op.type === "layer.create") {
+        const layerId = op.id ?? newId();
+        if (next.deck.layers.some((layer) => layer.id === layerId))
+          throw new AgentMutationError("INVALID_REQUEST", "Layer ID already exists.");
+        next = addLayer(next, layerId).snapshot;
+        if (op.patch && Object.keys(op.patch).length)
+          next = changeLayer(next, layerId, op.patch);
+        createdLayerIds.push(layerId);
+      } else if (op.type === "layer.update") {
+        if (!next.deck.layers.some((layer) => layer.id === op.layerId))
+          throw new AgentMutationError("UNKNOWN_LAYER", "Inspect the slide and use an existing Layer ID.");
+        if (!Object.keys(op.patch).length)
+          throw new AgentMutationError("INVALID_REQUEST", "Supply a nonempty Layer patch.");
+        next = changeLayer(next, op.layerId, op.patch);
+      } else if (op.type === "layer.delete") {
+        if (!next.deck.layers.some((layer) => layer.id === op.layerId))
+          throw new AgentMutationError("UNKNOWN_LAYER", "Inspect the slide and use an existing Layer ID.");
+        if (next.deck.layers.length <= 1)
+          throw new AgentMutationError("UNSUPPORTED_OPERATION", "The final Layer cannot be deleted.");
+        next = deleteLayer(next, op.layerId);
+      } else if (op.type === "layer.reorder") {
+        next = reorderLayers(next, op.layerIds, op.index);
       } else if (op.type === "text.style.apply") {
         if (op.styleId && !next.deck.textStyles.some((style) => style.id === op.styleId))
           throw new AgentMutationError("UNKNOWN_TEXT_STYLE", "Inspect the deck and use an existing Text Style ID.");
@@ -1423,6 +1487,7 @@ export async function assembleAgentMutation(
     updatedEffectInstanceIds: [...new Set(updatedEffectInstanceIds)],
     idMap,
     createdTextStyleIds: [...new Set(createdTextStyleIds)],
+    createdLayerIds: [...new Set(createdLayerIds)],
     changed: editorOperations(next).length > 0,
   };
 }
