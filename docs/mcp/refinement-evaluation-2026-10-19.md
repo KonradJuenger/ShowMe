@@ -80,3 +80,10 @@ Updated README and LOCAL_SETUP to the eight-tool 1.10 catalog, current configura
 Moved the existing MCP/collaboration settings slot after image-cache and library settings. Native rendered order was checked as Image cache → Library / Storage → MCP → Collaboration, with the original controls preserved.
 
 Local follow-up checks passed: the exact seven-file CI MCP unit selection (`agentProjection`, `agentContext`, `agentPreview`, `agentInspection`, `agentBridge`, `agentEditing`, `agentClosing`) with `npx vitest run` — **119/119**; `npm run build`; ESLint on `PresentationMenu.tsx` and `agentEditing.test.ts`; `npm run test:audit`; `git diff --check`. Full exact-head hosted checks are reported on PR #14 rather than treating the prior commit's green checks as current evidence.
+
+### Native CI follow-up
+
+The context UI test now opens responsive Click Timeline overflow controls and waits for the Add Click transaction against its immediate pre-click revision. It uses a fixed 1024×768 viewport. A failed MCP fixture launch terminates only its owned Electron process and reports captured startup stderr; startup presentation failures also log their cause before the native error dialog. No timeouts or retries changed.
+
+Local Windows verification: SHOWME_TEST_FILES selecting agent-context.spec.ts, agent-preview.spec.ts and agent-mcp.spec.ts with npx playwright test --config playwright.electron.config.ts --output test-results-mcp-debug: 20/20 passed (1.1 minutes). npm run build, focused ESLint and npm run test:audit passed. The CI-only pre-window startup failures remain under investigation pending the next exact-head run.
+

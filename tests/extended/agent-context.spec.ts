@@ -63,6 +63,7 @@ const read = (page: Page) =>
 test("MCP setting gates live editor context, persists and survives UI replacement without stale selection", async () => {
   const { app, page, folder } = await launch();
   try {
+    await page.setViewportSize({ width: 1024, height: 768 });
     expect(await read(page)).toMatchObject({
       enabled: false,
       availability: "disabled",
@@ -107,12 +108,18 @@ test("MCP setting gates live editor context, persists and survives UI replacemen
       name: "Click Timeline",
       exact: true,
     });
+    const more = dock.getByRole("button", {
+      name: "More Click Timeline controls",
+      exact: true,
+    });
+    if (await more.isVisible()) await more.click();
+    const beforeAdd = await read(page);
     await dock.getByRole("button", { name: "Add Click", exact: true }).click();
     // Stage selection and seek are UI state; creating the Click above is a native edit.
     await expect
       .poll(async () => {
         const value = await read(page);
-        return value.document!.revision > selected.document!.revision;
+        return value.document!.revision > beforeAdd.document!.revision;
       })
       .toBe(true);
     const beforeSeek = await read(page);

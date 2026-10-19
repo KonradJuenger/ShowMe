@@ -2946,6 +2946,7 @@ void app.whenReady().then(async () => {
     try {
       launchDocument = await openDocumentPath(file);
     } catch (error) {
+      console.error("Could not open startup presentation", file, error);
       dialog.showErrorBox(
         "Could not open presentation",
         error instanceof Error ? error.message : String(error),

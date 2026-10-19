@@ -106,7 +106,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-17",
+    "lastReviewed": "2026-10-19",
     "reason": "Real settings toggle gates and persists editor context; selection/template/slide navigation and reload publish current handles without document edits; strict IPC payloads, foreign windows and unprivileged subframes preserve the boundary"
   },
   {

@@ -80,9 +80,22 @@ async function launch(user: string, file: string) {
     ],
     env,
   });
-  const page = await app.firstWindow();
-  await readyEditor(page);
-  return { app, page };
+  const startupErrors: string[] = [];
+  app.process().stderr?.on("data", (data) => startupErrors.push(String(data)));
+  try {
+    const page = await app.firstWindow();
+    await readyEditor(page);
+    return { app, page };
+  } catch (error) {
+    // A native startup error dialog can block main-process evaluation. Terminate
+    // only this fixture's process instead of waiting on app.exit through IPC.
+    app.process().kill();
+    await app.close().catch(() => {});
+    throw new Error(
+      `Electron fixture failed to start: ${startupErrors.join("")}`,
+      { cause: error },
+    );
+  }
 }
 async function close(app: ElectronApplication | undefined) {
   await app?.evaluate(({ app }) => app.exit(0)).catch(() => {});
