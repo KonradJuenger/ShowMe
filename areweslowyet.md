@@ -330,3 +330,25 @@ transparent or hidden does not guarantee Chromium will paint it in advance.
 This experiment establishes that this particular capture-preparation strategy
 did not improve the supplied workload, not that every form of GPU prewarming is
 ineffective. This history-only addition is exempt from the rendering commit gate.
+
+### Backdrop/Motion root-cause investigation — 2026-10-19
+
+[Investigation and structured evidence](docs/rendering/CSS_BACKDROP_MOTION_ROOT_CAUSE.md)
+separate Chromium's backdrop-root semantics from the cost of PR #15's replay.
+No production behavior was changed. Electron 44.4.1 / Chromium 152, Radeon 880M,
+DPR 1.604; single instrumented Vite diagnostic runs, not clean production
+benchmarks or speedup claims. A synthetic 960×540 stripe-shader scene with ten
+overlapping glass cards had entrance p95 gaps of 49.9 ms with Presence, versus
+17.4 ms with its opacity held at 1. One and three cards were also measured.
+Removing replay stayed smooth but lost the intended blur. Native same-node
+filter/opacity pixel composition matched resolved-then-faded output in a limited
+card diagnostic; the current descendant-filter/parent-opacity hierarchy did not.
+
+Reanalysis of the retained clean `1a6d240` cold audience trace found a 72.227 ms
+Paint containing 71.744 ms image readback and 69.142 ms GPU-command waiting;
+Paint thread CPU was 4.243 ms. These results support a hierarchy-triggered
+reconstruction/synchronization cost, not a claim that shader GPU load is absent.
+Raw diagnostic data remains in `test-results-backdrop-root-cause`; compact
+evidence and reproduction tools accompany the report. Six existing CSS backdrop
+browser declarations passed. No product tests changed; no rendering commit or
+integration was made, so the audience-navigation gate was not invoked.
