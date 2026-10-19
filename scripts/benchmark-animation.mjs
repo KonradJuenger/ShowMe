@@ -7,23 +7,70 @@ import {
   writeFile,
   rm,
   readdir,
+  appendFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { build } from "esbuild";
 
 // Use a production build: npm run build, then npm run benchmark:animation -- file.sme.
-if (!process.argv[2]) throw new Error("Usage: npm run benchmark:animation -- presentation.sme [slide]");
+if (!process.argv[2])
+  throw new Error(
+    "Usage: npm run benchmark:animation -- presentation.sme [slide]",
+  );
 const file = path.resolve(process.argv[2]);
 const cacheEnabled = process.env.SHOWME_BENCHMARK_IMAGE_CACHE !== "off";
 const previewMode = process.env.SHOWME_BENCHMARK_PREVIEW_MODE ?? "normal";
-if (!["normal", "blank-console", "console-placeholder-images"].includes(previewMode)) throw new Error("Unknown diagnostic preview mode");
-const navigationDelayMs = Number(process.env.SHOWME_BENCHMARK_NAVIGATION_DELAY_MS ?? 0);
-if (!Number.isFinite(navigationDelayMs) || navigationDelayMs < 0) throw new Error("Invalid navigation delay");
-const output = path.resolve(`test-results-image-cache-benchmark-${previewMode}-cache-${cacheEnabled ? "on" : "off"}-delay-${navigationDelayMs}`);
+if (
+  !["normal", "blank-console", "console-placeholder-images"].includes(
+    previewMode,
+  )
+)
+  throw new Error("Unknown diagnostic preview mode");
+const navigationDelayMs = Number(
+  process.env.SHOWME_BENCHMARK_NAVIGATION_DELAY_MS ?? 0,
+);
+if (!Number.isFinite(navigationDelayMs) || navigationDelayMs < 0)
+  throw new Error("Invalid navigation delay");
+const output = path.resolve(
+  process.env.SHOWME_BENCHMARK_OUTPUT ??
+    `test-results-image-cache-benchmark-${previewMode}-cache-${cacheEnabled ? "on" : "off"}-delay-${navigationDelayMs}`,
+);
+const revision = execFileSync("git", ["rev-parse", "HEAD"], {
+  encoding: "utf8",
+}).trim();
+const dirty = Boolean(
+  execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim(),
+);
+const productionHash = createHash("sha256");
+for (const name of (await readdir("dist/assets")).sort()) {
+  if (name.endsWith(".js") || name.endsWith(".css")) {
+    productionHash.update(name);
+    productionHash.update(await readFile(path.join("dist/assets", name)));
+  }
+}
+productionHash.update(await readFile("dist-electron/main.cjs"));
+const productionBuildDigest = productionHash.digest("hex");
+const bundled = await build({
+  stdin: {
+    contents: 'export { stageDuration } from "./src/core/motionModel.ts";',
+    resolveDir: process.cwd(),
+  },
+  bundle: true,
+  write: false,
+  platform: "node",
+  format: "esm",
+});
+const { stageDuration } = await import(
+  `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`
+);
 const openedAt = Date.now();
 const sourceBytes = await readFile(file);
-const sourceDocumentDigest = createHash("sha256").update(sourceBytes).digest("hex");
+const sourceDocumentDigest = createHash("sha256")
+  .update(sourceBytes)
+  .digest("hex");
 const source = JSON.parse(sourceBytes.toString("utf8"));
 const index =
   process.argv[3] === undefined
@@ -38,11 +85,21 @@ if (!slide?.motion?.stages.length)
     "Requested slide has no animation (slide numbers start at 1)",
   );
 const stage = slide.motion.stages[0];
-const duration = Math.max(
-  ...stage.tracks.flatMap((t) => t.keyframes.map((k) => k.at)),
-  0,
+const duration = stageDuration(stage);
+const observationMs = Math.max(
+  duration,
+  Number(process.env.SHOWME_BENCHMARK_OBSERVATION_MS ?? 6000),
 );
-const ids = [...new Set(stage.tracks.map((t) => t.elementId))];
+if (!Number.isFinite(observationMs))
+  throw new Error("Invalid observation duration");
+const ids = [
+  ...new Set([
+    ...stage.tracks.map((t) => t.elementId),
+    ...(stage.blocks ?? []).flatMap((block) =>
+      block.binding?.kind === "presence" ? [block.binding.elementId] : [],
+    ),
+  ]),
+];
 const root = await mkdtemp(path.join(os.tmpdir(), "showme-benchmark-"));
 let app;
 try {
@@ -56,11 +113,11 @@ try {
     const settings = await readFile(settingsPath, "utf8")
       .then(JSON.parse)
       .catch(() => ({}));
-    if (!settings.showMeRootPath)
-      throw new Error("ShowMe root is not configured for this benchmark");
-    const library = path.join(settings.showMeRootPath, "Library");
+    const library = settings.showMeRootPath
+      ? path.join(settings.showMeRootPath, "ShowMe Library")
+      : null;
     const isolatedRoot = path.join(root, "ShowMe Root");
-    const isolatedLibrary = path.join(isolatedRoot, "Library");
+    const isolatedLibrary = path.join(isolatedRoot, "ShowMe Library");
     const assets = new Set();
     const visit = (elements) => {
       for (const element of elements) {
@@ -72,9 +129,9 @@ try {
       for (const node of slide.nodes) visit(node.children);
     for (const folder of ["images", "video", "audio", "fonts"]) {
       await mkdir(path.join(isolatedLibrary, folder), { recursive: true });
-      for (const name of await readdir(path.join(library, folder)).catch(
-        () => [],
-      )) {
+      for (const name of library
+        ? await readdir(path.join(library, folder)).catch(() => [])
+        : []) {
         if (
           folder === "fonts" ||
           [...assets].some((id) => name.includes(`__${id}.`))
@@ -94,7 +151,7 @@ try {
     );
   }
   const isolatedRoot = path.join(root, "ShowMe Root");
-  await mkdir(path.join(isolatedRoot, "Library"), { recursive: true });
+  await mkdir(path.join(isolatedRoot, "ShowMe Library"), { recursive: true });
   const copy = path.join(isolatedRoot, path.basename(file));
   await writeFile(copy, sourceBytes);
   const env = { ...process.env };
@@ -102,6 +159,7 @@ try {
   app = await electron.launch({
     args: [
       path.resolve("."),
+      "--test-mode",
       `--user-data-dir=${path.join(root, "user")}`,
       copy,
     ],
@@ -113,7 +171,8 @@ try {
     await app.evaluate(({ BrowserWindow }) => {
       const original = BrowserWindow.prototype.loadFile;
       BrowserWindow.prototype.loadFile = function (file, options) {
-        if (options?.query?.present === "console") return this.loadURL("about:blank");
+        if (options?.query?.present === "console")
+          return this.loadURL("about:blank");
         return original.call(this, file, options);
       };
     });
@@ -121,12 +180,27 @@ try {
   if (previewMode === "console-placeholder-images") {
     await app.context().addInitScript(() => {
       if (!location.search.includes("present=console")) return;
-      const pixel = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
-      const source = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
-      Object.defineProperty(HTMLImageElement.prototype, "src", { ...source, set(value) { source.set.call(this, value ? pixel : value); } });
+      const pixel =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+      const source = Object.getOwnPropertyDescriptor(
+        HTMLImageElement.prototype,
+        "src",
+      );
+      Object.defineProperty(HTMLImageElement.prototype, "src", {
+        ...source,
+        set(value) {
+          source.set.call(this, value ? pixel : value);
+        },
+      });
       const attribute = Element.prototype.setAttribute;
       Element.prototype.setAttribute = function (name, value) {
-        return attribute.call(this, name, this instanceof HTMLImageElement && name === "src" && value ? pixel : value);
+        return attribute.call(
+          this,
+          name,
+          this instanceof HTMLImageElement && name === "src" && value
+            ? pixel
+            : value,
+        );
       };
     });
   }
@@ -160,6 +234,12 @@ try {
           active: Boolean(active),
           ready: active?.dataset.imagesPrepared,
           animations,
+          effects: [...(active?.querySelectorAll("[data-effect-id]") ?? [])]
+            .filter((node) => node.querySelector(":scope > canvas"))
+            .map((node) => ({
+              id: node.dataset.effectId,
+              revision: node.dataset.effectRevision,
+            })),
         });
         window.showmeBenchmark.sampleCosts.push(performance.now() - start);
         requestAnimationFrame(sample);
@@ -257,8 +337,13 @@ try {
       audience = await windowPromise;
       await audience.waitForLoadState();
       if (mode === "new-audience-navigation") {
-        await audience.locator('[data-active-slide][data-images-prepared="true"]').waitFor({ timeout: 15000 });
-        if (navigationDelayMs) await new Promise(resolve => setTimeout(resolve, navigationDelayMs));
+        await audience
+          .locator('[data-active-slide][data-images-prepared="true"]')
+          .waitFor({ timeout: 15000 });
+        if (navigationDelayMs)
+          await new Promise((resolve) =>
+            setTimeout(resolve, navigationDelayMs),
+          );
         await editor.evaluate(
           (index) =>
             window.desktop.presentationCommand({ type: "jump", index }),
@@ -289,7 +374,7 @@ try {
       slide.id,
       { timeout: 15000 },
     );
-    await audience.waitForTimeout(duration + 500);
+    await audience.waitForTimeout(observationMs + 500);
     const data = await audience.evaluate(() => ({
       ...window.showmeBenchmark,
       measures: performance
@@ -315,6 +400,9 @@ try {
       mediaStillLoading: document.querySelectorAll(
         '[data-active-slide] [data-media-loading="true"]',
       ).length,
+      effectErrors: [
+        ...document.querySelectorAll("[data-active-slide] [data-effect-error]"),
+      ].map((node) => node.dataset.effectError),
       viewport: {
         width: innerWidth,
         height: innerHeight,
@@ -380,12 +468,42 @@ try {
     const frames = data.frames.filter(
       (f) =>
         f.at >= start.start &&
-        f.at <= start.start + duration - start.detail.time,
+        f.at <= start.start + observationMs - start.detail.time,
     );
     const gaps = frames
       .slice(1)
       .map((f, i) => f.at - frames[i].at)
       .sort((a, b) => a - b);
+    const intervals = (samples) => {
+      const gaps = samples
+        .slice(1)
+        .map((f, i) => f.at - samples[i].at)
+        .sort((a, b) => a - b);
+      return {
+        frames: samples.length,
+        p95GapMs: gaps[Math.floor(gaps.length * 0.95)] ?? null,
+        maximumGapMs: gaps.at(-1) ?? null,
+        gapsOver33ms: gaps.filter((g) => g > 33.34).length,
+      };
+    };
+    const shaderPublications = [
+      ...new Set(
+        frames.flatMap(
+          (frame) => frame.effects?.map((effect) => effect.id) ?? [],
+        ),
+      ),
+    ].map((id) => {
+      let previous;
+      const changes = frames.filter((frame) => {
+        const revision = frame.effects?.find(
+          (effect) => effect.id === id,
+        )?.revision;
+        if (revision === previous) return false;
+        previous = revision;
+        return true;
+      });
+      return { id, ...intervals(changes) };
+    });
     const cacheDiagnostics = await editor.evaluate(() =>
       window.desktop.presentationImageDiagnostics(),
     );
@@ -402,7 +520,19 @@ try {
       cacheEnabled,
       navigationDelayMs,
       sourceDocumentDigest,
-      processRoles: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => ({ url: window.webContents.getURL(), pid: window.webContents.getOSProcessId() }))),
+      productionBuildDigest,
+      revision,
+      dirty,
+      observationMs,
+      entrance: intervals(frames.filter((f) => f.at <= start.start + duration)),
+      steady: intervals(frames.filter((f) => f.at > start.start + duration)),
+      shaderPublications,
+      processRoles: await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().map((window) => ({
+          url: window.webContents.getURL(),
+          pid: window.webContents.getOSProcessId(),
+        })),
+      ),
       cacheDiagnostics,
       slideId: slide.id,
       duration,
@@ -411,6 +541,7 @@ try {
       error: data.error,
       missingAssets: data.missingAssets,
       mediaStillLoading: data.mediaStillLoading,
+      effectErrors: data.effectErrors,
       frameCountDuringPlayback: frames.length,
       maximumGapMs: gaps.at(-1) ?? null,
       p95GapMs: gaps[Math.floor(gaps.length * 0.95)] ?? null,
@@ -439,6 +570,7 @@ try {
       data.error ||
       data.missingAssets ||
       data.mediaStillLoading ||
+      data.effectErrors.length ||
       data.images.some((i) => !i.complete || !i.width)
     )
       throw new Error(
@@ -452,6 +584,29 @@ try {
   await writeFile(
     path.join(output, "summary.json"),
     JSON.stringify(summaries, null, 2),
+  );
+  const history = path.resolve(".benchmark-data/animation");
+  await mkdir(history, { recursive: true });
+  await appendFile(
+    path.join(history, "history.jsonl"),
+    JSON.stringify({
+      recordedAt: new Date().toISOString(),
+      revision,
+      dirty,
+      sourceDocumentDigest,
+      productionBuildDigest,
+      environment: {
+        platform: process.platform,
+        architecture: process.arch,
+        cpu: os.cpus()[0]?.model,
+        electron: await app.evaluate(() => process.versions.electron),
+      },
+      sourceFile: path.basename(file),
+      slide: index + 1,
+      runs: summaries.map(
+        ({ measures, mainThreadEvents, longTasks, ...summary }) => summary,
+      ),
+    }) + "\n",
   );
 } finally {
   await app?.close();

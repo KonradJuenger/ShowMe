@@ -745,7 +745,7 @@ const ElementView = memo(function ElementView({
       height={frame.height}
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
       rasterContent={
-        ["content", "backdrop"].includes(
+        resources[instance.resourceId].kind === "css" || ["content", "backdrop"].includes(
           resources[instance.resourceId].input ?? "none",
         )
           ? rasterContent

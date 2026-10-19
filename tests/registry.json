@@ -966,5 +966,27 @@
     "created": "2026-10-18",
     "lastReviewed": "2026-10-18",
     "reason": "Actual storage/recovery integration holds MCP durability through Save, Dont Save and direct close, rejects new admissions, drains accepted publication, prevents retained runtime writes, and reopens admission on cancel or save failure"
+  },
+  {
+    "id": "effects-css-backdrop-opacity",
+    "path": "tests/feature/effects/css-backdrop-opacity.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-19",
+    "lastReviewed": "2026-10-19",
+    "reason": "Pixel composition resolves CSS glass against animated shaders before element and group fades, preserving clipping, overlapping children, movement, cached current styles and sharp native text reused by overlapping glass consumers; the current document remains unchanged."
+  },
+  {
+    "id": "persistence-native-test-mode",
+    "path": "tests/feature/persistence/test-mode.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-19",
+    "lastReviewed": "2026-10-19",
+    "reason": "Explicit native test launches tolerate absent and unavailable configured roots, open external .sme fixtures, discard dirty close without prompts or source writes, preserve saved root settings, and retain root enforcement for normal launches."
   }
 ]

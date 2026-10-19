@@ -1,5 +1,6 @@
 import { nodeTransform, elementWorldTransform } from "./elementDomTransform";
 import { resizeRasterCanvas } from "./canvasAllocation";
+import { cssBackdropOutputs } from "./cssBackdropOutput";
 import type { Element, MediaContent } from "../core/element";
 import type { Deck, Slide } from "../core/document";
 import { effectPlacement, type EffectResources } from "../core/effects";
@@ -21,6 +22,10 @@ export type RasterContext = {
   typographySource?: () => TextStyleSource;
   /** Ancestors whose paint stops at the backdrop target. */
   partial?: ReadonlySet<string>;
+  /** Group alpha is applied after a CSS backdrop has been resolved. */
+  unfaded?: ReadonlySet<string>;
+  /** A CSS backdrop can publish directly into its visible replay surface. */
+  outputCanvas?: HTMLCanvasElement;
 };
 
 function owned<T extends HTMLElement>(node: HTMLElement, selector: string) {
@@ -49,6 +54,16 @@ function sourceEffect(
       ? effects.findIndex((e) => e.id === context.beforeEffect)
       : -1;
   const earlier = stop < 0 ? effects : effects.slice(0, stop);
+  if (context.partial?.has(element.id)) return null;
+  for (const effect of earlier.slice().reverse()) {
+    const surface = owned(node, "[data-effect-id]").find(
+      (n) => n.dataset.effectId === effect.id,
+    );
+    if (surface && cssBackdropOutputs.has(surface)) {
+      context.flush(surface);
+      return surface;
+    }
+  }
   for (const effect of effects) {
     const surface = owned(node, "[data-effect-id]").find(
       (n) => n.dataset.effectId === effect.id,
@@ -60,7 +75,6 @@ function sourceEffect(
         "Content rasterization cannot include CSS or text-function effects. Use content shaders for this compositing group.",
       );
   }
-  if (context.partial?.has(element.id)) return null;
   for (const prior of earlier.slice().reverse()) {
     if (context.resources[prior.resourceId]?.input !== "content") continue;
     const surface = owned(node, "[data-effect-id]").find(
@@ -279,9 +293,27 @@ function render(
   if (!target) transform(ctx, node);
   // The target's own transform/opacity is applied once by the ordinary outer DOM
   // owner. Child opacity requires a compositing group, not per-primitive alpha.
-  const opacity = target ? 1 : Number(getComputedStyle(node).opacity);
+  const opacity =
+    target || context.unfaded?.has(element.id)
+      ? 1
+      : Number(getComputedStyle(node).opacity);
   const previous = sourceEffect(element, node, context);
   if (previous && !previous.dataset.effectError) {
+    const material = cssBackdropOutputs.get(previous);
+    if (material) {
+      path(ctx, element);
+      ctx.clip();
+      ctx.globalAlpha *= opacity;
+      ctx.drawImage(
+        material.canvas,
+        -material.padding,
+        -material.padding,
+        material.width,
+        material.height,
+      );
+      ctx.restore();
+      return;
+    }
     const output = previous.querySelector("canvas");
     if (output) {
       ctx.globalAlpha *= opacity;
@@ -378,7 +410,7 @@ function createRasterSource(
   ) => unknown,
   paintSource: (canvas: HTMLCanvasElement) => void,
 ) {
-  const canvas = document.createElement("canvas");
+  const canvas = context.outputCanvas ?? document.createElement("canvas");
   const videos = new Map<HTMLVideoElement, { id: number; revision: number }>();
   let signature = "",
     revision = 0,
@@ -574,6 +606,7 @@ export function createBackdropRasterSource(
   scene: () => { slide: Slide; deck: Deck },
   context: RasterContext,
   invalidate: () => void,
+  material?: { padding(): number; includeTargetFill: boolean },
 ) {
   let prefix = backdropPrefix(scene().slide, scene().deck, element.id);
   const painting = {
@@ -600,6 +633,7 @@ export function createBackdropRasterSource(
         deck.width,
         deck.height,
         target().toString(),
+        material?.padding(),
         ...prefix.elements.map((entry) => scan(entry, false)),
       ];
     },
@@ -613,9 +647,11 @@ export function createBackdropRasterSource(
       ctx.save();
       try {
         ctx.scale(
-          canvas.width / element.frame.width,
-          canvas.height / element.frame.height,
+          canvas.width / (element.frame.width + 2 * (material?.padding() ?? 0)),
+          canvas.height /
+            (element.frame.height + 2 * (material?.padding() ?? 0)),
         );
+        ctx.translate(material?.padding() ?? 0, material?.padding() ?? 0);
         const world = target().inverse();
         ctx.transform(world.a, world.b, world.c, world.d, world.e, world.f);
         ctx.beginPath();
@@ -625,6 +661,20 @@ export function createBackdropRasterSource(
         ctx.fillRect(0, 0, deck.width, deck.height);
         for (const entry of prefix.elements)
           render(ctx, entry, painting, false);
+        if (material?.includeTargetFill && element.appearance.fill) {
+          const matrix = target();
+          ctx.transform(
+            matrix.a,
+            matrix.b,
+            matrix.c,
+            matrix.d,
+            matrix.e,
+            matrix.f,
+          );
+          path(ctx, element);
+          ctx.fillStyle = element.appearance.fill;
+          ctx.fill();
+        }
       } finally {
         ctx.restore();
       }

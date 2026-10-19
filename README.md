@@ -168,6 +168,23 @@ details and pending evaluation.
 [tests/README.md](tests/README.md) describes the test groups and how to run them.
 [Are we slow yet?](areweslowyet.md) tracks audience rendering benchmarks by commit.
 
+For fixture testing, build once with `npm run build`, then launch
+`npx electron . --test-mode --user-data-dir=.scratch/test-user "C:\path\fixture.sme"`.
+The explicit `--test-mode` switch allows native decks outside the configured root.
+If that root is missing or unavailable, ShowMe uses `test-root` inside this launch's
+user-data directory without a setup/error dialog or changing the saved root setting.
+Unsaved-document close prompts are suppressed: test mode discards in-memory changes
+on close and opens saved versions without recovery prompts. It never auto-saves
+over fixture files; existing recovery entries are left alone when opening.
+Normal launches retain root enforcement. Media still resolves through the selected
+Library; test mode does not invent missing assets or change document formats.
+
+`npm run benchmark:animation -- "C:\path\fixture.sme" 1` runs the native audience
+benchmark in test mode. It measures the first animation step (including Presence)
+and at least six seconds of shader motion, with separate entrance/steady frame
+intervals and shader publication intervals. Set `SHOWME_BENCHMARK_OUTPUT` to retain
+separate runs and `SHOWME_BENCHMARK_OBSERVATION_MS` for a longer observation.
+
 ## License
 
 [AGPL-3.0-or-later](LICENSE).

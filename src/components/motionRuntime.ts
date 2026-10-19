@@ -176,7 +176,7 @@ export function createMotionRuntime(
       willChange: node.style.willChange,
     };
     if (compiled.some((track) => track.elementId === id))
-      node.style.willChange = "transform, opacity";
+      node.style.willChange = "transform";
     const detach = styleEffect(node, values);
     styleEffect.flush(node);
     bindings.set(id, { node, values, original, detach });

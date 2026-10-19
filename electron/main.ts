@@ -161,6 +161,9 @@ let effectLibraryQueue = Promise.resolve();
 let lifecycleMode: LibraryLifecycleMode | null = null;
 let lifecycle: LibraryLifecycle | null = null;
 let showMeRoot = "";
+// Explicit native test launches may inspect fixture decks anywhere on disk.
+// Never persist this relaxation as a user setting or enable it for normal runs.
+const testMode = app.commandLine.hasSwitch("test-mode");
 function createLibraryLifecycle(root = showMeRoot) {
   const storage = requireStorage();
   const libraryRoot = showMeLibraryPath(root);
@@ -215,6 +218,7 @@ async function getLibraryLifecycle() {
   };
 }
 async function refreshLifecycleSettings() {
+  if (testMode) return;
   const settings = await readSettings(app.getPath("userData"), {
     requireExisting: true,
   });
@@ -623,6 +627,7 @@ function refreshDocumentWindow(documentId: string) {
 }
 
 async function chooseRecoveryAction(file: string) {
+  if (testMode) return "saved" as const;
   const candidate = await requireStorage().recoveryCandidate(file);
   if (!candidate) return "saved" as const;
   const options = {
@@ -644,6 +649,7 @@ async function chooseRecoveryAction(file: string) {
 }
 
 function assertPresentationInsideShowMeRoot(file: string) {
+  if (testMode) return;
   const resolved = path.resolve(file);
   if (
     path.extname(resolved).toLowerCase() === SHOWME_DOCUMENT_EXTENSION &&
@@ -678,6 +684,7 @@ async function openDocumentPath(file: string, beforeActivate?: () => Promise<voi
 }
 
 async function recoverUntitledAtLaunch() {
+  if (testMode) return null;
   const candidates = await requireStorage().listUntitledRecoveries();
   for (const candidate of candidates) {
     const result = await dialog.showMessageBox({
@@ -1760,8 +1767,9 @@ const agentWorkspace = new AgentWorkspaceService({
   eligibility: (id) =>
     collaboration.isGuest(id) ? "GUEST_EDITING_UNSUPPORTED" : null,
   perform: async (request, admit) => {
-    const authorized = async (file: string) => {
+    const authorized = async (file: string, opening = false) => {
       const resolved = await fs.realpath(path.resolve(file));
+      if (testMode && opening) return resolved;
       const root = await fs.realpath(showMeRoot);
       if (!isInsideRoot(root, resolved))
         throw new Error("Select a file inside the user-selected ShowMe root.");
@@ -1785,7 +1793,7 @@ const agentWorkspace = new AgentWorkspaceService({
     }
     if (request.action === "open") {
       const file = request.path
-        ? await authorized(request.path)
+        ? await authorized(request.path, true)
         : await chooseOpenPath();
       if (!file) return { cancelled: true };
       admit();
@@ -2384,7 +2392,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     const closed = await documentClosing.run(id, async () => {
     const summary = requireStorage().summary(id);
     let response = summary.dirty ? 2 : 0;
-    if (summary.dirty && !process.env.SHOWME_DOCUMENT_DIR) {
+    if (summary.dirty && !testMode && !process.env.SHOWME_DOCUMENT_DIR) {
       const result = await dialog.showMessageBox(editor!, {
         type: "question",
         buttons: ["Save", "Don't Save", "Cancel"],
@@ -2773,6 +2781,7 @@ function sendFileCommand(command: FileCommand) {
 
 function openInNewEditorWindow(file: string) {
   const args = [
+    ...(testMode ? ["--test-mode"] : []),
     ...(process.argv.includes("--no-sandbox") ? ["--no-sandbox"] : []),
     `--user-data-dir=${app.getPath("userData")}`,
     ...(app.isPackaged ? [] : [path.resolve(".")]),
@@ -2798,6 +2807,19 @@ async function openFromMenu() {
 async function requireConfiguredShowMeRoot(
   settings: Awaited<ReturnType<typeof readSettings>>,
 ): Promise<string | null> {
+  if (testMode) {
+    if (settings.showMeRootPath) {
+      try {
+        return await validateShowMeRoot(settings.showMeRootPath);
+      } catch {
+        // Missing fixture roots must not open a blocking native dialog.
+      }
+    }
+    const root = path.join(app.getPath("userData"), "test-root");
+    await fs.mkdir(showMeLibraryPath(root), { recursive: true });
+    lifecycleMode = "keep-all";
+    return validateShowMeRoot(root);
+  }
   const scriptedRoot =
     process.env.SHOWME_TESTING === "1"
       ? process.env.SHOWME_TEST_ROOT_SELECTION
