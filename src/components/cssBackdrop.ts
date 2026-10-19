@@ -34,6 +34,7 @@ export function createCssBackdrop(
   let foreground: ReturnType<typeof createDomRasterSource> | undefined;
   let foregroundOpacity = "";
   let composite = false;
+  const filtered = document.createElement("canvas");
   let declarationCache:
     | {
         slide: Slide;
@@ -496,6 +497,35 @@ export function createCssBackdrop(
           ctx.restore();
         };
         drawInput();
+        // Only the low-pass backdrop is reduced. Native foreground text/borders
+        // remain at output density, and group alpha is still applied once.
+        const sigma = /^blur\(([\d.]+)px\)/.exec(filter);
+        const filterDensity =
+          sigma && Number(sigma[1]) >= 8
+            ? Math.min(density, Math.max(0.25, 4 / Number(sigma[1])))
+            : density;
+        const filteredContext = resizeRasterCanvas(
+          filtered,
+          Math.max(1, Math.ceil(width * filterDensity)),
+          Math.max(1, Math.ceil(height * filterDensity)),
+        );
+        filteredContext.resetTransform();
+        filteredContext.clearRect(0, 0, filtered.width, filtered.height);
+        filteredContext.scale(filterDensity, filterDensity);
+        filteredContext.filter = filter.replace(
+          /blur\(([\d.]+)px\)/g,
+          (_, radius: string) => `blur(${Number(radius) * filterDensity}px)`,
+        );
+        filteredContext.transform(
+          matrix.a,
+          matrix.b,
+          matrix.c,
+          matrix.d,
+          matrix.e,
+          matrix.f,
+        );
+        filteredContext.drawImage(input, 0, 0, width, height);
+        filteredContext.filter = "none";
         ctx.save();
         ctx.beginPath();
         ctx.roundRect(
@@ -506,11 +536,7 @@ export function createCssBackdrop(
           parseFloat(style.borderRadius),
         );
         ctx.clip();
-        ctx.filter = filter.replace(
-          /blur\(([\d.]+)px\)/g,
-          (_, radius: string) => `blur(${Number(radius) * density}px)`,
-        );
-        drawInput();
+        ctx.drawImage(filtered, 0, 0, width, height);
         ctx.restore();
         ctx.drawImage(
           foreground.canvas,
@@ -690,6 +716,7 @@ export function createCssBackdrop(
       primitive?.dispose();
       replay.remove();
       replay.width = replay.height = 1;
+      filtered.width = filtered.height = 1;
     },
   };
 }
