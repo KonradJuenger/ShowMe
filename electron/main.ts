@@ -1,4 +1,14 @@
-import { effectDefinitionSchema } from "../src/core/effects";
+import { AGENT_CONTRACT_VERSION, AGENT_RUNTIME_CAPACITY } from "../src/core/agentProtocol";
+import { importAgentMedia } from "./agentMediaImport";
+import {
+  effectDefinitionSchema,
+  type EffectDefinition,
+} from "../src/core/effects";
+import type { EffectValidationResult } from "../src/core/effectValidation";
+import { SHOWME_MCP_SERVER_VERSION } from "../src/core/agentRead";
+import { AgentMutationError } from "../src/core/agentMutation";
+import {AgentWorkspaceService} from "./agentWorkspace";
+import { AgentDeliveryService } from "./agentDelivery";
 import { NativeLibraryBrowser } from "./libraryBrowser";
 import { libraryBrowserRequestSchema } from "../src/core/libraryBrowser";
 import { importManagedFile, mediaFolder } from "./mediaLibrary";
@@ -41,6 +51,7 @@ import {
   screen,
   shell,
   type WebContents,
+  type NativeImage,
 } from "electron";
 
 export function mayAccessLocalFonts(contents: WebContents | null) {
@@ -50,7 +61,7 @@ export function mayAccessLocalFonts(contents: WebContents | null) {
 }
 import { mediaResponse } from "./mediaResponse";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import { exportPowerPoint } from "./export/pptx";
 import {
   pdfSlides,
@@ -103,6 +114,15 @@ import {
 } from "./libraryLifecycle";
 import type { LibraryLifecycleMode } from "../src/core/libraryLifecycle";
 import { registerIpcRouter } from "./ipcRouter";
+import { AgentContextService } from "./agentContext";
+import { AgentPreviewService } from "./agentPreview";
+import { AgentInspectionService } from "./agentInspection";
+import { AgentAuthoringService } from "./agentAuthoring";
+import { AgentBridge } from "./agentBridge";
+import { AgentEditingService } from "./agentEditing";
+import { AgentTextMeasurementService } from "./agentTextMeasurement";
+import { DocumentClosing } from "./documentClosing";
+import type { AgentPreviewWarning, SlidePreviewCapture } from "../src/core/agentPreview";
 import { PresentationRuntime } from "./presentationRuntime";
 import {
   loadWindow as load,
@@ -244,6 +264,7 @@ function registerDocumentNotifications(documentId: string) {
     documentId,
     (accepted) => {
       try {
+        if (accepted.actorId === "mcp-local") notifyAgentHistory();
         const consoleWindow = presentation?.presenterConsoleWindow;
         if (consoleWindow && !consoleWindow.isDestroyed())
           consoleWindow.webContents.send("document-accepted", {
@@ -280,8 +301,55 @@ const collaboration = new CollaborationService(
   documentRuntime,
   app.getVersion(),
 );
+function activeAgentDocumentId() {
+  const guest = collaboration.status().clientDocumentId;
+  return guest ?? (activeDocumentId && storage?.hasDocument(activeDocumentId) ? activeDocumentId : null);
+}
+let mcpAccessVersion = 0;
+let mcpEditingEnabled = false;
+let mcpWriteAccessVersion = 0;
+const agentPreview = new AgentPreviewService({
+  access: () => agentContext.isEnabled ? mcpAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  projection: async (id, slideId) => {
+    if (collaboration.isGuest(id) && collaboration.status().clientStatus !== "connected")
+      throw new Error("Guest unavailable");
+    return operations.renderProjection(id, slideId);
+  },
+  capture: (projection, width, height, signal, sample, previous) => captureSlidePreview(projection, width, height, true, signal, sample, previous),
+});
+const agentContext = new AgentContextService({
+  activeDocumentId: activeAgentDocumentId,
+  projection: async (id, pageId) => {
+    if (collaboration.isGuest(id)) {
+      if (collaboration.status().clientStatus !== "connected") return Promise.reject(new Error("Guest unavailable"));
+      return collaboration.projection(id, pageId);
+    }
+    return documentRuntime(id).projection(id, pageId);
+  },
+  presentation: () => {
+    const state = presentation?.state;
+    return state ? {
+      documentId: state.deckId,
+      slideId: state.index === null ? null : state.slideIds[state.index] ?? null,
+      slideIndex: state.index,
+      black: !!state.black,
+      stageIndex: state.motion?.stageIndex ?? null,
+      stageTimeMs: state.motion?.time ?? null,
+      running: state.motion?.running ?? false,
+      startedAtMs: state.motion?.startedAt ?? null,
+      restartToken: state.restartToken ?? null,
+    } : null;
+  },
+});
+let agentGuestDocumentId: string | null = null;
 collaboration.subscribe(
   () => {
+    const next = collaboration.status().clientDocumentId;
+    if (next !== agentGuestDocumentId) {
+      agentGuestDocumentId = next;
+      agentContext.invalidate();
+    }
     storage?.setExternalOpenDocument(collaboration.clientDocument());
     if (editor && !editor.isDestroyed())
       editor.webContents.send("collaboration-status", collaboration.status());
@@ -540,6 +608,7 @@ function updateDocumentWindow(document: DocumentSummary | null) {
 }
 
 function activateDocument(document: DocumentSummary) {
+  agentContext.invalidate();
   prepareImages(document.id);
   activeDocumentId = document.id;
   requireStorage().setImportDocument(document.id);
@@ -585,7 +654,7 @@ function assertPresentationInsideShowMeRoot(file: string) {
     );
 }
 
-async function openDocumentPath(file: string) {
+async function openDocumentPath(file: string, beforeActivate?: () => Promise<void>) {
   const resolved = path.resolve(file);
   const extension = path.extname(resolved).toLowerCase();
   if (
@@ -603,6 +672,7 @@ async function openDocumentPath(file: string) {
         );
   registerDocumentNotifications(document.id);
   await rememberDocument(document);
+  await beforeActivate?.();
   activateDocument(document);
   return document;
 }
@@ -850,7 +920,7 @@ async function explainStorageAndFonts(id: string, portable: boolean) {
     });
 }
 
-async function saveDocument(documentId: string, beforePersist?: () => void) {
+async function saveDocument(documentId: string, beforePersist?: (destination: string) => void) {
   const id = idSchema.parse(documentId);
   if (collaboration.isGuest(id))
     throw new Error("Collaboration guests cannot save the host presentation");
@@ -863,16 +933,18 @@ async function saveDocument(documentId: string, beforePersist?: () => void) {
     id,
     destination?.endsWith(".smp") ?? requireStorage().isPackaged(id).packaged,
   );
-  beforePersist?.();
   const summary = destination?.endsWith(".smp")
-    ? await requireStorage().savePackageAs(id, destination, false)
-    : await requireStorage().saveDocument(id, destination ?? undefined);
+    ? await requireStorage().savePackageAs(id, destination, false, undefined, beforePersist)
+    : await requireStorage().saveDocument(id, destination ?? undefined, beforePersist);
   await rememberDocument(summary);
-  activateDocument(summary);
+  if (activeDocumentId === id) {
+    prepareImages(id);
+    refreshDocumentWindow(id);
+  } else activateDocument(summary);
   return summary;
 }
 
-async function saveDocumentAs(documentId: string) {
+async function saveDocumentAs(documentId: string, beforePersist?: (destination: string) => void) {
   const id = idSchema.parse(documentId);
   if (collaboration.isGuest(id))
     throw new Error("Collaboration guests cannot save the host presentation");
@@ -892,14 +964,17 @@ async function saveDocumentAs(documentId: string) {
       : null;
   if (packaged && packageDestination && locked === null) return null;
   const summary = packageDestination
-    ? await currentStorage.savePackageAs(id, file, locked ?? false)
-    : await currentStorage.saveDocument(id, file);
+    ? await currentStorage.savePackageAs(id, file, locked ?? false, undefined, beforePersist)
+    : await currentStorage.saveDocument(id, file, beforePersist);
   await rememberDocument(summary);
-  activateDocument(summary);
+  if (activeDocumentId === id) {
+    prepareImages(id);
+    refreshDocumentWindow(id);
+  } else activateDocument(summary);
   return summary;
 }
 
-async function packageDocument(documentId: string) {
+async function packageDocument(documentId: string, beforePersist?: (destination: string) => void, options?: import("../src/core/agentDelivery").AgentDeliveryRequest["packageOptions"]) {
   const id = idSchema.parse(documentId);
   if (collaboration.isGuest(id))
     throw new Error(
@@ -908,13 +983,13 @@ async function packageDocument(documentId: string) {
   const summary = requireStorage().summary(id);
   const file = await choosePackagePath(summary.name);
   if (!file) return null;
-  const locked = await choosePackageMediaLock(
+  const locked = options?.mediaLocked ?? await choosePackageMediaLock(
     "Export",
     requireStorage().isPackaged(id).locked,
   );
   if (locked === null) return null;
-  await explainStorageAndFonts(id, true);
-  const notes = await dialog.showMessageBox(editor!, {
+  if (!options) await explainStorageAndFonts(id, true);
+  const notes = options ? { response: 0, checkboxChecked: options.speakerNotes === "remove" } : await dialog.showMessageBox(editor!, {
     type: "question",
     title: "Share packaged presentation",
     message: "Speaker notes",
@@ -932,6 +1007,7 @@ async function packageDocument(documentId: string) {
     file,
     locked,
     notes.checkboxChecked,
+    beforePersist,
   );
 }
 
@@ -1123,9 +1199,15 @@ async function performExportPresentation(
 }
 
 let previewWindow: BrowserWindow | null = null;
+let previewWindowSize = "";
 let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
+let agentRuntimeWindow: BrowserWindow | null = null;
+let agentRuntimeStatus: "uninitialized" | "initializing" | "ready" | "failed" = "uninitialized";
+let agentRuntimeQueue: Promise<void> = Promise.resolve();
+let pendingAgentRuntime = 0;
+const AGENT_RUNTIME_MAX_ADMITTED = AGENT_RUNTIME_CAPACITY;
 let effectPreviewWindow: BrowserWindow | null = null;
 let previewsTornDown = false;
 let effectPreviewQueue: Promise<void> = Promise.resolve();
@@ -1141,8 +1223,11 @@ function previewOwnerAlive(owner: BrowserWindow | null) {
 
 function tearDownPreviewWindows() {
   previewsTornDown = true;
-  const windows = [previewWindow, effectPreviewWindow];
-  previewWindow = effectPreviewWindow = null;
+  const windows = [previewWindow, agentRuntimeWindow, effectPreviewWindow];
+  previewWindow = null;
+  agentRuntimeWindow = null;
+  agentRuntimeStatus = "uninitialized";
+  effectPreviewWindow = null;
   previewDocumentId = null;
   for (const window of windows) if (window && !window.isDestroyed()) window.destroy();
 }
@@ -1200,8 +1285,17 @@ function activeNativeLibraryBrowser() {
   return nativeLibraryBrowser;
 }
 
-async function compositionWindow(width: number, height: number) {
+async function compositionWindow(width: number, height: number, owner: BrowserWindow | null) {
+  if (!previewOwnerAlive(owner)) return null;
+  const size = `${width}x${height}`;
+  if (previewWindow && !previewWindow.isDestroyed() && previewWindowSize !== size) {
+    // Resizing a hidden Windows compositor can retain the old cleared backing
+    // surface. Create the next bounded surface at its final size instead.
+    previewWindow.destroy();
+    previewWindow = null;
+  }
   if (!previewWindow || previewWindow.isDestroyed()) {
+    previewWindowSize = size;
     previewWindow = new BrowserWindow({
       ...windowOptions(),
       show: false,
@@ -1214,6 +1308,7 @@ async function compositionWindow(width: number, height: number) {
       webPreferences: {
         ...windowOptions().webPreferences,
         backgroundThrottling: false,
+        offscreen: true,
       },
     });
     secure(previewWindow);
@@ -1225,8 +1320,165 @@ async function compositionWindow(width: number, height: number) {
         query: { slidePreview: "1" },
       });
   }
-  previewWindow.setContentSize(width, height);
-  return previewWindow;
+  const window = previewWindow;
+  if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
+  return window;
+}
+
+async function agentRuntimeSurface(owner: BrowserWindow | null) {
+  if (!previewOwnerAlive(owner)) return null;
+  if (!agentRuntimeWindow || agentRuntimeWindow.isDestroyed()) {
+    agentRuntimeStatus = "initializing";
+    agentRuntimeWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width: 320,
+      height: 180,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+        offscreen: true,
+      },
+    });
+    secure(agentRuntimeWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await agentRuntimeWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await agentRuntimeWindow.loadFile(
+        path.join(__dirname, "../dist/index.html"),
+        { query: { slidePreview: "1" } },
+      );
+    await agentRuntimeWindow.webContents.executeJavaScript("window.installAgentRuntime()");
+    agentRuntimeStatus = "ready";
+  }
+  const window = agentRuntimeWindow;
+  if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
+  return window;
+}
+
+function resetAgentRuntimeWindow(window?: BrowserWindow | null) {
+  const target = window ?? agentRuntimeWindow;
+  if (target && !target.isDestroyed()) target.destroy();
+  if (!window || agentRuntimeWindow === window) agentRuntimeWindow = null;
+  agentRuntimeStatus = "uninitialized";
+}
+
+function runAgentRuntime<T>(
+  execute: (window: BrowserWindow) => Promise<T>,
+  code = "MEASUREMENT_UNAVAILABLE",
+): Promise<T | null> {
+  const owner = editor;
+  if (
+    !agentContext.isEnabled ||
+    !previewOwnerAlive(owner) ||
+    pendingAgentRuntime >= AGENT_RUNTIME_MAX_ADMITTED
+  )
+    return Promise.reject(new AgentMutationError(code,
+      "Production runtime request was not admitted.", undefined, undefined,
+      { reason: pendingAgentRuntime >= AGENT_RUNTIME_MAX_ADMITTED ? "queue_capacity" : "access_unavailable", retry: "Read context; retry after pending runtime work finishes." }));
+  pendingAgentRuntime++;
+  const task = agentRuntimeQueue.then(async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!agentContext.isEnabled || !previewOwnerAlive(owner)) return null;
+      let window: BrowserWindow | null = null;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      let timedOut = false;
+      let initialized = false;
+      try {
+        timeout = setTimeout(() => { timedOut = true; resetAgentRuntimeWindow(window); }, 10000);
+        window = await agentRuntimeSurface(owner);
+        if (!window) throw new Error("Agent runtime initialization unavailable");
+        initialized = true;
+        const result = await execute(window);
+        if (
+          !agentContext.isEnabled ||
+          !previewOwnerAlive(owner) ||
+          window.isDestroyed() ||
+          agentRuntimeWindow !== window
+        )
+          throw new Error("Agent runtime unavailable");
+        return result;
+      } catch {
+        resetAgentRuntimeWindow(window);
+        if (attempt === 1) {
+          agentRuntimeStatus = "failed";
+          throw new AgentMutationError(code, "Production runtime failed; the next request will create a fresh surface.", undefined, undefined,
+            { reason: timedOut ? "timeout" : initialized ? "renderer_loss" : "initialization_failure", retry: "Read context and retry. No staged mutation was committed." });
+        }
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    }
+    return null;
+  });
+  agentRuntimeQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  void task
+    .finally(() => {
+      pendingAgentRuntime--;
+    })
+    .catch(() => {});
+  return task;
+}
+
+/** Accept only a compositor frame carrying this request's cropped-out acknowledgement. */
+function captureComposedFrame(window: BrowserWindow, width: number, height: number, token: string): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const contents = window.webContents;
+    let finished = false;
+    let checking = false;
+    let pendingFrame: NativeImage | null = null;
+    const finish = (image: Buffer | null) => {
+      if (finished) return;
+      finished = true;
+      pendingFrame = null;
+      clearTimeout(timer);
+      contents.removeListener("paint", painted);
+      contents.removeListener("destroyed", unavailable);
+      contents.removeListener("render-process-gone", unavailable);
+      resolve(image);
+    };
+    const unavailable = () => finish(null);
+    const timer = setTimeout(unavailable, 5000);
+    const painted = (_event: unknown, _rect: unknown, image: NativeImage) => {
+      if (finished) return;
+      if (checking) {
+        pendingFrame = image;
+        return;
+      }
+      checking = true;
+      void (async () => {
+        // Offscreen output uses one pixel per CSS pixel. Crop native padding,
+        // rather than scaling padding and acknowledgement pixels into the slide.
+        const {data, info} = await sharp(image.toPNG()).ensureAlpha().raw().toBuffer({resolveWithObject: true});
+        if (info.width < width || info.height < height + 48) return;
+        const value = parseInt(token, 16);
+        const matches = Array.from({length: 12}, (_, index) => index).every((index) => {
+          const offset = ((height + 2 + index * 4) * info.width + Math.floor(width / 2)) * info.channels;
+          return [0, 1, 2].every((channel) => Number(data[offset + channel] >= 128) === Math.floor(value / 2 ** (35 - index * 3 - channel)) % 2);
+        });
+        if (matches) finish(await sharp(data, {raw: info}).extract({left: 0, top: 0, width, height}).png().toBuffer());
+      })().catch(unavailable).finally(() => {
+        checking = false;
+        const pending = pendingFrame;
+        pendingFrame = null;
+        if (pending && !finished) painted(undefined, undefined, pending);
+      });
+    };
+    contents.once("destroyed", unavailable);
+    contents.once("render-process-gone", unavailable);
+    try {
+      contents.on("paint", painted);
+      contents.invalidate();
+    } catch { finish(null); }
+  });
 }
 
 async function effectCompositionWindow(width: number, height: number, owner: BrowserWindow | null) {
@@ -1283,7 +1535,367 @@ async function waitForSlidePreviewIdle() {
   }
 }
 
+function captureSlidePreview(
+  projection: import("../src/core/documentProjection").DocumentProjection,
+  width: unknown,
+  height: unknown,
+  diagnostics = false,
+  signal?: AbortSignal,
+  sample?: import("../src/core/agentPreviewSample").AgentPreviewSample,
+  previous?: import("../src/core/documentProjection").DocumentProjection,
+): Promise<SlidePreviewCapture | null> {
+  const owner = editor;
+  if (signal?.aborted || !previewOwnerAlive(owner)) return Promise.resolve(null);
+  // Capture an isolated canonical surface, never editor UI overlays.
+  const requestedWidth = z.number().int().positive().max(2048).parse(width);
+  const requestedHeight = z.number().int().positive().max(2048).parse(height);
+  const documentId = idSchema.parse(projection.documentId),
+    slideId = idSchema.parse(projection.slide.id);
+  if (pendingPreviews >= 8) return Promise.resolve(null);
+  pendingPreviews++;
+  const task = previewQueue.then(async () => {
+    if (signal?.aborted || !previewOwnerAlive(owner)) return null;
+    const current = await operations.renderProjection(documentId, slideId);
+    if (
+      signal?.aborted || !previewOwnerAlive(owner) ||
+      current.epoch !== projection.epoch ||
+      current.revision !== projection.revision
+    )
+      return null;
+    previewDocumentId = documentId;
+    const nonce = randomUUID().replaceAll("-", "").slice(0, 9);
+    // The leading dark bit prevents an empty light app surface from matching.
+    const captureToken = (parseInt(nonce[0], 16) & 7).toString(16) + nonce.slice(1);
+    const window = await compositionWindow(
+      requestedWidth,
+      requestedHeight + 48,
+      owner,
+    );
+    if (!window) return null;
+    let cancelled!: () => void;
+    const cancellation = new Promise<null>(resolve => { cancelled = () => resolve(null); });
+    const cancel = () => { cancelled(); if (!window.isDestroyed()) window.destroy(); };
+    signal?.addEventListener("abort", cancel, {once: true});
+    try {
+      if (signal?.aborted) { cancel(); return null; }
+      const ready = await Promise.race([window.webContents.executeJavaScript(
+        "window.composeSlidePreview(" +
+          JSON.stringify(current) +
+          "," +
+          requestedWidth +
+          "," +
+          requestedHeight +
+          "," + JSON.stringify(captureToken) +
+          "," + JSON.stringify(sample) + "," + JSON.stringify(previous) +
+          ")",
+      ), cancellation]);
+      if (!ready || !previewOwnerAlive(owner) || window.isDestroyed()) return null;
+      const image = await Promise.race([captureComposedFrame(window, requestedWidth, requestedHeight, captureToken), cancellation]);
+      if (!image) return null;
+      if (!previewOwnerAlive(owner) || window.isDestroyed()) return null;
+      const warnings: AgentPreviewWarning[] = diagnostics
+        ? await Promise.race([window.webContents.executeJavaScript(
+            "window.slidePreviewWarnings()",
+          ), cancellation])
+        : [];
+      if (signal?.aborted || !warnings) return null;
+      return {
+        width: requestedWidth,
+        height: requestedHeight,
+        warnings,
+        pngDataUrl: `data:image/png;base64,${image.toString("base64")}`,
+      };
+    } finally {
+      signal?.removeEventListener("abort", cancel);
+      if (!window.isDestroyed()) {
+        await window.webContents
+          .executeJavaScript("window.clearSlidePreview()")
+          .catch(() => {});
+      }
+    }
+  });
+  previewQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  void task
+    .finally(() => {
+      pendingPreviews--;
+    })
+    .catch(() => {});
+  return task;
+}
+
+function validateAgentEffect(
+  _documentId: string,
+  definition: EffectDefinition,
+  sampleText?: string,
+): Promise<EffectValidationResult | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.validateAgentEffect(" +
+        JSON.stringify(definition) +
+        "," +
+        JSON.stringify(sampleText) +
+        ")",
+    ), "EFFECT_VALIDATION_UNAVAILABLE",
+  );
+}
+
+function measureAgentText(
+  documentId: string,
+  element: import("../src/core/element").Element & {
+    content: import("../src/core/text").TextContent;
+  },
+): Promise<import("../src/core/text").TextMeasurement | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.measureAgentText(" +
+        JSON.stringify(documentId) +
+        "," +
+        JSON.stringify(element) +
+        ")",
+    ),
+  );
+}
+
+function measureAgentTextBatch(
+  documentId: string,
+  items: readonly import("../src/core/agentTextMeasure").AgentTextMeasureItem[],
+): Promise<import("../src/core/agentTextMeasure").AgentTextFitMeasurement[] | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.measureAgentTextBatch(" +
+        JSON.stringify(documentId) +
+        "," +
+        JSON.stringify(items) +
+        ")",
+    ),
+  );
+}
+
+const agentInspection = new AgentInspectionService({
+  access: () => agentContext.isEnabled ? mcpAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  context: () => agentContext.read(),
+  projection: async (id, pageId) => {
+    if (collaboration.isGuest(id) && collaboration.status().clientStatus !== "connected") throw new Error("Guest unavailable");
+    return collaboration.isGuest(id) ? collaboration.projection(id, pageId) : documentRuntime(id).projection(id, pageId);
+  },
+  listAssets: async (_documentId, query, offset, limit) =>
+    requireStorage().listAssets(query, offset, limit),
+});
+const agentAuthoring = new AgentAuthoringService({
+  access: () => (agentContext.isEnabled ? mcpAccessVersion : null),
+  activeDocumentId: activeAgentDocumentId,
+  context: () => agentContext.read(),
+  projection: async (id, pageId) => {
+    if (
+      collaboration.isGuest(id) &&
+      collaboration.status().clientStatus !== "connected"
+    )
+      throw new Error("Guest unavailable");
+    return collaboration.isGuest(id)
+      ? collaboration.projection(id, pageId)
+      : documentRuntime(id).projection(id, pageId);
+  },
+});
+const agentTextMeasurement = new AgentTextMeasurementService({
+  access: () => (agentContext.isEnabled ? mcpAccessVersion : null),
+  activeDocumentId: activeAgentDocumentId,
+  state: async (documentId) => {
+    const context = await agentContext.read();
+    if (!context.document || context.document.id !== documentId)
+      throw new Error("Document unavailable");
+    return {
+      documentId: context.document.id,
+      epoch: context.document.epoch,
+      revision: context.document.revision,
+    };
+  },
+  measure: measureAgentTextBatch,
+});
+function notifyAgentHistory() {
+  if (editor && !editor.isDestroyed()) editor.webContents.send("agent-history-changed");
+}
+const agentEditing = new AgentEditingService({
+  access: () => agentContext.isEnabled && mcpEditingEnabled ? mcpWriteAccessVersion : null,
+  eligibility: id => collaboration.isGuest(id) ? "GUEST_EDITING_UNSUPPORTED" : !agentContext.isEnabled ? "MCP_DISABLED" : !mcpEditingEnabled ? "EDITING_DISABLED" : null,
+  activeDocumentId: activeAgentDocumentId,
+  runtime: documentRuntime,
+  measure: measureAgentText,
+  validateEffect: validateAgentEffect,
+  asset: (documentId, assetId) =>
+    requireStorage().assetForDocument(documentId, assetId),
+  changed: notifyAgentHistory,
+});
+const documentClosing = new DocumentClosing(agentEditing);
+const agentDelivery = new AgentDeliveryService({
+  access: () => agentContext.isEnabled ? mcpAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  eligibility: (id) => collaboration.isGuest(id) ? "GUEST_DELIVERY_UNSUPPORTED" : null,
+  runtime: documentRuntime,
+  deliver: async (request, beforePersist) => {
+    let overwritten = false;
+    const admission = (destination: string) => { beforePersist(); overwritten = existsSync(destination); };
+    if (request.action === "package") {
+      const destination = await packageDocument(request.documentId, admission, request.packageOptions);
+      return destination ? { destination, format: "smp", overwrite: "native-policy", overwritten, packageOptions: request.packageOptions ?? null, fontWarnings: requireStorage().packageFontWarnings(request.documentId) } : null;
+    }
+    const summary = await (request.action === "save-as" ? saveDocumentAs : saveDocument)(request.documentId, admission);
+    return summary ? { destination: summary.location, format: summary.location.toLowerCase().endsWith(".smp") ? "smp" : "sme", overwrite: "native-policy", overwritten } : null;
+  },
+});
+function workspaceDocumentReceipt(document: { id: string; name: string }) {
+  const runtime = documentRuntime(document.id), metadata = runtime.metadata(document.id), deck = runtime.presentationDeck(document.id);
+  return { document: { id: document.id, name: document.name, ...metadata, dirty: metadata.revision !== metadata.savedRevision },
+    initialPageIds: { slides: deck.slideIds, templates: deck.templateIds },
+    readiness: { authority: "ready", editor: "poll-context", guidance: "Read showme.context until availability=ready and editor.documentId matches document.id. Replace the COMPLETE document identity, including id and epoch, before further requests." } };
+}
+const agentWorkspace = new AgentWorkspaceService({
+  access: () =>
+    agentContext.isEnabled && mcpEditingEnabled ? mcpWriteAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  runtime: documentRuntime,
+  eligibility: (id) =>
+    collaboration.isGuest(id) ? "GUEST_EDITING_UNSUPPORTED" : null,
+  perform: async (request, admit) => {
+    const authorized = async (file: string) => {
+      const resolved = await fs.realpath(path.resolve(file));
+      const root = await fs.realpath(showMeRoot);
+      if (!isInsideRoot(root, resolved))
+        throw new Error("Select a file inside the user-selected ShowMe root.");
+      return resolved;
+    };
+    const ensureIdle = async () => {
+      admit();
+      if (documentRuntime(request.documentId).leaseState(request.documentId).length) throw new AgentMutationError("EDITOR_BUSY", "Finish the active editor interaction before switching documents.");
+      const idle = await editor?.webContents.executeJavaScript("window.agentWorkspaceIdle?.(" + JSON.stringify(request.documentId) + ") === true");
+      admit();
+      if (!idle) throw new AgentMutationError("EDITOR_BUSY", "Finish text editing, drafts and active interactions before switching documents. No draft was flushed or discarded.");
+    };
+    if (request.action === "create") {
+      await ensureIdle();
+      const document = await requireStorage().createDocument(request.name);
+      await ensureIdle();
+      registerDocumentNotifications(document.id);
+      activateDocument(document);
+      editor?.webContents.send("document-opened", document);
+      return workspaceDocumentReceipt(document);
+    }
+    if (request.action === "open") {
+      const file = request.path
+        ? await authorized(request.path)
+        : await chooseOpenPath();
+      if (!file) return { cancelled: true };
+      admit();
+      await ensureIdle();
+      const existing = requireStorage()
+        .openDocuments()
+        .map((d) => requireStorage().summary(d.documentId))
+        .find(
+          (d) =>
+            !!d.location && path.resolve(d.location) === path.resolve(file),
+        );
+      const document = existing ?? (await openDocumentPath(file, ensureIdle));
+      if (existing) { await ensureIdle(); activateDocument(existing); }
+      editor?.webContents.send("document-opened", document);
+      return workspaceDocumentReceipt(document);
+    }
+    if (request.action === "close") {
+      await ensureIdle();
+      // Existing close coordination handles authority draining and native cleanup.
+      // Defer window shutdown until the bridge has delivered the clean-close receipt.
+      await documentClosing.run(request.documentId, async () => {
+        await ensureIdle();
+        documentNotifications.get(request.documentId)?.();
+        documentNotifications.delete(request.documentId);
+        await requireStorage().closeDocument(request.documentId);
+        return true;
+      });
+      agentContext.invalidate();
+      activeDocumentId = null;
+      setTimeout(() => {
+        allowEditorClose = true;
+        editor?.close();
+      }, 500);
+      return { closed: true };
+    }
+    const paths = request.paths ?? (await dialog.showOpenDialog(editor!, {
+      properties: ["openFile", "multiSelections"], filters: [{ name: "Media", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg", "mp4", "webm"] }],
+    })).filePaths;
+    return importAgentMedia(paths, admit, {
+      authorize: async file => request.paths ? authorized(file) : file,
+      importFile: source => requireStorage().importFile(source),
+      prepare: imported => runAgentRuntime(window => window.webContents.executeJavaScript(
+        "window.prepareAgentMedia(" + JSON.stringify(imported) + ")"), "MEDIA_PREPARATION_UNAVAILABLE"),
+      updateAsset: asset => requireStorage().updateAsset(asset),
+      storePreview: (id, bytes) => requireStorage().storePreview(id, bytes),
+    });
+
+  },
+});
+const agentContextRead = async () => ({
+  ...(await agentContext.read()),
+  serverVersion: SHOWME_MCP_SERVER_VERSION,
+  contractVersion: AGENT_CONTRACT_VERSION,
+  services: { agentRuntime: {
+    state: agentRuntimeWindow?.isDestroyed() ? "uninitialized" : agentRuntimeStatus,
+    pending: pendingAgentRuntime,
+  } },
+  editing: { enabled: mcpEditingEnabled, ...agentEditing.availability() },
+});
+const agentBridge = new AgentBridge(app.getPath("userData"), async (request, signal) => {
+  if (request.command === "context") return { ok: true, data: await agentContextRead() };
+  if (request.command === "inspect") return agentInspection.inspect(request.params);
+  if (request.command === "authoring")
+    return agentAuthoring.authoring(request.params);
+  if (request.command === "measure_text")
+    return agentTextMeasurement.measure(request.params);
+  if (request.command === "apply") return agentEditing.apply(request.params, signal);
+  if (request.command === "deliver") return agentDelivery.deliver(request.params, signal);
+  if(request.command === "workspace")return agentWorkspace.run(request.params,signal);
+  return agentPreview.preview(request.params, signal);
+});
 const operations: Record<string, (...args: any[]) => any> = {
+  getMcpEditingEnabled: () => mcpEditingEnabled,
+  async setMcpEditingEnabled(input: unknown) {
+    const enabled = z.boolean().parse(input);
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.mcpEditingEnabled = enabled;
+    await writeSettings(app.getPath("userData"), settings);
+    if (mcpEditingEnabled !== enabled) mcpWriteAccessVersion++;
+    mcpEditingEnabled = enabled;
+    return enabled;
+  },
+  agentHistory: () => agentEditing.history(),
+  agentUndo: (input: unknown) => agentEditing.undo(z.object({ documentId: idSchema, redo: z.boolean() }).strict().parse(input)),
+  getMcpConnection: () => ({
+    status: agentContext.isEnabled ? agentBridge.status : "disabled",
+    instanceId: agentBridge.instanceId,
+    configuration: agentContext.isEnabled && agentBridge.status === "ready" ? JSON.stringify({ mcpServers: { showme: {
+      command: "node", args: [app.isPackaged ? path.join(process.resourcesPath, "showme-mcp.cjs") : path.join(__dirname, "showme-mcp.cjs"), "--user-data", app.getPath("userData")],
+    } } }, null, 2) : null,
+  }),
+  getMcpEnabled: () => agentContext.isEnabled,
+  async setMcpEnabled(input: unknown) {
+    const enabled = z.boolean().parse(input);
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.mcpEnabled = enabled;
+    await writeSettings(app.getPath("userData"), settings);
+    if (agentContext.isEnabled !== enabled) { mcpAccessVersion++; mcpWriteAccessVersion++; }
+    agentContext.setEnabled(enabled);
+    if (!enabled) {
+      agentPreview.cancelAll();
+      resetAgentRuntimeWindow();
+    }
+    await agentBridge.setEnabled(enabled);
+    editor?.webContents.send("mcp-enabled-changed", enabled);
+    return enabled;
+  },
+  editorAgentContext: (input: unknown) => agentContext.update(input),
+  agentContext: agentContextRead,
+  agentPreview: (input: unknown) => agentPreview.preview(input),
   managedFonts: (documentId?: string) =>
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
@@ -1458,10 +2070,14 @@ const operations: Record<string, (...args: any[]) => any> = {
   },
   async closeDocument(id: string) {
     const parsed = idSchema.parse(id);
+    const clearsAgentContext = parsed === activeDocumentId || parsed === agentGuestDocumentId;
     if (collaboration.isGuest(parsed)) {
+      agentEditing.forget(parsed);
       collaboration.leave();
+      if (clearsAgentContext) agentContext.invalidate();
       return;
     }
+    await documentClosing.run(parsed, async () => {
     documentNotifications.get(parsed)?.();
     documentNotifications.delete(parsed);
     imagePreparation.close(parsed);
@@ -1471,7 +2087,10 @@ const operations: Record<string, (...args: any[]) => any> = {
       storage.documentRuntime(parsed).authority.revision === 0
     )
       await storage.discardDocumentChanges(parsed);
-    else storage.closeDocument(parsed);
+    else await storage.closeDocument(parsed);
+    return true;
+    });
+    if (clearsAgentContext) agentContext.invalidate();
   },
   documentProjection: (documentId: string, slideId?: string) => {
     const id = idSchema.parse(documentId);
@@ -1762,6 +2381,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       collaboration.leave();
       return "closed";
     }
+    const closed = await documentClosing.run(id, async () => {
     const summary = requireStorage().summary(id);
     let response = summary.dirty ? 2 : 0;
     if (summary.dirty && !process.env.SHOWME_DOCUMENT_DIR) {
@@ -1779,17 +2399,17 @@ const operations: Record<string, (...args: any[]) => any> = {
     }
     if (response === 2) {
       closeRequestPending = false;
-      return "canceled";
+      return false;
     }
     if (response === 0 && summary.dirty) {
       const saved = await saveDocument(id);
       if (!saved) {
         closeRequestPending = false;
-        return "canceled";
+        return false;
       }
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
-      requireStorage().closeDocument(id);
+      await requireStorage().closeDocument(id);
     } else if (response === 1 && summary.dirty) {
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
@@ -1798,9 +2418,13 @@ const operations: Record<string, (...args: any[]) => any> = {
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
       if (summary.untitled) await requireStorage().discardDocumentChanges(id);
-      else requireStorage().closeDocument(id);
+      else await requireStorage().closeDocument(id);
     }
+    return true;
+    }).finally(() => { closeRequestPending = false; });
+    if (!closed) return "canceled";
     allowEditorClose = true;
+    agentContext.invalidate();
     closeRequestPending = false;
     editor?.close();
     return "closed";
@@ -2065,92 +2689,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     width: unknown,
     height: unknown,
   ) {
-    const owner = editor;
-    if (!previewOwnerAlive(owner)) return Promise.resolve(null);
-    // Capture an isolated canonical surface, never editor UI overlays.
-    const requestedWidth = z.number().int().positive().max(2048).parse(width);
-    const requestedHeight = z.number().int().positive().max(2048).parse(height);
-    const documentId = idSchema.parse(projection.documentId),
-      slideId = idSchema.parse(projection.slide.id);
-    if (pendingPreviews >= 8) return Promise.resolve(null);
-    pendingPreviews++;
-    const task = previewQueue.then(async () => {
-      if (!previewOwnerAlive(owner)) return null;
-      const current = await operations.renderProjection(documentId, slideId);
-      if (
-        !previewOwnerAlive(owner) ||
-        current.epoch !== projection.epoch ||
-        current.revision !== projection.revision
-      )
-        return null;
-      previewDocumentId = documentId;
-      if (!previewWindow || previewWindow.isDestroyed()) {
-        previewWindow = new BrowserWindow({
-          ...windowOptions(),
-          show: false,
-          frame: false,
-          useContentSize: true,
-          minWidth: 1,
-          minHeight: 1,
-          width: requestedWidth,
-          height: requestedHeight,
-          // Keep a normal GPU compositor surface hidden. Offscreen copy requests
-          // can fail with UnknownVizError even after renderer readiness.
-          webPreferences: {
-            ...windowOptions().webPreferences,
-            backgroundThrottling: false,
-          },
-        });
-        secure(previewWindow);
-        const devUrl = process.env.SHOWME_DEV_URL;
-        if (devUrl && !app.isPackaged)
-          await previewWindow.loadURL(devUrl + "?slidePreview=1");
-        else
-          await previewWindow.loadFile(
-            path.join(__dirname, "../dist/index.html"),
-            { query: { slidePreview: "1" } },
-          );
-      }
-      const window = previewWindow;
-      if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
-      window.setContentSize(requestedWidth, requestedHeight);
-      try {
-        const ready = await window.webContents.executeJavaScript(
-          "window.composeSlidePreview(" +
-            JSON.stringify(current) +
-            "," +
-            requestedWidth +
-            "," +
-            requestedHeight +
-            ")",
-        );
-        if (!ready) return null;
-        const image = await window.webContents.capturePage(undefined, {
-          stayHidden: true,
-        });
-        return image
-          .resize({
-            width: requestedWidth,
-            height: requestedHeight,
-            quality: "best",
-          })
-          .toDataURL();
-      } finally {
-        if (!window.isDestroyed()) await window.webContents
-          .executeJavaScript("window.clearSlidePreview()")
-          .catch(() => {});
-      }
-    });
-    previewQueue = task.then(
-      () => undefined,
-      () => undefined,
-    );
-    void task
-      .finally(() => {
-        pendingPreviews--;
-      })
-      .catch(() => {});
-    return task;
+    return captureSlidePreview(projection, width, height).then((result) => result?.pngDataUrl ?? null);
   },
   async thumbnail(documentId, slideId) {
     try {
@@ -2218,6 +2757,7 @@ registerIpcRouter({
   getEditor: () => editor,
   getExportWindow: () => exportWindow,
   getPreviewWindow: () => previewWindow,
+  getAgentRuntimeWindow: () => agentRuntimeWindow,
   getPreviewDocumentId: () => previewDocumentId,
   getAudienceWindow: () => presentation?.audienceWindow ?? null,
   getPresenterConsole: () => presentation?.presenterConsoleWindow ?? null,
@@ -2330,6 +2870,8 @@ void app.whenReady().then(async () => {
     return;
   }
   lifecycleMode = settings.libraryLifecycleMode ?? "managed";
+  agentContext.setEnabled(settings.mcpEnabled === true);
+  mcpEditingEnabled = settings.mcpEditingEnabled === true;
   imageCachingEnabled = settings.imageCachingEnabled !== false;
   imageCacheFormat = settings.imageCacheFormat ?? "png";
   deleteImageCacheOnClose = settings.deleteImageCacheOnClose !== false;
@@ -2370,6 +2912,7 @@ void app.whenReady().then(async () => {
       editor.webContents.send("media-inventory-changed");
   };
   await storage.init();
+  await agentBridge.setEnabled(agentContext.isEnabled);
   lifecycle = createLibraryLifecycle();
   if (lifecycleMode !== "portable") await lifecycle!.init();
 
@@ -2403,6 +2946,7 @@ void app.whenReady().then(async () => {
     try {
       launchDocument = await openDocumentPath(file);
     } catch (error) {
+      console.error("Could not open startup presentation", file, error);
       dialog.showErrorBox(
         "Could not open presentation",
         error instanceof Error ? error.message : String(error),
@@ -2537,6 +3081,10 @@ void app.whenReady().then(async () => {
   });
 
   editor = new BrowserWindow(windowOptions());
+  editor.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+    if (mainFrame && !inPlace) agentContext.invalidate();
+  });
+  editor.webContents.on("render-process-gone", () => agentContext.invalidate());
   presentation.setEditor(editor);
   editor.setMenuBarVisibility(false);
   secure(editor);
@@ -2550,6 +3098,7 @@ void app.whenReady().then(async () => {
     editor?.webContents.send("file-command", "prepare-close");
   });
   editor.on("closed", () => {
+    agentContext.invalidate();
     tearDownPreviewWindows();
     editor = null;
     activeDocumentId = null;
@@ -2563,13 +3112,15 @@ app.on("before-quit", () => collaboration.close());
 // All window close/save prompts have completed before will-quit fires.
 app.on("will-quit", (event) => {
   tearDownPreviewWindows();
-  if (!storage || cacheCleanupFinished) return;
+  if (cacheCleanupFinished) return;
   event.preventDefault();
   if (cacheCleanupPending) return;
   cacheCleanupPending = true;
   imagePreparation.suspend();
-  void imageCache
-    .releaseOnQuit(deleteImageCacheOnClose)
+  void Promise.all([
+    agentBridge.setEnabled(false),
+    storage ? imageCache.releaseOnQuit(deleteImageCacheOnClose) : Promise.resolve(),
+  ])
     .catch((error) => {
       console.error("Could not delete image cache on close:", error);
     })

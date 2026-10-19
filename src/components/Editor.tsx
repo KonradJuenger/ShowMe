@@ -50,6 +50,7 @@ import { AssetLibrary } from "./AssetLibrary";
 import type { CanvasSelection } from "./editorCanvasCoordinator";
 import { SlideRenderer } from "./SlideRenderer";
 import { useEditorSession } from "./useEditorSession";
+import { useAgentContextPublisher } from "./useAgentContextPublisher";
 import { useDocumentPersistence } from "./useDocumentPersistence";
 import {
   EditorSlideOverview,
@@ -445,6 +446,7 @@ export function Editor({
       setSelection({ elementIds: [elementId], scopeId: parentId }),
   );
   const flushSpeakerNotes = notesEditing.flush;
+  useAgentContextPublisher(controller, selection, motionWorkspace, play);
   useEffect(() => {
     if (motionWorkspace.open && notesOpen) {
       setNotesOpen(false);

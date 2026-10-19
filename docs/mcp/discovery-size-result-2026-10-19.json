@@ -1,0 +1,59 @@
+{
+  "method": "Offline canonical guide generation; per-family minimum of whole-family versus individually selected queries. Full creative guides are required because old compact omits domain facts. Excludes context, inspection, measurement, and client normalization.",
+  "measurement": "Offline canonical guide generation. New default compact protocol, selected operations, shader and CSS guides. Caller emits one representation. Actual host model-context normalization is unmeasured.",
+  "baseline": {
+    "authoringCalls": 10,
+    "structuredBytes": 75417,
+    "wireBytes": 156868
+  },
+  "applySchemaBytes": 85498,
+  "authoringCalls": 4,
+  "structuredBytes": 28566,
+  "wireBytes": 60640,
+  "structuredReductionPercent": 62.12,
+  "wireReductionPercent": 61.34,
+  "calls": [
+    {
+      "request": {
+        "kind": "protocol"
+      },
+      "structuredBytes": 3028,
+      "wireBytes": 6318
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "operations": [
+          "deck.rename",
+          "deck.transition_defaults.set",
+          "slide.create",
+          "slide.update",
+          "slide.template.apply",
+          "layer.create",
+          "element.insert_text",
+          "element.insert_frame",
+          "background.shader.create",
+          "effect.apply_code",
+          "presence.add",
+          "elements.frame.set"
+        ]
+      },
+      "structuredBytes": 17280,
+      "wireBytes": 37386
+    },
+    {
+      "request": {
+        "kind": "background-shader"
+      },
+      "structuredBytes": 4382,
+      "wireBytes": 8982
+    },
+    {
+      "request": {
+        "kind": "css-effect"
+      },
+      "structuredBytes": 3876,
+      "wireBytes": 7954
+    }
+  ]
+}

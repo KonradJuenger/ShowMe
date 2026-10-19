@@ -1,5 +1,126 @@
 [
   {
+    "id": "editor-agent-workspace",
+    "path": "tests/feature/editor/agentWorkspace.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-18",
+    "lastReviewed": "2026-10-18",
+    "reason": "Native workspace lifecycle admission checks exact identity, revision, access and cancellation before native side effects; deterministic delayed media cancellation/revocation retains indexed native import receipts and renderer-loss recovery"
+  },
+  {
+    "id": "editor-agent-delivery",
+    "path": "tests/feature/editor/agentDelivery.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-18",
+    "lastReviewed": "2026-10-18",
+    "reason": "Exact accepted snapshot delivery uses native save/package locks; cancellation, access revocation, replaced runtime, native picker cancellation and rejected writes preserve revision/history and artifact boundaries; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed"
+  },
+  {
+    "id": "editor-agent-editing",
+    "path": "tests/feature/editor/agentEditing.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-18",
+    "lastReviewed": "2026-10-19",
+    "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery; template editing/ownership, direct shared text styles, native slide recipes, named effect resources and explicit expanded batch admission; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; batched compact discovery preserves canonical schemas, selectors, relevant semantics and measured payload budget; compact advertised transport versus strict admission, sparse replay/resource receipts, measured partial/complete native operation overflow and deliberate splits"
+  },
+  {
+    "id": "editor-agent-mcp",
+    "path": "tests/extended/agent-mcp.spec.ts",
+    "area": "editor",
+    "tier": "extended",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-19",
+    "reason": "Real SDK stdio client covers Settings opt-in, context/inspection, deck creation, frame-based text editing, production PNG previews, creative authoring discovery, production GLSL/CSS/text-JS validation, deck CSS/classes, native Effect-parameter Motion, revocation, crash/restart, exact revision recovery and separate guarded user/agent history. Native workspace create/open/close/import, template rendering and scoped CSS supports.; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; native Settings clipboard verifies Codex TOML, generic MCP JSON and VS Code JSON; held second native media decoder verifies revocation receipts and no third import; real SDK compact protocol/operation/Effect discovery, structured-text consistency and scoped source verified; compact advertised operation bodies retain nested fields and strict invalid-call diagnostics, protocol capabilities replace static context"
+  },
+  {
+    "id": "editor-agent-bridge",
+    "path": "tests/feature/editor/agentBridge.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-18",
+    "reason": "Authenticated loopback bridge enforces private descriptors and Windows ACLs, strict dispatch and browser request rejection, size limits, revocation and instance discovery without fallback; lost HTTP response during an actual durable mutation replays its accepted insertion receipt without repeating writes; lost workspace and package responses return uncertain outcomes with exactly one dispatch on cached and discovered connections"
+  },
+  {
+    "id": "editor-agent-inspection",
+    "path": "tests/feature/editor/agentInspection.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Strict scoped accepted-document reads preserve projection privacy and exact identity, resolve selection at a UI epoch, and reject missing targets and freshness/access races"
+  },
+  {
+    "id": "editor-agent-preview",
+    "path": "tests/feature/editor/agentPreview.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-18",
+    "reason": "Strict preview requests use accepted document/slide/epoch/revision and bounded pixels, reject disabled or stale access before/after capture, preserve explicit targeting and return structured failures without pixel/source leakage; propagates client cancellation and opt-out aborts before and during native capture"
+  },
+  {
+    "id": "editor-agent-preview-electron",
+    "path": "tests/extended/agent-preview.spec.ts",
+    "area": "editor",
+    "tier": "extended",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-18",
+    "reason": "Context/inspection/native preview loop captures template/nested/text/image/alpha/GLSL/CSS pixels through an acknowledged bounded native surface, crops compositor acknowledgement and OS padding, preserves exact output size and editor state, reports missing-media/Effect diagnostics, waits for readiness and discards revoked or stale output; real HTTP disconnect and MCP opt-out destroy held capture surfaces and release the serialized queue"
+  },
+  {
+    "id": "editor-agent-context",
+    "path": "tests/feature/editor/agentContext.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-17",
+    "reason": "Opt-in ephemeral context distinguishes accepted revisions from UI epochs, normalizes selection and timeline handles, isolates templates/drafts/presenter state, rejects obsolete views and read races, and persists only the MCP app preference"
+  },
+  {
+    "id": "editor-agent-context-electron",
+    "path": "tests/extended/agent-context.spec.ts",
+    "area": "editor",
+    "tier": "extended",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-19",
+    "reason": "Real settings toggle gates and persists editor context; selection/template/slide navigation and reload publish current handles without document edits; strict IPC payloads, foreign windows and unprivileged subframes preserve the boundary"
+  },
+  {
+    "id": "editor-agent-projection",
+    "path": "tests/feature/editor/agentProjection.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-17",
+    "lastReviewed": "2026-10-18",
+    "reason": "Pure agent deck/visual-slide/scoped-element reads preserve template ownership, canonical order, production world geometry, hidden-content opt-in, bounded Unicode previews, style/media/effect/timeline metadata, explicit failures and detached results without source/path/note disclosure; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed"
+  },
+  {
     "id": "presenter-audience-images",
     "path": "tests/feature/presenter/audience-images.test.ts",
     "area": "presenter",
@@ -161,7 +282,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-10-18",
     "reason": "Failed package open publishes no fonts and simultaneous packages retain independent font ownership"
   },
   {
@@ -194,8 +315,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-11",
-    "reason": "Failed durability blocks flush until explicit resolution; initial projection failure is observable and disposed loads publish nothing; retry preserves already accepted edit/history receipts"
+    "lastReviewed": "2026-10-18",
+    "reason": "Failed durability blocks flush until explicit resolution; initial projection failure is observable and disposed loads publish nothing; retry preserves already accepted edit/history receipts; workspace guards distinguish unaccepted drafts/queued work/active holds from accepted dirty state"
   },
   {
     "id": "document-lifecycle",
@@ -403,8 +524,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-13",
-    "reason": "Effect authoring model, GLSL parameter metadata, diagnostics, copied AI contract without request placeholders, timing semantics and deterministic slide-context shader inputs"
+    "lastReviewed": "2026-10-19",
+    "reason": "Effect authoring model, GLSL parameter metadata, diagnostics, copied AI contract without request placeholders, timing semantics and deterministic slide-context shader inputs; shared editor/MCP timing facts and current scoped CSS supports contract"
   },
   {
     "id": "effect-authoring-editor",
@@ -810,7 +931,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-17",
+    "lastReviewed": "2026-10-18",
     "reason": "One ShowMe root owns visible ShowMe Library/ and arbitrary recursive .sme scope; outside files stay outside authority; incomplete/changed scans fail closed before each move and expiry, late failures restore this scan's moves without overwriting arriving files; draft/import protection, Trash restoration/expiry and collector locking remain intact; old two-folder settings do not configure the root; active host/guest collaboration blocks root switching; filename-encoded protection survives cleanup; folder protection bulk-renames current managed contents without creating inherited policy; filename protection is physical-copy-specific while document references retain all duplicate hashes; protection renames invalidate the cleanup fingerprint before collection; lifecycle restoration rejects case/NFC parent collisions without consuming Trash or running expiry"
   },
   {
@@ -834,5 +955,16 @@
     "created": "2026-10-13",
     "lastReviewed": "2026-10-13",
     "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership"
+  },
+  {
+    "id": "editor-agent-closing",
+    "path": "tests/feature/editor/agentClosing.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-18",
+    "lastReviewed": "2026-10-18",
+    "reason": "Actual storage/recovery integration holds MCP durability through Save, Dont Save and direct close, rejects new admissions, drains accepted publication, prevents retained runtime writes, and reopens admission on cancel or save failure"
   }
 ]

@@ -100,3 +100,25 @@ it("explicit discard unblocks the queue without accepting failed edits", async (
   await session.flush();
   expect(runtime.authority.document.slides[slideId].notes).toBe("New");
 });
+
+it("workspace readiness observes local previews queued intents and active holds without equating accepted dirty state to drafts", async () => {
+  const { session } = await editing();
+  expect(session.hasUnacceptedWork).toBe(false);
+  session.apply(setSlideNotes(session.snapshot!, "Local preview"), false);
+  expect(session.hasUnacceptedWork).toBe(true);
+  session.discardPreview();
+  expect(session.hasUnacceptedWork).toBe(false);
+  session.apply(setSlideNotes(session.snapshot!, "Accepted later"));
+  expect(session.hasUnacceptedWork).toBe(true);
+  await session.flush();
+  expect(session.isDirty).toBe(true);
+  expect(session.hasUnacceptedWork).toBe(false);
+  session.beginLeaseHold();
+  expect(session.hasUnacceptedWork).toBe(true);
+  await session.endLeaseHold();
+  expect(session.hasUnacceptedWork).toBe(false);
+  session.beginHistoryGroup();
+  expect(session.hasUnacceptedWork).toBe(true);
+  await session.endHistoryGroup();
+  expect(session.hasUnacceptedWork).toBe(false);
+});

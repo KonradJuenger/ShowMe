@@ -631,7 +631,7 @@ export class DocumentStorage {
     );
   }
 
-  async saveDocument(id: string, destination?: string) {
+  async saveDocument(id: string, destination?: string, beforePersist?: (destination: string) => void) {
     const entry = this.entry(id);
     const { handle, runtime } = entry;
     if (!destination && entry.packagePath)
@@ -640,12 +640,14 @@ export class DocumentStorage {
         entry.packagePath,
         entry.packageLocked ?? false,
         entry.packageFingerprint,
+        beforePersist,
       );
     if (destination && path.extname(destination).toLowerCase() === ".smp")
-      return this.savePackageAs(id, destination, entry.packageLocked ?? false);
+      return this.savePackageAs(id, destination, entry.packageLocked ?? false, undefined, beforePersist);
     const target = destination ? ensureSmePath(destination) : handle.filePath;
     if (!target) throw new Error("Untitled presentations require Save As");
     return runtime.authority.runExclusive(async (snapshot) => {
+      beforePersist?.(target);
       if (entry.packageLocked)
         throw new Error(
           "Locked package media cannot be extracted into the shared Library",
@@ -692,14 +694,15 @@ export class DocumentStorage {
     });
   }
 
-  closeDocument(id: string) {
-    this.entry(id);
+  async closeDocument(id: string) {
+    await this.entry(id).runtime.authority.beginClose();
     this.documents.delete(id);
     this.releaseDocumentAssets(id);
   }
 
   async discardDocumentChanges(id: string) {
-    const { handle } = this.entry(id);
+    const { handle, runtime } = this.entry(id);
+    await runtime.authority.beginClose();
     await this.recovery.discard(handle.recoveryPath);
     this.documents.delete(idSchema.parse(id));
     this.releaseDocumentAssets(id);
@@ -826,7 +829,7 @@ export class DocumentStorage {
       try {
         await this.recovery.checkpoint(entry.handle, document);
       } catch (error) {
-        this.closeDocument(document.documentId);
+        await this.closeDocument(document.documentId);
         throw error;
       }
       return this.summary(document.documentId);
@@ -957,11 +960,13 @@ export class DocumentStorage {
     file: string,
     lockMediaFiles?: boolean,
     removeSpeakerNotes = false,
+    beforePersist?: (destination: string) => void,
   ) {
     const entry = this.entry(id);
     return entry.runtime.authority.runExclusive(
-      async (snapshot) =>
-        (
+      async (snapshot) => {
+        beforePersist?.(file);
+        return (
           await this.writePackage(
             id,
             file,
@@ -970,7 +975,8 @@ export class DocumentStorage {
               ? withoutSpeakerNotes(snapshot.document)
               : snapshot.document,
           )
-        ).path,
+        ).path;
+      },
     );
   }
 
@@ -979,9 +985,11 @@ export class DocumentStorage {
     file: string,
     lockMediaFiles: boolean,
     expectedFingerprint?: string,
+    beforePersist?: (destination: string) => void,
   ) {
     const entry = this.entry(id);
     return entry.runtime.authority.runExclusive(async (snapshot) => {
+      beforePersist?.(file);
       const written = await this.writePackage(
         id,
         file,

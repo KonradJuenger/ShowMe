@@ -4,6 +4,7 @@ import {
   DocumentAuthority,
   type DocumentAuthorityOptions,
   type EditScope,
+  type CommitAdmission,
 } from "./documentAuthority";
 import {
   presentationDocumentSchema,
@@ -157,11 +158,12 @@ export class DocumentRuntime implements EditorTransport {
     documentId: string,
     actorId: string,
     transaction: DocumentTransaction,
+    admit?: CommitAdmission,
   ) {
     this.requireDocument(documentId);
     if (transaction.documentId !== documentId)
       throw new Error("Document transaction mismatch");
-    return this.authority.commit(actorId, transaction);
+    return this.authority.commit(actorId, transaction, admit);
   }
 
   async acquire(documentId: string, scopes: EditScope[]) {
@@ -209,9 +211,10 @@ export class DocumentRuntime implements EditorTransport {
     documentId: string,
     actorId: string,
     leaseTokens: string[] = [],
+    admit?: CommitAdmission,
   ) {
     this.requireDocument(documentId);
-    return this.authority.undo(actorId, leaseTokens);
+    return this.authority.undo(actorId, leaseTokens, admit);
   }
 
   redo(documentId: string, leaseTokens: string[]) {
@@ -222,9 +225,10 @@ export class DocumentRuntime implements EditorTransport {
     documentId: string,
     actorId: string,
     leaseTokens: string[] = [],
+    admit?: CommitAdmission,
   ) {
     this.requireDocument(documentId);
-    return this.authority.redo(actorId, leaseTokens);
+    return this.authority.redo(actorId, leaseTokens, admit);
   }
 
   async historyState(documentId: string) {

@@ -1,0 +1,111 @@
+{
+  "method": "Offline canonical guide generation; per-family minimum of whole-family versus individually selected queries. Full creative guides are required because old compact omits domain facts. Excludes context, inspection, measurement, and client normalization.",
+  "operations": [
+    "deck.rename",
+    "deck.transition_defaults.set",
+    "slide.create",
+    "slide.update",
+    "slide.template.apply",
+    "layer.create",
+    "element.insert_text",
+    "element.insert_frame",
+    "background.shader.create",
+    "effect.apply_code",
+    "presence.add",
+    "elements.frame.set"
+  ],
+  "applySchemaBytes": 85498,
+  "calls": [
+    {
+      "request": {
+        "kind": "operations",
+        "family": "deck",
+        "detail": "compact"
+      },
+      "structuredBytes": 6231,
+      "wireBytes": 12988
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "family": "slide",
+        "detail": "compact"
+      },
+      "structuredBytes": 8015,
+      "wireBytes": 16810
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "operation": "layer.create",
+        "detail": "compact"
+      },
+      "structuredBytes": 4596,
+      "wireBytes": 9498
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "family": "element",
+        "detail": "compact"
+      },
+      "structuredBytes": 10812,
+      "wireBytes": 22952
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "operation": "background.shader.create",
+        "detail": "compact"
+      },
+      "structuredBytes": 6612,
+      "wireBytes": 13865
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "operation": "effect.apply_code",
+        "detail": "compact"
+      },
+      "structuredBytes": 7019,
+      "wireBytes": 14757
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "operation": "presence.add",
+        "detail": "compact"
+      },
+      "structuredBytes": 7384,
+      "wireBytes": 15594
+    },
+    {
+      "request": {
+        "kind": "operations",
+        "operation": "elements.frame.set",
+        "detail": "compact"
+      },
+      "structuredBytes": 5109,
+      "wireBytes": 10614
+    },
+    {
+      "request": {
+        "kind": "background-shader",
+        "detail": "full"
+      },
+      "structuredBytes": 10658,
+      "wireBytes": 21594
+    },
+    {
+      "request": {
+        "kind": "css-effect",
+        "detail": "full"
+      },
+      "structuredBytes": 8981,
+      "wireBytes": 18196
+    }
+  ],
+  "authoringCalls": 10,
+  "structuredBytes": 75417,
+  "wireBytes": 156868
+}

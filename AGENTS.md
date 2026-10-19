@@ -102,6 +102,9 @@ Keep this list accurate. Do not delete a branch merely because it appears stale;
 ## Testing philosophy
 
 Local verification is authoritative. Run the smallest test set that provides meaningful confidence.
+Automatic GitHub Actions CI is paused; run relevant checks locally. The development
+checks workflow is retained for optional manual use. Local verification and the
+audience-navigation commit/integration gate below still apply.
 Do not run the complete ShowMe suite by default.
 
 Choose verification using judgment, not a fixed checklist:

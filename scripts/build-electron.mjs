@@ -4,6 +4,7 @@ await build({
     main: "electron/bootstrap.ts",
     preload: "electron/preload.ts",
     imageWorker: "electron/imageWorker.ts",
+    "showme-mcp": "mcp/stdio.ts",
   },
   outdir: "dist-electron",
   outExtension: { ".js": ".cjs" },

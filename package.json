@@ -15,7 +15,7 @@
     "typecheck": "npm run verify:typescript && tsc --noEmit",
     "typecheck:ts6": "tsc6 --noEmit --stableTypeOrdering --noUncheckedSideEffectImports",
     "verify:typescript": "node scripts/verify-typescript.mjs",
-    "lint": "eslint src electron tests *.ts",
+    "lint": "eslint src electron mcp tests *.ts",
     "test": "node scripts/test-suite.mjs core",
     "benchmark:animation": "node scripts/benchmark-animation.mjs",
     "benchmark:audience": "node scripts/benchmark-audience.mjs",
@@ -35,6 +35,7 @@
     "test:audit": "node scripts/test-suite.mjs audit"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
     "motion": "^14.0.0",
     "pica": "^10.0.3",
     "pptxgenjs": "^4.0.1",
@@ -47,6 +48,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "^1.55.0",
     "@types/node": "^24.13.5",
     "@types/react": "^19.1.0",
@@ -84,6 +86,7 @@
       "src/assets/material-icons/APACHE-2.0.txt"
     ],
     "asar": true,
+    "extraResources": [{ "from": "dist-electron/showme-mcp.cjs", "to": "showme-mcp.cjs" }],
     "fileAssociations": [
       {
         "ext": "sme",

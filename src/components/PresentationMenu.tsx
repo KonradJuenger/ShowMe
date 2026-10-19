@@ -391,7 +391,6 @@ export function PresentationMenu({
               </button>
             </header>
             <div className="settings-dialog-body">
-              {applicationSettings}
               <div className="settings-section">
                 <h3>Image cache</h3>
                 <label><input type="checkbox" checked={imageCaching} disabled={cacheBusy || settingsBusy} onChange={event => {
@@ -461,6 +460,7 @@ export function PresentationMenu({
                     (settingsBusy ? "Loading…" : "Unavailable")}
                 </div>
               </div>)}
+              {applicationSettings}
             </div>
             <footer className="settings-dialog-footer">
               <button type="button" onClick={() => setSettingsOpen(false)}>

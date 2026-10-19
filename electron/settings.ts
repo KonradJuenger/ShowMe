@@ -4,6 +4,8 @@ import { z } from "zod";
 import { atomicWrite } from "./storage";
 
 const appSettingsSchema = z.object({
+  mcpEnabled: z.boolean().optional(),
+  mcpEditingEnabled: z.boolean().optional(),
   storageWarningSeen: z.boolean().optional(),
   imageCachingEnabled: z.boolean().optional(),
   imageCacheFormat: z.enum(["png", "jpg"]).optional(),

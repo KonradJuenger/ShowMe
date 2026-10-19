@@ -9,6 +9,8 @@ import { Collaboration } from "../Collaboration";
 import { MaterialIcon } from "../MaterialIcon";
 import { PresentationMenu } from "../PresentationMenu";
 import { platform } from "../../platform";
+import { McpSettings } from "../McpSettings";
+import { AgentHistoryControls } from "../AgentHistoryControls";
 
 type PresentationMenuProps = Parameters<typeof PresentationMenu>[0];
 
@@ -117,6 +119,7 @@ export function EditorToolbar({
             setSettingsOpen={setSettingsOpen}
             applicationSettings={
               <>
+                <McpSettings />
                 {platform.collaborationStatus &&
                   onCollaborationEnabledChange && (
                     <section className="settings-section">
@@ -178,6 +181,7 @@ export function EditorToolbar({
           >
             <MaterialIcon name="dock-left" />
           </button>
+          <AgentHistoryControls documentId={deckId} onError={onError} />
           <div className="deck-title-container">
             <div
               aria-label="Presentation filename"

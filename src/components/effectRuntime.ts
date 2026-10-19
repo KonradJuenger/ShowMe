@@ -325,9 +325,14 @@ export function compileEffectCss(source: string, scope: string) {
   sheet.replaceSync(source);
   if (!sheet.cssRules.length) throw new Error("CSS must contain a :scope rule");
   const names = new Map<string, string>();
-  for (const rule of sheet.cssRules)
-    if (rule instanceof CSSKeyframesRule)
-      names.set(rule.name, `${scope}_${rule.name}`);
+  const collect = (rules: CSSRuleList) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSKeyframesRule)
+        names.set(rule.name, `${scope}_${rule.name}`);
+      else if (rule instanceof CSSSupportsRule) collect(rule.cssRules);
+    }
+  };
+  collect(sheet.cssRules);
   const declarations = (style: CSSStyleDeclaration) => {
     for (const property of ["animation", "animation-name"]) {
       let value = style.getPropertyValue(property);
@@ -345,20 +350,31 @@ export function compileEffectCss(source: string, scope: string) {
     style.setProperty("animation-play-state", "paused", "important");
     style.setProperty("transition", "none", "important");
   };
-  const output: string[] = [];
-  for (const rule of sheet.cssRules) {
-    if (rule instanceof CSSStyleRule) {
-      if (rule.selectorText !== ":scope")
-        throw new Error("CSS effects support :scope and @keyframes rules only");
-      declarations(rule.style);
-      output.push(`[data-effect-scope="${scope}"] { ${rule.style.cssText} }`);
-    } else if (rule instanceof CSSKeyframesRule) {
-      rule.name = names.get(rule.name)!;
-      output.push(rule.cssText);
-    } else
-      throw new Error("CSS effects support :scope and @keyframes rules only");
-  }
-  return output.join("\n");
+  const compile = (rules: CSSRuleList): string => {
+    const output: string[] = [];
+    for (const rule of rules) {
+      if (rule instanceof CSSStyleRule) {
+        if (rule.selectorText !== ":scope")
+          throw new Error(
+            "CSS effects support :scope and @keyframes rules only",
+          );
+        declarations(rule.style);
+        output.push(`[data-effect-scope="${scope}"] { ${rule.style.cssText} }`);
+      } else if (rule instanceof CSSKeyframesRule) {
+        rule.name = names.get(rule.name)!;
+        output.push(rule.cssText);
+      } else if (rule instanceof CSSSupportsRule)
+        output.push(
+          `@supports ${rule.conditionText} { ${compile(rule.cssRules)} }`,
+        );
+      else
+        throw new Error(
+          "CSS effects support :scope, @keyframes and scoped @supports rules only",
+        );
+    }
+    return output.join("\n");
+  };
+  return compile(sheet.cssRules);
 }
 
 /** Renderer-owned surfaces consume values, never advance presentation time. */

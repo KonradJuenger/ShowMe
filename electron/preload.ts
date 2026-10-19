@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const methods = [
+  "getMcpEnabled",
+  "getMcpConnection",
+  "setMcpEnabled",
+  "getMcpEditingEnabled",
+  "setMcpEditingEnabled",
+  "agentHistory",
+  "agentUndo",
+  "editorAgentContext",
+  "agentContext",
+  "agentPreview",
   "effectLibrary",
   "getLibraryLifecycle",
   "chooseShowMeRoot",
@@ -100,7 +110,17 @@ const methods = [
 ];
 
 contextBridge.exposeInMainWorld("desktop", {
+  onAgentHistoryChanged: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on("agent-history-changed", listener);
+    return () => ipcRenderer.removeListener("agent-history-changed", listener);
+  },
   isTest: Boolean(process.env.SHOWME_DOCUMENT_DIR),
+  onMcpEnabledChanged: (cb: (enabled: boolean) => void) => {
+    const listener = (_: unknown, enabled: boolean) => cb(enabled);
+    ipcRenderer.on("mcp-enabled-changed", listener);
+    return () => ipcRenderer.removeListener("mcp-enabled-changed", listener);
+  },
   ...Object.fromEntries(
     methods.map((method) => [
       method,
