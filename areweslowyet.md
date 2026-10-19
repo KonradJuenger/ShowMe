@@ -230,3 +230,69 @@ tests and both mandatory audience-navigation declarations passed. Build,
 typecheck, changed-file lint, stats and registry audit passed (414 active tests).
 The full/release suites and macOS were not run. This follow-up commit only records
 measurements in Markdown; its contents cannot affect rendering or cache behavior.
+
+## 2026-10-19 — glass over animated shaders in native audience output
+
+Workload: the supplied `ShowMe — Ideas in motion.sme`, SHA-256
+`48b6ca7d471fdede2d5c37fabe556e33af6c40733afffd561373c1e75354b047`.
+Windows x64, Ryzen AI 9 365 / Radeon 880M, Electron 44.4.1; audience viewport
+1596 × 998 at DPR 1.604. Production builds, normal presenter console, six-second
+observation per case. Slide 4's first Presence step lasts 1440 ms. Each case below
+is one observation, not a repeated statistical estimate.
+
+The correctness fix resolves the backdrop before applying the existing card/group
+fade. The fast path reuses live shader pixels and cached static material foregrounds;
+custom contributing CSS keeps native capture. A low-pass material buffer avoids
+filtering all backdrop pixels at output density; text and borders remain sharp.
+Document persistence, fade timing and the supplied fixture are unchanged.
+
+Matched clean builds of the three-card slide, before (`d0e4d70`) and after
+(`1a6d240`) reducing the material blur buffer:
+
+| Audience entry | Entrance p95 gap, before → after (ms) | Maximum gap, before → after (ms) | Gaps >33.34 ms, before → after |
+| --- | ---: | ---: | ---: |
+| Cold | 80.1 → 59.9 | 113.1 → 96.7 | 10 → 9 |
+| Repeat | 40.0 → 40.1 | 74.3 → 45.7 | 10 → 11 |
+| New window + navigation | 39.5 → 39.0 | 86.6 → 66.5 | 14 → 9 |
+
+The repeat p95 is effectively unchanged; the observed worst gaps decreased.
+Cold entrances still stall, and these samples do **not** establish consistently
+60 fps playback. Steady shader playback after the entrance had p95 gaps of
+5.8–6.8 ms and no gaps above 33.34 ms in the selected candidate. These are rAF and
+shader-publication intervals, not physical display-presentation timestamps.
+Tracing all Electron processes and sampling also add overhead.
+
+An earlier dirty exploratory implementation with correct blur had slide-4 entrance
+p95 gaps of 110.6 / 65.6 / 50.4 ms for cold / repeat / new window respectively.
+That run is retained as exploratory evidence, not attributed to its parent commit
+or used as a clean-commit speedup claim. The original rendering without the fix
+loses blur during fades, so it is not an equivalent visual workload.
+
+The cover slide at `d0e4d70` had entrance p95 gaps of 10.2 / 9.6 / 10.1 ms and
+maximum gaps of 36.8 / 22.5 / 43.3 ms. Its single-card path is unaffected by the
+subsequent material-buffer change. All selected runs reported no effect errors,
+missing assets or image generation during ready playback.
+
+A broader material-composition experiment (`ba399c5`) was rejected: slide-4 repeat
+p95 rose to 46.6 ms with 19 gaps above 33.34 ms, versus 40.1 ms and 11 in the selected
+candidate. The final source restores the measured `1a6d240` tree.
+
+Commands (set `SHOWME_BENCHMARK_OUTPUT` to a distinct directory for each run):
+
+`npm run build`
+
+`npm run benchmark:animation -- "<path>/ShowMe — Ideas in motion.sme" 4`
+
+`npm run benchmark:animation -- "<path>/ShowMe — Ideas in motion.sme" 1`
+
+Raw summaries/traces remain locally in `test-results-glass-final-multi`,
+`test-results-glass-final-lowpass` and `test-results-glass-final-cover`; persistent
+run metadata, document/build hashes and summaries are in
+`.benchmark-data/animation/history.jsonl`.
+
+Verification: 24 focused browser declarations (glass pixel parity, mixed effects
+and both audience-navigation contracts), nine execution-graph unit declarations,
+and three native test-mode declarations passed. Production build/TypeScript,
+changed-file ESLint, registry stats and audit passed. Full/release suites and macOS
+were not run. This benchmark-history addition is documentation-only and exempt
+from the rendering commit gate.
