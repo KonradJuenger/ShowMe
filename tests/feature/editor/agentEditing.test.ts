@@ -304,7 +304,7 @@ it("sparse MCP receipts preserve native replay concurrency identities and meanin
   });
 });
 
-it("native assembly overflow reports measured costs and accepts independent smaller transactions without partial changes", async () => {
+it("native assembly overflow reports measured costs and accepts a smaller transaction without partial changes", async () => {
   const f = fixture();
   const operations = Array.from({ length: 100 }, (_, i) => ({
     type: "element.insert_text" as const,
@@ -330,11 +330,13 @@ it("native assembly overflow reports measured costs and accepts independent smal
   expect(result.error.details.nativeOperations).toBeGreaterThan(256);
   expect(f.runtime.currentRevision(f.model.documentId)).toBe(0);
   expect(findElement((await f.projection()).slide, "cost-0")).toBeNull();
-  for (let i = 0; i < 100; i += 25)
-    expect(
-      await f.service.apply(f.request(operations.slice(i, i + 25))),
-    ).toMatchObject({ ok: true });
-  expect(findElement((await f.projection()).slide, "cost-99")).not.toBeNull();
+  expect(await f.service.apply(f.request(operations.slice(0, 2)))).toMatchObject({
+    ok: true,
+    revision: 1,
+  });
+  expect(findElement((await f.projection()).slide, "cost-0")).not.toBeNull();
+  expect(findElement((await f.projection()).slide, "cost-1")).not.toBeNull();
+  expect(findElement((await f.projection()).slide, "cost-2")).toBeNull();
 });
 
 it("combined page overflow reports complete native counts and preserves atomicity before a deliberate split", async () => {

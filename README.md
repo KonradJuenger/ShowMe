@@ -126,26 +126,36 @@ Collaboration synchronizes presentation edits, not filesystem contents. Sync the
 ## Local MCP integration
 
 ShowMe includes an experimental local MCP server for agents running on your computer.
-Open **Settings → MCP · Experimental**, enable MCP, then use **Copy client
-configuration** to connect a stdio MCP host. Node.js 24 or 26 is required.
+Open **Settings → MCP · Experimental**, enable MCP, then use **Copy for Codex (TOML)**,
+**Copy for MCP clients (JSON)** or **Copy for VS Code (JSON)** to connect a stdio
+MCP host. Each action copies a complete server entry for that format. Node.js 24 or 26
+is required; restart or reconnect the host after configuration changes.
 
-The server exposes five tools: `showme.context`, `showme.inspect`,
-`showme.authoring`, `showme.apply` and `showme.preview`. Agents can inspect
-accepted unsaved presentation state, capture production slide PNGs and, with
-**Allow agent editing** enabled, author normal ShowMe content through the same
-document authority used by the editor.
+Server 1.10 exposes eight tools: `showme.workspace`, `showme.context`,
+`showme.authoring`, `showme.inspect`, `showme.measure_text`, `showme.apply`,
+`showme.deliver` and `showme.preview`. Agents can inspect accepted unsaved state,
+measure text with production fonts, capture sampled production slide PNGs and,
+with **Allow agent editing** enabled, create/open presentations, import managed assets,
+author content and save/package through the editor's existing document authority.
 
 The semantic authoring surface includes slides, layers, text and Text Styles,
 shapes, Frames, hierarchy, alignment/distribution, managed image/SVG/video assets,
 media crop/frame controls, transitions, deck CSS, Effects, Motion and Presence.
 Persistent geometry stays parent-local, and previews use ShowMe's production renderer.
-Media insertion accepts only existing ShowMe-managed asset IDs. It never accepts
-filesystem paths or raw media bytes.
+Media insertion accepts existing ShowMe-managed asset IDs, rather than file paths
+or raw bytes. `showme.workspace` can import files through native pickers or supplied
+paths inside the user-selected ShowMe root. Imports use production raster/SVG/video
+preparation and report partial results when interrupted.
 
 Edits use a separate Agent history so human Ctrl+Z remains independent. Both MCP and
 agent editing are off by default. Editing currently requires a locally owned document;
-collaboration guest writes and arbitrary file import remain outside the MCP boundary.
+collaboration guest writes and arbitrary filesystem access remain outside the MCP boundary.
 ShowMe does not connect to external MCP services.
+
+Protocol discovery contains static capabilities; context reports live state. Selected
+operation schemas remain exact, and full server-side validation still runs behind the
+compact advertised apply schema. Measured schema/response byte reductions do not
+establish model-token savings; fresh-host token and cache behavior remain unverified.
 
 See [local MCP setup and supported operations](docs/mcp/LOCAL_SETUP.md) for connection,
 retry and recovery instructions, [the authoring capability matrix](docs/mcp/AUTHORING_CAPABILITY_MATRIX.md)

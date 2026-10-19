@@ -1,7 +1,7 @@
 # Connect a local MCP client to ShowMe
 
 Use a local MCP host that can launch a stdio command. ShowMe exposes its own
-inspection, preview and optional editing tools; it does not connect to external MCP services. Node.js 24 or 26
+native workspace, inspection, measurement, authoring, preview and delivery tools; it does not connect to external MCP services. Node.js 24 or 26
 must be installed and available to the host as `node` (or use its absolute executable
 path in your client configuration).
 
@@ -54,10 +54,30 @@ it uses only the explicit app-data directory and never scans for presentation fi
 Closing ShowMe does not close the helper's MCP tool catalog. Subsequent calls return
 `APP_UNAVAILABLE` until ShowMe is running and enabled again.
 
+## Current tool catalog
+
+Server **1.10.0**, discovery contract **3**, exposes eight tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `showme.workspace` | Native create/open/close and managed asset import |
+| `showme.context` | Live document, editor, access and runtime state |
+| `showme.authoring` | Protocol, exact selected operation schemas and creative-code guides |
+| `showme.inspect` | Sparse accepted-state inspection with opt-in details |
+| `showme.measure_text` | Production font/layout measurement without insertion |
+| `showme.apply` | Atomic semantic edits through the native document authority |
+| `showme.deliver` | Native save, Save As and portable SMP package export |
+| `showme.preview` | Production PNGs and deterministic timeline/transition samples |
+
+Rebuild/restart ShowMe and reconnect the host after updates to refresh its catalog.
+The current normative request contracts and boundaries are in [TOOL_CONTRACT.md](TOOL_CONTRACT.md).
+
 ## Read loop
 
 - Call `showme.context` with `{}` first. Its result is `{ok:true,data:...}` with
-  document identity/epoch/revision, editor page/selection and `uiEpoch`.
+  document identity/epoch/revision, saved/dirty state, editor page/selection, `uiEpoch`,
+  editing availability and runtime initialization/queue state. Static capabilities, budgets,
+  Effect API version and scoped CSS support are in `showme.authoring {kind:"protocol"}`.
 - Call `showme.inspect` with `documentId`, `epoch`, `revision`, and a `target`:
   `{type:"deck"}`, `{type:"slide",slideId}`, `{type:"elements",slideId,elementIds}`
   or `{type:"selection",uiEpoch}`. Selection means the exact observed UI epoch.
@@ -70,11 +90,14 @@ Closing ShowMe does not close the helper's MCP tool catalog. Subsequent calls re
 
 These calls read accepted unsaved state from the running application. They do not
 flush text/interaction drafts, save files, select objects, move the playhead or edit
-anything. Preview state is `base`, with static video/posters and existing production
-Effect clocks; click/time sampling is unsupported. Template context can be observed,
-but inspection/preview targets must be presentation slides.
+anything. Omit `sample` for authored `base` state, or use `timeline`, `finite-complete`
+or explicit incoming/outgoing `transition` traces to sample native Effect/Motion/Presence
+clocks. `samples` supports up to six frames within the five-megapixel total limit.
+Video uses static posters; PNG samples do not prove live playback smoothness.
+Template IDs can be inspected explicitly; preview targets remain presentation slides.
 
-Notes, media bytes and filesystem paths remain excluded. Effect source and deck
+Media bytes and filesystem paths remain excluded from inspection. Notes are opt-in
+with `includeNotes:true` on a slide target. Effect source and deck
 stylesheet are opt-in: request `includeEffectSource:true` on element/selection detail
 or `includeStylesheet:true` on deck inspection. `includeMotion` and
 `includePresence` return semantic summaries rather than raw keyframes. Exact text is
@@ -125,7 +148,7 @@ in a batch and following operations then author that new slide before the single
 | `element.insert_frame` | Parent-local empty clipping Frame |
 | `element.insert_media` | Existing managed `assetId`, parent-local frame, optional name/stable ID |
 | `text.set` / `text.style` | Text content and local typography/autosize |
-| `text.style.apply/clear_overrides/create/update/rename/delete` | Native Text Style lifecycle |
+| `text.style.define/apply/clear_overrides/create/update/rename/delete` | Native Text Style lifecycle |
 | `elements.move` / `elements.frame.set` | Explicit parent-local geometry; full frame supports rotation/scale/flip/origin |
 | `elements.appearance.patch` | Fill, strokeColor, strokeWidth, opacity and radius |
 | `elements.align` / `elements.distribute` | Explicit scope plus native alignment/distribution axis |
@@ -149,19 +172,27 @@ keeps the exact frame, `"height"` changes only height, and `"both"` changes
 width/height after production DOM/font measurement while preserving x/y. Existing text
 preserves typography; resizing uses native text auto-size/Free-media rules.
 
-Only slide-owned content on visible unlocked layers is directly editable. Use
-`slide.make_independent` to detach inherited template state when necessary. Use
-`showme.inspect` with `target: { "type": "assets", ... }` to discover managed Library
+Target slide-owned content on visible unlocked layers directly. Inherited template
+content must be edited by explicitly targeting its template ID, or detached with
+`slide.make_independent`. Use `showme.inspect` with `target: { "type": "assets", ... }`
+to discover managed Library
 assets before `element.insert_media`; results contain asset IDs, names, media type and
-prepared dimensions, never filesystem paths or bytes. Importing a new filesystem file
-remains a human/host action. Guest-owned documents and raw transactions remain
-unavailable. One request permits at most 32 semantic steps, 128 targeted/affected
-elements (including descendants), the native 256-operation limit after expansion, and
-256 KiB JSON at the private bridge.
+prepared dimensions, never filesystem paths or bytes. Import new files through
+`showme.workspace` action `import-assets`: supply paths
+inside the user-selected root, or omit them for native pickers. Native raster/SVG/video
+preparation produces managed IDs and per-item preparation/recovery receipts. Imports
+are library side effects, not atomic document edits; retry only indicated items.
+Guest-owned document writes and raw transactions remain unavailable. Standard apply
+budget permits 128 semantic operations, eight page groups and 128 affected elements;
+explicit `budget:"expanded"` permits 256 operations, 32 groups and 512 affected elements.
+Both retain 256 native operations after expansion, 32 renderer validations and a
+256 KiB bridge/source budget. Semantic operation counts do not predict native cost.
 
 Success includes `changed`, `mutationId`, document/epoch/slide identity, previous and
 accepted revision, transaction ID, generated/changed/removed IDs, a compact change set,
-warnings and `replayed`. No-op success has no transaction and does not advance revision.
+warnings and `replayed`. Empty collection fields and empty `idMap` are omitted and
+mean empty; all nonempty identities, resource receipts and warnings remain available.
+No-op success has no transaction and does not advance revision.
 Receipts also include `createdSlideIds`, `updatedSlideIds`, `createdLayerIds`,
 `createdTextStyleIds`, duplication `idMap` and `deckChanged`.
 Preview the accepted revision after visual edits. Changing human selection/slide does
@@ -180,9 +211,11 @@ showme.preview
 ```
 
 For an existing Effect, pass exact document/epoch/revision/slide plus `elementId` and
-`effectInstanceId`. The result includes current source and the same authoring prompt
-used by Effect Studio. `showme.context` also reports MCP server version, Effect API
-version and capabilities so stale app/helper combinations are diagnosable.
+`effectInstanceId`. The compact result includes runtime environment/timing/parameter
+facts and an `operationTemplate`, containing the current source once. Full detail adds examples.
+These facts are shared with Effect Studio without repeating its human-facing prompt.
+Context reports server/contract versions and live runtime state; protocol discovery
+reports static capabilities, Effect API version, budgets and scoped CSS rules.
 
 ### Build a deck through MCP
 
@@ -244,8 +277,10 @@ lease, including structural changes to a shared parent; ShowMe will not overwrit
 - **EPOCH_CONFLICT / REVISION_CONFLICT:** read context and inspect again. No automatic
   rebase or retargeting occurs.
 - **UI_CONTEXT_CONFLICT:** selection changed; read context and deliberately retry.
-- **PAYLOAD_TOO_LARGE:** narrow the scope (at most 128 explicit element IDs), or use
-  a smaller preview. Full slide/deck payloads are not silently truncated or paginated.
+- **PAYLOAD_TOO_LARGE:** narrow the scope, split independent editing steps/page groups,
+  or reduce preview size/sample count. Native assembly errors report measured cost,
+  page/transaction scope and whether the count is complete or a lower bound. No batch
+  is automatically split or partially accepted; preserve cross-group dependencies.
 - **BUSY / PREVIEW_FAILED:** wait for existing work and retry deliberately.
 - **OUTCOME_UNKNOWN:** a workspace/delivery response was lost after dispatch. The
   operation may have completed. Read context, refresh the complete identity after
@@ -264,15 +299,42 @@ Crashes may leave descriptor files behind. The helper probes identity/authentica
 and ignores unreachable/stale descriptors. A PID alone is never trusted. It will not
 delete another instance's descriptor or automatically switch/open a document.
 
-## Authoring revision 1.6
+## Authoring and delivery in 1.10
 
-- Discover canonical operation families with `showme.authoring` (`kind: "operations"`, then `family` or `operation`, `detail: "compact"`). Use effect kinds with `detail: "full"` for creative-code ABI guidance. `kind: "preview"` and `kind: "delivery"` expose those complete contracts.
-- Preview accepts deterministic timeline/finite-complete/transition traces and up to six bounded samples. Omitted sampling still returns authored base state. Video stays a static poster; screenshots do not establish smoothness.
-- Motion/Presence inspection includes stable native IDs and opt-in track/keyframe details. `slideId` in apply remains request context; use `createdSlideIds` and `authoredSlideIds` for construction results. Replay's historical revision is distinct from `currentObservation`.
-- `showme.deliver` saves accepted state or exports native SMP using existing destinations/pickers and exact revision admission. No editor draft is flushed. Reconnect the host after rebuilding/restarting ShowMe to refresh the seven-tool catalog.
+Read `showme.authoring {kind:"protocol"}` for the apply envelope and static capabilities.
+Use `kind:"operations"` for the catalog, then select `operations:[names]` (1–32),
+`operation:name` or `family:name` for exact canonical schemas and relevant rules.
+Selectors are mutually exclusive. Compact is the default; full adds examples.
+The advertised apply operation bodies are intentionally open metadata, but complete
+canonical validation still rejects unknown types/fields and invalid nested values.
 
-The earlier base-only and six-tool descriptions above describe the initial release; the current normative contract is [TOOL_CONTRACT.md](TOOL_CONTRACT.md).
+Use `showme.measure_text` with exact document identity/revision and up to 64 text runs
+to check wrapping and font availability before construction. It uses production fonts
+and layout without inserting elements or creating history.
 
-## Current 1.7 authoring surface
+Template creation/editing, direct Text Styles, page-owned shared Effect resources and
+native slide recipes are discoverable through authoring. Edit a template once for its
+dependent slides. Cross-slide Effect sharing uses template elements; resource attachment
+otherwise remains page-local. Motion/Presence inspection returns stable native IDs.
+Apply's `slideId` is request context: use `authoredPages`, returned creation IDs and native
+`idMap` for subsequent edits. Replay's historical revision differs from `currentObservation`.
 
-Rebuild/restart and reconnect the host to discover all eight tools, including `showme.workspace`. Use authoring kind workspace for its request schema. Template operations, direct text styles, shared page resources and slide recipe slots are in canonical operation discovery. Context advertises standard/expanded budgets and scoped CSS support. Use a fresh context after create/open; it may initially report loading. Save before switching or closing. Raster import prepares native dimensions; video/SVG metadata may still need preparation.
+`showme.workspace` uses exact current documentId/epoch/expectedRevision and editing
+opt-in. Save before create/open/close. Refresh the complete context after create/open;
+the editor may initially report loading. Supplied open/import paths must resolve inside
+the user-selected ShowMe root; omitted paths use native pickers. Import prepares raster,
+SVG and video metadata/posters through the isolated native runtime. Inspect per-item
+receipts on cancellation, unavailable preparation or decoding failure. Imported assets
+may remain available even when preparation did not finish.
+
+`showme.deliver` saves accepted state, opens native Save As, or exports a portable SMP
+package using exact revision admission and native destination/overwrite policy. It does
+not flush editor drafts. SME/SMP preserve native animation; these tools do not provide
+static PDF/PPTX delivery. Lost workspace/delivery responses require the OUTCOME_UNKNOWN
+recovery described above, rather than automatic resend.
+
+The measured 1.10 metadata and structured-response reductions are byte measurements,
+not evidence of equivalent model-token savings. The connected host may already normalize
+schemas. Evaluate a freshly reconnected model before claiming a host-specific token or
+cache improvement. Exact compact operation schemas remain available; no field-list-only
+contract or extra schema detail level has been introduced.

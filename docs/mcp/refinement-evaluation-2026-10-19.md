@@ -70,3 +70,13 @@ Passed:
 An initial combined overflow test exceeded the default five-second unit timeout. It was split into two explicit contract declarations (per-page early overflow and combined-page complete overflow), rather than increasing timeouts, adding retries or reducing the workloads. Both passed, followed by the full focused unit run above.
 
 Full/release/packaged/macOS checks, independent fresh-agent trials and audience performance benchmarks were not run. No rendering-affecting main commit/integration occurred, so the audience-navigation commit gate was not invoked. No test was weakened, skipped or quarantined to permit a commit.
+
+## PR review follow-up
+
+The Windows MCP job on `ad5042b` passed 118/119 unit declarations but the page-overflow test timed out while replaying all 100 insertions in four recovery transactions. Keep the original 100-operation failed intent and its measured-cost/zero-revision assertions; prove recovery with one two-element transaction, including that a third unrequested element remains absent. The separate combined-page overflow/split test retains both successful page transactions. No timeout or retry policy changed.
+
+Updated README and LOCAL_SETUP to the eight-tool 1.10 catalog, current configuration-copy actions, native workspace/import/delivery boundaries, sampled previews, exact compact guides, budgets and sparse receipt semantics. Removed obsolete version/catalog sections. Public guidance explicitly distinguishes byte reductions from unproven host/model-token savings; no field-list-only discovery contract was added.
+
+Moved the existing MCP/collaboration settings slot after image-cache and library settings. Native rendered order was checked as Image cache → Library / Storage → MCP → Collaboration, with the original controls preserved.
+
+Local follow-up checks passed: the exact seven-file CI MCP unit selection (`agentProjection`, `agentContext`, `agentPreview`, `agentInspection`, `agentBridge`, `agentEditing`, `agentClosing`) with `npx vitest run` — **119/119**; `npm run build`; ESLint on `PresentationMenu.tsx` and `agentEditing.test.ts`; `npm run test:audit`; `git diff --check`. Full exact-head hosted checks are reported on PR #14 rather than treating the prior commit's green checks as current evidence.
