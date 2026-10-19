@@ -210,7 +210,7 @@ test("CSS glass resolves an animated shader before whole-element opacity", async
   await parity(page, "glass");
   await expect(page.locator("[data-css-backdrop]")).toHaveAttribute(
     "data-css-backdrop-backend",
-    "primitive",
+    "material",
   );
   await parity(page, "glass", 0.37, 0.99997, -20);
   await page
@@ -404,7 +404,7 @@ test("overlapping glass consumers reuse resolved material pixels without refadin
   );
   await expect(
     page.locator('[data-css-backdrop-backend="material"]'),
-  ).toHaveCount(1);
+  ).toHaveCount(2);
   assertPixelComposition(await pixels(page), full, backdrop, 0.5, {
     left: 60,
     top: 55,
