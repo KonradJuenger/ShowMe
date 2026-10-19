@@ -141,29 +141,10 @@ export function createCssBackdrop(
         );
       },
     );
-  const opacityBoundary = () => {
-    for (
-      let ancestor = node.parentElement;
-      ancestor && ancestor !== scene;
-      ancestor = ancestor.parentElement
-    ) {
-      const style = getComputedStyle(ancestor);
-      if (
-        Number(style.opacity) < 1 ||
-        style.willChange.split(",").some((part) => part.trim() === "opacity")
-      )
-        return true;
-    }
-    return false;
-  };
   let plannedMaterial = false;
   const prepareForeground = async (density: number) => {
     const rules = declarations();
-    const needed =
-      !!rules &&
-      (opacityBoundary() ||
-        needsMaterial() ||
-        !!node.closest('[data-presentation-absent="true"]'));
+    const needed = !!rules && needsMaterial();
     if (needed !== plannedMaterial) {
       plannedMaterial = needed;
       invalidate();
@@ -186,6 +167,7 @@ export function createCssBackdrop(
               );
               clone.style.setProperty("backdrop-filter", "none", "important");
               clone.style.setProperty("opacity", "1", "important");
+              clone.style.setProperty("box-sizing", "border-box", "important");
               clone.style.setProperty(
                 "width",
                 `${content.element.frame.width}px`,
@@ -330,7 +312,18 @@ export function createCssBackdrop(
         return;
       }
       // Keep native CSS on the fast path when no ancestor blocks its backdrop.
-      const blocked = opacityBoundary();
+      let blocked = false;
+      for (
+        let ancestor = node.parentElement;
+        ancestor && ancestor !== scene;
+        ancestor = ancestor.parentElement
+      ) {
+        const style = getComputedStyle(ancestor);
+        const boundary =
+          Number(style.opacity) < 1 ||
+          style.willChange.split(",").some((part) => part.trim() === "opacity");
+        blocked ||= boundary;
+      }
       const state = content?.scene?.();
       const authored =
         content &&
@@ -358,8 +351,8 @@ export function createCssBackdrop(
       const descendants = content ? walkElements(content.element.children) : [];
       const style = getComputedStyle(node),
         clipStyle = node.parentElement && getComputedStyle(node.parentElement);
-      const resolveMaterial = blocked || needsMaterial();
-      const materialWorld = resolveMaterial
+      const laterNeedsPixels = needsMaterial();
+      const materialWorld = laterNeedsPixels
         ? elementWorldTransform(node.parentElement!, scene)
         : undefined;
       const material = !!(
@@ -379,7 +372,7 @@ export function createCssBackdrop(
             element.content?.type !== "video",
         ) &&
         !dynamicChildren &&
-        resolveMaterial &&
+        laterNeedsPixels &&
         /^\d+(?:\.\d+)?px$/.test(style.borderRadius) &&
         clipStyle?.borderRadius === style.borderRadius &&
         style.filter === "none" &&
@@ -509,7 +502,7 @@ export function createCssBackdrop(
         const sigma = /^blur\(([\d.]+)px\)/.exec(filter);
         const filterDensity =
           sigma && Number(sigma[1]) >= 8
-            ? Math.min(density, Math.max(0.25, 8 / Number(sigma[1])))
+            ? Math.min(density, Math.max(0.25, 4 / Number(sigma[1])))
             : density;
         const filteredContext = resizeRasterCanvas(
           filtered,
@@ -657,7 +650,7 @@ export function createCssBackdrop(
       const width = node.offsetWidth + padding * 2,
         height = node.offsetHeight + padding * 2;
       // A strongly blurred, fully clipped backdrop has no visible sharp pixels.
-      // Sample its input at eight pixels per blur sigma, then let Chromium apply
+      // Sample its input at four pixels per blur sigma, then let Chromium apply
       // the authored filter in logical CSS units. Text/content stays native at
       // output resolution; only this low-pass material input is reduced.
       const blur = /^blur\(([\d.]+)px\)/.exec(filter);
@@ -668,7 +661,7 @@ export function createCssBackdrop(
         clip?.overflow === "hidden" &&
         clip.borderRadius === getComputedStyle(node).borderRadius;
       const inputDensity = reduced
-        ? Math.min(density, Math.max(0.25, 8 / Number(blur[1])))
+        ? Math.min(density, Math.max(0.25, 4 / Number(blur[1])))
         : density;
       await raster.update(
         Math.max(1, Math.ceil(width * inputDensity)),
