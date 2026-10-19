@@ -296,3 +296,37 @@ and three native test-mode declarations passed. Production build/TypeScript,
 changed-file ESLint, registry stats and audit passed. Full/release suites and macOS
 were not run. This benchmark-history addition is documentation-only and exempt
 from the rendering commit gate.
+
+### Hidden preparation experiment — 2026-10-19
+
+Tested `cbdc187` on the same slide-4 native audience workload. Presence kept the
+cards mounted and hidden while renderer-local foregrounds and native backdrop
+captures were prepared before the audience readiness acknowledgement. Prepared
+foregrounds were retained until slide teardown. A focused test verified no visible
+change while hidden and capture reuse at entrance; all 24 glass/mixed-effects/
+audience-navigation declarations, build/TypeScript, changed-file lint, stats and
+audit passed.
+
+The clean-run performance result did not justify keeping this implementation:
+
+| Audience entry | Selected `1a6d240` entrance p95 / max (ms) | Hidden preparation `cbdc187` p95 / max (ms) |
+| --- | ---: | ---: |
+| Cold | 59.9 / 96.7 | 66.5 / 166.8 |
+| Repeat | 40.1 / 45.7 | 43.5 / 70.0 |
+| New window + navigation | 39.0 / 66.5 | 46.6 / 73.3 |
+
+Cold playback started at audience-document clock 1102.7 ms, versus 556.7 ms in the
+selected run. This includes general startup/readiness work and is not an isolated
+prewarm timer. The extra preparation delayed playback without removing the
+per-frame moving-backdrop cost. Each cell is one observation; these are not
+statistical estimates. All assets/effects loaded and steady samples had no gaps
+above 33.34 ms. Raw evidence is retained in `test-results-glass-hidden-warmup` and
+`.benchmark-data/animation/history.jsonl`.
+
+The experiment was reverted in `c35d187`; the production source and test tree
+exactly match the previously verified `47f416b` result. The selected production
+build was restored. The cards already exist in the DOM; simply making a card
+transparent or hidden does not guarantee Chromium will paint it in advance.
+This experiment establishes that this particular capture-preparation strategy
+did not improve the supplied workload, not that every form of GPU prewarming is
+ineffective. This history-only addition is exempt from the rendering commit gate.
