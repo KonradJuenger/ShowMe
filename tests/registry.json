@@ -976,7 +976,7 @@
     "runtime": "browser",
     "created": "2026-10-19",
     "lastReviewed": "2026-10-19",
-    "reason": "Pixel composition resolves CSS glass against animated shaders before element and group fades, preserving clipping, overlapping children, movement, hidden prewarm without revealing cards, capture reuse on entrance, cached current styles and sharp native text reused by overlapping glass consumers; the current document remains unchanged."
+    "reason": "Pixel composition resolves CSS glass against animated shaders before element and group fades, preserving clipping, overlapping children, movement, cached current styles and sharp native text reused by overlapping glass consumers; the current document remains unchanged."
   },
   {
     "id": "persistence-native-test-mode",
