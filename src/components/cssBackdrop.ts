@@ -142,9 +142,9 @@ export function createCssBackdrop(
       },
     );
   let plannedMaterial = false;
-  const prepareForeground = async (density: number) => {
+  const prepareForeground = async (density: number, hidden = false) => {
     const rules = declarations();
-    const needed = !!rules && needsMaterial();
+    const needed = !!rules && (hidden || needsMaterial());
     if (needed !== plannedMaterial) {
       plannedMaterial = needed;
       invalidate();
@@ -204,12 +204,12 @@ export function createCssBackdrop(
     });
     return preparingForeground;
   };
-  const stopComposite = () => {
+  const stopComposite = (release = false) => {
     cssBackdropOutputs.delete(node);
-    if (foreground) {
+    if (composite) node.style.opacity = foregroundOpacity;
+    if (release && foreground) {
       foreground.dispose();
       foreground = undefined;
-      node.style.opacity = foregroundOpacity;
     }
     if (composite) {
       replay.style.visibility = "hidden";
@@ -293,15 +293,44 @@ export function createCssBackdrop(
     }
   };
   scene.addEventListener("showme-effect-output", changed);
-  return {
+  let warmup: Promise<void> | undefined;
+  let warmedDensity = 0;
+  const controller = {
     inputs,
-    prepare: prepareForeground,
+    async prepare(density: number): Promise<void> {
+      const hidden = !!node.closest('[data-presentation-absent="true"]');
+      await prepareForeground(density, hidden);
+      if (
+        disposed ||
+        !hidden ||
+        !declarations() ||
+        (warmedDensity === density && raster)
+      )
+        return;
+      warmup ??= controller
+        .update(density, true)
+        .then(() => {
+          if (!disposed) warmedDensity = density;
+        })
+        .finally(() => {
+          warmup = undefined;
+        });
+      await warmup;
+    },
     hide() {
       stopComposite();
       replay.style.visibility = "hidden";
     },
-    async update(density: number) {
-      const filter = getComputedStyle(node).backdropFilter;
+    async update(density: number, warming = false): Promise<void> {
+      // A not-yet-started CSS stage is disabled in the live DOM. Read only
+      // eligible constant declarations for its hidden renderer-local warmup.
+      const rules = warming ? declarations() : null;
+      const filter = warming
+        ? (rules?.find(
+            ([key]) =>
+              key === "backdrop-filter" || key === "-webkit-backdrop-filter",
+          )?.[1] ?? "none")
+        : getComputedStyle(node).backdropFilter;
       padding = [...filter.matchAll(/blur\(([\d.]+)px\)/g)].reduce(
         (sum, match) => sum + Math.ceil(Number(match[1]) * 3),
         0,
@@ -312,7 +341,7 @@ export function createCssBackdrop(
         return;
       }
       // Keep native CSS on the fast path when no ancestor blocks its backdrop.
-      let blocked = false;
+      let blocked = warming;
       for (
         let ancestor = node.parentElement;
         ancestor && ancestor !== scene;
@@ -355,35 +384,37 @@ export function createCssBackdrop(
       const materialWorld = laterNeedsPixels
         ? elementWorldTransform(node.parentElement!, scene)
         : undefined;
-      const material = !!(
-        state &&
-        content &&
-        definition?.kind === "css" &&
-        authored?.placement === "content" &&
-        stableStyleKey() &&
-        declarations() &&
-        content.element.clipChildren &&
-        !content.element.appearance.strokeWidth &&
-        content.element.effects?.filter((effect) => effect.enabled).length ===
-          1 &&
-        descendants.every(
-          (element) =>
-            !element.effects?.some((effect) => effect.enabled) &&
-            element.content?.type !== "video",
-        ) &&
-        !dynamicChildren &&
-        laterNeedsPixels &&
-        /^\d+(?:\.\d+)?px$/.test(style.borderRadius) &&
-        clipStyle?.borderRadius === style.borderRadius &&
-        style.filter === "none" &&
-        style.mixBlendMode === "normal" &&
-        style.maskImage === "none" &&
-        !/url\(|drop-shadow\(/.test(filter) &&
-        materialWorld &&
-        Math.abs(Math.hypot(materialWorld.a, materialWorld.b) - 1) < 0.001 &&
-        Math.abs(Math.hypot(materialWorld.c, materialWorld.d) - 1) < 0.001 &&
-        (composite || style.opacity === "1")
-      );
+      const material =
+        !warming &&
+        !!(
+          state &&
+          content &&
+          definition?.kind === "css" &&
+          authored?.placement === "content" &&
+          stableStyleKey() &&
+          declarations() &&
+          content.element.clipChildren &&
+          !content.element.appearance.strokeWidth &&
+          content.element.effects?.filter((effect) => effect.enabled).length ===
+            1 &&
+          descendants.every(
+            (element) =>
+              !element.effects?.some((effect) => effect.enabled) &&
+              element.content?.type !== "video",
+          ) &&
+          !dynamicChildren &&
+          laterNeedsPixels &&
+          /^\d+(?:\.\d+)?px$/.test(style.borderRadius) &&
+          clipStyle?.borderRadius === style.borderRadius &&
+          style.filter === "none" &&
+          style.mixBlendMode === "normal" &&
+          style.maskImage === "none" &&
+          !/url\(|drop-shadow\(/.test(filter) &&
+          materialWorld &&
+          Math.abs(Math.hypot(materialWorld.a, materialWorld.b) - 1) < 0.001 &&
+          Math.abs(Math.hypot(materialWorld.c, materialWorld.d) - 1) < 0.001 &&
+          (composite || style.opacity === "1")
+        );
       if (!material) stopComposite();
       if (!blocked && !material) {
         replay.style.visibility = "hidden";
@@ -443,6 +474,7 @@ export function createCssBackdrop(
           );
         });
       const simple =
+        !warming &&
         state &&
         content &&
         target &&
@@ -616,7 +648,7 @@ export function createCssBackdrop(
         publishedRevision = -1;
       }
       if (!raster) {
-        node.before(replay);
+        if (!warming) node.before(replay);
         raster = createDomRasterSource(
           () => scene,
           (candidate) =>
@@ -647,19 +679,30 @@ export function createCssBackdrop(
         );
       }
       if (disposed) return;
-      const width = node.offsetWidth + padding * 2,
-        height = node.offsetHeight + padding * 2;
+      const width =
+          (warming
+            ? (content?.element.frame.width ?? node.offsetWidth)
+            : node.offsetWidth) +
+          padding * 2,
+        height =
+          (warming
+            ? (content?.element.frame.height ?? node.offsetHeight)
+            : node.offsetHeight) +
+          padding * 2;
       // A strongly blurred, fully clipped backdrop has no visible sharp pixels.
       // Sample its input at four pixels per blur sigma, then let Chromium apply
       // the authored filter in logical CSS units. Text/content stays native at
       // output resolution; only this low-pass material input is reduced.
       const blur = /^blur\(([\d.]+)px\)/.exec(filter);
       const clip = node.parentElement && getComputedStyle(node.parentElement);
+      const radius = warming
+        ? rules?.find(([key]) => key === "border-radius")?.[1]
+        : getComputedStyle(node).borderRadius;
       const reduced =
         blur &&
         Number(blur[1]) >= 8 &&
         clip?.overflow === "hidden" &&
-        clip.borderRadius === getComputedStyle(node).borderRadius;
+        clip.borderRadius === radius;
       const inputDensity = reduced
         ? Math.min(density, Math.max(0.25, 4 / Number(blur[1])))
         : density;
@@ -669,7 +712,9 @@ export function createCssBackdrop(
         width,
         height,
       );
-      if (disposed) return;
+      // Warmup allocates and paints the native mirror, but never publishes it
+      // into the hidden card or changes Presence/timing in the live document.
+      if (disposed || warming) return;
       const inverse = elementWorldTransform(
         node.parentElement!,
         scene,
@@ -697,6 +742,7 @@ export function createCssBackdrop(
         context.drawImage(raster.canvas, 0, 0);
         publishedRevision = raster.revision;
       }
+      if (!replay.parentElement) node.before(replay);
       replay.style.width = `${width}px`;
       replay.style.height = `${height}px`;
       // A capture can complete after Motion has advanced. Keep its pixels in
@@ -709,7 +755,7 @@ export function createCssBackdrop(
     },
     dispose() {
       disposed = true;
-      stopComposite();
+      stopComposite(true);
       observer.disconnect();
       scene.removeEventListener("showme-effect-output", changed);
       raster?.dispose();
@@ -719,4 +765,5 @@ export function createCssBackdrop(
       filtered.width = filtered.height = 1;
     },
   };
+  return controller;
 }

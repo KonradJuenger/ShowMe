@@ -6,6 +6,7 @@ import type { mountMixedEffectsHarness } from "../../helpers/mixedEffectsHarness
 type GlassWindow = Window & {
   glass: Awaited<ReturnType<typeof mountMixedEffectsHarness>>;
   glassModel: PresentationDocument;
+  glassEntrance: (time: number) => Promise<void>;
 };
 
 async function mount(
@@ -245,12 +246,13 @@ test("CSS glass retains resolved pixels and overlapping children under parent-gr
   ).toBe(true);
 });
 
-test("production Move In presence keeps glass resolved while its transform and opacity are intermediate", async ({
+test("production Move In prepares hidden glass without revealing it and reuses its capture on entrance", async ({
   page,
 }) => {
-  await mount(page, false);
-  await page.evaluate(async () => {
+  await mount(page, false, true);
+  const before = await page.evaluate(async () => {
     const w = window as unknown as GlassWindow;
+    const initial = w.glass.inspect().diagnostics;
     const slide = w.glassModel.slides[w.glassModel.deck.slideIds[0]];
     slide.motion = {
       stages: [
@@ -292,15 +294,43 @@ test("production Move In presence keeps glass resolved while its transform and o
       /* @vite-ignore */ path
     );
     const runtime = createMotionRuntime(w.glass.host, slide, 0);
-    runtime.sync({
-      stageId: "entrance",
-      stageIndex: 0,
-      time: 480,
-      startedAt: Date.now(),
-      running: false,
-    });
-    await w.glass.advance(0.48);
+    const sync = (time: number) =>
+      runtime.sync({
+        stageId: "entrance",
+        stageIndex: 0,
+        time,
+        startedAt: Date.now(),
+        running: false,
+      });
+    sync(0);
+    w.glassEntrance = async (time) => {
+      sync(time);
+      await w.glass.advance(time / 1000);
+    };
+    return initial;
   });
+  const hidden = await pixels(page);
+  await page.evaluate(() =>
+    (window as unknown as GlassWindow).glass.advance(0),
+  );
+  expect(await pixels(page)).toEqual(hidden);
+  const warmed = await page.evaluate(
+    () => (window as unknown as GlassWindow).glass.inspect().diagnostics,
+  );
+  expect(warmed.captures).toBeGreaterThan(before.captures);
+  await expect(page.locator('[data-element-id="glass"]')).toHaveAttribute(
+    "data-presentation-absent",
+    "true",
+  );
+  await page.evaluate(() =>
+    (window as unknown as GlassWindow).glassEntrance(480),
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        (window as unknown as GlassWindow).glass.inspect().diagnostics.clones,
+    ),
+  ).toBe(warmed.clones);
   await expect(page.locator("[data-css-backdrop]")).toBeVisible();
   const card = page.locator('[data-element-id="glass"]');
   const alpha = await card.evaluate((node: HTMLElement) =>
