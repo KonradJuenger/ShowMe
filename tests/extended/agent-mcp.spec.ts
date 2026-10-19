@@ -26,8 +26,8 @@ import { bridgeRead, ShowMeClient } from "../../mcp/showmeClient";
 import type { BridgeDescriptor } from "../../electron/agentBridge";
 import type { AgentContext } from "../../src/core/agentContext";
 import { DocumentStorage } from "../../electron/storage";
-import { z } from "zod/v4";
-import { agentApplyRequestSchema } from "../../src/core/agentMutation";
+import { advertisedApplySchema } from "../../mcp/applyTransport";
+import { AGENT_CONTRACT_VERSION } from "../../src/core/agentProtocol";
 import { SHOWME_MCP_SERVER_VERSION } from "../../src/core/agentRead";
 
 const helperPath = () =>
@@ -120,17 +120,27 @@ async function context(client: Client): Promise<AgentContext> {
 }
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires fixture destructuring to access testInfo.
-test("raw SDK tools list retains canonical operation schemas", async ({}, testInfo) => {
+test("raw SDK tools list advertises compact envelopes with strict canonical admission", async ({}, testInfo) => {
   const f = await fixture();
   const { client } = await connect(f.user, f.folder);
   try {
     const catalog = await client.listTools();
     const raw = catalog.tools.find((tool) => tool.name === "showme.apply")!;
     expect(raw.inputSchema).toEqual({
-      ...z.toJSONSchema(agentApplyRequestSchema),
+      ...advertisedApplySchema(),
       type: "object",
     });
     const bytes = Buffer.byteLength(JSON.stringify(raw.inputSchema));
+    expect(bytes).toBeLessThanOrEqual(6144);
+    const envelope = { documentId: "document", epoch: "epoch", expectedRevision: 0, mutationId: "invalid", slideId: "slide" };
+    for (const operations of [
+      [{ type: "no.such_operation" }],
+      [{ type: "deck.rename", name: "Name", unexpected: true }],
+      [{ type: "element.insert_text", parentId: "layer", text: "Invalid", frame: { x: 0, y: 0, width: -1, height: 80 } }],
+    ]) {
+      const rejected = await client.callTool({ name: "showme.apply", arguments: { ...envelope, operations } });
+      expect(rejected.structuredContent).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", details: { issues: expect.any(Array) } } });
+    }
     await writeFile(
       testInfo.outputPath("tools-list.json"),
       JSON.stringify(catalog, null, 2),
@@ -1529,16 +1539,10 @@ test("MCP creative authoring validates live GLSL CSS text-JS and native Effect M
       capabilities?: Record<string, boolean>;
     };
     expect(initial.serverVersion).toBe(SHOWME_MCP_SERVER_VERSION);
-    expect(initial.effectApiVersion).toBe(1);
-    expect(initial.capabilities).toMatchObject({
-      shaderEffects: true,
-      cssEffects: true,
-      textJsEffects: true,
-      deckCss: true,
-      motion: true,
-      presence: true,
-      preview: true,
-    });
+    expect(initial).not.toHaveProperty("effectApiVersion");
+    expect(initial).not.toHaveProperty("capabilities");
+    expect(initial).toHaveProperty("contractVersion", AGENT_CONTRACT_VERSION);
+
 
     const guide = await client.callTool({
       name: "showme.authoring",
@@ -1557,6 +1561,28 @@ test("MCP creative authoring validates live GLSL CSS text-JS and native Effect M
     expect(JSON.stringify(guide.structuredContent)).toContain(
       "#version 300 es",
     );
+
+    const discovery = await Promise.all([
+      { kind: "protocol" },
+      { kind: "operations", operations: ["background.shader.create", "effect.apply_code", "presence.add", "element.insert_text", "element.insert_frame"] },
+      { kind: "css-effect" },
+    ].map((arguments_) => client!.callTool({ name: "showme.authoring", arguments: arguments_ })));
+    for (const result of [guide, ...discovery]) {
+      expect(result.isError, JSON.stringify(result.structuredContent)).toBe(false);
+      const text = result.content.find((item) => item.type === "text");
+      expect(text?.type === "text" && JSON.parse(text.text)).toEqual(result.structuredContent);
+    }
+    expect(discovery[0].structuredContent).toMatchObject({ ok: true, data: { contractVersion: AGENT_CONTRACT_VERSION, limits: { nativeOperations: 256 } } });
+    expect((discovery[0].structuredContent as any).data.capabilities).toMatchObject({ effectApiVersion: 1, features: { shaderEffects: true, cssEffects: true, presence: true }, runtime: { capacity: 8 } });
+    expect(initial).toHaveProperty("services.agentRuntime.state");
+    expect(initial).toHaveProperty("services.agentRuntime.pending");
+    const contracts = (discovery[1].structuredContent as any).data;
+    expect(contracts.operations).toHaveLength(5);
+    expect(contracts).not.toHaveProperty("request");
+    expect(contracts.rules.join(" ")).toContain("slide-end stop requires Exit None");
+    expect((discovery[2].structuredContent as any).data.runtime.environment).toContain("nested @supports");
+    const invalidDiscovery = await client.callTool({ name: "showme.authoring", arguments: { kind: "operations", operations: ["no.such_operation"] } });
+    expect(invalidDiscovery.structuredContent).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", details: { issues: [{ path: "operations.0" }] } } });
 
     const slideId = initial.editor!.page.id;
     const slide = await client.callTool({
@@ -1753,8 +1779,8 @@ void main() {
       ok: true,
       data: {
         editing: true,
-        contract: { source: shader },
         operationTemplate: {
+          source: shader,
           type: "effect.apply_code",
           elementId: backgroundId,
           existingInstanceId: shaderEffect.id,

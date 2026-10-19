@@ -1,5 +1,15 @@
 import { validateApplyInput } from "../../../mcp/inputValidation";
+import {
+  advertisedApplySchema,
+  compactApplyReceipt,
+} from "../../../mcp/applyTransport";
 import { expect, it } from "vitest";
+import { z } from "zod/v4";
+import { blankEffect } from "../../../src/core/effectAuthoring";
+import discoveryBaseline from "../../../docs/mcp/discovery-size-baseline-2026-10-18.json";
+import { agentPreviewRequestSchema } from "../../../src/core/agentPreview";
+import { agentWorkspaceRequestSchema } from "../../../src/core/agentWorkspace";
+import { agentDeliveryRequestSchema } from "../../../src/core/agentDelivery";
 import { AgentEditingService } from "../../../electron/agentEditing";
 import {
   agentApplyRequestSchema,
@@ -32,7 +42,10 @@ import {
   agentOperationFamilies,
   agentOperationSchema,
 } from "../../../src/core/agentOperationContracts";
-import { agentAuthoringRequestSchema, buildAgentAuthoringGuide } from "../../../src/core/agentAuthoring";
+import {
+  agentAuthoringRequestSchema,
+  buildAgentAuthoringGuide,
+} from "../../../src/core/agentAuthoring";
 
 it("canonical discovery exports every operation and validated examples in bounded families", () => {
   const all = agentOperationContracts();
@@ -42,7 +55,9 @@ it("canonical discovery exports every operation and validated examples in bounde
   expect(all.operations.map((item) => item.operation)).toEqual(variants);
   const discovered: string[] = [];
   for (const family of agentOperationFamilies) {
-    const contract = agentOperationContracts(family, undefined, { detail: "full" });
+    const contract = agentOperationContracts(family, undefined, {
+      detail: "full",
+    });
     for (const item of contract.operations) {
       expect(item).toHaveProperty("schema.required");
       expect(item).toHaveProperty("example");
@@ -63,7 +78,9 @@ it("canonical discovery exports every operation and validated examples in bounde
   });
   expect(compact).not.toHaveProperty("authoringPrompt");
   expect(compact).toHaveProperty("runtime.slideContext");
-  expect(buildAgentAuthoringGuide("background-shader", { detail: "full" })).toHaveProperty("examples.slideChange");
+  expect(
+    buildAgentAuthoringGuide("background-shader", { detail: "full" }),
+  ).toHaveProperty("examples.slideChange");
   expect(
     buildAgentAuthoringGuide("preview", { detail: "compact" }),
   ).toMatchObject({
@@ -83,29 +100,288 @@ it("canonical discovery exports every operation and validated examples in bounde
 });
 
 it("batched compact discovery preserves exact admission schemas and relevant semantic rules without repeating the protocol", () => {
-  const names = ["presence.add", "element.insert_text", "slide.create", "presence.add"];
-  const batch = agentOperationContracts(undefined, undefined, { operations: names });
+  const names = [
+    "presence.add",
+    "element.insert_text",
+    "slide.create",
+    "presence.add",
+  ];
+  const batch = agentOperationContracts(undefined, undefined, {
+    operations: names,
+  });
   expect(batch.operations.map((item) => item.operation)).toEqual(
-    agentOperationSchema.options.map((variant) => variant.shape.type.value).filter((name) => names.includes(name)),
+    agentOperationSchema.options
+      .map((variant) => variant.shape.type.value)
+      .filter((name) => names.includes(name)),
   );
   expect(batch).not.toHaveProperty("request");
   expect(batch).not.toHaveProperty("limits");
   expect(batch).not.toHaveProperty("result");
   expect(batch.operations.every((item) => !("example" in item))).toBe(true);
   for (const item of batch.operations) {
-    const variant = agentOperationSchema.options.find((v) => v.shape.type.value === item.operation)!;
+    const variant = agentOperationSchema.options.find(
+      (v) => v.shape.type.value === item.operation,
+    )!;
     expect(item).toHaveProperty("schema", z.toJSONSchema(variant));
   }
-  const rules = "rules" in batch ? batch.rules!.join(" ") : "";
-  expect(rules).toContain("parent-local");
-  expect(rules).toContain("slide-end stop requires Exit None");
-  expect(new Set(batch.rules).size).toBe(batch.rules!.length);
-  expect(agentOperationContracts(undefined, undefined, { operations: [...names].reverse(), detail: "full" }).schemaDigest).toBe(batch.schemaDigest);
-  expect(agentOperationContracts(undefined, "presence.add")).toEqual(agentOperationContracts(undefined, undefined, { operations: ["presence.add"] }));
+  const rules = "rules" in batch ? batch.rules : [];
+  expect(rules.join(" ")).toContain("parent-local");
+  expect(rules.join(" ")).toContain("slide-end stop requires Exit None");
+  expect(new Set(rules).size).toBe(rules.length);
+  expect(
+    agentOperationContracts(undefined, undefined, {
+      operations: [...names].reverse(),
+      detail: "full",
+    }).schemaDigest,
+  ).toBe(batch.schemaDigest);
+  expect(agentOperationContracts(undefined, "presence.add")).toEqual(
+    agentOperationContracts(undefined, undefined, {
+      operations: ["presence.add"],
+    }),
+  );
   const protocol = buildAgentAuthoringGuide("protocol");
-  expect(protocol).toHaveProperty("request.required", expect.arrayContaining(["epoch", "expectedRevision", "mutationId"]));
+  expect(protocol).toHaveProperty(
+    "request.required",
+    expect.arrayContaining(["epoch", "expectedRevision", "mutationId"]),
+  );
   expect(protocol).toHaveProperty("limits.nativeOperations", 256);
-  expect(agentOperationContracts().operations.every((item) => !("schema" in item))).toBe(true);
+  expect(
+    agentOperationContracts().operations.every((item) => !("schema" in item)),
+  ).toBe(true);
+});
+
+it("glass-deck discovery stays within four calls and forty percent of its measured baseline payload", () => {
+  const guides = [
+    buildAgentAuthoringGuide("protocol"),
+    buildAgentAuthoringGuide("operations", {
+      operations: discoveryBaseline.operations,
+    }),
+    buildAgentAuthoringGuide("background-shader"),
+    buildAgentAuthoringGuide("css-effect"),
+  ];
+  const bytes = guides.reduce(
+    (total, data) =>
+      total +
+      new TextEncoder().encode(JSON.stringify({ ok: true, data })).length,
+    0,
+  );
+  expect(guides).toHaveLength(4);
+  expect(bytes).toBeLessThan(discoveryBaseline.structuredBytes * 0.4);
+});
+
+it("advertised apply metadata opens only operation bodies while canonical admission retains every constraint", () => {
+  const canonical = z.toJSONSchema(agentApplyRequestSchema);
+  const advertised = advertisedApplySchema();
+  const forms = advertised.anyOf as Array<any>;
+  expect(
+    new TextEncoder().encode(JSON.stringify(advertised)).length,
+  ).toBeLessThanOrEqual(6144);
+  const bodies = [
+    forms[0].properties.operations,
+    forms[1].properties.pages.items.properties.operations,
+  ];
+  for (const body of bodies) {
+    expect(body.items).toMatchObject({
+      type: "object",
+      required: ["type"],
+      additionalProperties: true,
+    });
+    body.items = { placeholder: true };
+  }
+  const original = canonical.anyOf as Array<any>;
+  original[0].properties.operations.items = { placeholder: true };
+  original[1].properties.pages.items.properties.operations.items = {
+    placeholder: true,
+  };
+  expect(advertised).toEqual(canonical);
+  const f = fixture();
+  const valid = f.request([
+    {
+      type: "element.insert_text",
+      parentId: f.slide.nodes[0].id,
+      frame: { x: 0, y: 0, width: 400, height: 80 },
+      text: "Preserve nested fields",
+      typography: { fontSize: 32 },
+    },
+  ]);
+  expect(validateApplyInput(valid).success).toBe(true);
+  for (const input of [
+    {
+      ...valid,
+      operations: [
+        { ...(valid.operations[0] as Record<string, unknown>), unknown: true },
+      ],
+    },
+    { ...valid, operations: [{ type: "no.such_operation" }] },
+    {
+      ...valid,
+      operations: [
+        {
+          ...(valid.operations[0] as Record<string, unknown>),
+          frame: { x: 0, y: 0, width: -1, height: 80 },
+        },
+      ],
+    },
+    { ...valid, slideId: undefined },
+    { ...valid, unknown: true },
+    {
+      ...valid,
+      pages: [{ slideId: f.slide.id, operations: valid.operations }],
+    },
+    {
+      ...valid,
+      operations: undefined,
+      pages: [{ pageId: f.slide.id, operations: valid.operations }],
+    },
+    {
+      ...valid,
+      operations: Array(129).fill({ type: "deck.rename", name: "Too many" }),
+    },
+  ])
+    expect(validateApplyInput(input).success).toBe(false);
+});
+
+it("sparse MCP receipts preserve native replay concurrency identities and meaningful nested empty resource users", async () => {
+  const f = fixture();
+  const input = f.request(
+    [{ type: "deck.rename", name: "Compact receipt" }],
+    "compact-replay",
+  );
+  const accepted = await f.service.apply(input);
+  const projected = compactApplyReceipt(accepted);
+  expect(projected).toMatchObject({
+    ok: true,
+    documentId: f.model.documentId,
+    epoch: "epoch",
+    revision: 1,
+    changed: true,
+    replayed: false,
+  });
+  expect(projected).not.toHaveProperty("createdIds");
+  expect(accepted.createdIds).toEqual([]);
+  expect(JSON.stringify(projected).length).toBeLessThan(
+    JSON.stringify(accepted).length,
+  );
+  await f.service.apply(
+    f.request([{ type: "deck.rename", name: "Later edit" }]),
+  );
+  const replay = compactApplyReceipt(await f.service.apply(input));
+  expect(replay).toMatchObject({
+    revision: 1,
+    replayed: true,
+    currentObservation: { revision: 2, epoch: "epoch" },
+  });
+  const resource = {
+    pageId: f.slide.id,
+    resourceId: "removed",
+    kind: "removed",
+    elementIds: [],
+  };
+  const rich = compactApplyReceipt({
+    ...accepted,
+    createdIds: ["title"],
+    idMap: { old: "title" },
+    resourceChanges: [resource],
+    warnings: [{ code: "NOTE", message: "Keep me" }],
+    pageResults: [
+      { slideId: f.slide.id, createdIds: ["title"], createdStageIds: [] },
+    ],
+  });
+  expect(rich).toMatchObject({
+    createdIds: ["title"],
+    idMap: { old: "title" },
+    resourceChanges: [resource],
+    warnings: [{ code: "NOTE" }],
+    pageResults: [{ createdIds: ["title"] }],
+  });
+  expect((rich.pageResults as any[])[0]).not.toHaveProperty("createdStageIds");
+  const noop = await f.service.apply(
+    f.request([{ type: "deck.rename", name: "Later edit" }]),
+  );
+  expect(compactApplyReceipt(noop)).toMatchObject({
+    changed: false,
+    transactionId: null,
+  });
+});
+
+it("native assembly overflow reports measured costs and accepts independent smaller transactions without partial changes", async () => {
+  const f = fixture();
+  const operations = Array.from({ length: 100 }, (_, i) => ({
+    type: "element.insert_text" as const,
+    id: `cost-${i}`,
+    parentId: f.slide.nodes[0].id,
+    text: `Text ${i}`,
+    frame: { x: 10, y: 10, width: 200, height: 60 },
+  }));
+  const result = await f.service.apply(f.request(operations));
+  expect(result).toMatchObject({
+    ok: false,
+    error: {
+      code: "PAYLOAD_TOO_LARGE",
+      details: {
+        budget: "nativeOperations",
+        limit: 256,
+        nativeOperations: expect.any(Number),
+        count: "lower-bound",
+        semanticOperations: 100,
+      },
+    },
+  });
+  expect(result.error.details.nativeOperations).toBeGreaterThan(256);
+  expect(f.runtime.currentRevision(f.model.documentId)).toBe(0);
+  expect(findElement((await f.projection()).slide, "cost-0")).toBeNull();
+  for (let i = 0; i < 100; i += 25)
+    expect(
+      await f.service.apply(f.request(operations.slice(i, i + 25))),
+    ).toMatchObject({ ok: true });
+  expect(findElement((await f.projection()).slide, "cost-99")).not.toBeNull();
+});
+
+it("combined page overflow reports complete native counts and preserves atomicity before a deliberate split", async () => {
+  const g = fixture();
+  const pages = ["cost-page-a", "cost-page-b"].map((slideId, index) => ({
+    slideId,
+    operations: [
+      {
+        type: "slide.create",
+        id: slideId,
+        afterId: index ? "cost-page-a" : g.slide.id,
+        name: slideId,
+      },
+      { type: "layer.create", id: slideId + "-layer" },
+      ...Array.from({ length: 50 }, (_, i) => ({
+        type: "element.insert_text",
+        id: slideId + "-text-" + i,
+        parentId: slideId + "-layer",
+        text: "Text",
+        frame: { x: 0, y: 0, width: 200, height: 60 },
+      })),
+    ],
+  }));
+  const pageRequest = () => {
+    const request: Record<string, unknown> = g.request([]);
+    delete request.operations;
+    return request;
+  };
+  const combined = await g.service.apply({ ...pageRequest(), pages });
+  expect(combined).toMatchObject({
+    ok: false,
+    error: {
+      code: "PAYLOAD_TOO_LARGE",
+      details: {
+        budget: "nativeOperations",
+        scope: "transaction",
+        count: "complete",
+        semanticOperations: 104,
+        processedSemanticOperations: 104,
+      },
+    },
+  });
+  expect(g.runtime.currentRevision(g.model.documentId)).toBe(0);
+  for (const page of pages)
+    expect(
+      await g.service.apply({ ...pageRequest(), pages: [page] }),
+    ).toMatchObject({ ok: true });
 });
 
 it("discovery selectors reject ambiguous unknown oversized and domain-mismatched requests", () => {
@@ -113,35 +389,97 @@ it("discovery selectors reject ambiguous unknown oversized and domain-mismatched
     { kind: "operations", operations: [] },
     { kind: "operations", operations: Array(33).fill("slide.create") },
     { kind: "operations", operations: ["no.such_operation"] },
-    { kind: "operations", operations: ["slide.create"], operation: "slide.create" },
+    {
+      kind: "operations",
+      operations: ["slide.create"],
+      operation: "slide.create",
+    },
     { kind: "operations", family: "slide", operation: "slide.create" },
     { kind: "deck", operations: ["presence.add"] },
+    { kind: "deck", family: "presence" },
     { kind: "css-effect", operations: ["effect.apply_code"] },
     { kind: "protocol", family: "slide" },
-  ]) expect(agentAuthoringRequestSchema.safeParse(input).success).toBe(false);
-  expect(agentAuthoringRequestSchema.safeParse({ kind: "operations", operations: ["slide.create", "presence.add"] }).success).toBe(true);
-  expect(agentAuthoringRequestSchema.safeParse({ kind: "operations", operation: "slide.create" }).success).toBe(true);
+  ])
+    expect(agentAuthoringRequestSchema.safeParse(input).success).toBe(false);
+  expect(
+    agentAuthoringRequestSchema.safeParse({
+      kind: "operations",
+      operations: ["slide.create", "presence.add"],
+    }).success,
+  ).toBe(true);
+  expect(
+    agentAuthoringRequestSchema.safeParse({
+      kind: "operations",
+      operation: "slide.create",
+    }).success,
+  ).toBe(true);
 });
 
 it("compact domain guides retain runtime facts and scoped source once while full detail adds valid examples", () => {
-  const shader = buildAgentAuthoringGuide("background-shader", { detail: "compact" });
-  expect(shader).toHaveProperty("runtime.environment", expect.stringContaining("No input texture"));
-  expect(shader).toHaveProperty("runtime.timing.progress", expect.stringContaining("Stop None supplies p=1"));
+  const shader = buildAgentAuthoringGuide("background-shader", {
+    detail: "compact",
+  });
+  expect(shader).toHaveProperty(
+    "runtime.environment",
+    expect.stringContaining("No input texture"),
+  );
+  expect(shader).toHaveProperty(
+    "runtime.timing.progress",
+    expect.stringContaining("Stop None supplies p=1"),
+  );
   expect(shader).not.toHaveProperty("authoringPrompt");
   const css = buildAgentAuthoringGuide("css-effect");
-  expect(css).toHaveProperty("runtime.environment", expect.stringContaining("nested @supports"));
-  expect(css).toHaveProperty("runtime.environment", expect.stringContaining("paused and sampled"));
-  const definition = { ...blankEffect("shader"), source: "unique-private-source" };
-  const scoped = buildAgentAuthoringGuide("content-shader", { definition, elementId: "element", effectInstanceId: "effect", detail: "full" });
+  expect(css).toHaveProperty(
+    "runtime.environment",
+    expect.stringContaining("nested @supports"),
+  );
+  expect(css).toHaveProperty(
+    "runtime.environment",
+    expect.stringContaining("paused and sampled"),
+  );
+  const definition = {
+    ...blankEffect("shader"),
+    source: "unique-private-source",
+  };
+  const scoped = buildAgentAuthoringGuide("content-shader", {
+    definition,
+    elementId: "element",
+    effectInstanceId: "effect",
+    detail: "full",
+  });
   expect(scoped).toHaveProperty("operationTemplate.source", definition.source);
-  expect(scoped).toHaveProperty("operationTemplate.existingInstanceId", "effect");
+  expect(scoped).toHaveProperty(
+    "operationTemplate.existingInstanceId",
+    "effect",
+  );
   expect(JSON.stringify(scoped).split(definition.source)).toHaveLength(2);
   expect(JSON.stringify(shader)).not.toContain(definition.source);
   const full = buildAgentAuthoringGuide("preview", { detail: "full" });
+  expect(
+    agentPreviewRequestSchema.safeParse(
+      "example" in full ? full.example : undefined,
+    ).success,
+  ).toBe(true);
+  const workspace = buildAgentAuthoringGuide("workspace", { detail: "full" });
+  expect(
+    agentWorkspaceRequestSchema.safeParse(
+      "example" in workspace ? workspace.example : undefined,
+    ).success,
+  ).toBe(true);
+  const delivery = buildAgentAuthoringGuide("delivery", { detail: "full" });
+  expect(
+    agentDeliveryRequestSchema.safeParse(
+      "example" in delivery ? delivery.example : undefined,
+    ).success,
+  ).toBe(true);
   expect(full).toHaveProperty("example.sample.incoming.captureTimeMs", 3350);
   expect(buildAgentAuthoringGuide("preview")).not.toHaveProperty("example");
-  expect(buildAgentAuthoringGuide("layout")).not.toHaveProperty("componentWorkflow");
-  expect(buildAgentAuthoringGuide("layout", { detail: "full" })).toHaveProperty("componentWorkflow");
+  expect(buildAgentAuthoringGuide("layout")).not.toHaveProperty(
+    "componentWorkflow",
+  );
+  expect(buildAgentAuthoringGuide("layout", { detail: "full" })).toHaveProperty(
+    "componentWorkflow",
+  );
 });
 
 it("replay preserves the historical receipt and separately observes subsequent accepted revisions", async () => {

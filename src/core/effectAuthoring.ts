@@ -113,6 +113,9 @@ export function effectRuntimeContract(definition: EffectDefinition) {
       ? shaderPromptEnvironment(effectAffects(definition))
       : cssTextPromptEnvironment(effectAffects(definition)),
     timing: {
+      inputs: shader
+        ? "uniform float u_t;\nuniform float u_p;"
+        : "CSS --t/--p; text-JS t/p.",
       time: "t is elapsed seconds relative to Start, frozen by Stop and multiplied by Speed. Presentation start anchors to playback; Slide start resets on activation/re-entry; Click start anchors to the click plus offset; before that origin t stays 0 and the Effect is bypassed. Speed scales delivered t only, never the shared clocks or interval duration. Use native clocks, not timers/render loops.",
       progress:
         "NORMALIZED EFFECT INTERVAL: p follows the unscaled Start-to-Stop After duration, with easing. Before any Start p=0 and the Effect is bypassed. After duration p=1; Stop None supplies p=1 once Start occurs. For Next click, Click N and Slide end, p stays 0 while waiting and jumps to 1 at that event. Do not derive p from time or hard-code the interval duration.",

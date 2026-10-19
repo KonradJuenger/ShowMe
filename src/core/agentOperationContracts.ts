@@ -1,3 +1,7 @@
+import {
+  AGENT_CONTRACT_VERSION,
+  agentProtocolCapabilities,
+} from "./agentProtocol";
 import { z } from "zod/v4";
 import { agentSingleApplyRequestSchema } from "./agentMutation";
 
@@ -85,8 +89,13 @@ function schemaExample(schema: Record<string, any>): unknown {
 
 /** The apply envelope is learned once; selected operation contracts stay self-contained. */
 export function agentProtocolGuide() {
+  const envelopeSchema = z.toJSONSchema(
+    agentSingleApplyRequestSchema.omit({ operations: true }),
+  );
   return {
-    contractVersion: 2,
+    contractVersion: AGENT_CONTRACT_VERSION,
+    schemaDigest: agentContractDigest(JSON.stringify(envelopeSchema)),
+    capabilities: agentProtocolCapabilities,
     limits: {
       standard: { operations: 128, pages: 8, affectedElements: 128 },
       expanded: { operations: 256, pages: 32, affectedElements: 512 },
@@ -96,6 +105,9 @@ export function agentProtocolGuide() {
       sourceBytesPerEffect: 100000,
     },
     request: {
+      envelopeSchema,
+      construction:
+        "The envelopeSchema describes only common fields, not a complete apply request. Add exactly one operations or pages form using the selected operation schemas.",
       required: [
         "documentId",
         "epoch",
@@ -117,6 +129,8 @@ export function agentProtocolGuide() {
       "Inherited template visuals belong to their template. Use inspected editable parents and parent-local geometry. Human navigation and selection remain unchanged.",
     ],
     result: {
+      collections:
+        "Empty collections and idMap are omitted in MCP receipts and mean empty. Nonempty IDs, warnings, authored pages and resource receipts remain available. Native/replay receipts remain complete.",
       authoredPages:
         "Authored IDs with explicit kind=slide/template; use createdSlideIds/createdTemplateIds for newly created pages.",
       idMap: "Native duplication maps source IDs to new IDs.",
@@ -186,7 +200,7 @@ export function agentOperationContracts(
     schema,
   }));
   return {
-    contractVersion: 2,
+    contractVersion: AGENT_CONTRACT_VERSION,
     schemaDigest: agentContractDigest(JSON.stringify(schemas)),
     ...(filtered
       ? {

@@ -79,9 +79,11 @@ export function validateApplyInput(input: unknown) {
   };
 }
 
-/** Standard Schema metadata stays canonical. The callback owns structured error admission because SDK 2.3 renders schema failures as text only. */
-export function callbackAdmissionSchema<T extends z.ZodType>(value: T) {
-  const json = z.toJSONSchema(value);
+/** The callback owns canonical admission and structured errors. Optional metadata projections never validate or transform input. */
+export function callbackAdmissionSchema<T extends z.ZodType>(
+  value: T,
+  json = z.toJSONSchema(value),
+) {
   return {
     "~standard": {
       version: 1 as const,

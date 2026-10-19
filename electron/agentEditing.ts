@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AgentMutationError,
+  nativeOperationBudgetError,
   agentApplyRequestSchema,
   assembleAgentMutation,
   type AgentApplyRequest,
@@ -543,11 +544,10 @@ export class AgentEditingService {
         idMap: Object.assign({}, ...results.map((result) => result.idMap)),
       };
     } else staged = await stagePage(projection, request);
-    if (editorOperations(staged.snapshot).length > 256)
-      throw new AgentMutationError(
-        "PAYLOAD_TOO_LARGE",
-        "The assembled intent exceeds 256 native operations. Split it into coherent transactions.",
-      );
+    if (editorOperations(staged.snapshot).length > 256) {
+      const semanticOperations = pages ? pages.reduce((total, page) => total + page.operations.length, 0) : request.operations.length;
+      throw nativeOperationBudgetError(editorOperations(staged.snapshot).length, semanticOperations, semanticOperations, "transaction");
+    }
     check();
     const base = {
       documentId: request.documentId,

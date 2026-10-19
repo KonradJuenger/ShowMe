@@ -1,4 +1,5 @@
 import { callbackAdmissionSchema, validateApplyInput } from "./inputValidation";
+import { advertisedApplySchema, compactApplyReceipt } from "./applyTransport";
 import {
   McpServer,
   fromJsonSchema,
@@ -93,16 +94,14 @@ export function createShowMeServer(
             "Invalid request. Use the canonical tool contract and indicated fields.",
           recoverable: true,
           details: {
-            issues: parsed.error.issues
-              .slice(0, 8)
-              .map((issue) => ({
-                path: issue.path.map(String).join(".").slice(0, 300),
-                code: issue.code,
-                message:
-                  issue.code === "invalid_union"
-                    ? "Use one valid canonical request form."
-                    : issue.message.slice(0, 200),
-              })),
+            issues: parsed.error.issues.slice(0, 8).map((issue) => ({
+              path: issue.path.map(String).join(".").slice(0, 300),
+              code: issue.code,
+              message:
+                issue.code === "invalid_union"
+                  ? "Use one valid canonical request form."
+                  : issue.message.slice(0, 200),
+            })),
           },
         },
       };
@@ -159,7 +158,7 @@ export function createShowMeServer(
     "showme.authoring",
     {
       description:
-        "Learn ShowMe's live authoring contract without repository access. Use layout, text, frame, media, shader, CSS Effect, text Effect or Motion context. Creative-code contexts may be scoped to an exact document/slide/element/Effect.",
+        "Discover ShowMe contracts without repository access. Read kind=protocol once for apply rules. kind=operations returns a catalog; select operations:[names] (1-32), operation:name or family:name for exact schemas. Compact is default and includes relevant rules; full adds examples. Shader/CSS/text-effect kinds provide executable-code guidance. Creative-code contexts may be scoped to an exact document/slide/element/Effect.",
       inputSchema: callbackAdmissionSchema(agentAuthoringRequestSchema),
       outputSchema: schema(envelopeSchema),
       annotations,
@@ -245,8 +244,11 @@ export function createShowMeServer(
     "showme.apply",
     {
       description:
-        "Apply an atomic semantic batch to the active locally owned presentation. Requires Allow agent editing and an exact inspected revision. Supports slide construction, text/shape/frame insertion, managed media insertion by assetId, parent-local geometry, appearance, z-order, hierarchy, duplication, grouping, alignment/distribution, Text Styles, media frame/crop/playback controls, templates, deck CSS, Effects, Motion and Presence. Effect code is production-validated. Reuse an identical mutationId after a lost response. Raw document operations remain unavailable.",
-      inputSchema: callbackAdmissionSchema(agentApplyRequestSchema),
+        "Apply an atomic semantic batch to the active locally owned presentation. Requires Allow agent editing and an exact inspected revision. Supports slide construction, text/shape/frame insertion, managed media insertion by assetId, parent-local geometry, appearance, z-order, hierarchy, duplication, grouping, alignment/distribution, Text Styles, media frame/crop/playback controls, templates, deck CSS, Effects, Motion and Presence. Effect code is production-validated. Reuse an identical mutationId after a lost response. Operation objects are intentionally open in tool metadata; discover exact operation contracts with showme.authoring. Full canonical validation runs before execution. Empty receipt collections/maps are omitted and mean empty. Raw document operations remain unavailable.",
+      inputSchema: callbackAdmissionSchema(
+        agentApplyRequestSchema,
+        advertisedApplySchema(),
+      ),
       outputSchema: schema(
         z.union([
           z
@@ -256,28 +258,32 @@ export function createShowMeServer(
               epoch: z.string(),
               slideId: z.string(),
               requestSlideId: z.string(),
-              authoredSlideIds: z.array(z.string()),
-              authoredPages: z.array(
-                z
-                  .object({
-                    id: z.string(),
-                    kind: z.enum(["slide", "template"]),
-                  })
-                  .strict(),
-              ),
-              resourceChanges: z.array(
-                z
-                  .object({
-                    pageId: z.string(),
-                    resourceId: z.string(),
-                    kind: z.enum(["created", "changed", "removed"]),
-                    elementIds: z.array(z.string()),
-                  })
-                  .strict(),
-              ),
+              authoredSlideIds: z.array(z.string()).optional(),
+              authoredPages: z
+                .array(
+                  z
+                    .object({
+                      id: z.string(),
+                      kind: z.enum(["slide", "template"]),
+                    })
+                    .strict(),
+                )
+                .optional(),
+              resourceChanges: z
+                .array(
+                  z
+                    .object({
+                      pageId: z.string(),
+                      resourceId: z.string(),
+                      kind: z.enum(["created", "changed", "removed"]),
+                      elementIds: z.array(z.string()),
+                    })
+                    .strict(),
+                )
+                .optional(),
               pageResults: z
                 .array(z.record(z.string(), z.unknown()))
-                .max(8)
+                .max(32)
                 .optional(),
               currentObservation: z
                 .object({ epoch: z.string(), revision: z.number() })
@@ -289,33 +295,37 @@ export function createShowMeServer(
               transactionId: z.string().nullable(),
               changed: z.boolean(),
               replayed: z.boolean(),
-              createdIds: z.array(z.string()),
-              changedIds: z.array(z.string()),
-              removedIds: z.array(z.string()),
-              createdSlideIds: z.array(z.string()),
-              createdTemplateIds: z.array(z.string()),
-              updatedSlideIds: z.array(z.string()),
-              createdStageIds: z.array(z.string()),
-              createdBlockIds: z.array(z.string()),
-              createdTrackIds: z.array(z.string()),
-              createdKeyframeIds: z.array(z.string()),
-              createdEffectInstanceIds: z.array(z.string()),
-              updatedEffectInstanceIds: z.array(z.string()),
-              idMap: z.record(z.string(), z.string()),
-              createdTextStyleIds: z.array(z.string()),
-              createdLayerIds: z.array(z.string()),
+              createdIds: z.array(z.string()).optional(),
+              changedIds: z.array(z.string()).optional(),
+              removedIds: z.array(z.string()).optional(),
+              createdSlideIds: z.array(z.string()).optional(),
+              createdTemplateIds: z.array(z.string()).optional(),
+              updatedSlideIds: z.array(z.string()).optional(),
+              createdStageIds: z.array(z.string()).optional(),
+              createdBlockIds: z.array(z.string()).optional(),
+              createdTrackIds: z.array(z.string()).optional(),
+              createdKeyframeIds: z.array(z.string()).optional(),
+              createdEffectInstanceIds: z.array(z.string()).optional(),
+              updatedEffectInstanceIds: z.array(z.string()).optional(),
+              idMap: z.record(z.string(), z.string()).optional(),
+              createdTextStyleIds: z.array(z.string()).optional(),
+              createdLayerIds: z.array(z.string()).optional(),
               deckChanged: z.boolean(),
-              changes: z.array(
-                z
-                  .object({
-                    kind: z.enum(["created", "changed", "removed"]),
-                    elementIds: z.array(z.string()),
-                  })
-                  .strict(),
-              ),
-              warnings: z.array(
-                z.object({ code: z.string(), message: z.string() }).strict(),
-              ),
+              changes: z
+                .array(
+                  z
+                    .object({
+                      kind: z.enum(["created", "changed", "removed"]),
+                      elementIds: z.array(z.string()),
+                    })
+                    .strict(),
+                )
+                .optional(),
+              warnings: z
+                .array(
+                  z.object({ code: z.string(), message: z.string() }).strict(),
+                )
+                .optional(),
             })
             .strict(),
           z
@@ -337,9 +347,11 @@ export function createShowMeServer(
       const parsed = validateApplyInput(params);
       return parsed.success
         ? json(
-            await read(
-              { command: "apply", params: parsed.data },
-              ctx.mcpReq.signal,
+            compactApplyReceipt(
+              await read(
+                { command: "apply", params: parsed.data },
+                ctx.mcpReq.signal,
+              ),
             ),
           )
         : json(parsed.error);

@@ -1012,6 +1012,35 @@ export class AgentMutationError extends Error {
     super(message);
   }
 }
+
+/** Counts come from native assembly, not a parallel semantic cost estimator. */
+export function nativeOperationBudgetError(
+  nativeOperations: number,
+  semanticOperations: number,
+  processedSemanticOperations: number,
+  scope: "page" | "transaction" = "page",
+) {
+  return new AgentMutationError(
+    "PAYLOAD_TOO_LARGE",
+    "The assembled intent exceeds 256 native operations. Split independent page groups or editing steps into coherent transactions; no partial changes were accepted.",
+    undefined,
+    undefined,
+    {
+      budget: "nativeOperations",
+      scope,
+      limit: 256,
+      nativeOperations,
+      count:
+        processedSemanticOperations === semanticOperations
+          ? "complete"
+          : "lower-bound",
+      semanticOperations,
+      processedSemanticOperations,
+      advice:
+        "Split only at independent page groups or steps. Preserve dependencies on earlier IDs/styles/resources. Atomic intents are never split automatically.",
+    },
+  );
+}
 export type AgentTextMeasure = (
   element: Element & { content: TextContent },
 ) => Promise<TextMeasurement | null>;
@@ -2777,9 +2806,10 @@ export async function assembleAgentMutation(
         }
       }
       if (editorOperations(next).length > 256)
-        throw new AgentMutationError(
-          "PAYLOAD_TOO_LARGE",
-          "Use fewer editing steps.",
+        throw nativeOperationBudgetError(
+          editorOperations(next).length,
+          request.operations.length,
+          stepIndex + 1,
         );
     } catch (error) {
       if (error instanceof AgentMutationError)

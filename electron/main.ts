@@ -1,6 +1,6 @@
+import { AGENT_CONTRACT_VERSION, AGENT_RUNTIME_CAPACITY } from "../src/core/agentProtocol";
 import { importAgentMedia } from "./agentMediaImport";
 import {
-  EFFECT_API_VERSION,
   effectDefinitionSchema,
   type EffectDefinition,
 } from "../src/core/effects";
@@ -1207,7 +1207,7 @@ let agentRuntimeWindow: BrowserWindow | null = null;
 let agentRuntimeStatus: "uninitialized" | "initializing" | "ready" | "failed" = "uninitialized";
 let agentRuntimeQueue: Promise<void> = Promise.resolve();
 let pendingAgentRuntime = 0;
-const AGENT_RUNTIME_MAX_ADMITTED = 8;
+const AGENT_RUNTIME_MAX_ADMITTED = AGENT_RUNTIME_CAPACITY;
 let effectPreviewWindow: BrowserWindow | null = null;
 let previewsTornDown = false;
 let effectPreviewQueue: Promise<void> = Promise.resolve();
@@ -1838,28 +1838,11 @@ const agentWorkspace = new AgentWorkspaceService({
 const agentContextRead = async () => ({
   ...(await agentContext.read()),
   serverVersion: SHOWME_MCP_SERVER_VERSION,
-  effectApiVersion: EFFECT_API_VERSION,
+  contractVersion: AGENT_CONTRACT_VERSION,
   services: { agentRuntime: {
     state: agentRuntimeWindow?.isDestroyed() ? "uninitialized" : agentRuntimeStatus,
-    pending: pendingAgentRuntime, capacity: AGENT_RUNTIME_MAX_ADMITTED, lazyInitialization: true,
+    pending: pendingAgentRuntime,
   } },
-  capabilities: {
-    shaderEffects: true,
-    cssEffects: true,
-    textJsEffects: true,
-    deckCss: true,
-    motion: true,
-    presence: true,
-    measureText: true,
-    preview: true,
-    timelineSampling: true,
-    multiPageBatches: true,
-    delivery: true,
-    templateAuthoring:true,sharedEffectResources:"page-or-template",slideRecipes:true,workspace:true,expandedBudget:true,
-    reducedMotionLimit:false,
-    budgets:{standard:{pages:8,operations:128,affectedElements:128},expanded:{pages:32,operations:256,affectedElements:512},nativeOperations:256,bridgeBytes:262144,rendererValidations:32},
-    cssRules:[":scope","@keyframes","@supports"],
-  },
   editing: { enabled: mcpEditingEnabled, ...agentEditing.availability() },
 });
 const agentBridge = new AgentBridge(app.getPath("userData"), async (request, signal) => {

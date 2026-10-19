@@ -29,8 +29,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-18",
-    "lastReviewed": "2026-10-18",
-    "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery; template editing/ownership, direct shared text styles, native slide recipes, named effect resources and explicit expanded batch admission; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed"
+    "lastReviewed": "2026-10-19",
+    "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery; template editing/ownership, direct shared text styles, native slide recipes, named effect resources and explicit expanded batch admission; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; batched compact discovery preserves canonical schemas, selectors, relevant semantics and measured payload budget; compact advertised transport versus strict admission, sparse replay/resource receipts, measured partial/complete native operation overflow and deliberate splits"
   },
   {
     "id": "editor-agent-mcp",
@@ -40,8 +40,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-18",
-    "reason": "Real SDK stdio client covers Settings opt-in, context/inspection, deck creation, frame-based text editing, production PNG previews, creative authoring discovery, production GLSL/CSS/text-JS validation, deck CSS/classes, native Effect-parameter Motion, revocation, crash/restart, exact revision recovery and separate guarded user/agent history. Native workspace create/open/close/import, template rendering and scoped CSS supports.; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; native Settings clipboard verifies Codex TOML, generic MCP JSON and VS Code JSON; held second native media decoder verifies revocation receipts and no third import"
+    "lastReviewed": "2026-10-19",
+    "reason": "Real SDK stdio client covers Settings opt-in, context/inspection, deck creation, frame-based text editing, production PNG previews, creative authoring discovery, production GLSL/CSS/text-JS validation, deck CSS/classes, native Effect-parameter Motion, revocation, crash/restart, exact revision recovery and separate guarded user/agent history. Native workspace create/open/close/import, template rendering and scoped CSS supports.; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; native Settings clipboard verifies Codex TOML, generic MCP JSON and VS Code JSON; held second native media decoder verifies revocation receipts and no third import; real SDK compact protocol/operation/Effect discovery, structured-text consistency and scoped source verified; compact advertised operation bodies retain nested fields and strict invalid-call diagnostics, protocol capabilities replace static context"
   },
   {
     "id": "editor-agent-bridge",
@@ -524,8 +524,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-13",
-    "reason": "Effect authoring model, GLSL parameter metadata, diagnostics, copied AI contract without request placeholders, timing semantics and deterministic slide-context shader inputs"
+    "lastReviewed": "2026-10-19",
+    "reason": "Effect authoring model, GLSL parameter metadata, diagnostics, copied AI contract without request placeholders, timing semantics and deterministic slide-context shader inputs; shared editor/MCP timing facts and current scoped CSS supports contract"
   },
   {
     "id": "effect-authoring-editor",

@@ -1,18 +1,24 @@
 # Current ShowMe MCP contract
 
-Server 1.8.0. Document, SME/SMP, effect API and native schedule formats remain public v1. Canonical schemas returned by tools/list and showme.authoring are authoritative.
+Server 1.10.0. Document, SME/SMP, effect API and native schedule formats remain public v1. Tool envelopes in tools/list and exact semantic schemas in showme.authoring describe the current API; full canonical runtime validators remain authoritative for admission.
 
 ## Discovery and context
 
 Call showme.context first. Accepted document identity includes id, epoch, revision, savedRevision and dirty. Editor context is ephemeral and includes the human's page, selection and UI epoch. Reading context never flushes drafts or warms the agent runtime.
 
-Capabilities describe supported operations. services.agentRuntime separately reports uninitialized/initializing/ready/failed, queue occupancy and lazy initialization. An uninitialized service can initialize on its first request.
+Capabilities describe supported operations. services.agentRuntime separately reports uninitialized/initializing/ready/failed and queue occupancy. Static capabilities, Effect API version, CSS support, runtime capacity/lazy initialization and budgets are returned through authoring kind=protocol. Context retains serverVersion and contractVersion=3 to identify that contract. An uninitialized service can initialize on its first request.
 
-Use showme.authoring with kind=operations for the operation catalog, then family or operation and detail=compact for canonical JSON Schemas, validated examples, limits and target/result rules. Families include template, slide, deck, layer, element, elements, text, frame, media, video, background, effect, motion, presence and timeline. Workspace, preview and delivery have dedicated authoring kinds with canonical request schemas. Unknown operations and mismatched families reject.
+Use showme.authoring kind=protocol once for the common apply envelope, atomicity/revision/ownership rules, limits and receipts. kind=operations without a selector returns a small catalog. Request operations:[names] (1-32), operation:name, or family:name for exact canonical JSON Schemas and relevant semantic rules, included once per response. Selectors are mutually exclusive; unknown operations, mismatched domains and oversized lists reject. Duplicate names are normalized and results follow stable catalog order. The singular selector remains supported.
 
-Omitting detail preserves earlier guides and full creative-code prompts. Request a shader/CSS/text effect kind with detail=full when writing executable effect source. contractVersion and schemaDigest cover static operation contracts only. Scoped discovery requires documentId, epoch, revision and slideId; its scope/ownership observation is revision-bound and must not be cached as document state by digest.
+Compact is the default for all authoring kinds. Full adds examples for the selected subject without resending the global protocol. Schema digests identify selected canonical schemas independently of examples and prose; contractVersion=3 identifies the discovery behavior. Full selected operation examples are validated by the same admission validators. Raw mutation admission remains unchanged.
 
-Raw SDK tools/list retains the canonical nested operation shapes. The SDK adds top-level type=object to the union of request forms. This session cannot directly inspect host normalization internals; a host's unknown nested alternatives are not evidence that the server omitted the schema. Compact discovery is an independent usable path.
+Shader/CSS/text-effect compact guides include actual runtime environment, timing, parameter and safety facts plus an operationTemplate. Existing source appears once, in that template, including existingInstanceId for scoped editing. Full adds examples; MCP no longer embeds the human Effect Editor prompt. Both surfaces share runtime facts. Scoped discovery still requires exact documentId/epoch/revision/slideId and honors access, source visibility and ownership. A schema digest is never a document-state cache key.
+
+Preview/delivery/workspace retain canonical request schemas and relevant rules in compact; full adds a request example. The full preview example shows matching incoming/outgoing capture times and explicit previousSlideId. Layout full adds the composite Frame workflow.
+
+Server responses retain structuredContent plus a semantically identical JSON text mirror for client compatibility. Callers should expose one representation, preferring structuredContent with text fallback, while retaining image content. The server does not assume host-side normalization or suppress fallback text. Reproduce the offline glass-task discovery size comparison with node scripts/measure-mcp-discovery.mjs; it reports structured bytes and full mirrored wire bytes separately, not model tokens.
+
+Raw tools/list advertises the canonical strict apply envelope and request forms with open semantic operation objects requiring type:string. Only embedded operation-item schemas are projected; their arbitrary nested properties are preserved. Discover exact operation fields with authoring. Callback and bridge admission still validate the entire canonical request, including unknown operations/fields and nested constraints. SDK normalization adds top-level type=object to the union; metadata openness does not permit arbitrary native operations. Supported-host schema normalization and token/cache usage remain client observations, not inferred from raw schema bytes.
 
 ## Accepted-state inspection
 
@@ -30,6 +36,8 @@ showme.apply requires documentId, epoch, expectedRevision, mutationId and reques
 The request/source bridge budget remains 256 KiB; at most 32 renderer effect validations run per transaction. Later page groups see earlier staged layer/style/deck changes. Native semantic commands stage against a detached current document, then one EditorSession submits one transaction through the existing DocumentAuthority and durable recovery. A late failure commits no pages or deck changes. No separately committed writes are presented as atomic.
 
 Exact epoch/revision admission, ownership, assets, leases, cancellation and access generation checks apply to all pages. Human navigation and selection are not moved by construction. Agent history uses the existing mcp-local actor and preserves human history.
+
+MCP apply receipts omit empty collection fields and empty idMap; omission means empty, never unknown. Scalar identity, accepted/replay revision, changed/replayed, transaction identity and currentObservation semantics remain. All nonempty identity lists, native idMap, authored page kinds, nested resource users and warnings are retained. Native/internal replay receipts remain complete; sparsity is only a deterministic MCP wire projection.
 
 Receipts contain historical revision/previousRevision/transactionId, mutationId, changed, replayed, created/changed/removed identities and created timeline IDs. slideId retains request context, duplicated explicitly as requestSlideId. authoredSlideIds identifies transaction page targets; createdSlideIds is authoritative for new pages. Page batches add per-page results. Replaying an identical mutationId returns the original historical transaction plus a separate currentObservation. That observation is not a guarantee that the next write will succeed. Reusing an ID for changed intent rejects. No-ops retain revision and have no transaction ID.
 
@@ -122,3 +130,7 @@ Apply receipts add authoredPages (id and slide/template kind) and resourceChange
 Style-name collisions include conflictingStyle.id/name and remediation: reuse that ID or choose a unique name. Full native typography still owns its color; no separate color-role or global resource model is implied.
 
 Production static previews prepare native video posters before mounting/capture. Offscreen media preparation waits for a seek-completed drawable frame, avoiding black posters captured immediately at loadeddata. Video remains a static poster in sampled previews; no live playback performance claim follows.
+
+## Native operation capacity diagnostics (1.10)
+
+PAYLOAD_TOO_LARGE from native assembly includes details.budget=nativeOperations, scope=page/transaction, limit, measured nativeOperations, semanticOperations and processedSemanticOperations. count=lower-bound means assembly stopped early; count=complete means the full stated scope was assembled. A page-scoped failure in a multi-page batch also reports pageIndex. No partial transaction is accepted. Split only genuinely independent groups/steps while preserving dependencies; no automatic splitting or mandatory preflight is introduced.

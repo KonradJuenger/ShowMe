@@ -493,9 +493,7 @@ it("copied prompts describe the selected contract, speed, parameters and source"
   expect(prompt).toContain("uniform float u_slideCount;");
   expect(prompt).toContain("uniform float u_slideSeed;");
   expect(prompt).toContain("uniform float u_previousSlideSeed;");
-  expect(prompt).toContain(
-    "including backward navigation and jumps",
-  );
+  expect(prompt).toContain("including backward navigation and jumps");
   expect(prompt).toContain(
     "Use the seeds to derive deterministic per-slide configurations and u_slideTime to blend",
   );
@@ -586,7 +584,9 @@ it("AI prompt exports ShowMe context before the contract without a request place
 it("CSS/text prompts export their actual scoped runtime and existing sources without implying DOM scripting", () => {
   const definition = changeEffectAffects(blankEffect("css-js"), "text", false);
   const prompt = buildEffectAuthoringPrompt(definition);
-  expect(prompt).toContain("Only :scope and @keyframes rules are supported");
+  expect(prompt).toContain(
+    "Only :scope, @keyframes and nested @supports rules are supported",
+  );
   expect(prompt).toContain("isolated worker with bounded execution time");
   expect(prompt).toContain(
     "text is the original Element text, not the previous transformed result",

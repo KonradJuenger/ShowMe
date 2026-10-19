@@ -1,3 +1,4 @@
+import { AGENT_CONTRACT_VERSION } from "./agentProtocol";
 import { z } from "zod/v4";
 import { EFFECT_API_VERSION, type EffectDefinition } from "./effects";
 import {
@@ -95,6 +96,16 @@ export const agentAuthoringRequestSchema = z
         : value.kind === "timeline"
           ? "timeline"
           : undefined);
+    if (
+      value.family &&
+      (value.kind === "deck" || value.kind === "timeline") &&
+      value.family !== value.kind
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["family"],
+        message: "The family must match the requested deck or timeline kind.",
+      });
     for (const [index, name] of (
       value.operations ?? (value.operation ? [value.operation] : [])
     ).entries()) {
@@ -185,14 +196,14 @@ function normalAuthoringGuide(
   if (kind === "workspace")
     return {
       kind,
-      contractVersion: 2,
+      contractVersion: AGENT_CONTRACT_VERSION,
       schema: z.toJSONSchema(agentWorkspaceRequestSchema),
       ...(detail === "full"
         ? {
             example: {
               action: "create",
-              documentId: "<currentDocumentId>",
-              epoch: "<currentEpoch>",
+              documentId: "document",
+              epoch: "epoch",
               expectedRevision: 0,
               name: "New presentation",
             },
@@ -207,7 +218,7 @@ function normalAuthoringGuide(
   if (kind === "preview" || kind === "delivery")
     return {
       kind,
-      contractVersion: 2,
+      contractVersion: AGENT_CONTRACT_VERSION,
       schema: serviceSchema!,
       schemaDigest: agentContractDigest(JSON.stringify(serviceSchema)),
       ...(detail === "full"
@@ -215,16 +226,16 @@ function normalAuthoringGuide(
             example:
               kind === "preview"
                 ? {
-                    documentId: "<documentId>",
-                    epoch: "<epoch>",
+                    documentId: "document",
+                    epoch: "epoch",
                     revision: 0,
-                    slideId: "<incomingSlideId>",
+                    slideId: "incoming-slide",
                     width: 960,
                     height: 540,
                     sample: {
                       mode: "transition",
                       elapsedMs: 350,
-                      previousSlideId: "<outgoingSlideId>",
+                      previousSlideId: "outgoing-slide",
                       outgoing: {
                         presentationOriginMs: 0,
                         activationMs: 0,
@@ -236,13 +247,13 @@ function normalAuthoringGuide(
                         activationMs: 3000,
                         captureTimeMs: 3350,
                         clickTimesMs: [],
-                        previousSlideId: "<outgoingSlideId>",
+                        previousSlideId: "outgoing-slide",
                       },
                     },
                   }
                 : {
-                    documentId: "<documentId>",
-                    epoch: "<epoch>",
+                    documentId: "document",
+                    epoch: "epoch",
                     expectedRevision: 0,
                     action: "package",
                     packageOptions: {
@@ -483,7 +494,7 @@ export function buildAgentAuthoringGuide(
   const definition = options.definition ?? starter(kind);
   return {
     kind,
-    contractVersion: 2,
+    contractVersion: AGENT_CONTRACT_VERSION,
     effectApiVersion: EFFECT_API_VERSION,
     editing: !!options.definition,
     contract: {
