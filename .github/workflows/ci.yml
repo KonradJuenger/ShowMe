@@ -1,8 +1,7 @@
 name: Development checks
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Automatic CI is paused; development verification runs locally.
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
