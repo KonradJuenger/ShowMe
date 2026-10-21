@@ -142,6 +142,57 @@ UI interaction semantics and media admission are unchanged.
 
 ## Verification
 
+### Real-deck performance follow-up, 2026-10-21
+
+PR #16 does **not** fix the reported choppiness of filled, rounded glass cards.
+The user's `ShowMe — Ideas in motion.sme`, slide 4, stays on the correctness
+fallback. Testing the correct checkout reproduces the stalls, independently of
+the earlier wrong-folder issue. The original presentation was not changed.
+
+The clean `f620e6a` production build measured entrance frame-gap p95 of
+133.3 ms on cold entry, 83.4 ms on replay and 83.4 ms after opening a new audience
+window. Corresponding steady p95 values were 16.8 ms. These are one observation
+of each lifecycle mode on the same machine, not repeated statistical trials.
+The measured stage includes Presence blocks and lasts 1440 ms; measuring only
+ordinary track keyframes would incorrectly classify this entrance as zero length.
+
+In the warm entrance trace, audience-main-thread Paint intervals contain
+321.8 ms of `ReadbackImagePixels`, including 269.6 ms of `WaitForGetOffset`.
+These are nested durations and must not be added together. This identifies a
+paint/readback synchronization cost; it does not establish GPU occupancy or a
+particular backing-store decision.
+
+Experiments covered layer promotion, resolving the final glass consumer as a
+material, GPU image filtering, retained GPU prefix/material textures, bitmap
+publication and preparation/retention changes. None established smooth production
+playback. Later runs also differed in steady frame cadence, so they cannot support
+a speedup claim against the clean baseline. The experiments remain local and are
+excluded from the PR; its renderer still matches the verified `f620e6a` result.
+
+The [compact measurement record](evidence/backdrop-motion-performance-2026-10-21.json)
+contains the source/build digests, environment, all three lifecycle observations
+and selected trace totals. Raw traces and append-only benchmark history remain
+local under `test-results-compositing-f620e6a-entry` and
+`.benchmark-data/animation/history.jsonl`. The benchmark harness was exactly
+`scripts/benchmark-animation.mjs` from `28b9038` (Git blob
+`1e0a8936ca1dcd3475be87cb220a94047ffbd090`), copied into an ignored helper so the
+production renderer and tracked benchmark tooling were unchanged. Reproduction:
+
+```powershell
+npm run build
+git show 28b9038:scripts/benchmark-animation.mjs | Set-Content -Encoding utf8 .agenttmp/benchmark-current.mjs
+$env:SHOWME_BENCHMARK_OUTPUT='test-results-compositing-real-deck'
+node .agenttmp/benchmark-current.mjs '<path-to-original.sme>' 4
+```
+
+The helper uses an isolated library and user-data directory, normal console and
+preview rendering, and a six-second observation. The committed record is a
+performance limitation, not a completed retained GPU compositor. The PR remains
+a draft while that follow-up is unresolved.
+
+The commands and results below describe the unchanged implementation at
+`f620e6a`. This follow-up adds documentation and measurement data only.
+
 Final focused browser selection:
 
 ```powershell

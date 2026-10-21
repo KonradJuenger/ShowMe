@@ -1,5 +1,32 @@
 # Are we slow yet?
 
+## Glass/Motion follow-up — 2026-10-21
+
+The clean `f620e6a15c86e83b9b314e3e8ffa3f182b37e505` build still stutters on
+slide 4 of `ShowMe — Ideas in motion.sme`. This is a different workload from the
+audience image/navigation measurements below and must not be compared with them.
+
+| Lifecycle mode | Entrance frame gap p95 | Entrance maximum | Gaps over 33.34 ms | Steady p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Cold entry | 133.3 ms | 183.4 ms | 12 | 16.8 ms |
+| Warm replay | 83.4 ms | 100.0 ms | 12 | 16.8 ms |
+| New audience navigation | 83.4 ms | 149.9 ms | 16 | 16.8 ms |
+
+One run per lifecycle mode; Windows x64, Ryzen AI 9 365 / Radeon 880M,
+Electron 44.4.1. Audience viewport 1596 × 998 DIP at DPR 1.6041666269302368.
+The Presence entrance lasts 1440 ms; each observation lasts six seconds and keeps
+the normal console/preview renderers. There were no missing assets or effect
+errors. Frame gaps are audience rAF observations, not a physical display or GPU
+occupancy measurement.
+
+Exploratory dirty builds did not establish a smooth replacement. They are not
+attributed to `f620e6a` and were excluded from the PR. The clean baseline and raw
+explorations are retained in local benchmark history. See the
+[measurement record](docs/rendering/evidence/backdrop-motion-performance-2026-10-21.json)
+and [architecture follow-up](docs/rendering/COMPOSITING_ARCHITECTURE.md#real-deck-performance-follow-up-2026-10-21)
+for provenance, reproduction and limits. This follow-up changes documentation and
+measurement data only; it is exempt from the rendering commit/integration gate.
+
 The latest clean audience workload measures **507.5 ms p95
 for first-pass slide entry**, **487.9 ms p95 on revisits**,
 and **116.6 ms p95 between animation frames** on the reference
