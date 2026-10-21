@@ -238,6 +238,18 @@ UI interaction semantics and media admission are unchanged.
 
 ### Presence restoration entry synchronization, 2026-10-21
 
+The clean `fe30101` production run of the original slide 4 completed cold entry,
+replay and new-audience navigation. Entrance frame-gap p95 was respectively
+66.5, 17.0 and 33.4 ms; steady p95 was 16.8 ms in each mode. All three modes
+used `native-backdrop-restore`, three restoration overlays and zero CSS replay
+outputs, with no effect errors or missing assets. The warm audience entrance
+trace contained no `ReadbackImagePixels` or `WaitForGetOffset` events.
+Warm entrance cadence is retained, but cold entry and occasional steady stalls
+remain; this is not a uniformly smooth playback claim. These are single
+sequential observations, not controlled repeated trials. The
+[compact performance record](evidence/presence-restoration-performance-2026-10-21.json)
+preserves the pre-fix, unbatched and final observations and build provenance.
+
 The real slide-4 entry recording confirmed an unpopulated first restoration:
 `motion-one` was visible at native opacity 1 with Motion alpha 0.0109461,
 restoration opacity 0 and an empty bitmap canvas. Its next sample had alpha
@@ -345,7 +357,8 @@ prompt sentence that the existing prompt no longer contains. It was not modified
 or excluded to make that aggregate command pass. The native group was run
 explicitly as shown above because the aggregate stopped before its Electron step.
 
-Full/release suites, packaged output, macOS, production performance benchmarks
-and explicit export visual validation were not run. The source was checked on
+Full/release suites, packaged output, macOS
+and explicit export visual validation were not run. Production measurements for
+the later restoration implementation are recorded above. The source was checked on
 an isolated branch based on current `main`; no integration into `main` is part
 of this work.

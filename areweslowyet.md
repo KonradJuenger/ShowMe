@@ -257,3 +257,59 @@ tests and both mandatory audience-navigation declarations passed. Build,
 typecheck, changed-file lint, stats and registry audit passed (414 active tests).
 The full/release suites and macOS were not run. This follow-up commit only records
 measurements in Markdown; its contents cannot affect rendering or cache behavior.
+
+## Glass Presence entry synchronization — 2026-10-21
+
+The real slide-4 flicker was confirmed before changing code: the native card
+painted at opacity 1 while Motion alpha was 0.0109461 and its restoration bitmap
+was empty. Subsequent restoration alpha and placement lagged the Motion sample.
+The fix gates content visibility with the existing populated flag, synchronizes
+placement/inverse alpha with Motion, and reveals both parts after publication.
+DOM reads are batched before writes. The compositor remains
+`native-backdrop-restore`; no alternate Motion state or timed delay was added.
+
+Clean production observations on the same Windows / Electron 44.4.1 machine,
+original `ShowMe — Ideas in motion.sme` slide 4, normal console/preview, isolated
+library/user data, 1440 ms Presence entrance and six-second observation:
+
+| Lifecycle | Before fix `fd0dafb` entrance p95 | Final `fe30101` entrance p95 | Final maximum entrance gap |
+| --- | ---: | ---: | ---: |
+| Cold entry | 50.1 ms | 66.5 ms | 99.9 ms |
+| Warm replay | 33.4 ms | 17.0 ms | 33.5 ms |
+| New audience navigation | 33.3 ms | 33.4 ms | 66.6 ms |
+
+Final steady p95 was 16.8 ms in every mode, with occasional 33–117 ms gaps.
+All entrances used three restoration overlays, zero CSS replay outputs and no
+effect errors or missing assets. The warm audience entrance trace had 6.805 ms
+of Paint and no `ReadbackImagePixels` / `WaitForGetOffset` events. Warm playback
+retains good cadence, but cold entry and occasional stalls remain. One sequential
+observation per mode/revision cannot establish uniform smoothness or a general
+speedup. These are instrumented rAF gaps, not physical display delivery.
+
+The unbatched readiness iteration (`b3bf87d`) increased style resolution work;
+batching reduced warm entrance UpdateLayoutTree time from 54.938 to 36.687 ms.
+These are trace observations, not an isolated causal performance experiment.
+An initial final-candidate measurement lost its audience window after replay;
+it is retained locally as incomplete and excluded from the table. The subsequent
+complete run exited normally. Raw traces/samples remain under
+`test-results-compositing-fe30101-complete`; append-only history is in
+`.benchmark-data/animation/history.jsonl`. The
+[compact record](docs/rendering/evidence/presence-restoration-performance-2026-10-21.json)
+contains build/source digests, environment, all completed observations and trace
+totals. The helper derives from Git blob
+`1e0a8936ca1dcd3475be87cb220a94047ffbd090`, adding backend/alpha and process-exit
+diagnostics. Command after `npm run build`:
+
+```powershell
+$env:SHOWME_BENCHMARK_OUTPUT='test-results-compositing-fe30101-complete'
+node .agenttmp/benchmark-backdrop-observed.mjs '<path-to-original.sme>' 4
+```
+
+The entrance regression and all seven native-composition tests pass, including
+filled/rounded Move In and cancellation. CSS backdrop/mixed composition and both
+audience-navigation declarations pass (25 browser declarations; gate repeated
+separately, two passed). Build including TypeScript, changed-file ESLint, registry
+stats/audit (635 active tests) and whitespace checks pass. The real slide-4 entry
+filmstrip was reviewed without the flash; 134 visible partial-alpha samples had
+populated restoration and matching inverse alpha. Full/release, packaging,
+macOS and explicit export visual checks were not run. No main integration.
