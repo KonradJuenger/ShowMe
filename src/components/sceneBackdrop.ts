@@ -329,8 +329,10 @@ export function mountSceneBackdrop(
   // Placement and inverse alpha belong to the current Motion sample, not to
   // the asynchronous bitmap request. Until the first bitmap exists, keep the
   // native card unpainted; publication reveals both parts in the same task.
-  const sample = () =>
-    cards.filter((card) => {
+  const sample = () => {
+    // Read the whole cohort before changing styles. In particular, do not
+    // force a fresh style/layout resolution between each card's placement.
+    const samples = cards.map((card) => {
       const alpha = Number(
         getComputedStyle(
           card.owner.querySelector<HTMLElement>(
@@ -340,26 +342,51 @@ export function mountSceneBackdrop(
       );
       const visibility = getComputedStyle(card.owner).visibility;
       const active = visibility === "visible" && alpha < 1;
+      return {
+        card,
+        alpha,
+        visibility,
+        active,
+        world: active ? elementWorldTransform(card.owner, root) : undefined,
+      };
+    });
+    const set = (
+      node: HTMLElement,
+      key: "contentVisibility" | "visibility" | "opacity" | "clipPath",
+      value: string,
+    ) => {
+      if (node.style[key] !== value) node.style[key] = value;
+    };
+    for (const { card, alpha, visibility, active, world } of samples) {
       // Keep opacity at one even while preparing: lowering it would activate
       // the CSS group-opacity fallback that this native path avoids.
-      card.owner.style.contentVisibility =
+      set(
+        card.owner,
+        "contentVisibility",
         (active && !card.populated) ||
-        card.owner.dataset.presentationAbsent === "true"
+          card.owner.dataset.presentationAbsent === "true"
           ? "hidden"
-          : "";
-      card.overlay.style.visibility = visibility;
-      card.overlay.style.opacity =
-        active && card.populated ? String(1 - alpha) : "0";
-      if (active) {
-        const world = elementWorldTransform(card.owner, root),
-          { width, height } = card.group.element.frame,
+          : "",
+      );
+      set(card.overlay, "visibility", visibility);
+      set(
+        card.overlay,
+        "opacity",
+        active && card.populated ? String(1 - alpha) : "0",
+      );
+      if (world) {
+        const { width, height } = card.group.element.frame,
           pad = scene.padding;
-        card.overlay.style.clipPath = `inset(${world.f - pad}px ${deck.width - world.e - width - pad}px ${deck.height - world.f - height - pad}px ${world.e - pad}px)`;
+        set(
+          card.overlay,
+          "clipPath",
+          `inset(${world.f - pad}px ${deck.width - world.e - width - pad}px ${deck.height - world.f - height - pad}px ${world.e - pad}px)`,
+        );
       }
-      return active;
-    });
+    }
+    return samples.filter((s) => s.active).map((s) => s.card);
+  };
   const render = async () => {
-    sample();
     await ready;
     if (disposed || rejected) return false;
     root.dataset.compositionBackend = "native-backdrop-restore";

@@ -54,14 +54,14 @@
       "visibility": "visible",
       "contentVisibility": "visible",
       "opacity": "1",
-      "alpha": 0.148034,
-      "transform": "matrix(1, 0, 0, 1, 0, -30.6708)",
-      "restore": 0.851966,
-      "clip": "inset(186.836px 157.506px 688.177px 1017.51px)",
+      "alpha": 0.110639,
+      "transform": "matrix(1, 0, 0, 1, 0, -32.017)",
+      "restore": 0.889361,
+      "clip": "inset(185.49px 157.506px 689.523px 1017.51px)",
       "populated": true,
       "rect": {
         "x": 510.0000305175781,
-        "y": 94.66136932373047
+        "y": 93.98826599121094
       }
     },
     {
@@ -69,14 +69,14 @@
       "visibility": "visible",
       "contentVisibility": "visible",
       "opacity": "1",
-      "alpha": 0.504599,
-      "transform": "matrix(1, 0, 0, 1, 0, -17.8345)",
-      "restore": 0.495401,
-      "clip": "inset(449.672px 157.506px 425.341px 1097.51px)",
+      "alpha": 0.137459,
+      "transform": "matrix(1, 0, 0, 1, 0, -31.0515)",
+      "restore": 0.862541,
+      "clip": "inset(436.455px 157.506px 438.558px 1097.51px)",
       "populated": true,
       "rect": {
         "x": 549.9984130859375,
-        "y": 226.08116149902344
+        "y": 219.47264099121094
       }
     },
     {
@@ -84,20 +84,20 @@
       "visibility": "visible",
       "contentVisibility": "visible",
       "opacity": "1",
-      "alpha": 0.110639,
-      "transform": "matrix(1, 0, 0, 1, 0, -32.017)",
-      "restore": 0.889361,
-      "clip": "inset(685.49px 157.506px 189.523px 1177.51px)",
+      "alpha": 0.174093,
+      "transform": "matrix(1, 0, 0, 1, 0, -29.7327)",
+      "restore": 0.825907,
+      "clip": "inset(687.774px 157.506px 187.239px 1177.51px)",
       "populated": true,
       "rect": {
         "x": 589.9967651367188,
-        "y": 343.99151611328125
+        "y": 345.1336975097656
       }
     }
   ],
   "after": {
-    "observedFrames": 96,
-    "visiblePartialAlphaSamples": 126,
+    "observedFrames": 103,
+    "visiblePartialAlphaSamples": 134,
     "unpopulatedVisibleSamples": 0,
     "inverseAlphaMismatches": 0
   },

@@ -249,14 +249,14 @@ overlay's inverse alpha and world clip after flushing its existing values.
 `RestoredCard.populated` gates the card's `content-visibility` until publication;
 the native card's opacity stays 1. Bitmap publication resamples current DOM
 values before revealing both parts together, rather than publishing captured
-alpha/geometry from before the asynchronous request. No timer, extra Motion
-state or compositor was added. Cancellation synchronizes the restored state too.
+alpha/geometry from before the asynchronous request. The sampler batches DOM reads before writes and avoids redundant style updates.
+No timer, extra Motion state or compositor was added. Cancellation synchronizes the restored state too.
 
 The focused entrance test holds first bitmap publication across an actual
 paint, advances the existing Motion sampler while it is pending, and checks
 readiness, native opacity, inverse alpha and current world placement at reveal.
 The real slide-4 filmstrip was visually reviewed without the entrance flash;
-all 126 observed visible partial-alpha card samples were populated and matched
+all 134 observed visible partial-alpha card samples were populated and matched
 inverse alpha. These capture observations do not measure playback performance.
 
 The final Electron selection below passes all **seven** native-composition
