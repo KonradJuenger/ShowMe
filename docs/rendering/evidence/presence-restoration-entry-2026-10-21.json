@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-21",
+  "sourceDocumentSha256": "48b6ca7d471fdede2d5c37fabe556e33af6c40733afffd561373c1e75354b047",
+  "beforeRevision": "fd0dafb57068f8d450b97e18983fb9264e0b1d2a",
+  "workload": "Original slide 4, real template and Presence schedules, native Electron renderer at scale 0.5; CDP screencast plus post-Motion rAF observations. Capture instrumentation is not a performance measurement.",
+  "populatedObservation": "bitmaprenderer canvas width > 1; production RestoredCard.populated is set in the same synchronous publication task",
+  "firstBefore": [
+    {
+      "id": "motion-one",
+      "visibility": "visible",
+      "opacity": "1",
+      "alpha": 0.0109461,
+      "transform": "matrix(1, 0, 0, 1, 0, -35.6059)",
+      "restore": 0,
+      "clip": "",
+      "populated": false,
+      "rect": {
+        "x": 510.0000305175781,
+        "y": 92.19379425048828
+      }
+    },
+    {
+      "id": "motion-two",
+      "visibility": "visible",
+      "opacity": "1",
+      "alpha": 0.306823,
+      "transform": "matrix(1, 0, 0, 1, 0, -24.9544)",
+      "restore": 0,
+      "clip": "",
+      "populated": false,
+      "rect": {
+        "x": 549.9984130859375,
+        "y": 222.5211944580078
+      }
+    },
+    {
+      "id": "motion-three",
+      "visibility": "visible",
+      "opacity": "1",
+      "alpha": 0.0997573,
+      "transform": "matrix(1, 0, 0, 1, 0, -32.4087)",
+      "restore": 1,
+      "clip": "inset(681.507px 157.506px 193.506px 1177.51px)",
+      "populated": true,
+      "rect": {
+        "x": 589.9967651367188,
+        "y": 343.795654296875
+      }
+    }
+  ],
+  "firstAfter": [
+    {
+      "id": "motion-one",
+      "visibility": "visible",
+      "contentVisibility": "visible",
+      "opacity": "1",
+      "alpha": 0.148034,
+      "transform": "matrix(1, 0, 0, 1, 0, -30.6708)",
+      "restore": 0.851966,
+      "clip": "inset(186.836px 157.506px 688.177px 1017.51px)",
+      "populated": true,
+      "rect": {
+        "x": 510.0000305175781,
+        "y": 94.66136932373047
+      }
+    },
+    {
+      "id": "motion-two",
+      "visibility": "visible",
+      "contentVisibility": "visible",
+      "opacity": "1",
+      "alpha": 0.504599,
+      "transform": "matrix(1, 0, 0, 1, 0, -17.8345)",
+      "restore": 0.495401,
+      "clip": "inset(449.672px 157.506px 425.341px 1097.51px)",
+      "populated": true,
+      "rect": {
+        "x": 549.9984130859375,
+        "y": 226.08116149902344
+      }
+    },
+    {
+      "id": "motion-three",
+      "visibility": "visible",
+      "contentVisibility": "visible",
+      "opacity": "1",
+      "alpha": 0.110639,
+      "transform": "matrix(1, 0, 0, 1, 0, -32.017)",
+      "restore": 0.889361,
+      "clip": "inset(685.49px 157.506px 189.523px 1177.51px)",
+      "populated": true,
+      "rect": {
+        "x": 589.9967651367188,
+        "y": 343.99151611328125
+      }
+    }
+  ],
+  "after": {
+    "observedFrames": 96,
+    "visiblePartialAlphaSamples": 126,
+    "unpopulatedVisibleSamples": 0,
+    "inverseAlphaMismatches": 0
+  },
+  "regression": "A controlled createImageBitmap promise holds first publication across an actual screenshot, then advances the existing Presence sample from 1 to 100 ms. Pending native card has opacity 1 and content-visibility hidden; first reveal is populated at alpha 0.1, inverse opacity 0.9 and current world clip. No visible CSS fallback.",
+  "visualReview": "Reviewed pending fixture screenshot (background only) and original slide-4 entry filmstrip: no full-opacity flash. Raw records and captures retained in .agenttmp/entry-before and .agenttmp/entry-final."
+}

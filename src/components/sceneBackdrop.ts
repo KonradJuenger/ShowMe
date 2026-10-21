@@ -326,36 +326,51 @@ export function mountSceneBackdrop(
     }
   };
   document.fonts.addEventListener("loadingdone", fontChanged);
+  // Placement and inverse alpha belong to the current Motion sample, not to
+  // the asynchronous bitmap request. Until the first bitmap exists, keep the
+  // native card unpainted; publication reveals both parts in the same task.
+  const sample = () =>
+    cards.filter((card) => {
+      const alpha = Number(
+        getComputedStyle(
+          card.owner.querySelector<HTMLElement>(
+            ":scope > [data-composition-alpha]",
+          ) ?? card.owner,
+        ).opacity,
+      );
+      const visibility = getComputedStyle(card.owner).visibility;
+      const active = visibility === "visible" && alpha < 1;
+      // Keep opacity at one even while preparing: lowering it would activate
+      // the CSS group-opacity fallback that this native path avoids.
+      card.owner.style.contentVisibility =
+        (active && !card.populated) ||
+        card.owner.dataset.presentationAbsent === "true"
+          ? "hidden"
+          : "";
+      card.overlay.style.visibility = visibility;
+      card.overlay.style.opacity =
+        active && card.populated ? String(1 - alpha) : "0";
+      if (active) {
+        const world = elementWorldTransform(card.owner, root),
+          { width, height } = card.group.element.frame,
+          pad = scene.padding;
+        card.overlay.style.clipPath = `inset(${world.f - pad}px ${deck.width - world.e - width - pad}px ${deck.height - world.f - height - pad}px ${world.e - pad}px)`;
+      }
+      return active;
+    });
   const render = async () => {
+    sample();
     await ready;
     if (disposed || rejected) return false;
     root.dataset.compositionBackend = "native-backdrop-restore";
-    const active = cards
-      .map((card) => ({
-        card,
-        world: elementWorldTransform(card.owner, root),
-        alpha: Number(
-          getComputedStyle(
-            card.owner.querySelector<HTMLElement>(
-              ":scope > [data-composition-alpha]",
-            ) ?? card.owner,
-          ).opacity,
-        ),
-        visibility: getComputedStyle(card.owner).visibility,
-      }))
-      .filter((sample) => {
-        sample.card.overlay.style.visibility = sample.visibility;
-        if (sample.visibility !== "visible" || sample.alpha >= 1) {
-          sample.card.overlay.style.opacity = "0";
-          if (sample.card.populated) {
-            sample.card.bitmap.transferFromImageBitmap(null);
-            sample.card.canvas.width = sample.card.canvas.height = 1;
-            sample.card.populated = false;
-          }
-          return false;
-        }
-        return true;
-      });
+    const active = sample();
+    for (const card of cards) {
+      if (!active.includes(card) && card.populated) {
+        card.bitmap.transferFromImageBitmap(null);
+        card.canvas.width = card.canvas.height = 1;
+        card.populated = false;
+      }
+    }
     if (!active.length) {
       if (source.width !== 1 || source.height !== 1)
         source.width = source.height = 1;
@@ -385,8 +400,8 @@ export function mountSceneBackdrop(
     if (getComputedStyle(shader).visibility === "visible")
       context.drawImage(shader, 0, 0, source.width, source.height);
     const pending = await Promise.allSettled(
-      active.map(async (sample) => ({
-        ...sample,
+      active.map(async (card) => ({
+        card,
         bitmap: await createImageBitmap(source),
       })),
     );
@@ -395,7 +410,7 @@ export function mountSceneBackdrop(
       if (failure) throw failure.reason;
       for (const result of pending) {
         if (result.status !== "fulfilled") continue;
-        const { card, bitmap, world, alpha } = result.value;
+        const { card, bitmap } = result.value;
         if (!disposed && !rejected) {
           if (card.canvas.width !== source.width)
             card.canvas.width = source.width;
@@ -403,10 +418,6 @@ export function mountSceneBackdrop(
             card.canvas.height = source.height;
           card.bitmap.transferFromImageBitmap(bitmap);
           card.populated = true;
-          const { width, height } = card.group.element.frame,
-            pad = scene.padding;
-          card.overlay.style.clipPath = `inset(${world.f - pad}px ${deck.width - world.e - width - pad}px ${deck.height - world.f - height - pad}px ${world.e - pad}px)`;
-          card.overlay.style.opacity = String(1 - alpha);
         }
       }
     } finally {
@@ -414,9 +425,11 @@ export function mountSceneBackdrop(
         if (result.status === "fulfilled") result.value.bitmap.close();
       });
     }
+    if (!disposed && !rejected) sample();
     return !disposed && !rejected;
   };
   const backend = {
+    sample,
     flush() {
       return (inFlight ??= render()
         .catch((error) => {
@@ -429,6 +442,7 @@ export function mountSceneBackdrop(
     },
   };
   sceneBackdropBackends.set(root, backend);
+  sample();
   void ready.catch(reject);
   return () => {
     disposed = true;
@@ -436,6 +450,8 @@ export function mountSceneBackdrop(
     sceneBackdropBackends.delete(root);
     delete root.dataset.compositionBackend;
     cards.forEach((c) => {
+      if (c.owner.dataset.presentationAbsent !== "true")
+        c.owner.style.contentVisibility = "";
       c.overlay.remove();
       c.bitmap.transferFromImageBitmap(null);
       c.canvas.width = c.canvas.height = 1;

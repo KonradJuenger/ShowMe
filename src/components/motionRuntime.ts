@@ -21,6 +21,7 @@ import {
 } from "../core/motion";
 import { stageDuration } from "../core/motionModel";
 import { effectSurface, flushEffectSurfaces } from "./effectRuntime";
+import { sampleSceneBackdrops } from "./sceneBackdropRegistry";
 import {
   numericEffectParameters,
   effectTiming,
@@ -344,6 +345,7 @@ export function createMotionRuntime(
       styleEffect.flush(binding.node);
       if (binding.visual !== binding.node) styleEffect.flush(binding.visual);
     });
+    sampleSceneBackdrops(root);
     if (presenceOnly) return;
     effectBindings.forEach(({ element, instance, surface, values }) => {
       if (
@@ -468,6 +470,7 @@ export function createMotionRuntime(
           delete node.dataset.presentationAbsent;
         },
       );
+      sampleSceneBackdrops(root);
     },
   };
 }

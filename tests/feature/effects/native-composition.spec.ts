@@ -264,6 +264,121 @@ async function enableScene(page: Page) {
   });
 }
 
+test("filled rounded Presence reveals its first restoration with the current Motion sample", async () => {
+  await mount(page, "glass");
+  await enableScene(page);
+  await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow & {
+      releaseBitmap: () => void;
+      bitmapStarted: Promise<void>;
+      entranceFlush: Promise<unknown>;
+    };
+    const runtimePath = "/src/components/motionRuntime.ts";
+    const {
+      createMotionRuntime,
+    }: typeof import("../../../src/components/motionRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
+    const original = window.createImageBitmap.bind(window);
+    let started!: () => void;
+    w.bitmapStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      w.releaseBitmap = resolve;
+    });
+    window.createImageBitmap = (async (
+      ...args: Parameters<typeof createImageBitmap>
+    ) => {
+      const bitmap = await original(...args);
+      started();
+      await held;
+      return bitmap;
+    }) as typeof createImageBitmap;
+    w.runtime = createMotionRuntime(
+      w.native.host,
+      { ...w.model.slides[w.model.deck.slideIds[0]], motion: w.motion },
+      0,
+    );
+    w.runtime.sync({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 1,
+      running: false,
+      startedAt: 0,
+    });
+    w.entranceFlush = w.native.advance(0.37);
+    await w.bitmapStarted;
+    // Advance the existing sampler while publication is pending. The eventual
+    // reveal must use this sample, not the one captured before the await.
+    w.runtime.samplePresence(100);
+  });
+  // A screenshot forces an actual painted boundary while the first bitmap is
+  // pending; the fully opaque native card must not paint by itself.
+  await page.locator(".slide-renderer").screenshot({
+    path: "test-results-native-composition/entrance-pending.png",
+  });
+  const pending = await page
+    .locator('[data-element-id="glass"]')
+    .evaluate((node) => ({
+      opacity: Number(getComputedStyle(node).opacity),
+      contentVisibility: getComputedStyle(node).contentVisibility,
+      populated: node.nextElementSibling!.querySelector("canvas")!.width > 1,
+    }));
+  expect(pending).toEqual({
+    opacity: 1,
+    contentVisibility: "hidden",
+    populated: false,
+  });
+  await expect(page.locator("[data-css-backdrop]:visible")).toHaveCount(0);
+  const first = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow & {
+      releaseBitmap: () => void;
+      entranceFlush: Promise<unknown>;
+    };
+    w.releaseBitmap();
+    await w.entranceFlush;
+    const node = w.native.host.querySelector<HTMLElement>(
+        '[data-element-id="glass"]',
+      )!,
+      overlay = node.nextElementSibling as HTMLElement,
+      canvas = overlay.querySelector("canvas")!;
+    const transformPath = "/src/components/elementDomTransform.ts";
+    const {
+      elementWorldTransform,
+    }: typeof import("../../../src/components/elementDomTransform") =
+      await import(/* @vite-ignore */ transformPath);
+    const world = elementWorldTransform(
+      node,
+      w.native.host.querySelector<HTMLElement>(".slide-renderer")!,
+    );
+    return {
+      opacity: Number(getComputedStyle(node).opacity),
+      contentVisibility: getComputedStyle(node).contentVisibility,
+      alpha: Number(
+        getComputedStyle(node.querySelector("[data-composition-alpha]")!)
+          .opacity,
+      ),
+      restoration: Number(getComputedStyle(overlay).opacity),
+      populated: canvas.width > 1,
+      clip: overlay.style.clipPath.match(/-?[\d.]+/g)!.map(Number),
+      x: world.e,
+      y: world.f,
+    };
+  });
+  expect(first.populated).toBe(true);
+  expect(first.opacity).toBe(1);
+  expect(first.contentVisibility).toBe("visible");
+  expect(first.alpha).toBeCloseTo(0.1);
+  expect(first.restoration).toBeCloseTo(1 - first.alpha, 5);
+  expect(first.clip[0]).toBeCloseTo(first.y - 2, 2);
+  expect(first.clip[3]).toBeCloseTo(first.x - 2, 2);
+  await expect(page.locator("[data-css-backdrop]:visible")).toHaveCount(0);
+  await page
+    .locator(".slide-renderer")
+    .screenshot({ path: "test-results-native-composition/entrance-first.png" });
+});
+
 test("filled rounded glass keeps native edge pixels and one resolved Presence fade with an ordered scene input", async () => {
   await mount(page, "glass");
   await page.evaluate(() =>

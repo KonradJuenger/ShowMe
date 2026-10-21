@@ -236,6 +236,37 @@ UI interaction semantics and media admission are unchanged.
 
 ## Verification
 
+### Presence restoration entry synchronization, 2026-10-21
+
+The real slide-4 entry recording confirmed an unpopulated first restoration:
+`motion-one` was visible at native opacity 1 with Motion alpha 0.0109461,
+restoration opacity 0 and an empty bitmap canvas. Its next sample had alpha
+0.121433 but restoration opacity 0.989054 and placement from the previous
+sample. See the [compact entry evidence](evidence/presence-restoration-entry-2026-10-21.json).
+
+The fix preserves backdrop restoration. Motion synchronously updates the
+overlay's inverse alpha and world clip after flushing its existing values.
+`RestoredCard.populated` gates the card's `content-visibility` until publication;
+the native card's opacity stays 1. Bitmap publication resamples current DOM
+values before revealing both parts together, rather than publishing captured
+alpha/geometry from before the asynchronous request. No timer, extra Motion
+state or compositor was added. Cancellation synchronizes the restored state too.
+
+The focused entrance test holds first bitmap publication across an actual
+paint, advances the existing Motion sampler while it is pending, and checks
+readiness, native opacity, inverse alpha and current world placement at reveal.
+The real slide-4 filmstrip was visually reviewed without the entrance flash;
+all 126 observed visible partial-alpha card samples were populated and matched
+inverse alpha. These capture observations do not measure playback performance.
+
+The final Electron selection below passes all **seven** native-composition
+declarations, including filled/rounded Move In and cancellation. The browser
+selection passes **25** declarations, including CSS backdrop correctness and
+both audience-navigation declarations. Build (including TypeScript), changed-file
+ESLint, stats and registry audit pass (635 active tests). Full/release suites,
+packaged output and macOS checks were not run. Earlier verification and baseline
+measurements below remain historical records.
+
 ### Real-deck performance follow-up, 2026-10-21
 
 The initial `f620e6a` implementation did **not** fix filled, rounded glass cards.
