@@ -111,6 +111,8 @@ export function createMotionRuntime(
     string,
     {
       node: HTMLElement;
+      visual: HTMLElement;
+      originalVisualOpacity: string;
       values: Record<string, MotionValue<number>>;
       original: { transform: string; opacity: string; willChange: string };
       detach: () => void;
@@ -176,12 +178,34 @@ export function createMotionRuntime(
       willChange: node.style.willChange,
     };
     if (compiled.some((track) => track.elementId === id))
-      node.style.willChange = "transform, opacity";
-    const detach = styleEffect(node, values);
+      node.style.willChange = "transform";
+    const visual =
+      node.querySelector<HTMLElement>(":scope > [data-composition-visual]") ??
+      node;
+    const originalVisualOpacity = visual.style.opacity;
+    const { opacity, ...transport } = values;
+    const detachTransport = styleEffect(
+      node,
+      visual === node ? values : transport,
+    );
+    const detachAlpha =
+      visual === node ? () => {} : styleEffect(visual, { opacity });
+    const detach = () => {
+      detachTransport();
+      detachAlpha();
+    };
     styleEffect.flush(node);
-    bindings.set(id, { node, values, original, detach });
+    if (visual !== node) styleEffect.flush(visual);
+    bindings.set(id, {
+      node,
+      visual,
+      originalVisualOpacity,
+      values,
+      original,
+      detach,
+    });
   }
-  const controls = Array.from(bindings, ([id, binding]) => {
+  const controls = Array.from(bindings).flatMap(([id, binding]) => {
     const targets: Record<string, number[]> = {};
     const transitions: StyleTransitions = {};
     for (const track of compiled.filter(
@@ -209,10 +233,20 @@ export function createMotionRuntime(
         autoplay: false,
       };
     }
+    const alpha = targets.opacity;
+    if (binding.visual !== binding.node && alpha) {
+      delete targets.opacity;
+      return [
+        animate(binding.values.opacity, alpha, transitions.opacity),
+        ...(Object.keys(targets).length
+          ? [animate(binding.node, targets, transitions)]
+          : []),
+      ];
+    }
     return Object.keys(targets).length
-      ? animate(binding.node, targets, transitions)
-      : null;
-  }).filter((control) => control !== null);
+      ? [animate(binding.node, targets, transitions)]
+      : [];
+  });
   const effectBindings = Array.from(
     root.querySelectorAll<HTMLElement>("[data-effect-id]"),
   ).flatMap((node) => {
@@ -307,6 +341,7 @@ export function createMotionRuntime(
         binding.values[name].set(value),
       );
       styleEffect.flush(binding.node);
+      if (binding.visual !== binding.node) styleEffect.flush(binding.visual);
     });
     if (presenceOnly) return;
     effectBindings.forEach(({ element, instance, surface, values }) => {
@@ -414,21 +449,24 @@ export function createMotionRuntime(
       });
       detachClock();
       clock.destroy();
-      bindings.forEach(({ node, values, original, detach }) => {
-        detach();
-        Object.values(values).forEach((value) => value.destroy());
-        node.style.transform = original.transform;
-        node.style.opacity = original.opacity;
-        node.style.willChange = original.willChange;
-        const saved = visibility.get(node.dataset.elementId!);
-        if (saved) {
-          node.style.visibility = saved.visibility;
-          node.style.pointerEvents = saved.pointerEvents;
-          node.style.contentVisibility = saved.contentVisibility;
-          node.inert = saved.inert;
-        }
-        delete node.dataset.presentationAbsent;
-      });
+      bindings.forEach(
+        ({ node, visual, originalVisualOpacity, values, original, detach }) => {
+          detach();
+          Object.values(values).forEach((value) => value.destroy());
+          node.style.transform = original.transform;
+          node.style.opacity = original.opacity;
+          node.style.willChange = original.willChange;
+          if (visual !== node) visual.style.opacity = originalVisualOpacity;
+          const saved = visibility.get(node.dataset.elementId!);
+          if (saved) {
+            node.style.visibility = saved.visibility;
+            node.style.pointerEvents = saved.pointerEvents;
+            node.style.contentVisibility = saved.contentVisibility;
+            node.inert = saved.inert;
+          }
+          delete node.dataset.presentationAbsent;
+        },
+      );
     },
   };
 }

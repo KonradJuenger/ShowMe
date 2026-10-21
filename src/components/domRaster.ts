@@ -27,6 +27,7 @@ export function createDomRasterSource(
   dependencies: () => Promise<void>,
   sourceTransform: () => DOMMatrix = () => new DOMMatrix(),
   refined = false,
+  stableStyles?: () => unknown,
 ) {
   const canvas = document.createElement("canvas") as PaintCanvas;
   const context = canvas.getContext("2d") as PaintContext | null;
@@ -53,6 +54,16 @@ export function createDomRasterSource(
     revision: string;
     children: number[];
     bitmap?: HTMLCanvasElement;
+    paint?: {
+      value: string;
+      media: {
+        width: string;
+        height: string;
+        objectFit: string;
+        objectPosition: string;
+      };
+      pseudos: string[];
+    };
   }> = [];
   let dirty = true,
     structureDirty = true,
@@ -70,6 +81,10 @@ export function createDomRasterSource(
   let wasDynamic = false;
   let bitmapWritten = false;
   let structureRevision = 0;
+  let styleEpoch = 0;
+  let frozenKey: unknown;
+  let frozenEpoch = -1;
+  let frozenInline = "";
   const included = (node: HTMLElement) => {
     for (
       let ancestor: HTMLElement | null = node;
@@ -120,12 +135,21 @@ export function createDomRasterSource(
       return (
         target &&
         (target.closest("head,style") ||
+          target.contains(source()) ||
           ((refined ? included(target) : include(target)) &&
             target.tagName !== "CANVAS" &&
             !record.attributeName?.startsWith("data-effect")))
       );
     });
     if (!relevant.length) return;
+    if (
+      relevant.some(
+        ({ target }) =>
+          target instanceof HTMLElement &&
+          (!!target.closest("head,style") || !source().contains(target)),
+      )
+    )
+      styleEpoch++;
     if (
       relevant.some((record) => {
         if (record.type !== "childList") return false;
@@ -163,6 +187,15 @@ export function createDomRasterSource(
       characterData: true,
       attributes: true,
     });
+    for (
+      let ancestor = source().parentElement;
+      ancestor;
+      ancestor = ancestor.parentElement
+    )
+      observer.observe(ancestor, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
     source()
       .closest(".slide-renderer")
       ?.querySelectorAll("style")
@@ -277,8 +310,68 @@ export function createDomRasterSource(
       }
     }
     if (structureDirty || !root) build();
+    // This opt-in is used only for a scene of constant scoped CSS declarations.
+    // Motion still supplies live computed transforms/alpha/visibility. Other
+    // authoring, stylesheet, font and topology changes invalidate the cache.
+    const transport = new Set([
+      "transform",
+      "transform-origin",
+      "opacity",
+      "visibility",
+      "content-visibility",
+      "pointer-events",
+      "will-change",
+      "display",
+    ]);
+    const key = stableStyles?.();
+    const frozen =
+      key !== undefined &&
+      key !== null &&
+      !originalRoot
+        .getAnimations({ subtree: true })
+        .some(
+          (animation) =>
+            animation instanceof CSSAnimation ||
+            animation instanceof CSSTransition,
+        );
+    if (frozen) {
+      const inline = pairs
+        .map(({ original }) =>
+          [
+            original.className,
+            ...Array.from(original.style)
+              .filter(
+                (property) =>
+                  !property.startsWith("--") && !transport.has(property),
+              )
+              .map(
+                (property) =>
+                  `${property}:${original.style.getPropertyValue(property)}`,
+              ),
+          ].join(";"),
+        )
+        .join("\n");
+      if (
+        key !== frozenKey ||
+        frozenEpoch !== styleEpoch ||
+        inline !== frozenInline
+      )
+        pairs.forEach((pair) => {
+          pair.paint = undefined;
+        });
+      frozenKey = key;
+      frozenEpoch = styleEpoch;
+      frozenInline = inline;
+    } else
+      pairs.forEach((pair) => {
+        pair.paint = undefined;
+      });
     const pseudoRules: string[] = [];
     const read = (pair: (typeof pairs)[number]) => {
+      if (frozen && pair.paint) {
+        pseudoRules.push(...pair.paint.pseudos);
+        return pair.paint;
+      }
       const { original, clone } = pair;
       const computed = getComputedStyle(original);
       metrics.styleReads++;
@@ -291,14 +384,18 @@ export function createDomRasterSource(
         objectPosition: computed.objectPosition,
       };
       const key = clone.dataset.domRasterNode!;
+      const pseudos: string[] = [];
       for (const pseudo of ["::before", "::after"]) {
         const style = getComputedStyle(original, pseudo);
         if (style.content !== "none" && style.content !== "normal")
-          pseudoRules.push(
+          pseudos.push(
             `[data-dom-raster-node="${key}"]${pseudo}{${declarations(style)}animation:none!important;transition:none!important;}`,
           );
       }
-      return { value, media };
+      pseudoRules.push(...pseudos);
+      const paint = { value, media, pseudos };
+      if (frozen) pair.paint = paint;
+      return paint;
     };
     const reads = batchReads ? pairs.map(read) : null;
     for (const [index, pair] of pairs.entries()) {
@@ -309,6 +406,16 @@ export function createDomRasterSource(
         clone.style.setProperty("animation", "none", "important");
         clone.style.setProperty("transition", "none", "important");
         pair.style = value;
+      }
+      if (frozen) {
+        const current = getComputedStyle(original);
+        metrics.styleReads++;
+        for (const property of transport)
+          clone.style.setProperty(
+            property,
+            current.getPropertyValue(property),
+            "important",
+          );
       }
       normalize(original, clone);
       const texts = Array.from(original.childNodes).filter(
@@ -342,7 +449,7 @@ export function createDomRasterSource(
       ) {
         const next =
           original instanceof HTMLCanvasElement
-            ? `${original.closest<HTMLElement>("[data-effect-id]")?.dataset.effectRevision}:${original.width}:${original.height}`
+            ? `${original.dataset.rasterRevision ?? original.closest<HTMLElement>("[data-effect-id]")?.dataset.effectRevision}:${original.width}:${original.height}`
             : `${original.currentTime}:${original.videoWidth}:${original.videoHeight}`;
         if (next !== pair.revision) {
           const output = pair.bitmap!;

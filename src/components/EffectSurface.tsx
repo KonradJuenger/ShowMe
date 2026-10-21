@@ -17,6 +17,7 @@ import type { Element } from "../core/element";
 import { effectSurface, mountEffectSurface } from "./effectRuntime";
 import { EffectRenderContext } from "./EffectRenderContext";
 import { useDisplayDensity } from "./useDisplayDensity";
+import type { EffectRef } from "./compositionPlan";
 
 export function EffectSurface({
   definition,
@@ -28,12 +29,16 @@ export function EffectSurface({
   textContent,
   rasterContent,
   samplingEnvelope,
+  compositionDependencies,
+  nativeBackdrop = false,
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
   width: number;
   height: number;
   samplingEnvelope?: number;
+  compositionDependencies?: EffectRef[];
+  nativeBackdrop?: boolean;
   children?: ReactNode;
   textContent?: TextContent;
   rasterContent?: {
@@ -60,6 +65,9 @@ export function EffectSurface({
 }) {
   const root = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null);
+  const dependencies = useRef(compositionDependencies);
+  dependencies.current = compositionDependencies;
+  const dependencyKey = JSON.stringify(compositionDependencies);
   const [error, setError] = useState("");
   const copyErrors = useContext(EffectErrorCopyContext);
   const render = useContext(EffectRenderContext);
@@ -124,6 +132,8 @@ export function EffectSurface({
       { width, height },
       setError,
       mountedContent,
+      undefined,
+      () => dependencies.current,
     );
   }, [
     mountedDefinition,
@@ -133,6 +143,9 @@ export function EffectSurface({
     textContent,
     mountedContent,
   ]);
+  useLayoutEffect(() => {
+    if (root.current) effectSurface(root.current)?.replan();
+  }, [dependencyKey]);
   useLayoutEffect(() => {
     if (root.current)
       effectSurface(root.current)?.setSampling({
@@ -172,6 +185,7 @@ export function EffectSurface({
         position: "absolute",
         inset: 0,
         pointerEvents: instance.placement === "content" ? undefined : "none",
+        backdropFilter: nativeBackdrop ? "none" : undefined,
       }}
     >
       {definition.kind === "fragment-glsl" && (

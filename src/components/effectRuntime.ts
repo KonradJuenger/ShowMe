@@ -1,6 +1,7 @@
 import { createTextEffectRunner } from "./textEffectRunner";
 import { EffectGraph } from "./effectGraph";
 import { EffectSources } from "./effectSources";
+import type { EffectRef } from "./compositionPlan";
 import { frame, cancelFrame } from "motion";
 import {
   affineSamplingDensity,
@@ -16,6 +17,7 @@ import {
   backdropPrefix,
 } from "./elementRaster";
 import { createDomRasterSource } from "./domRaster";
+import { createCssBackdrop } from "./cssBackdrop";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
@@ -51,6 +53,7 @@ function samplingRoot(node: HTMLElement, sampling: EffectSampling) {
   );
 }
 type Surface = {
+  replan(): void;
   inputs(): HTMLElement[];
   materialize(): void;
   gpuOutput(): ShaderOutput | null;
@@ -93,6 +96,7 @@ type Coordinator = {
   graph: EffectGraph<HTMLElement>;
   sources: EffectSources<Raster>;
   nodes: Set<HTMLElement>;
+  references: Map<string, HTMLElement>;
   compiled: boolean;
   observer: MutationObserver;
 };
@@ -117,6 +121,7 @@ function coordinatorFor(root: HTMLElement) {
       graph: new EffectGraph(),
       sources: new EffectSources(),
       nodes: new Set(),
+      references: new Map(),
       compiled: false,
       observer,
     };
@@ -395,11 +400,16 @@ export function mountEffectSurface(
     y: devicePixelRatio || 1,
     mode: "live",
   },
+  compositionDependencies?: () => EffectRef[] | undefined,
 ) {
   const refined = executionMode === "refined";
   const useGpu = refined;
   const sceneRoot = samplingRoot(node, initialSampling);
   const coordinator = refined ? coordinatorFor(sceneRoot) : null;
+  const referenceKey = JSON.stringify([
+    node.closest<HTMLElement>("[data-element-id]")?.dataset.elementId,
+    instance.id,
+  ]);
   const dependencies = effectDependencies(definition);
   const cssSource = () =>
     (definition.kind === "css"
@@ -457,7 +467,14 @@ export function mountEffectSurface(
   let logicalSize = size;
   let samplingGeometry = "";
   const prepareSampling = () => {
-    if (!live || definition.kind !== "fragment-glsl") return;
+    if (!live) return;
+    if (definition.kind === "css") {
+      void cssBackdrop
+        ?.prepare(Math.max(sampling.x, sampling.y))
+        .catch(diagnose);
+      return;
+    }
+    if (definition.kind !== "fragment-glsl") return;
     try {
       const owner = node.closest<HTMLElement>("[data-element-id]");
       if (owner) {
@@ -550,6 +567,7 @@ export function mountEffectSurface(
   let sourceRoot: HTMLElement | null = null;
   let sourceContent: HTMLElement | null = null;
   let sourceOpacity = "";
+  let cssBackdrop: ReturnType<typeof createCssBackdrop> = null;
   const ownerAbsent = () => !!node.closest('[data-presentation-absent="true"]');
   const schedule = () => {
     if (live) {
@@ -586,6 +604,20 @@ export function mountEffectSurface(
       sourceChanged();
   };
   const inputDependencies = () => {
+    const planned = compositionDependencies?.();
+    if (planned && coordinator) {
+      return [
+        ...new Set([
+          ...(cssBackdrop?.inputs() ?? []),
+          ...planned.flatMap((ref) => {
+            const mounted = coordinator.references.get(
+              JSON.stringify([ref.elementId, ref.effectId]),
+            );
+            return mounted ? [mounted] : [];
+          }),
+        ]),
+      ];
+    }
     const root =
       definition.kind === "css"
         ? node
@@ -624,12 +656,15 @@ export function mountEffectSurface(
       .sort(dependencyOrder);
     // The outer stage resolves its own inputs. Re-listing every descendant
     // makes a deep stack repeatedly walk and wait on the same subtree.
-    return candidates.filter(
-      (candidate) =>
-        !candidates.some(
-          (other) => other !== candidate && other.contains(candidate),
-        ),
-    );
+    return [
+      ...(cssBackdrop?.inputs() ?? []),
+      ...candidates.filter(
+        (candidate) =>
+          !candidates.some(
+            (other) => other !== candidate && other.contains(candidate),
+          ),
+      ),
+    ];
   };
   let domRevision = -1;
   const materialize = () => {
@@ -690,6 +725,7 @@ export function mountEffectSurface(
   let style: HTMLStyleElement | null = null;
   // Identity belongs to this stage, never to its Element or earlier stages.
   const bypass = () => {
+    cssBackdrop?.hide();
     if (node.dataset.effectStarted !== "false") {
       ++sequence; // A pending worker must not repaint a backward seek.
       lastTextInput = "";
@@ -709,6 +745,7 @@ export function mountEffectSurface(
     node.dataset.effectReady = "true";
   };
   const diagnose = (error: unknown) => {
+    cssBackdrop?.hide();
     node.dataset.effectError =
       error instanceof Error ? error.message : String(error);
     onDiagnostic?.(node.dataset.effectError);
@@ -854,6 +891,32 @@ export function mountEffectSurface(
         for (const [key, value] of Object.entries(params))
           node.style.setProperty(`--${key}`, String(value));
         node.style.setProperty("--duration", String(timing.duration));
+        if (!cssBackdrop && getComputedStyle(node).backdropFilter !== "none")
+          cssBackdrop = createCssBackdrop(
+            node,
+            schedule,
+            (dependencies) => {
+              dependencies.forEach((dependency) =>
+                surfaces.get(dependency)?.materialize(),
+              );
+            },
+            content,
+          );
+        if (cssBackdrop) {
+          pending = cssBackdrop
+            .update(Math.max(sampling.x, sampling.y))
+            .then(() => {
+              if (!live || !timing.started || ownerAbsent())
+                cssBackdrop?.hide();
+              if (live) {
+                delete node.dataset.effectError;
+                onDiagnostic?.("");
+                node.dataset.effectReady = "true";
+              }
+            })
+            .catch(diagnose);
+          return pending;
+        }
       } else if (canvas) {
         const {
           gl,
@@ -1196,6 +1259,8 @@ export function mountEffectSurface(
     if (coordinator) {
       coordinator.graph.remove(node);
       coordinator.nodes.delete(node);
+      if (coordinator.references.get(referenceKey) === node)
+        coordinator.references.delete(referenceKey);
       coordinator.compiled = false;
       nodeCoordinators.delete(node);
       if (!coordinator.nodes.size) {
@@ -1208,6 +1273,7 @@ export function mountEffectSurface(
     if (shaderOutput) disposeShaderOutput(shaderOutput);
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     surfaces.delete(node);
+    cssBackdrop?.dispose();
     runner?.dispose();
     output?.remove();
     if (original && textInputHidden) original.style.opacity = originalOpacity;
@@ -1227,6 +1293,17 @@ export function mountEffectSurface(
       style.media = "not all";
       style.textContent = compileEffectCss(definition.source, scope);
       node.append(style);
+      if (/backdrop-filter\s*:/.test(definition.source))
+        cssBackdrop = createCssBackdrop(
+          node,
+          schedule,
+          (dependencies) => {
+            dependencies.forEach((dependency) =>
+              surfaces.get(dependency)?.materialize(),
+            );
+          },
+          content,
+        );
     } else if (definition.kind === "text-js") {
       original = node.querySelector<HTMLElement>("[data-text-content]");
       if (!original) throw new Error("Text effects require a text Element");
@@ -1543,6 +1620,10 @@ export function mountEffectSurface(
     return dispose;
   }
   const surface: Surface = {
+    replan() {
+      if (coordinator) coordinator.compiled = false;
+      schedule();
+    },
     inputs: inputDependencies,
     materialize,
     gpuOutput() {
@@ -1623,7 +1704,10 @@ export function mountEffectSurface(
     async flush(cohort) {
       cancelFrame(draw);
       scheduled.delete(node);
-      if (ownerAbsent()) return;
+      if (ownerAbsent()) {
+        await cssBackdrop?.prepare(Math.max(sampling.x, sampling.y));
+        return;
+      }
       if (coordinator) {
         compileCoordinator(coordinator);
         await coordinator.graph.flush(node, cohort);
@@ -1668,6 +1752,7 @@ export function mountEffectSurface(
   surfaces.set(node, surface);
   if (coordinator) {
     coordinator.nodes.add(node);
+    coordinator.references.set(referenceKey, node);
     coordinator.graph.register(node, async () => {
       void draw();
       await pending;

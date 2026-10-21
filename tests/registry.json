@@ -966,5 +966,38 @@
     "created": "2026-10-18",
     "lastReviewed": "2026-10-18",
     "reason": "Actual storage/recovery integration holds MCP durability through Save, Dont Save and direct close, rejects new admissions, drains accepted publication, prevents retained runtime writes, and reopens admission on cancel or save failure"
+  },
+  {
+    "id": "effects-composition-plan",
+    "path": "tests/feature/effects/composition-plan.test.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-21",
+    "lastReviewed": "2026-10-21",
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure"
+  },
+  {
+    "id": "effects-native-composition",
+    "path": "tests/feature/effects/native-composition.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-21",
+    "lastReviewed": "2026-10-21",
+    "reason": "Dependency-safe native visual alpha preserves resolved glass pixels through real Presence Motion without prefix reconstruction; unsupported clip/fill/ancestor-alpha boundaries retain the correctness fallback; static topology parity, ordinary opacity/move controls and cancellation restoration run in the verified production Electron compositor"
+  },
+  {
+    "id": "effects-css-backdrop-opacity",
+    "path": "tests/feature/effects/css-backdrop-opacity.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-19",
+    "lastReviewed": "2026-10-21",
+    "reason": "Retained correctness fallback resolves CSS backdrop before whole-element and parent alpha, including real intermediate Move In, lower custom CSS, live shader motion, transformed cached material and overlapping consumers; independent nested alphas resolve through the same fallback, with whole-subtree exclusion for pixel-reference captures"
   }
 ]

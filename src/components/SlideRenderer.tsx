@@ -4,15 +4,20 @@ import type { EffectClockOrigins } from "../core/effectClocks";
 import { resolveVisualSlide } from "../core/templates";
 import { usePreparedImage } from "./usePreparedImage";
 import { useSlideImagePlan, type SlideImagePlan } from "./useSlideImagePlan";
-import {
-  type ImageOutputProfile,
-} from "../core/presentationImages";
+import { type ImageOutputProfile } from "../core/presentationImages";
 import type { MotionPreviewState } from "../core/motionPlayback";
 import { useMotionRuntime } from "./useMotionRuntime";
 import { EffectSurface } from "./EffectSurface";
-import { effectPlacement, type EffectResources } from "../core/effects";
+import { nativeBackdropGroups } from "./nativeComposition";
+import type { EffectResources } from "../core/effects";
+import {
+  compileCompositionPlan,
+  type Composition,
+  type CompositionPlan,
+} from "./compositionPlan";
 import {
   memo,
+  Fragment,
   createContext,
   useMemo,
   useContext,
@@ -53,6 +58,10 @@ const VideoPreparationContext = createContext(false);
 const TextStylesContext = createContext<Deck | undefined>(undefined);
 const EffectResourcesContext = createContext<EffectResources>({});
 const emptyEffectResources: EffectResources = {};
+const CompositionContext = createContext<CompositionPlan | null>(null);
+const NativeCompositionContext = createContext<
+  ReturnType<typeof nativeBackdropGroups>
+>(new Map());
 
 const ImageDocumentContext = createContext<{
   documentId: string;
@@ -720,9 +729,9 @@ const ElementView = memo(function ElementView({
   const resources = useContext(EffectResourcesContext);
   const effectRender = useContext(EffectRenderContext);
   const scene = useContext(RasterSceneContext);
-  const effects = (element.effects ?? []).filter(
-    (e) => e.enabled && resources[e.resourceId],
-  );
+  const plan = useContext(CompositionContext)!;
+  const nativeBackdrop = useContext(NativeCompositionContext).get(element.id);
+  const group = plan.groups.get(element.id)!;
   const rasterContent = useMemo(
     () => ({
       element,
@@ -732,7 +741,7 @@ const ElementView = memo(function ElementView({
     [element, scene],
   );
   const surface = (
-    instance: (typeof effects)[number],
+    instance: NonNullable<Element["effects"]>[number],
     children?: ReactNode,
   ) => (
     <EffectSurface
@@ -744,7 +753,13 @@ const ElementView = memo(function ElementView({
       width={frame.width}
       height={frame.height}
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
+      nativeBackdrop={nativeBackdrop?.effectId === instance.id}
+      compositionDependencies={plan.dependencies({
+        elementId: element.id,
+        effectId: instance.id,
+      })}
       rasterContent={
+        resources[instance.resourceId].kind === "css" ||
         ["content", "backdrop"].includes(
           resources[instance.resourceId].input ?? "none",
         )
@@ -761,7 +776,7 @@ const ElementView = memo(function ElementView({
       {children}
     </EffectSurface>
   );
-  let content = (
+  const source = (
     <>
       {element.content?.type === "text" && element.id !== editingTextId && (
         <TextView content={element.content} />
@@ -774,27 +789,18 @@ const ElementView = memo(function ElementView({
           editorPlayback={editorPlayback}
         />
       )}
-      {element.children.map((child) => (
-        <ElementView
-          key={child.id}
-          element={child}
-          staticVideo={staticVideo}
-          presentation={presentation}
-          editorPlayback={editorPlayback}
-          editingTextId={editingTextId}
-        />
-      ))}
     </>
   );
-  // JS stages transform strings before layout; CSS/shaders then transform pixels.
-  // Keep string evaluation upstream even when a JS stage follows a pixel filter.
-  for (const effect of effects.filter(
-    (e) =>
-      effectPlacement(resources[e.resourceId], e) === "content" &&
-      resources[e.resourceId].kind === "text-js" &&
-      element.id !== editingTextId,
-  ))
-    content = surface(effect, content);
+  const children = element.children.map((child) => (
+    <ElementView
+      key={child.id}
+      element={child}
+      staticVideo={staticVideo}
+      presentation={presentation}
+      editorPlayback={editorPlayback}
+      editingTextId={editingTextId}
+    />
+  ));
   const shape = element.geometry.type === "ellipse" ? "50%" : appearance.radius;
   const outline: CSSProperties = {
     position: "absolute",
@@ -808,60 +814,53 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
-  const baseVisual = (content: ReactNode) => (
-    <>
-      <div
-        style={{
-          position: "relative",
-          width: "100%",
-          height: "100%",
-          borderRadius: shape,
-          overflow: element.clipChildren ? "hidden" : "visible",
-        }}
-      >
-        {appearance.fill && (
+  const lower = (operation: Composition): ReactNode => {
+    switch (operation.kind) {
+      case "source":
+        return source;
+      case "children":
+        return children;
+      case "effect":
+        return surface(
+          operation.effect,
+          operation.input ? lower(operation.input) : undefined,
+        );
+      case "sequence":
+        return operation.items.map((item, index) => (
+          <Fragment key={index}>{lower(item)}</Fragment>
+        ));
+      case "clip":
+        return (
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              height: "100%",
+              borderRadius: shape,
+              overflow: element.clipChildren ? "hidden" : "visible",
+            }}
+          >
+            {lower(operation.input)}
+          </div>
+        );
+      case "fill":
+        return (
           <div
             aria-hidden="true"
             style={{
               position: "absolute",
               inset: 0,
-              backgroundColor: appearance.fill,
+              backgroundColor: appearance.fill ?? undefined,
               borderRadius: shape,
             }}
           />
-        )}
-        {effects
-          .filter(
-            (e) => effectPlacement(resources[e.resourceId], e) === "background",
-          )
-          .map((e) => surface(e))}
-        {content}
-        {effects
-          .filter(
-            (e) => effectPlacement(resources[e.resourceId], e) === "overlay",
-          )
-          .map((e) => surface(e))}
-      </div>
-      {appearance.strokeWidth > 0 && (
-        <div data-element-stroke="true" aria-hidden="true" style={outline} />
-      )}
-    </>
-  );
-  let visual = baseVisual(content);
-  let filtered = false;
-  for (const effect of effects.filter(
-    (e) =>
-      effectPlacement(resources[e.resourceId], e) === "content" &&
-      resources[e.resourceId].kind !== "text-js" &&
-      element.id !== editingTextId,
-  )) {
-    if (resources[effect.resourceId].input === "content") filtered = true;
-    if (filtered) visual = surface(effect, visual);
-    else {
-      content = surface(effect, content);
-      visual = baseVisual(content);
+        );
+      case "stroke":
+        return (
+          <div data-element-stroke="true" aria-hidden="true" style={outline} />
+        );
     }
-  }
+  };
 
   return (
     <div
@@ -878,10 +877,24 @@ const ElementView = memo(function ElementView({
         height: frame.height,
         transform: frameCssTransform(frame),
         transformOrigin: frameCssOrigin(frame),
-        opacity: appearance.opacity,
+        opacity: nativeBackdrop ? 1 : appearance.opacity,
       }}
     >
-      {visual}
+      {nativeBackdrop ? (
+        <div
+          data-composition-visual="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: appearance.opacity,
+            backdropFilter: nativeBackdrop.filter,
+          }}
+        >
+          {lower(group.visual)}
+        </div>
+      ) : (
+        lower(group.visual)
+      )}
     </div>
   );
 });
@@ -932,6 +945,15 @@ export const SlideRenderer = memo(function SlideRenderer({
   const editingMedia = editingMediaId
     ? locateElement(slide, editingMediaId)
     : null;
+  const compositionResources = slide.effectResources;
+  const composition = useMemo(
+    () => compileCompositionPlan(slide, deck, editingTextId, compositionResources),
+    [slide, deck, compositionResources, editingTextId],
+  );
+  const nativeComposition = useMemo(
+    () => nativeBackdropGroups(composition, slide, deck),
+    [composition, slide, deck],
+  );
   const root = useRef<HTMLDivElement>(null);
   const pixelRatio = useDisplayDensity();
   const width = deck.width,
@@ -977,94 +999,120 @@ export const SlideRenderer = memo(function SlideRenderer({
   const layers = new Map(deck.layers.map((layer) => [layer.id, layer]));
   // Live editor and preview surfaces share the audience variants. Only explicit
   // output profiles (audience negotiation and export) override that default.
-  const imagePlan = useSlideImagePlan(slide, deck, imageProfile, preparedImages, deferImageUpdates);
-  const imageContext = useMemo(() => preparedImages ? {
-    documentId: deck.id,
-    slideId: slide.id,
-    deferUpdates: deferImageUpdates,
-    profile: imageProfile,
-    plan: imagePlan,
-  } : null, [preparedImages, deck.id, slide.id, deferImageUpdates, imageProfile, imagePlan]);
+  const imagePlan = useSlideImagePlan(
+    slide,
+    deck,
+    imageProfile,
+    preparedImages,
+    deferImageUpdates,
+  );
+  const imageContext = useMemo(
+    () =>
+      preparedImages
+        ? {
+            documentId: deck.id,
+            slideId: slide.id,
+            deferUpdates: deferImageUpdates,
+            profile: imageProfile,
+            plan: imagePlan,
+          }
+        : null,
+    [
+      preparedImages,
+      deck.id,
+      slide.id,
+      deferImageUpdates,
+      imageProfile,
+      imagePlan,
+    ],
+  );
   return (
     <EffectRenderContext.Provider value={effectRender}>
       <EffectResourcesContext.Provider
         value={slide.effectResources ?? emptyEffectResources}
       >
-        <RasterSceneContext.Provider value={rasterScene}>
-          <TextStylesContext.Provider value={deck}>
-            <VideoPreparationContext.Provider value={prepareVideo}>
-              <ImageDocumentContext.Provider value={imageContext}>
-                <div
-                  ref={root}
-                  className="slide-renderer"
-                  data-slide-id={slide.id}
-                  style={{
-                    position: "relative",
-                    width: deck.width,
-                    height: deck.height,
-                    background: slide.background,
-                    overflow: editorOverflow ? "visible" : "hidden",
-                  }}
-                >
-                  {deck.stylesheet && (
-                    <style>{`@scope (.slide-renderer) { ${deck.stylesheet} }`}</style>
-                  )}
-                  {layerRoots(slide).map((root) => {
-                    const layer = layers.get(root.id);
-                    if (!layer || layer.hidden) return null;
-                    return (
-                      <div
-                        key={root.id}
-                        data-layer-id={root.id}
-                        data-layer-locked={layer.locked ? "true" : undefined}
-                        style={{ position: "absolute", inset: 0 }}
-                      >
-                        {root.children.map((element) => (
-                          <ElementView
-                            key={element.id}
-                            element={element}
-                            staticVideo={staticVideo}
-                            presentation={presentation}
-                            editorPlayback={editorPlayback}
-                            editingTextId={editingTextId}
-                            inherited={
-                              resolved?.sources.get(element.id) === "template"
+        <CompositionContext.Provider value={composition}>
+          <NativeCompositionContext.Provider value={nativeComposition}>
+            <RasterSceneContext.Provider value={rasterScene}>
+              <TextStylesContext.Provider value={deck}>
+                <VideoPreparationContext.Provider value={prepareVideo}>
+                  <ImageDocumentContext.Provider value={imageContext}>
+                    <div
+                      ref={root}
+                      className="slide-renderer"
+                      data-slide-id={slide.id}
+                      style={{
+                        position: "relative",
+                        width: deck.width,
+                        height: deck.height,
+                        background: slide.background,
+                        overflow: editorOverflow ? "visible" : "hidden",
+                      }}
+                    >
+                      {deck.stylesheet && (
+                        <style>{`@scope (.slide-renderer) { ${deck.stylesheet} }`}</style>
+                      )}
+                      {layerRoots(slide).map((root) => {
+                        const layer = layers.get(root.id);
+                        if (!layer || layer.hidden) return null;
+                        return (
+                          <div
+                            key={root.id}
+                            data-layer-id={root.id}
+                            data-layer-locked={
+                              layer.locked ? "true" : undefined
                             }
-                          />
-                        ))}
-                      </div>
-                    );
-                  })}
-                  {editorOverflow &&
-                    editingMedia?.element.content?.type === "image" && (
-                      <div
-                        data-media-edit-reveal={editingMedia.element.id}
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          top: 0,
-                          width: editingMedia.element.frame.width,
-                          height: editingMedia.element.frame.height,
-                          transform: `matrix(${editingMedia.world.join(",")})`,
-                          transformOrigin: "0 0",
-                          opacity: 0.4,
-                          pointerEvents: "none",
-                          clipPath: `polygon(evenodd, -100000px -100000px, 100000px -100000px, 100000px 100000px, -100000px 100000px, -100000px -100000px, 0px 0px, 0px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px 0px, 0px 0px)`,
-                        }}
-                      >
-                        <MediaView
-                          element={editingMedia.element}
-                          staticVideo={true}
-                          presentation={false}
-                          editorPlayback="inactive"
-                        />
-                      </div>
-                    )}
-                </div>
-              </ImageDocumentContext.Provider>
-            </VideoPreparationContext.Provider>
-          </TextStylesContext.Provider>
-        </RasterSceneContext.Provider>
+                            style={{ position: "absolute", inset: 0 }}
+                          >
+                            {root.children.map((element) => (
+                              <ElementView
+                                key={element.id}
+                                element={element}
+                                staticVideo={staticVideo}
+                                presentation={presentation}
+                                editorPlayback={editorPlayback}
+                                editingTextId={editingTextId}
+                                inherited={
+                                  resolved?.sources.get(element.id) ===
+                                  "template"
+                                }
+                              />
+                            ))}
+                          </div>
+                        );
+                      })}
+                      {editorOverflow &&
+                        editingMedia?.element.content?.type === "image" && (
+                          <div
+                            data-media-edit-reveal={editingMedia.element.id}
+                            style={{
+                              position: "absolute",
+                              left: 0,
+                              top: 0,
+                              width: editingMedia.element.frame.width,
+                              height: editingMedia.element.frame.height,
+                              transform: `matrix(${editingMedia.world.join(",")})`,
+                              transformOrigin: "0 0",
+                              opacity: 0.4,
+                              pointerEvents: "none",
+                              clipPath: `polygon(evenodd, -100000px -100000px, 100000px -100000px, 100000px 100000px, -100000px 100000px, -100000px -100000px, 0px 0px, 0px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px 0px, 0px 0px)`,
+                            }}
+                          >
+                            <MediaView
+                              element={editingMedia.element}
+                              staticVideo={true}
+                              presentation={false}
+                              editorPlayback="inactive"
+                            />
+                          </div>
+                        )}
+                    </div>
+                  </ImageDocumentContext.Provider>
+                </VideoPreparationContext.Provider>
+              </TextStylesContext.Provider>
+            </RasterSceneContext.Provider>
+          </NativeCompositionContext.Provider>
+        </CompositionContext.Provider>
       </EffectResourcesContext.Provider>
     </EffectRenderContext.Provider>
   );
