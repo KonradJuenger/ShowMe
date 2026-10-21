@@ -9,6 +9,7 @@ import type { MotionPreviewState } from "../core/motionPlayback";
 import { useMotionRuntime } from "./useMotionRuntime";
 import { EffectSurface } from "./EffectSurface";
 import { nativeBackdropGroups } from "./nativeComposition";
+import { sceneBackdropPlan, mountSceneBackdrop } from "./sceneBackdrop";
 import type { EffectResources } from "../core/effects";
 import {
   compileCompositionPlan,
@@ -58,7 +59,11 @@ const VideoPreparationContext = createContext(false);
 const TextStylesContext = createContext<Deck | undefined>(undefined);
 const EffectResourcesContext = createContext<EffectResources>({});
 const emptyEffectResources: EffectResources = {};
-const CompositionContext = createContext<CompositionPlan | null>(null);
+const emptyBackdropRestoration = new Set<string>();
+const CompositionContext = createContext<{
+  plan: CompositionPlan;
+  restoration: ReadonlySet<string>;
+} | null>(null);
 const NativeCompositionContext = createContext<
   ReturnType<typeof nativeBackdropGroups>
 >(new Map());
@@ -729,8 +734,9 @@ const ElementView = memo(function ElementView({
   const resources = useContext(EffectResourcesContext);
   const effectRender = useContext(EffectRenderContext);
   const scene = useContext(RasterSceneContext);
-  const plan = useContext(CompositionContext)!;
+  const { plan, restoration } = useContext(CompositionContext)!;
   const nativeBackdrop = useContext(NativeCompositionContext).get(element.id);
+  const restoreBackdrop = restoration.has(element.id);
   const group = plan.groups.get(element.id)!;
   const rasterContent = useMemo(
     () => ({
@@ -877,7 +883,7 @@ const ElementView = memo(function ElementView({
         height: frame.height,
         transform: frameCssTransform(frame),
         transformOrigin: frameCssOrigin(frame),
-        opacity: nativeBackdrop ? 1 : appearance.opacity,
+        opacity: nativeBackdrop || restoreBackdrop ? 1 : appearance.opacity,
       }}
     >
       {nativeBackdrop ? (
@@ -894,6 +900,12 @@ const ElementView = memo(function ElementView({
         </div>
       ) : (
         lower(group.visual)
+      )}
+      {restoreBackdrop && (
+        <div
+          data-composition-alpha="true"
+          style={{ display: "none", opacity: appearance.opacity }}
+        />
       )}
     </div>
   );
@@ -947,7 +959,8 @@ export const SlideRenderer = memo(function SlideRenderer({
     : null;
   const compositionResources = slide.effectResources;
   const composition = useMemo(
-    () => compileCompositionPlan(slide, deck, editingTextId, compositionResources),
+    () =>
+      compileCompositionPlan(slide, deck, editingTextId, compositionResources),
     [slide, deck, compositionResources, editingTextId],
   );
   const nativeComposition = useMemo(
@@ -955,6 +968,9 @@ export const SlideRenderer = memo(function SlideRenderer({
     [composition, slide, deck],
   );
   const root = useRef<HTMLDivElement>(null);
+  const [failedBackdrop, setFailedBackdrop] = useState<CompositionPlan | null>(
+    null,
+  );
   const pixelRatio = useDisplayDensity();
   const width = deck.width,
     height = deck.height;
@@ -987,12 +1003,62 @@ export const SlideRenderer = memo(function SlideRenderer({
     }),
     [width, height, output, deferImageUpdates, playing, envelopes],
   );
+  const backdropDensity = Math.max(
+    effectRender.density.x,
+    effectRender.density.y,
+  );
+  const hasMotionPreview = !!motionState;
+  const sceneBackdrop = useMemo(
+    () =>
+      failedBackdrop !== composition &&
+      (presentation || hasMotionPreview) &&
+      !editingTextId &&
+      !editingMediaId
+        ? sceneBackdropPlan(
+            composition,
+            slide,
+            deck,
+            Math.max(2, 2 / backdropDensity),
+          )
+        : null,
+    [
+      composition,
+      slide,
+      deck,
+      presentation,
+      hasMotionPreview,
+      editingTextId,
+      editingMediaId,
+      failedBackdrop,
+      backdropDensity,
+    ],
+  );
+  const compositionView = useMemo(
+    () => ({
+      plan: composition,
+      restoration: sceneBackdrop?.glass ?? emptyBackdropRestoration,
+    }),
+    [composition, sceneBackdrop],
+  );
+  useLayoutEffect(() => {
+    if (!root.current || !sceneBackdrop) return;
+    const failed = (error: unknown) => {
+      console.error("Scene backdrop preparation failed", error);
+      setFailedBackdrop(composition);
+    };
+    try {
+      return mountSceneBackdrop(root.current, sceneBackdrop, deck, failed);
+    } catch (error) {
+      failed(error);
+    }
+  }, [sceneBackdrop, deck, backdropDensity, composition]);
   useMotionRuntime(
     root,
     slide,
     motionState,
     !!effectClock || !staticVideo,
     effectClock,
+    sceneBackdrop?.glass ?? nativeComposition,
   );
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
@@ -1031,7 +1097,7 @@ export const SlideRenderer = memo(function SlideRenderer({
       <EffectResourcesContext.Provider
         value={slide.effectResources ?? emptyEffectResources}
       >
-        <CompositionContext.Provider value={composition}>
+        <CompositionContext.Provider value={compositionView}>
           <NativeCompositionContext.Provider value={nativeComposition}>
             <RasterSceneContext.Provider value={rasterScene}>
               <TextStylesContext.Provider value={deck}>

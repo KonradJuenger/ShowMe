@@ -40,6 +40,7 @@ export function useMotionRuntime(
   state?: MotionPreviewState | null,
   continuous = false,
   origins?: EffectClockOrigins,
+  bindingTopology?: object | null,
 ) {
   const hasOrigins = Boolean(origins);
   const origin = useRef({
@@ -285,8 +286,8 @@ export function useMotionRuntime(
       instance.cancel();
       runtime.current = null;
     };
-  }, [root, slide, stageIndex, continuous]);
+  }, [root, slide, stageIndex, continuous, bindingTopology]);
   useLayoutEffect(() => {
     if (state) runtime.current?.sync(state);
-  }, [state, slide]);
+  }, [state, slide, bindingTopology]);
 }

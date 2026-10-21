@@ -66,8 +66,102 @@ Admission is conservative:
 Rejected cases use the retained correctness fallback. There is no per-descendant
 alpha multiplication, no altered Move In recipe and no blanket CSS-filter hoist.
 Background/overlay placements keep their existing order. Rounded and filled cards
-are intentionally outside this native lowering until exact boundary parity is
-proven.
+remain outside this filter-hoisting lowering. A separate bounded restoration
+operation below preserves their original native paint order.
+
+## Filled, rounded glass: backdrop restoration
+
+The real card paints authored fill, then the CSS backdrop stage and its children,
+inside an enclosing rounded overflow clip. The ShowMe stroke is outside that clip;
+the entire result then receives group alpha and transport. Hoisting the filter
+past the fill changes its input: filtering `B overlaid with fill` differs from
+overlaying fill on `filter(B)`. The rounded fill also changes samples near corners.
+Removing the CSS border and shadow did not remove that mismatch.
+
+Radius has a separate ownership problem. An outer rounded clip around the
+filter/alpha owner preserved the empty rounded card exactly in the independent
+probe. Putting the clip inside that owner, or changing the filter to rectangular
+bounds, changed antialiased corner coverage. A low whole-card mean therefore did
+not establish equivalence. The [probe](evidence/native-filled-rounded.mjs) records
+card, edge and interior errors, including maxima. Keeping the filtered material
+under an ordinary alpha wrapper preserved the static image but failed the fade.
+
+The missing operation is backdrop restoration, rather than another filter hoist.
+Resolve the original card natively at opacity one, producing R. Overlay its
+incoming opaque backdrop B at opacity `1 - alpha`. Source-over then gives
+`alpha * R + (1 - alpha) * B`: one resolved-group fade, including overlapping
+children, tint, border, shadow and rounded-edge coverage. The card's original fill,
+filter and clips stay in place. Motion writes its existing alpha value to a local
+nonpainting binding; the element node continues to own transport.
+
+Restoration images stay in slide coordinates as siblings immediately after their
+card. A rectangular clip follows the moving card with a small output-pixel outset.
+It does not clip at the rounded boundary. This matters: a canvas inside the rounded
+clip changed coverage, and inverse-transforming a canvas inside the moving card
+introduced another sampling phase at fractional display density. Neither variant
+met the strict pixel contract. The slide-coordinate restoration passed unchanged
+static output and resolved Move In pixels at the machine's fractional DPR.
+
+Admission is intentionally narrow: the verified Electron engine, an opaque slide
+background, one full-slide procedural background shader, flat cards with one
+constant CSS material and static children, and bounded translation/fade Presence.
+Swept card bounds must be disjoint. Other shape paint and native text ink must not
+contribute to a restoration rectangle; text bounds are checked after fonts are
+ready and again when fonts load. Thus the same background snapshot is the exact
+incoming scene within each restoration rectangle. Earlier cards are culled by
+that proof, not reconstructed per consumer. Native backdrop filtering still sees
+all actual lower paint, including paint outside the restoration rectangle.
+
+This is not a general retained compositor. Overlapping envelopes, nested alpha,
+mixed effect stacks, media, unsupported motion/CSS and unknown engines retain the
+existing lowering. Static export keeps its existing route. The document model,
+Presence recipes and authority/persistence path are unchanged.
+
+Snapshot publication follows the effect cohort and participates in audience
+readiness. It uses the existing shader output and GPU-backed bitmap publication;
+there is no DOM backdrop capture, primitive replay, custom blur or CPU pixel read
+in this operation. Completed/hidden cards release their restoration images, and
+there is a 256 MiB logical RGBA surface limit. Optional-capability or preparation
+failure restores the existing backend and rebinds Motion at its current time.
+
+The Electron contract covers the actual filled/rounded CSS style over a GLSL
+background, strict maximum RGB error of two for static/fade images, actual Move In,
+overlapping translucent children, cancellation, 1/3/10 disjoint consumers, and
+rejection of 3/10 overlapping consumers. Existing parent/nested and mixed handoff
+contracts remain separate. The production-build performance record is below;
+synthetic pixel tests alone are not performance evidence.
+
+Reproduce the independent topology probe:
+
+```powershell
+node docs/rendering/evidence/native-filled-rounded.mjs
+node docs/rendering/evidence/native-filled-rounded.mjs --no-border-shadow
+```
+
+The [compact pixel record](evidence/native-filled-rounded-2026-10-21.json) contains
+the measured card/edge/interior maxima and the probe digest. In the filled rounded
+case, the best filter-hoisting topology still had maximum static RGB error 10;
+removing border/shadow did not make it exact. Restoration had static error zero
+and maximum fade error 1.5 in the independent DPR-1 probe. The application tests
+also passed at Windows fractional DPR with actual Move In.
+
+Restoration verification on Windows:
+
+```powershell
+$env:SHOWME_TEST_FILES='["tests/feature/effects/native-composition.spec.ts"]'
+npx playwright test --config playwright.electron.config.ts
+$env:SHOWME_TEST_FILES='["tests/feature/effects/css-backdrop-opacity.spec.ts","tests/feature/effects/mixed-compositing.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'
+$env:SHOWME_TEST_PORT='5181'
+npx playwright test --config playwright.config.ts
+```
+
+All six Electron and 25 browser declarations passed, including both unchanged
+audience-navigation declarations, parent/nested fades and the PR #4 GPU handoff,
+context-loss and intervening-CSS contracts. The active effects unit selection
+passed all 102 declarations; `npm test` passed 15. `npm run build`, changed-file
+ESLint, `npm run test:stats`, `npm run test:audit` and whitespace checks passed.
+The registry contains 634 active tests. Full/release, packaging and macOS checks
+were not run. No integration into `main` is part of this change.
 
 ## Native engine evidence
 
@@ -144,9 +238,9 @@ UI interaction semantics and media admission are unchanged.
 
 ### Real-deck performance follow-up, 2026-10-21
 
-PR #16 does **not** fix the reported choppiness of filled, rounded glass cards.
-The user's `ShowMe — Ideas in motion.sme`, slide 4, stays on the correctness
-fallback. Testing the correct checkout reproduces the stalls, independently of
+The initial `f620e6a` implementation did **not** fix filled, rounded glass cards.
+The user's `ShowMe — Ideas in motion.sme`, slide 4, stayed on the correctness
+fallback. Testing the correct checkout reproduced the stalls, independently of
 the earlier wrong-folder issue. The original presentation was not changed.
 
 The clean `f620e6a` production build measured entrance frame-gap p95 of
@@ -164,10 +258,10 @@ particular backing-store decision.
 
 Experiments covered layer promotion, resolving the final glass consumer as a
 material, GPU image filtering, retained GPU prefix/material textures, bitmap
-publication and preparation/retention changes. None established smooth production
-playback. Later runs also differed in steady frame cadence, so they cannot support
+publication and preparation/retention changes. Those earlier experiments did not
+establish smooth production playback. Later runs also differed in steady frame cadence, so they cannot support
 a speedup claim against the clean baseline. The experiments remain local and are
-excluded from the PR; its renderer still matches the verified `f620e6a` result.
+excluded from production code. Backdrop restoration above is a subsequent change.
 
 The [compact measurement record](evidence/backdrop-motion-performance-2026-10-21.json)
 contains the source/build digests, environment, all three lifecycle observations
@@ -187,8 +281,7 @@ node .agenttmp/benchmark-current.mjs '<path-to-original.sme>' 4
 
 The helper uses an isolated library and user-data directory, normal console and
 preview rendering, and a six-second observation. The committed record is a
-performance limitation, not a completed retained GPU compositor. The PR remains
-a draft while that follow-up is unresolved.
+baseline performance limitation, not a completed retained GPU compositor.
 
 The commands and results below describe the unchanged implementation at
 `f620e6a`. This follow-up adds documentation and measurement data only.

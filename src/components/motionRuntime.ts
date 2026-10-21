@@ -180,8 +180,9 @@ export function createMotionRuntime(
     if (compiled.some((track) => track.elementId === id))
       node.style.willChange = "transform";
     const visual =
-      node.querySelector<HTMLElement>(":scope > [data-composition-visual]") ??
-      node;
+      node.querySelector<HTMLElement>(
+        ":scope > [data-composition-visual], :scope > [data-composition-alpha]",
+      ) ?? node;
     const originalVisualOpacity = visual.style.opacity;
     const { opacity, ...transport } = values;
     const detachTransport = styleEffect(

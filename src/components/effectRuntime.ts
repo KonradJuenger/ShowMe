@@ -18,6 +18,7 @@ import {
 } from "./elementRaster";
 import { createDomRasterSource } from "./domRaster";
 import { createCssBackdrop } from "./cssBackdrop";
+import { flushSceneBackdrops } from "./sceneBackdropRegistry";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
@@ -156,11 +157,11 @@ function flushScheduled() {
   scheduled.clear();
   // Read all current transforms after Motion writes, before allocating/painting.
   work.forEach(([, value]) => value.prepare());
-  work.forEach(([node, value]) => {
+  const pending = work.map(([node, value]) => {
     const coordinator = nodeCoordinators.get(node);
     if (coordinator) {
       compileCoordinator(coordinator);
-      void coordinator.graph
+      return coordinator.graph
         .resolve(node, (input) => !!surfaces.get(input)?.gpuOutput())
         .then(() => {
           if (
@@ -174,8 +175,15 @@ function flushScheduled() {
         .catch((error) => {
           node.dataset.effectError = String(error);
         });
-    } else value.draw();
+    } else return value.draw();
   });
+  void Promise.all(pending).then(() =>
+    flushSceneBackdrops(
+      work.map(
+        ([node]) => node.closest<HTMLElement>(".slide-renderer") ?? node,
+      ),
+    ),
+  );
 }
 const nodeCoordinators = new WeakMap<HTMLElement, Coordinator>();
 export function effectSurface(node: HTMLElement) {
@@ -197,8 +205,14 @@ export async function flushEffectSurfaces(root: ParentNode) {
       .get(node)
       ?.flush(coordinator ? cohorts.get(coordinator) : undefined);
   }
-  return !Array.from(root.querySelectorAll('[data-effect-ready="false"]')).some(
-    (node) => !node.closest('[data-presentation-absent="true"]'),
+  const compositionReady = await flushSceneBackdrops(
+    nodes.map((node) => node.closest<HTMLElement>(".slide-renderer") ?? node),
+  );
+  return (
+    compositionReady &&
+    !Array.from(root.querySelectorAll('[data-effect-ready="false"]')).some(
+      (node) => !node.closest('[data-presentation-absent="true"]'),
+    )
   );
 }
 
