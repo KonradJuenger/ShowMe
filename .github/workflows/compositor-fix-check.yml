@@ -1,7 +1,9 @@
 name: Temporary compositor fix verification
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - chatgpt/general-compositor-fix
 
 permissions:
   contents: read
