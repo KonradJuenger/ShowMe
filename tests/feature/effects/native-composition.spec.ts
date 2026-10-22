@@ -62,13 +62,14 @@ async function mount(
   count = 1,
   disjoint = false,
   imageBackground = false,
+  mixedPrefix = false,
 ) {
   await page.goto(
     `http://127.0.0.1:${port}/tests/helpers/effects-harness.html`,
   );
-  const options = { mode, count, disjoint, imageBackground };
+  const options = { mode, count, disjoint, imageBackground, mixedPrefix };
   await page.evaluate(async (options) => {
-    const { mode, count, disjoint, imageBackground } = options;
+    const { mode, count, disjoint, imageBackground, mixedPrefix } = options;
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
       factoryPath = "/src/core/elementFactory.ts",
       authoringPath = "/src/core/effectAuthoring.ts",
@@ -87,7 +88,7 @@ async function mount(
       await import(/* @vite-ignore */ authoringPath);
     const { newEffectInstance }: typeof import("../../../src/core/effects") =
       await import(/* @vite-ignore */ effectsPath);
-    if (imageBackground) {
+    if (imageBackground || mixedPrefix) {
       const platformPath = "/src/platform/index.ts";
       const { platform }: typeof import("../../../src/platform") = await import(
         /* @vite-ignore */ platformPath
@@ -117,8 +118,9 @@ async function mount(
             ...blankEffect("shader"),
             input: "none" as const,
             target: "background" as const,
-            source:
-              "#version 300 es\nprecision highp float;uniform float u_t;in vec2 v_uv;out vec4 outColor;void main(){float c=step(.5,fract(v_uv.x*32.+u_t));outColor=vec4(vec3(c),1.);}",
+            source: mixedPrefix
+              ? "#version 300 es\nprecision highp float;uniform float u_t;in vec2 v_uv;out vec4 outColor;void main(){float c=step(.5,fract(v_uv.x*18.+u_t));outColor=vec4(.08+.65*c,.18,.9-.45*c,.32);}"
+              : "#version 300 es\nprecision highp float;uniform float u_t;in vec2 v_uv;out vec4 outColor;void main(){float c=step(.5,fract(v_uv.x*32.+u_t));outColor=vec4(vec3(c),1.);}",
           };
           const css = {
             ...blankEffect("css-js"),
@@ -164,6 +166,30 @@ async function mount(
               },
             };
           }
+          if (mixedPrefix) {
+            lower.effects = [];
+            lower.appearance.fill = "#133050";
+            lower.clipChildren = true;
+            lower.content = {
+              type: "image",
+              assetId: "image-a",
+              filename: "image-a.png",
+              mediaType: "image",
+              opacity: 0.82,
+              lockAspect: true,
+              transform: {
+                rule: "fill",
+                intrinsicWidth: 300,
+                intrinsicHeight: 200,
+                rotation: 0,
+                flipX: false,
+                flipY: false,
+                anchorX: 0.5,
+                anchorY: 0.5,
+                zoom: 1,
+              },
+            };
+          }
           const glass = createBasicShape("glass", "rectangle", {
             x: 80,
             y: 70,
@@ -193,8 +219,56 @@ async function mount(
           group.frame.width = 640;
           group.frame.height = 360;
           group.children = [glass];
+          const sources = [lower];
+          if (mixedPrefix) {
+            const rectangle = createBasicShape("mixed-rectangle", "rectangle", {
+              x: 0,
+              y: 0,
+            });
+            rectangle.frame.width = 640;
+            rectangle.frame.height = 360;
+            rectangle.appearance.fill = "#ff335566";
+
+            const shaderLayer = createBasicShape("mixed-shader", "rectangle", {
+              x: 0,
+              y: 0,
+            });
+            shaderLayer.frame.width = 640;
+            shaderLayer.frame.height = 360;
+            shaderLayer.effects = [
+              newEffectInstance("shader-layer", shader, "background"),
+            ];
+
+            const imageB = createBasicShape("image-b", "rectangle", {
+              x: 0,
+              y: 0,
+            });
+            imageB.frame.width = 640;
+            imageB.frame.height = 360;
+            imageB.clipChildren = true;
+            imageB.content = {
+              type: "image",
+              assetId: "image-b",
+              filename: "image-b.png",
+              mediaType: "image",
+              opacity: 0.58,
+              lockAspect: true,
+              transform: {
+                rule: "fill",
+                intrinsicWidth: 300,
+                intrinsicHeight: 200,
+                rotation: 0,
+                flipX: true,
+                flipY: false,
+                anchorX: 0.65,
+                anchorY: 0.35,
+                zoom: 1.08,
+              },
+            };
+            sources.push(rectangle, shaderLayer, imageB);
+          }
           slide.nodes[0].children =
-            mode === "parent" ? [lower, group] : [lower, glass];
+            mode === "parent" ? [lower, group] : [...sources, glass];
           for (let index = 1; index < count; index++) {
             const copy = structuredClone(glass);
             copy.id = `glass-${index}`;
@@ -208,13 +282,27 @@ async function mount(
             });
             slide.nodes[0].children.push(copy);
           }
-          if (disjoint)
-            slide.nodes[0].children.slice(1).forEach((card, index) => {
+          if (disjoint) {
+            const cards = slide.nodes[0].children.filter((element) =>
+              element.id === "glass" || element.id.startsWith("glass-"),
+            );
+            cards.forEach((card, index) => {
               card.frame.x = 20 + (index % 5) * 124;
               card.frame.y = 20 + Math.floor(index / 5) * 154;
               card.frame.width = 100;
               card.frame.height = 120;
             });
+          }
+          if (mixedPrefix) {
+            const later = createBasicShape("later-unrelated", "rectangle", {
+              x: 520,
+              y: 270,
+            });
+            later.frame.width = 80;
+            later.frame.height = 60;
+            later.appearance.fill = "#22dd88";
+            slide.nodes[0].children.push(later);
+          }
           slide.motion = {
             stages: [
               {
