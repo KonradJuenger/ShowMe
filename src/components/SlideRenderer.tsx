@@ -8,10 +8,6 @@ import { type ImageOutputProfile } from "../core/presentationImages";
 import type { MotionPreviewState } from "../core/motionPlayback";
 import { useMotionRuntime } from "./useMotionRuntime";
 import { EffectSurface } from "./EffectSurface";
-import {
-  planCompositionBackends,
-  type CompositionBackends,
-} from "./compositionBackendPlan";
 import type { EffectResources } from "../core/effects";
 import {
   compileCompositionPlan,
@@ -54,18 +50,13 @@ import {
   type SlideRenderProfile,
 } from "../core/renderProfile";
 
-const RasterSceneContext = createContext<{
+const SceneTextureSceneContext = createContext<{
   current: { slide: Slide; deck: Deck };
 } | null>(null);
 const VideoPreparationContext = createContext(false);
 const TextStylesContext = createContext<Deck | undefined>(undefined);
 const EffectResourcesContext = createContext<EffectResources>({});
 const emptyEffectResources: EffectResources = {};
-const CompositionContext = createContext<{
-  plan: CompositionPlan;
-  backends: CompositionBackends;
-} | null>(null);
-
 const ImageDocumentContext = createContext<{
   documentId: string;
   slideId: string;
@@ -719,6 +710,7 @@ const ElementView = memo(function ElementView({
   editorPlayback,
   editingTextId,
   inherited = false,
+  composition,
 }: {
   element: Element;
   staticVideo: boolean;
@@ -726,14 +718,14 @@ const ElementView = memo(function ElementView({
   editorPlayback?: EditorPlayback;
   editingTextId?: string | null;
   inherited?: boolean;
+  composition: CompositionPlan;
 }) {
   const { frame, appearance } = element;
   const resources = useContext(EffectResourcesContext);
   const effectRender = useContext(EffectRenderContext);
-  const scene = useContext(RasterSceneContext);
-  const { plan, backends } = useContext(CompositionContext)!;
-  const group = plan.groups.get(element.id)!;
-  const rasterContent = useMemo(
+  const scene = useContext(SceneTextureSceneContext);
+  const group = composition.groups.get(element.id)!;
+  const sceneTextureSource = useMemo(
     () => ({
       element,
       resources: scene?.current.slide.effectResources ?? emptyEffectResources,
@@ -754,26 +746,12 @@ const ElementView = memo(function ElementView({
       width={frame.width}
       height={frame.height}
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
-      backdropMode={
-        resources[instance.resourceId].kind === "css" &&
-        backends.browserNativeCss.has(element.id)
-          ? "browser-native"
-          : "fallback"
-      }
-      compositionDependencies={
-        resources[instance.resourceId].kind === "css"
-          ? undefined
-          : plan.dependencies({
-              elementId: element.id,
-              effectId: instance.id,
-            })
-      }
-      rasterContent={
-        resources[instance.resourceId].kind !== "css" &&
+      sceneTextureSource={
+        resources[instance.resourceId].kind === "fragment-glsl" &&
         ["content", "backdrop"].includes(
           resources[instance.resourceId].input ?? "none",
         )
-          ? rasterContent
+          ? sceneTextureSource
           : undefined
       }
       textContent={
@@ -809,6 +787,7 @@ const ElementView = memo(function ElementView({
       presentation={presentation}
       editorPlayback={editorPlayback}
       editingTextId={editingTextId}
+      composition={composition}
     />
   ));
   const shape = element.geometry.type === "ellipse" ? "50%" : appearance.radius;
@@ -980,25 +959,12 @@ export const SlideRenderer = memo(function SlideRenderer({
     }),
     [width, height, output, deferImageUpdates, playing, envelopes],
   );
-  const backends = useMemo(
-    () =>
-      planCompositionBackends(composition, slide, deck, {
-        restoration: false,
-        padding: 2,
-      }),
-    [composition, slide, deck],
-  );
-  const compositionView = useMemo(
-    () => ({ plan: composition, backends }),
-    [composition, backends],
-  );
   useMotionRuntime(
     root,
     slide,
     motionState,
     !!effectClock || !staticVideo,
     effectClock,
-    backends,
   );
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
@@ -1037,8 +1003,7 @@ export const SlideRenderer = memo(function SlideRenderer({
       <EffectResourcesContext.Provider
         value={slide.effectResources ?? emptyEffectResources}
       >
-        <CompositionContext.Provider value={compositionView}>
-          <RasterSceneContext.Provider value={rasterScene}>
+        <SceneTextureSceneContext.Provider value={rasterScene}>
             <TextStylesContext.Provider value={deck}>
               <VideoPreparationContext.Provider value={prepareVideo}>
                 <ImageDocumentContext.Provider value={imageContext}>
@@ -1078,6 +1043,7 @@ export const SlideRenderer = memo(function SlideRenderer({
                               inherited={
                                 resolved?.sources.get(element.id) === "template"
                               }
+                              composition={composition}
                             />
                           ))}
                         </div>
@@ -1112,8 +1078,7 @@ export const SlideRenderer = memo(function SlideRenderer({
                 </ImageDocumentContext.Provider>
               </VideoPreparationContext.Provider>
             </TextStylesContext.Provider>
-          </RasterSceneContext.Provider>
-        </CompositionContext.Provider>
+        </SceneTextureSceneContext.Provider>
       </EffectResourcesContext.Provider>
     </EffectRenderContext.Provider>
   );

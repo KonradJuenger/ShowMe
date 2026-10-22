@@ -104,7 +104,7 @@ do not change the persisted v1 ordering.
 
 ## Runtime ownership and backend selection
 
-`compositionBackendPlan.ts` selects native group, bounded restoration or fallback
+`legacyCssBackdropValidation.ts` selects native group, bounded restoration or fallback
 per material. `compositionCapabilities.ts` owns scoped declaration parsing,
 declaration capabilities and one tested engine capability table. Native and
 restoration routes do not construct the fallback capture/observer machinery.
@@ -474,3 +474,6 @@ and explicit export visual validation were not run. Production measurements for
 the later restoration implementation are recorded above. The source was checked on
 an isolated branch based on current `main`; no integration into `main` is part
 of this work.
+
+
+> Current experiment note (2026-10-23): this document describes the retained legacy compositor validation subsystem. Normal `SlideRenderer` rendering no longer selects these backends. Explicit rendered-pixel shaders enter legacy capture only through `sceneTexture.ts`.

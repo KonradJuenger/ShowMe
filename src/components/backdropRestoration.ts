@@ -1,4 +1,4 @@
-import type { RestorationPlan } from "./compositionBackendPlan";
+import type { RestorationPlan } from "./legacyCssBackdropValidation";
 import type { Deck } from "../core/document";
 import type { MotionRenderSink, MotionVisualSample } from "./motionRuntime";
 import type { RenderDensity } from "../core/renderProfile";

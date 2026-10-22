@@ -611,11 +611,10 @@ The restoration equation intentionally reconstructed a resolved material before 
 
 ### New normal CSS path
 
-Production `SlideRenderer` now receives browser-native CSS routing by default; the legacy CSS compositor is an explicit opt-in used only by retained validation:
+Production `SlideRenderer` now mounts CSS unconditionally as browser-native CSS. There is no CSS rendering-backend decision in the normal renderer; the legacy CSS compositor is retained only by explicit validation modules:
 
 ```text
 ShowMe document / CompositionPlan
-  -> CSS Effect classified browser-native
   -> scoped CSS on the mounted Effect DOM node
   -> Motion writes transform / opacity
   -> Presence gates the existing mounted Element
@@ -628,7 +627,7 @@ For this route:
 - `backdrop-filter` remains the real CSS property.
 - CSS Effects receive no Element raster source.
 - CSS Effects receive no scene composition dependencies.
-- `EffectRuntime` does not join the scene EffectGraph and does not install its scene-root `MutationObserver`.
+- CSS, text JS and generated shaders do not join a scene EffectGraph and do not install a scene-root `MutationObserver`.
 - `createCssBackdrop` is not created.
 - `SlideRenderer` no longer mounts `CompositionRuntime` or emits restoration/split-alpha DOM at all. The retained compositor is now a separate explicit subsystem rather than a normal renderer fallback.
 - no `data-composition-visual`, `data-composition-paint` or `data-backdrop-restore` wrapper is required for ordinary CSS.
@@ -670,7 +669,7 @@ It is no longer mounted by the normal `SlideRenderer`. It remains available as a
 
 Generated shaders with no scene input remain independent GPU/canvas layers.
 
-Fragment shaders that explicitly request `content` or `backdrop` pixels still use the current raster/materialization machinery. That is the next boundary to make more explicit, not something this slice broadens.
+Fragment shaders that explicitly request `content` or `backdrop` pixels now cross the explicit `SceneTexture` boundary. The temporary implementation behind that boundary still adapts the current raster/capture machinery.
 
 ### Visual semantic change
 
@@ -711,5 +710,89 @@ The hard problem is now narrower:
 4. profile real editor and audience playback with representative decks
 5. remove legacy CSS-specific compositor admission/restoration code once the browser-native contract has enough local validation
 
-The next safest simplification is to define one explicit SceneTexture boundary for fragment shaders that genuinely need rendered scene pixels, then move or delete the remaining CSS-only legacy admission/restoration code from the production module surface.
+The next safest simplification is to delete or shrink legacy capture implementations behind SceneTexture once representative scene-input shaders have enough local pixel validation.
 
+
+
+## SceneTexture boundary refactor
+
+Implemented on 2026-10-23 on `experimental/browser-native-renderer`.
+
+The production rendering model is now intentionally three paths:
+
+```text
+browser-native
+  DOM / CSS / media / text JS / Motion
+  -> Chromium
+
+GPU-owned
+  generated GLSL and direct shader-to-shader GPU chaining
+  -> persistent Effect GPU surface
+
+rendered scene pixels
+  explicit fragment input: content | backdrop
+  -> SceneTexture
+  -> temporary legacy capture adapter
+```
+
+### Normal renderer boundary
+
+`SlideRenderer` no longer imports or computes CSS/compositor backend plans. It still uses `CompositionPlan` only as the semantic description of Element DOM ordering, clipping, fill/stroke and Effect nesting. The backend plan, browser-native CSS admission set, restoration plan and custom-alpha eligibility are not normal rendering concerns.
+
+`EffectSurface` no longer accepts a CSS backend mode or compositor dependency list. A CSS definition always mounts scoped CSS. Chromium semantics are canonical.
+
+The canonical Motion/Presence clock is unchanged. `useMotionRuntime` receives no compositor-backend topology from `SlideRenderer`. Ordinary frame sampling continues to write native transform/opacity properties, CSS variables and shader uniforms without React rendering, scene planning or capture.
+
+### SceneTexture API
+
+`sceneTexture.ts` defines the narrow semantic boundary:
+
+- `SceneTextureRequest`: currently `element` or `backdrop`, identified by Element/Effect identity
+- `SceneTextureSampling`: requested pixel and logical dimensions
+- `SceneTextureProvider.prepare(...)`
+- `SceneTextureProvider.acquire(...)`
+- `SceneTexture.bind(gl)`
+- `SceneTextureProvider.invalidate()`
+- `SceneTextureProvider.dispose()`
+
+The consumer receives only a revision and the ability to bind the resulting pixels to a WebGL context. It does not receive a Canvas, DOM clone, primitive raster, capture backend name or compositor surface.
+
+`sceneTextureLegacy.ts` is the temporary adapter. It contains the old implementation knowledge required by explicit scene-pixel shaders: primitive-vs-DOM capture choice, backdrop prefix filtering, dependency flushing, media invalidation, source transforms, retained raster leases and DOM observation. `effectRuntime.ts` no longer imports `elementRaster`, `domRaster`, `cssBackdrop`, `compositionSurface` or `backdropRestoration`.
+
+### Which shaders cross the boundary
+
+- `input: "none"`: does not create SceneTexture. The shader owns its pixels.
+- direct compatible shader-to-shader content chaining: stays on the GPU and does not capture the DOM.
+- `input: "content"`: currently requests an Element SceneTexture when direct GPU chaining cannot satisfy the input.
+- `input: "backdrop"`: requests a backdrop SceneTexture.
+
+The current schema is retained. Architecturally, `content` is now understood as rendered-scene input unless a known owned source can be bound directly. A future image/video direct-texture path can therefore bypass SceneTexture without forcing normal media through capture.
+
+### Remaining MutationObservers
+
+Normal `SlideRenderer`, `EffectSurface`, `effectRuntime` and `useMotionRuntime` do not install a `MutationObserver`.
+
+Observers remain only inside exceptional/legacy capture implementation:
+
+- `sceneTextureLegacy.ts`: moved from the former Effect runtime to invalidate an explicit scene-pixel request when its captured DOM changes
+- `domRaster.ts`: maintains the temporary Chromium capture mirror
+- `elementRaster.ts`: observes style/environment changes for the legacy primitive raster
+- `compositionSurface.ts`: retained legacy compositor validation, not mounted by normal SlideRenderer
+
+These observers are not part of CSS, Motion, Presence, generated GLSL, normal media or text-JS correctness.
+
+### Remaining legacy modules
+
+The CSS backend admission code is now named `legacyCssBackdropValidation.ts`. `compositionRuntime.ts`, `backdropRestoration.ts`, `compositionSurface.ts`, `cssBackdrop.ts` and the legacy capability planner remain for explicit low-level validation only. Normal production rendering does not import or mount them.
+
+`elementRaster.ts` and `domRaster.ts` remain production-reachable only through `sceneTextureLegacy.ts` for explicit rendered-pixel shaders.
+
+### Next deletion candidates
+
+After content/backdrop shader pixel parity is validated locally, the safest next steps are:
+
+1. remove CSS-only legacy backdrop replay and restoration tests/modules that no longer define product semantics
+2. shrink the SceneTexture legacy adapter by replacing primitive reconstruction with one capture implementation where practical
+3. add direct owned-media texture input so image/video shaders need no SceneTexture
+4. delete unused EffectGraph/source-planning code if no other explicit pixel path depends on it
+5. keep `compositionPlan` only for semantic DOM/Effect ordering, not renderer-backend selection

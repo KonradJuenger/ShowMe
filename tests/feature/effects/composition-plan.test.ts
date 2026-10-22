@@ -15,7 +15,7 @@ import {
 } from "../../../src/core/effects";
 import type { Element } from "../../../src/core/element";
 import { EffectGraph } from "../../../src/components/effectGraph";
-import { planCompositionBackends } from "../../../src/components/compositionBackendPlan";
+import { planCompositionBackends } from "../../../src/components/legacyCssBackdropValidation";
 
 const shape = (id: string) => createBasicShape(id, "rectangle", { x: 0, y: 0 });
 function fixture(children: Element[]) {

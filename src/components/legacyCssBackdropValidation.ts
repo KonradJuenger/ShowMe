@@ -1,3 +1,6 @@
+/** Legacy CSS compositor admission retained only for validation while the old
+ * backdrop/restoration implementation is being removed. Normal SlideRenderer
+ * rendering must not import this module. */
 import type { Deck, Slide } from "../core/document";
 import type {
   CompositionPlan,

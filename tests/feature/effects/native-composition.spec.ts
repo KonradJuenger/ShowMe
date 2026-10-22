@@ -549,12 +549,12 @@ async function image(page: Page) {
 async function enableScene(page: Page, prepare = true) {
   await page.evaluate(async (prepare) => {
     const w = window as unknown as ProbeWindow;
-    const plannerPath = "/src/components/compositionBackendPlan.ts",
+    const plannerPath = "/src/components/legacyCssBackdropValidation.ts",
       runtimePath = "/src/components/compositionRuntime.ts",
       planPath = "/src/components/compositionPlan.ts";
     const {
       planCompositionBackends,
-    }: typeof import("../../../src/components/compositionBackendPlan") =
+    }: typeof import("../../../src/components/legacyCssBackdropValidation") =
       await import(/* @vite-ignore */ plannerPath);
     const {
       mountCompositionRuntime,
@@ -1183,11 +1183,11 @@ test("scene materializer shares one exact surface across independent regional co
 
   const result = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow;
-    const plannerPath = "/src/components/compositionBackendPlan.ts";
+    const plannerPath = "/src/components/legacyCssBackdropValidation.ts";
     const planPath = "/src/components/compositionPlan.ts";
     const {
       planCompositionBackends,
-    }: typeof import("../../../src/components/compositionBackendPlan") =
+    }: typeof import("../../../src/components/legacyCssBackdropValidation") =
       await import(/* @vite-ignore */ plannerPath);
     const {
       compileCompositionPlan,
@@ -1293,11 +1293,11 @@ test("one failed restoration surface leaves an independent consumer operational"
 
   const result = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow;
-    const plannerPath = "/src/components/compositionBackendPlan.ts";
+    const plannerPath = "/src/components/legacyCssBackdropValidation.ts";
     const planPath = "/src/components/compositionPlan.ts";
     const {
       planCompositionBackends,
-    }: typeof import("../../../src/components/compositionBackendPlan") =
+    }: typeof import("../../../src/components/legacyCssBackdropValidation") =
       await import(/* @vite-ignore */ plannerPath);
     const {
       compileCompositionPlan,
@@ -1538,11 +1538,11 @@ test("overlapping motion envelopes retain the existing backdrop lowering for thr
     await mount(page, "glass", count);
     const eligible = await page.evaluate(async () => {
       const w = window as unknown as ProbeWindow;
-      const scenePath = "/src/components/compositionBackendPlan.ts",
+      const scenePath = "/src/components/legacyCssBackdropValidation.ts",
         planPath = "/src/components/compositionPlan.ts";
       const {
         planCompositionBackends,
-      }: typeof import("../../../src/components/compositionBackendPlan") =
+      }: typeof import("../../../src/components/legacyCssBackdropValidation") =
         await import(/* @vite-ignore */ scenePath);
       const {
         compileCompositionPlan,
@@ -1565,12 +1565,12 @@ test("backend selection is regional for bounded unrelated paint and overlapping 
   await mount(page, "glass", 3, true);
   const result = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow;
-    const plannerPath = "/src/components/compositionBackendPlan.ts",
+    const plannerPath = "/src/components/legacyCssBackdropValidation.ts",
       planPath = "/src/components/compositionPlan.ts",
       factoryPath = "/src/core/elementFactory.ts";
     const {
       planCompositionBackends,
-    }: typeof import("../../../src/components/compositionBackendPlan") =
+    }: typeof import("../../../src/components/legacyCssBackdropValidation") =
       await import(/* @vite-ignore */ plannerPath);
     const {
       compileCompositionPlan,

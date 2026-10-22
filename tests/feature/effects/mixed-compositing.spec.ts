@@ -63,7 +63,7 @@ test("backdrop pixels recover after dragging outside the slide without resizing"
   });
   for (const state of states) expect(state.errors).toEqual([]);
   const initial = states[0].surfaces[1];
-  expect(initial.backend).toBe("primitive");
+  expect(initial.backend).toBe("scene-texture");
   expect(initial.green).toBeGreaterThan(0);
   expect(states[1].surfaces[1].green).toBeLessThan(initial.green);
   expect(states[2].surfaces[1].opaque).toBe(0);
@@ -201,8 +201,7 @@ test("unused, disabled and unrelated CSS effects preserve primitive content and 
     expect(
       state.surfaces.every(
         (surface) =>
-          surface.backend ===
-          (placement === "contributing" ? "native" : "primitive"),
+          surface.backend === "scene-texture",
       ),
     ).toBe(true);
     expect(state.surfaces.every((surface) => surface.green > 1000)).toBe(true);
@@ -367,14 +366,14 @@ test("a mounted backdrop switches from primitive capture when lower CSS is added
   expect(result.before.errors).toEqual([]);
   expect(result.before.surfaces.at(-1)!.opaque).toBeGreaterThan(1000);
   expect(result.visible.errors).toEqual([]);
-  expect(result.visible.surfaces.at(-1)!.backend).toBe("native");
+  expect(result.visible.surfaces.at(-1)!.backend).toBe("scene-texture");
   expect(result.visible.surfaces.at(-1)!.green).toBeGreaterThan(1000);
   expect(result.hidden.surfaces.at(-1)!.green).toBe(0);
   expect(result.restored.errors).toEqual([]);
-  expect(result.restored.surfaces.at(-1)!.backend).toBe("primitive");
+  expect(result.restored.surfaces.at(-1)!.backend).toBe("scene-texture");
   expect(result.restored.surfaces.at(-1)!.green).toBeGreaterThan(1000);
   expect(result.styled.errors).toEqual([]);
-  expect(result.styled.surfaces.at(-1)!.backend).toBe("native");
+  expect(result.styled.surfaces.at(-1)!.backend).toBe("scene-texture");
   expect(result.styled.surfaces.at(-1)!.green).toBe(0);
   expect(result.warnings).toEqual([]);
 });
@@ -884,7 +883,7 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
   expect(
     result.recovered?.surfaces.every((surface) => surface.ready === "true"),
   ).toBe(true);
-  expect(result.css.surfaces[0].backend).toBe("native");
+  expect(result.css.surfaces[0].backend).toBe("scene-texture");
   expect(result.remaining).toBe(0);
 });
 

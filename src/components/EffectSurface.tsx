@@ -17,7 +17,6 @@ import type { Element } from "../core/element";
 import { effectSurface, mountEffectSurface } from "./effectRuntime";
 import { EffectRenderContext } from "./EffectRenderContext";
 import { useDisplayDensity } from "./useDisplayDensity";
-import type { EffectRef } from "./compositionPlan";
 
 export function EffectSurface({
   definition,
@@ -27,25 +26,17 @@ export function EffectSurface({
   children,
   previewTiming,
   textContent,
-  rasterContent,
+  sceneTextureSource,
   samplingEnvelope,
-  compositionDependencies,
-  backdropMode,
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
   width: number;
   height: number;
   samplingEnvelope?: number;
-  compositionDependencies?: EffectRef[];
-  backdropMode?:
-    | "browser-native"
-    | "fallback"
-    | "hoisted"
-    | "restoration";
   children?: ReactNode;
   textContent?: TextContent;
-  rasterContent?: {
+  sceneTextureSource?: {
     element: Element;
     resources: EffectResources;
     scene?: () => { slide: Slide; deck: Deck };
@@ -69,9 +60,6 @@ export function EffectSurface({
 }) {
   const root = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null);
-  const dependencies = useRef(compositionDependencies);
-  dependencies.current = compositionDependencies;
-  const dependencyKey = JSON.stringify(compositionDependencies);
   const [error, setError] = useState("");
   const copyErrors = useContext(EffectErrorCopyContext);
   const render = useContext(EffectRenderContext);
@@ -91,8 +79,6 @@ export function EffectSurface({
     resize();
     return () => observer.disconnect();
   }, [standalone, width, height]);
-  const resolvedBackdropMode =
-    backdropMode ?? (definition.kind === "css" ? "browser-native" : "fallback");
   const densityX = render?.density.x ?? standaloneScale.x * pixelRatio;
   const densityY = render?.density.y ?? standaloneScale.y * pixelRatio;
   const mode = render?.density.mode ?? "live";
@@ -105,7 +91,7 @@ export function EffectSurface({
   // Authority updates may clone unchanged definitions/instances. A backdrop's
   // mounted source depends on the frame and effect, not its own children or
   // higher scene objects. The scene getter continues to read accepted updates.
-  const mountInput = useRef({ key: "", definition, instance, rasterContent });
+  const mountInput = useRef({ key: "", definition, instance, sceneTextureSource });
   const backdropKey =
     definition.input === "backdrop"
       ? JSON.stringify([
@@ -113,7 +99,7 @@ export function EffectSurface({
           instance,
           width,
           height,
-          rasterContent?.element.id,
+          sceneTextureSource?.element.id,
         ])
       : "";
   if (!backdropKey || mountInput.current.key !== backdropKey)
@@ -121,12 +107,12 @@ export function EffectSurface({
       key: backdropKey,
       definition,
       instance,
-      rasterContent,
+      sceneTextureSource,
     };
   const {
     definition: mountedDefinition,
     instance: mountedInstance,
-    rasterContent: mountedContent,
+    sceneTextureSource: mountedContent,
   } = mountInput.current;
   useLayoutEffect(() => {
     if (!root.current) return;
@@ -139,8 +125,6 @@ export function EffectSurface({
       setError,
       mountedContent,
       undefined,
-      () => dependencies.current,
-      resolvedBackdropMode,
     );
   }, [
     mountedDefinition,
@@ -149,11 +133,7 @@ export function EffectSurface({
     height,
     textContent,
     mountedContent,
-    resolvedBackdropMode,
   ]);
-  useLayoutEffect(() => {
-    if (root.current) effectSurface(root.current)?.replan();
-  }, [dependencyKey]);
   useLayoutEffect(() => {
     if (root.current)
       effectSurface(root.current)?.setSampling({
@@ -193,8 +173,6 @@ export function EffectSurface({
         position: "absolute",
         inset: 0,
         pointerEvents: instance.placement === "content" ? undefined : "none",
-        backdropFilter:
-          resolvedBackdropMode === "hoisted" ? "none" : undefined,
       }}
     >
       {definition.kind === "fragment-glsl" && (

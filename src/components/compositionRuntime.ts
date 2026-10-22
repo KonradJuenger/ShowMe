@@ -1,14 +1,13 @@
 import { mountBackdropRestoration } from "./backdropRestoration";
-import type { RestorationPlan } from "./compositionBackendPlan";
+import type { RestorationPlan } from "./legacyCssBackdropValidation";
 import type { Deck, Slide } from "../core/document";
 import type { MotionRenderSink } from "./motionRuntime";
 import { registerCompositionOutput } from "./compositionReadiness";
 import type { RenderDensity } from "../core/renderProfile";
 import { createSceneSurfaceMaterializer } from "./compositionSurface";
 
-/** Renderer activation owns one scene materializer independently of any one
- * consumer implementation. Restoration is currently the only registered
- * consumer, but future pixel consumers can share the same scene service. */
+/** Legacy validation runtime for the retired CSS backdrop/restoration path.
+ * Normal SlideRenderer rendering does not mount this runtime. */
 export function mountCompositionRuntime(
   root: HTMLElement,
   scene: { slide: Slide; deck: Deck },
