@@ -61,13 +61,14 @@ async function mount(
   mode: "native" | "parent" | "rounded" | "fill" | "glass" = "native",
   count = 1,
   disjoint = false,
+  imageBackground = false,
 ) {
   await page.goto(
     `http://127.0.0.1:${port}/tests/helpers/effects-harness.html`,
   );
-  const options = { mode, count, disjoint };
+  const options = { mode, count, disjoint, imageBackground };
   await page.evaluate(async (options) => {
-    const { mode, count, disjoint } = options;
+    const { mode, count, disjoint, imageBackground } = options;
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
       factoryPath = "/src/core/elementFactory.ts",
       authoringPath = "/src/core/effectAuthoring.ts",
@@ -86,6 +87,23 @@ async function mount(
       await import(/* @vite-ignore */ authoringPath);
     const { newEffectInstance }: typeof import("../../../src/core/effects") =
       await import(/* @vite-ignore */ effectsPath);
+    if (imageBackground) {
+      const platformPath = "/src/platform/index.ts";
+      const { platform }: typeof import("../../../src/platform") = await import(
+        /* @vite-ignore */ platformPath
+      );
+      const source = document.createElement("canvas");
+      source.width = 300;
+      source.height = 200;
+      const ctx = source.getContext("2d")!;
+      const gradient = ctx.createLinearGradient(0, 0, 300, 200);
+      gradient.addColorStop(0, "#0630a0");
+      gradient.addColorStop(1, "#ff7200");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 300, 200);
+      const url = source.toDataURL();
+      platform.assetUrl = async () => url;
+    }
     (window as unknown as ProbeWindow).native = await mountMixedEffectsHarness(
       undefined,
       0,
@@ -118,6 +136,34 @@ async function mount(
           lower.frame.width = 640;
           lower.frame.height = 360;
           lower.effects = [newEffectInstance("shader", shader, "background")];
+          if (imageBackground) {
+            lower.effects = [];
+            lower.appearance.fill = "#33aa44";
+            lower.frame.x = 40;
+            lower.frame.y = 20;
+            lower.frame.width = 560;
+            lower.frame.height = 320;
+            lower.clipChildren = true;
+            lower.content = {
+              type: "image",
+              assetId: "image-background",
+              filename: "image-background.png",
+              mediaType: "image",
+              opacity: 0.7,
+              lockAspect: true,
+              transform: {
+                rule: "fill",
+                intrinsicWidth: 300,
+                intrinsicHeight: 200,
+                rotation: 15,
+                flipX: true,
+                flipY: false,
+                anchorX: 0.4,
+                anchorY: 0.6,
+                zoom: 1.15,
+              },
+            };
+          }
           const glass = createBasicShape("glass", "rectangle", {
             x: 80,
             y: 70,
@@ -281,6 +327,7 @@ async function enableScene(page: Page, prepare = true) {
       plan,
       w.model.deck,
       (_ids, error) => w.sceneErrors!.push(String(error)),
+      { x: 1, y: 1 },
     );
     const apply = w.compositor.apply.bind(w.compositor);
     // Observe the semantic frame in this diagnostic, independently of output.
@@ -795,6 +842,135 @@ test("renderer-owned cropped restoration is prepared before entry and remains co
   expect(result.remaining).toBe(0);
   expect(result.released).toBe(true);
   expect(result.captures).toBe(0);
+});
+
+test("image-backed glass keeps native paint through the final Move In frame and replay", async () => {
+  await mount(page, "glass", 1, false, true);
+  await page
+    .locator('[data-element-id="lower"] img')
+    .evaluate(async (image: HTMLImageElement) => image.decode());
+  const reference = await image(page);
+  const state = {
+    stageId: "stage",
+    stageIndex: 0,
+    time: 0,
+    running: false,
+    startedAt: 1000,
+  };
+  const sample = async (time: number) =>
+    page.evaluate(
+      async (state) => {
+        const w = window as unknown as ProbeWindow;
+        const slide = w.model.slides[w.model.deck.slideIds[0]];
+        slide.motion = w.motion;
+        await w.native.setMotion(state);
+        const root =
+          w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+        const node = root.querySelector<HTMLElement>(
+          '[data-element-id="glass"]',
+        )!;
+        const output = root.querySelector<HTMLElement>(
+          '[data-backdrop-restore="glass"]',
+        )!;
+        return {
+          backend: root.dataset.compositionBackend,
+          opacity: Number(node.style.opacity),
+          alpha: Number(output.style.opacity),
+          ready: output.querySelector("canvas")!.width > 1,
+          width: output.querySelector("canvas")!.width,
+          paint: getComputedStyle(
+            node.querySelector("[data-composition-paint]")!,
+          ).contentVisibility,
+          captures: w.native.inspect().diagnostics.captures,
+          replay: root.querySelectorAll("[data-css-backdrop]").length,
+        };
+      },
+      { ...state, time },
+    );
+  const first = await sample(1);
+  expect(first).toMatchObject({
+    backend: "native-backdrop-restore",
+    opacity: 1,
+    ready: true,
+    paint: "visible",
+    captures: 0,
+    replay: 0,
+  });
+  expect(first.alpha).toBeCloseTo(0.999, 5);
+  const near = await sample(999.999);
+  const almost = await image(page);
+  const final = await sample(1000);
+  const complete = await image(page);
+  expect(near.ready).toBe(true);
+  expect(near.alpha).toBeCloseTo(0.000001, 6);
+  expect(final).toMatchObject({
+    backend: "native-backdrop-restore",
+    opacity: 1,
+    alpha: 0,
+    ready: true,
+    captures: 0,
+    replay: 0,
+  });
+  let boundaryMax = 0,
+    referenceMax = 0,
+    boundaryError = 0;
+  for (let i = 0; i < complete.length; i++) {
+    boundaryMax = Math.max(boundaryMax, Math.abs(almost[i] - complete[i]));
+    referenceMax = Math.max(referenceMax, Math.abs(reference[i] - complete[i]));
+    boundaryError += Math.abs(almost[i] - complete[i]);
+  }
+  // The final subpixel translation can change native edge antialiasing.
+  expect(boundaryMax).toBeLessThanOrEqual(8);
+  expect(boundaryError / complete.length).toBeLessThan(0.1);
+  expect(referenceMax).toBeLessThanOrEqual(2);
+  // Check the image source independently of the finish comparison: keeping a
+  // wrongly placed source would also avoid a handoff, but would not compose.
+  await sample(1000);
+  await page.evaluate(() => {
+    const w = window as unknown as ProbeWindow;
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    root.querySelector<HTMLElement>(
+      '[data-backdrop-restore="glass"]',
+    )!.style.opacity = "0.5";
+    root.querySelector<HTMLElement>(
+      '[data-element-id="glass"]',
+    )!.style.transform = "none";
+  });
+  const faded = await image(page);
+  await page
+    .locator('[data-element-id="glass"]')
+    .evaluate((node: HTMLElement) => {
+      node.style.visibility = "hidden";
+    });
+  await page
+    .locator('[data-backdrop-restore="glass"]')
+    .evaluate((node: HTMLElement) => {
+      node.style.opacity = "0";
+    });
+  const background = await image(page);
+  let error = 0;
+  for (let i = 0; i < faded.length; i++)
+    error = Math.max(
+      error,
+      Math.abs(faded[i] - (complete[i] + background[i]) * 0.5),
+    );
+  expect(error).toBeLessThanOrEqual(3);
+  await page
+    .locator('[data-element-id="glass"]')
+    .evaluate((node: HTMLElement) => {
+      node.style.visibility = "";
+    });
+  expect((await sample(1)).alpha).toBeCloseTo(first.alpha, 5);
+  await page.evaluate(() =>
+    (window as unknown as ProbeWindow).native.setZoom(0.5),
+  );
+  const resized = await sample(1);
+  expect(resized.ready).toBe(true);
+  expect(resized.width).toBeLessThan(first.width);
+  await page.evaluate(() =>
+    (window as unknown as ProbeWindow).native.setMotion(null),
+  );
+  await expect(page.locator("[data-backdrop-restore]")).toHaveCount(0);
 });
 
 test("restoration consumes ordinary opacity samples without reading animated DOM values", async () => {

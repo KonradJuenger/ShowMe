@@ -987,7 +987,7 @@
     "runtime": "electron",
     "created": "2026-10-21",
     "lastReviewed": "2026-10-22",
-    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-bitmap readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and mixed stacks retain the correctness lowering; centralized regional selection, renderer-owned cropped output prepared before entry, replay/disposal and semantic opacity updates without animated DOM readback"
+    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-bitmap readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and mixed stacks retain the correctness lowering; centralized regional selection, renderer-owned cropped output prepared before entry, replay/disposal and semantic opacity updates without animated DOM readback; static image backgrounds preserve decoded crop/rotation/flip/content alpha, final Move In boundary pixels, native paint, replay and output resizing without CSS replay handoff"
   },
   {
     "id": "effects-css-backdrop-opacity",

@@ -104,7 +104,7 @@ const overlap = (a: Bounds, b: Bounds, padding: number) =>
 
 /** Backdrop restoration implements mix(B,R,a) as R overlaid with B at 1-a.
  * R remains entirely native, including fill-before-filter and rounded AA. The
- * current capability is disjoint flat cards over one procedural background;
+ * current capability is disjoint flat cards over one procedural or static image background;
  * prior cards cannot contribute pixels inside another card's swept bounds.
  * Unsupported overlap, nested alpha and mixed stacks retain the usual backend. */
 function restorationPlan(
@@ -122,12 +122,18 @@ function restorationPlan(
   if (!background) return null;
   const bg = background.element,
     frame = bg.frame;
+  const imageBackground =
+    bg.content?.type === "image" &&
+    bg.clipChildren &&
+    !background.inputs.size &&
+    !bg.cssClasses?.length;
   if (
     bg.geometry.type !== "rect" ||
-    frame.x ||
-    frame.y ||
-    frame.width !== deck.width ||
-    frame.height !== deck.height ||
+    (!imageBackground &&
+      (frame.x ||
+        frame.y ||
+        frame.width !== deck.width ||
+        frame.height !== deck.height)) ||
     frame.rotation ||
     frame.scaleX !== 1 ||
     frame.scaleY !== 1 ||
@@ -136,19 +142,21 @@ function restorationPlan(
     bg.appearance.opacity !== 1 ||
     bg.appearance.radius ||
     bg.appearance.strokeWidth ||
-    bg.content ||
+    (!imageBackground && bg.content) ||
     bg.children.length ||
-    background.inputs.size !== 1
+    (!imageBackground && background.inputs.size !== 1)
   )
     return null;
-  const [effectId, input] = [...background.inputs][0],
-    instance = bg.effects!.find((i) => i.id === effectId)!;
-  if (
-    input.kind !== "none" ||
-    instance.placement !== "background" ||
-    slide.effectResources![instance.resourceId].kind !== "fragment-glsl"
-  )
-    return null;
+  if (!imageBackground) {
+    const [effectId, input] = [...background.inputs][0],
+      instance = bg.effects!.find((i) => i.id === effectId)!;
+    if (
+      input.kind !== "none" ||
+      instance.placement !== "background" ||
+      slide.effectResources![instance.resourceId].kind !== "fragment-glsl"
+    )
+      return null;
+  }
   const glass = new Set<string>(),
     envelopes = new Map<string, Bounds>();
   for (const group of plan.groups.values()) {

@@ -1090,6 +1090,7 @@ export const SlideRenderer = memo(function SlideRenderer({
         sceneBackdrop,
         deck,
         failed,
+        effectRender.density,
       );
       runtime.current = mounted;
       return () => {
@@ -1099,7 +1100,7 @@ export const SlideRenderer = memo(function SlideRenderer({
     } catch (error) {
       failed([...sceneBackdrop.glass], error);
     }
-  }, [sceneBackdrop, deck, composition]);
+  }, [sceneBackdrop, deck, composition, effectRender.density]);
   const hasRestoration = !!sceneBackdrop;
   const renderSink = useMemo<MotionRenderSink | undefined>(
     () =>

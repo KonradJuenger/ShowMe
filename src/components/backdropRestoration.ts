@@ -3,6 +3,8 @@ import { elementWorldTransform } from "./elementDomTransform";
 import type { RestorationPlan, Bounds } from "./compositionBackendPlan";
 import type { Deck } from "../core/document";
 import type { MotionRenderSink, MotionVisualSample } from "./motionRuntime";
+import { localMatrix, resolveMediaFrame } from "../core/element";
+import type { RenderDensity } from "../core/renderProfile";
 
 type Crop = { x: number; y: number; width: number; height: number };
 type Material = {
@@ -25,6 +27,7 @@ export function mountBackdropRestoration(
   plan: RestorationPlan,
   deck: Deck,
   failed: (ids: readonly string[], error: unknown) => void,
+  density: Pick<RenderDensity, "x" | "y">,
 ) {
   let disposed = false,
     rejected = false,
@@ -37,7 +40,7 @@ export function mountBackdropRestoration(
     ]),
   );
   const background = nodes.get(plan.background.element.id)!;
-  const fx = background.querySelector<HTMLElement>("[data-effect-id]")!;
+  const fx = background.querySelector<HTMLElement>("[data-effect-id]");
   const source = document.createElement("canvas");
   source.width = source.height = 1;
   const context = source.getContext("2d");
@@ -183,47 +186,79 @@ export function mountBackdropRestoration(
   const render = async () => {
     await ready;
     if (disposed || rejected) return false;
-    if (fx.dataset.effectError) throw new Error(fx.dataset.effectError);
-    if (fx.dataset.effectReady !== "true") return false;
-    effectSurface(fx)?.materialize();
-    const shader = fx.querySelector("canvas")!;
-    if (!shader.width || !shader.height) return false;
-    const visible = shader.style.visibility !== "hidden";
-    const key = `${fx.dataset.effectRevision}:${shader.width}:${shader.height}:${visible}`;
+    let shader: HTMLCanvasElement | undefined,
+      image: HTMLImageElement | undefined;
+    let width: number, height: number, key: string;
+    if (fx) {
+      if (fx.dataset.effectError) throw new Error(fx.dataset.effectError);
+      if (fx.dataset.effectReady !== "true") return false;
+      effectSurface(fx)?.materialize();
+      shader = fx.querySelector("canvas")!;
+      if (!shader.width || !shader.height) return false;
+      width = shader.width;
+      height = shader.height;
+      key = `${fx.dataset.effectRevision}:${width}:${height}:${shader.style.visibility}`;
+    } else {
+      image = background.querySelector<HTMLImageElement>("img") ?? undefined;
+      if (!image?.complete) return false;
+      if (!image.naturalWidth)
+        throw new Error("Image restoration source failed to load");
+      if (!(density.x > 0 && density.y > 0)) return false;
+      width = Math.ceil(deck.width * density.x);
+      height = Math.ceil(deck.height * density.y);
+      key = `${image.currentSrc}:${image.naturalWidth}:${image.naturalHeight}:${width}:${height}`;
+    }
     if (key === revision && materials.every((m) => m.populated)) return true;
-    const sx = shader.width / deck.width,
-      sy = shader.height / deck.height;
+    if (image) await image.decode();
+    if (disposed || rejected) return false;
+    const sx = width / deck.width,
+      sy = height / deck.height;
     const crops = materials.map((material) => {
       const bounds = plan.envelopes.get(material.id)!,
         p = plan.padding;
       const x = Math.max(0, Math.floor((bounds.left - p) * sx)),
         y = Math.max(0, Math.floor((bounds.top - p) * sy));
-      const right = Math.min(shader.width, Math.ceil((bounds.right + p) * sx));
-      const bottom = Math.min(
-        shader.height,
-        Math.ceil((bounds.bottom + p) * sy),
-      );
+      const right = Math.min(width, Math.ceil((bounds.right + p) * sx));
+      const bottom = Math.min(height, Math.ceil((bounds.bottom + p) * sy));
       if (right <= x || bottom <= y)
         throw new Error("Restoration region is outside the output");
       return { material, x, y, width: right - x, height: bottom - y };
     });
     if (
-      (shader.width * shader.height +
+      (width * height +
         crops.reduce((sum, c) => sum + 2 * c.width * c.height, 0)) *
         4 >
       256 * 1024 * 1024
     )
       throw new Error("Backdrop restoration exceeds its surface budget");
-    if (source.width !== shader.width) source.width = shader.width;
-    if (source.height !== shader.height) source.height = shader.height;
+    if (source.width !== width) source.width = width;
+    if (source.height !== height) source.height = height;
     context.resetTransform();
     context.globalAlpha = 1;
     context.fillStyle = root.style.background;
     context.fillRect(0, 0, source.width, source.height);
-    context.fillStyle =
-      plan.background.element.appearance.fill || "transparent";
-    context.fillRect(0, 0, source.width, source.height);
-    if (visible) context.drawImage(shader, 0, 0, source.width, source.height);
+    const bg = plan.background.element;
+    context.save();
+    context.scale(sx, sy);
+    context.translate(bg.frame.x, bg.frame.y);
+    context.fillStyle = bg.appearance.fill || "transparent";
+    context.fillRect(0, 0, bg.frame.width, bg.frame.height);
+    if (shader && shader.style.visibility !== "hidden")
+      context.drawImage(shader, 0, 0, bg.frame.width, bg.frame.height);
+    if (image && bg.content?.type === "image") {
+      // Use the same Fit/Fill/Free frame as the native media view. The admitted
+      // image is static and clipped; its decoded pixels are a source, not a
+      // replacement for native glass paint or a second animation sampler.
+      const media = resolveMediaFrame(bg);
+      if (!media) throw new Error("Image restoration frame is unavailable");
+      context.beginPath();
+      context.rect(0, 0, bg.frame.width, bg.frame.height);
+      context.clip();
+      context.transform(...localMatrix(media));
+      context.globalAlpha = bg.content.opacity;
+      context.drawImage(image, 0, 0, media.width, media.height);
+    }
+    context.restore();
     // Prepare every admitted region during existing audience readiness, even
     // before Presence starts. Keep these small surfaces through replay.
     const pending = await Promise.allSettled(

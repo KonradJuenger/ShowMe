@@ -3,6 +3,7 @@ import type { RestorationPlan } from "./compositionBackendPlan";
 import type { Deck } from "../core/document";
 import type { MotionRenderSink } from "./motionRuntime";
 import { registerCompositionOutput } from "./compositionReadiness";
+import type { RenderDensity } from "../core/renderProfile";
 
 /** Renderer activation owns backend lifetime. Motion receives only this sink;
  * Effect readiness flushes the same coordinator after its ordered cohort. */
@@ -11,8 +12,9 @@ export function mountCompositionRuntime(
   plan: RestorationPlan,
   deck: Deck,
   failed: (ids: readonly string[], error: unknown) => void,
+  density: Pick<RenderDensity, "x" | "y">,
 ) {
-  const backend = mountBackdropRestoration(root, plan, deck, failed);
+  const backend = mountBackdropRestoration(root, plan, deck, failed, density);
   const unregister = registerCompositionOutput(root, backend);
   root.dataset.compositionBackend = "native-backdrop-restore";
   return {

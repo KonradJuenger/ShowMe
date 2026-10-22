@@ -167,7 +167,8 @@ met the strict pixel contract. The slide-coordinate restoration passed unchanged
 static output and resolved Move In pixels at the machine's fractional DPR.
 
 Admission is intentionally narrow: the verified Electron engine, an opaque slide
-background, one full-slide procedural background shader, flat cards with one
+background, one full-slide procedural background shader or one static clipped
+image (which may cover only part of the slide), flat cards with one
 constant CSS material and static children, and bounded translation/fade Presence.
 Swept card bounds must be disjoint. Other shape paint and native text ink must not
 contribute to a restoration rectangle; text bounds are checked after fonts are
@@ -175,6 +176,15 @@ ready and again when fonts load. Thus the same background snapshot is the exact
 incoming scene within each restoration rectangle. Earlier cards are culled by
 that proof, not reconstructed per consumer. Native backdrop filtering still sees
 all actual lower paint, including paint outside the restoration rectangle.
+
+Static image sources use the native media model's canonical Fit/Fill/Free frame,
+including content opacity, cropping, rotation and flips. The image must be decoded
+before restoration publication. Output density comes from the renderer's existing
+render profile, without per-frame layout measurement. Image sources use the same
+cropped outputs, readiness gate, Motion samples and teardown as shader sources.
+The real card stays native throughout the fade and at alpha one, avoiding a
+fallback-material/native-filter handoff at Move In completion. Moving backgrounds,
+video, unbounded image paint and image effects remain outside this admission.
 
 This is not a general retained compositor. Overlapping envelopes, nested alpha,
 mixed effect stacks, unsupported motion/CSS and unknown engines retain the
