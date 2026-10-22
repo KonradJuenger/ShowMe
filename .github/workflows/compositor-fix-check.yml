@@ -1,0 +1,81 @@
+name: Temporary compositor fix verification
+
+on:
+  push:
+    branches:
+      - chatgpt/general-compositor-fix
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compositor-fix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run typecheck:ts6
+      - run: npm run lint
+      - run: npm run test:stats
+      - run: npm run test:audit
+      - run: npm test
+      - run: npm run build
+      - name: Composition plan unit regression
+        run: npx vitest run
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/composition-plan.test.ts"]'
+      - name: Whitespace check
+        run: git diff --check 407e70d0ec73493dc565c47ba1b92ff1ff1e4a3b HEAD
+      - name: Prettier changed files
+        run: >-
+          npx prettier --check
+          src/components/compositionPlan.ts
+          src/components/compositionSurface.ts
+          src/components/compositionBackendPlan.ts
+          src/components/backdropRestoration.ts
+          src/components/compositionRuntime.ts
+          src/components/elementRaster.ts
+          tests/feature/effects/composition-plan.test.ts
+          tests/feature/effects/native-composition.spec.ts
+          docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md
+
+  browser-effects:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Mixed, CSS backdrop, sampling and audience navigation gates
+        run: npx playwright test --config playwright.config.ts --output test-results-compositor-browser
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/mixed-compositing.spec.ts","tests/feature/effects/css-backdrop-opacity.spec.ts","tests/feature/effects/render-sampling.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'
+
+  electron-effects:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Native compositor Electron regressions
+        run: npx playwright test --config playwright.electron.config.ts --output test-results-compositor-electron
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/native-composition.spec.ts"]'
