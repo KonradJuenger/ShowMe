@@ -771,10 +771,14 @@ const ElementView = memo(function ElementView({
               ? "restoration"
               : "fallback"
       }
-      compositionDependencies={plan.dependencies({
-        elementId: element.id,
-        effectId: instance.id,
-      })}
+      compositionDependencies={
+        resources[instance.resourceId].kind === "css"
+          ? undefined
+          : plan.dependencies({
+              elementId: element.id,
+              effectId: instance.id,
+            })
+      }
       rasterContent={
         resources[instance.resourceId].kind !== "css" &&
         ["content", "backdrop"].includes(
