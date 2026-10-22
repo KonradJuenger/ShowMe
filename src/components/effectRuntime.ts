@@ -416,12 +416,21 @@ export function mountEffectSurface(
     mode: "live",
   },
   compositionDependencies?: () => EffectRef[] | undefined,
-  backdropMode: "fallback" | "hoisted" | "restoration" = "fallback",
+  backdropMode:
+    | "browser-native"
+    | "fallback"
+    | "hoisted"
+    | "restoration" = "fallback",
 ) {
   const refined = executionMode === "refined";
   const useGpu = refined;
+  const browserNativeCss =
+    definition.kind === "css" && backdropMode === "browser-native";
   const sceneRoot = samplingRoot(node, initialSampling);
-  const coordinator = refined ? coordinatorFor(sceneRoot) : null;
+  // Native CSS participates directly in Chromium paint. It needs neither the
+  // scene effect graph nor its subtree MutationObserver.
+  const coordinator =
+    refined && !browserNativeCss ? coordinatorFor(sceneRoot) : null;
   const referenceKey = JSON.stringify([
     node.closest<HTMLElement>("[data-element-id]")?.dataset.elementId,
     instance.id,
