@@ -1092,7 +1092,7 @@ test("one failed semantic surface leaves an independent retained surface operati
   expect(result.sameSource).toBe(true);
 });
 
-test("source changes publish a complete restoration revision atomically", async () => {
+test("source changes commit one coherent frame without an async bitmap gap", async () => {
   await mount(page, "glass", 1, false, true);
   await page
     .locator('[data-element-id="lower"] img')
@@ -1103,9 +1103,12 @@ test("source changes publish a complete restoration revision atomically", async 
     (window as unknown as ProbeWindow).compositor!.flush(),
   );
 
-  const result = await page.evaluate(async () => {
+  const transition = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow & {
+      pendingPublication?: Promise<boolean>;
       releasePublication?: () => void;
+      originalCreateImageBitmap?: typeof createImageBitmap;
+      bitmapCalls?: number;
     };
     const compositor = w.compositor!;
     const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
@@ -1123,45 +1126,87 @@ test("source changes publish a complete restoration revision atomically", async 
     };
 
     const original = window.createImageBitmap.bind(window);
-    let started!: () => void;
+    w.originalCreateImageBitmap = original;
+    w.bitmapCalls = 0;
     let release!: () => void;
-    const publicationStarted = new Promise<void>((resolve) => {
-      started = resolve;
-    });
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
+    w.releasePublication = release;
     window.createImageBitmap = (async (
       ...args: Parameters<typeof createImageBitmap>
     ) => {
-      const bitmap = await original(...args);
-      started();
+      w.bitmapCalls = (w.bitmapCalls ?? 0) + 1;
       await held;
-      return bitmap;
+      return original(...args);
     }) as typeof createImageBitmap;
 
     lower.style.transform = "translateX(96px)";
     await Promise.resolve();
-    const pending = compositor.flush();
-    await publicationStarted;
-    const during = {
-      pixels: output.toDataURL(),
-      revision: revision(),
+    w.pendingPublication = compositor.flush();
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+
+    return {
+      before,
+      current: {
+        pixels: output.toDataURL(),
+        revision: revision(),
+      },
+      bitmapCalls: w.bitmapCalls,
     };
-    release();
-    await pending;
-    await compositor.flush();
-    window.createImageBitmap = original;
-    const after = {
-      pixels: output.toDataURL(),
-      revision: revision(),
-    };
-    return { before, during, after };
   });
 
-  expect(result.during).toEqual(result.before);
-  expect(result.after.revision).toBeGreaterThan(result.before.revision);
-  expect(result.after.pixels).not.toBe(result.before.pixels);
+  // Force a painted boundary while the legacy async bitmap primitive is held.
+  // The corrected Canvas2D publication path must not depend on it.
+  const faded = await image(page);
+  await setAlpha(page, "glass", 1);
+  const full = await image(page);
+  await page
+    .locator('[data-element-id="glass"]')
+    .evaluate((node: HTMLElement) => {
+      node.style.visibility = "hidden";
+    });
+  const backdrop = await image(page);
+  await page
+    .locator('[data-element-id="glass"]')
+    .evaluate((node: HTMLElement) => {
+      node.style.visibility = "";
+    });
+  await setAlpha(page, "glass", 0.5);
+
+  const cleanup = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow & {
+      pendingPublication?: Promise<boolean>;
+      releasePublication?: () => void;
+      originalCreateImageBitmap?: typeof createImageBitmap;
+      bitmapCalls?: number;
+    };
+    w.releasePublication?.();
+    await w.pendingPublication;
+    await w.compositor!.flush();
+    if (w.originalCreateImageBitmap)
+      window.createImageBitmap = w.originalCreateImageBitmap;
+    return { bitmapCalls: w.bitmapCalls ?? 0 };
+  });
+
+  expect(transition.bitmapCalls).toBe(0);
+  expect(cleanup.bitmapCalls).toBe(0);
+  expect(transition.current.revision).toBeGreaterThan(
+    transition.before.revision,
+  );
+  expect(transition.current.pixels).not.toBe(transition.before.pixels);
+
+  let max = 0;
+  let sum = 0;
+  for (let i = 0; i < faded.length; i++) {
+    const error = Math.abs(faded[i] - (full[i] + backdrop[i]) * 0.5);
+    max = Math.max(max, error);
+    sum += error;
+  }
+  expect(sum / faded.length).toBeLessThan(0.2);
+  expect(max).toBeLessThanOrEqual(3);
 });
 
 test("overlapping motion envelopes retain the existing backdrop lowering for three and ten cards", async () => {
