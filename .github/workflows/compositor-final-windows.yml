@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   checks-browser:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -52,7 +52,7 @@ jobs:
           tests/registry.json
           tests/stats.json
           docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md
-      - run: npx playwright install chromium
+      - run: npx playwright install --with-deps chromium
       - name: Mixed, CSS backdrop, sampling and audience navigation gates
         run: npx playwright test --config playwright.config.ts --output test-results-compositor-browser
         env:
