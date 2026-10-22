@@ -611,7 +611,7 @@ The restoration equation intentionally reconstructed a resolved material before 
 
 ### New normal CSS path
 
-Production `SlideRenderer` explicitly requests browser-native CSS routing:
+Production `SlideRenderer` now receives browser-native CSS routing by default; the legacy CSS compositor is an explicit opt-in used only by retained validation:
 
 ```text
 ShowMe document / CompositionPlan
@@ -630,7 +630,7 @@ For this route:
 - CSS Effects receive no scene composition dependencies.
 - `EffectRuntime` does not join the scene EffectGraph and does not install its scene-root `MutationObserver`.
 - `createCssBackdrop` is not created.
-- `SlideRenderer` does not mount `CompositionRuntime` when no explicit pixel consumer exists.
+- `SlideRenderer` no longer mounts `CompositionRuntime` or emits restoration/split-alpha DOM at all. The retained compositor is now a separate explicit subsystem rather than a normal renderer fallback.
 - no `data-composition-visual`, `data-composition-paint` or `data-backdrop-restore` wrapper is required for ordinary CSS.
 - Motion continues to use the existing canonical runtime and Motion values. No new clock or playback state was introduced.
 - Presence continues to use the existing canonical presence sampler and keeps the CSS subtree mounted while toggling visibility, hit testing, content visibility and inert state.
@@ -658,7 +658,7 @@ The regression contract checks that ordinary Motion produces no backdrop restora
 
 The custom compositor has not been deleted.
 
-It remains available for explicit pixel-oriented work and its existing low-level validation still exercises:
+It is no longer mounted by the normal `SlideRenderer`. It remains available as an explicit pixel-oriented subsystem, and its existing low-level validation mounts it directly to exercise:
 
 - semantic `SceneSurfaceRef` identity
 - retained surface materialization
@@ -690,7 +690,7 @@ Local Electron profiling is still required to quantify frame pacing and CPU impa
 
 ### Code that is no longer necessary for normal CSS glass
 
-The following code remains in the repository, but is no longer part of the normal CSS glass render path:
+The following code remains in the repository, but is no longer part of `SlideRenderer`'s normal CSS glass render path:
 
 - `nativeBackdropGroups`
 - `restorationPlan`
@@ -711,5 +711,5 @@ The hard problem is now narrower:
 4. profile real editor and audience playback with representative decks
 5. remove legacy CSS-specific compositor admission/restoration code once the browser-native contract has enough local validation
 
-The next safest simplification is to separate explicit pixel-input shader routing from the old CSS-backdrop capability planner, then delete CSS-only restoration admission from the production planning surface while retaining a focused SceneTexture service.
+The next safest simplification is to define one explicit SceneTexture boundary for fragment shaders that genuinely need rendered scene pixels, then move or delete the remaining CSS-only legacy admission/restoration code from the production module surface.
 
