@@ -587,3 +587,129 @@ The direction can be summarized as:
 The measure of success is not how general the custom compositor becomes.
 
 The measure of success is how rarely ShowMe needs one.
+
+## Vertical slice result: browser-native CSS glass
+
+Implemented on 2026-10-23 on `experimental/browser-native-renderer`.
+
+### Render-path finding
+
+The previous CSS glass path was not primarily required by CSS itself. It existed to preserve ShowMe's custom resolved-material/group-alpha semantic:
+
+```text
+CSS backdrop read
+  -> CompositionPlan effect-entry backdrop identity
+  -> compositionBackendPlan capability/admission checks
+  -> native-group split wrapper OR backdrop-restoration
+  -> SceneSurface materialization / retained prefix
+  -> restoration canvas or CSS backdrop replay
+  -> custom alpha reconstruction
+  -> Chromium
+```
+
+The restoration equation intentionally reconstructed a resolved material before applying group alpha. That differs from normal Chromium stacking-context and `backdrop-filter` behavior. The experiment now treats that difference as a product-semantic change, not as an error to repair.
+
+### New normal CSS path
+
+Production `SlideRenderer` explicitly requests browser-native CSS routing:
+
+```text
+ShowMe document / CompositionPlan
+  -> CSS Effect classified browser-native
+  -> scoped CSS on the mounted Effect DOM node
+  -> Motion writes transform / opacity
+  -> Presence gates the existing mounted Element
+  -> CSS variables / Effect timing update in place
+  -> Chromium style / paint / compositing
+```
+
+For this route:
+
+- `backdrop-filter` remains the real CSS property.
+- CSS Effects receive no Element raster source.
+- CSS Effects receive no scene composition dependencies.
+- `EffectRuntime` does not join the scene EffectGraph and does not install its scene-root `MutationObserver`.
+- `createCssBackdrop` is not created.
+- `SlideRenderer` does not mount `CompositionRuntime` when no explicit pixel consumer exists.
+- no `data-composition-visual`, `data-composition-paint` or `data-backdrop-restore` wrapper is required for ordinary CSS.
+- Motion continues to use the existing canonical runtime and Motion values. No new clock or playback state was introduced.
+- Presence continues to use the existing canonical presence sampler and keeps the CSS subtree mounted while toggling visibility, hit testing, content visibility and inert state.
+
+### Representative fixture
+
+The Electron rendering fixture now has a browser-native case containing:
+
+- image background
+- translucent geometry behind the card
+- rounded/clipped CSS glass with `backdrop-filter`
+- text inside the glass
+- overlapping foreground geometry after the glass
+- Move Motion
+- Scale Motion
+- Rotate Motion
+- Fade/opacity Motion
+- Presence enter and timed exit
+
+The same boundary test runs through normal preview rendering and presentation-mode `SlideRenderer`.
+
+The regression contract checks that ordinary Motion produces no backdrop restoration, no CSS backdrop replay, no split alpha wrapper and no CSS Effect canvas. It also checks stable DOM identity, no child-list churn during direct Motion sampling, Presence exit without unmounting, foreground ordering, and continued generated-GLSL canvas rendering.
+
+### What remains custom
+
+The custom compositor has not been deleted.
+
+It remains available for explicit pixel-oriented work and its existing low-level validation still exercises:
+
+- semantic `SceneSurfaceRef` identity
+- retained surface materialization
+- regional reuse
+- source invalidation
+- coherent publication
+- failure isolation
+- legacy backdrop restoration when explicitly selected
+
+Generated shaders with no scene input remain independent GPU/canvas layers.
+
+Fragment shaders that explicitly request `content` or `backdrop` pixels still use the current raster/materialization machinery. That is the next boundary to make more explicit, not something this slice broadens.
+
+### Visual semantic change
+
+Normal CSS now follows Chromium exactly.
+
+In particular, opacity on a glass Element is ordinary browser group opacity. The previous resolved-material restoration result `mix(B, R, alpha)` is no longer reproduced for CSS Effects. Depending on stacking context, clipping and alpha, the result can therefore differ from the old custom compositor. This is intentional.
+
+If ShowMe later needs the old or another non-CSS compositing operation, it should be exposed as an explicit advanced pixel/GPU Effect rather than hidden behind normal CSS.
+
+### Performance observation
+
+No frame-time or CPU numbers are claimed from this pass.
+
+The architectural hot path is nevertheless materially smaller: the representative CSS glass case no longer schedules scene-surface builds, retained-prefix invalidations, Canvas backdrop reconstruction, bitmap/raster copies or scene-root mutation observation. Ordinary Motion remains direct DOM transform/opacity work plus Effect CSS-variable timing before Chromium paint.
+
+Local Electron profiling is still required to quantify frame pacing and CPU impact.
+
+### Code that is no longer necessary for normal CSS glass
+
+The following code remains in the repository, but is no longer part of the normal CSS glass render path:
+
+- `nativeBackdropGroups`
+- `restorationPlan`
+- `backdropRestoration`
+- `compositionSurface` materialization
+- `elementRaster` backdrop reproduction
+- `createCssBackdrop`
+
+Keeping these modules temporarily is deliberate. They still document and support explicit advanced materialization cases while the browser-native boundary is validated.
+
+### Remaining difficult work
+
+The hard problem is now narrower:
+
+1. define an explicit SceneTexture/flattened-group API for Effects that genuinely require rendered scene pixels
+2. decide how explicit scene-input GLSL migrates onto that API without pulling ordinary DOM/CSS back into the compositor
+3. validate browser-native CSS and CSS+JS across more nested stacking, mask, blend and media cases
+4. profile real editor and audience playback with representative decks
+5. remove legacy CSS-specific compositor admission/restoration code once the browser-native contract has enough local validation
+
+The next safest simplification is to separate explicit pixel-input shader routing from the old CSS-backdrop capability planner, then delete CSS-only restoration admission from the production planning surface while retaining a focused SceneTexture service.
+
