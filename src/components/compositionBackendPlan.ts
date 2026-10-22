@@ -322,13 +322,13 @@ export function planCompositionBackends(
     restoration: boolean;
     padding: number;
     exclude?: ReadonlySet<string>;
-    /** Ordinary CSS is browser paint. Keep the legacy backdrop backends only
-     * for explicit compositor validation / future scene-pixel consumers. */
-    browserNativeCss?: boolean;
+    /** Ordinary CSS is browser paint by default. This opt-in exists only for
+     * retained compositor validation while the old backend is being removed. */
+    legacyCssBackdrop?: boolean;
   },
 ) {
   const browserNativeCss = new Set<string>();
-  if (options.browserNativeCss) {
+  if (!options.legacyCssBackdrop) {
     const resources = slide.effectResources ?? {};
     for (const [id, group] of plan.groups) {
       if (
@@ -345,7 +345,7 @@ export function planCompositionBackends(
 
   const native = new Map<string, { effectId: string; filter: string }>();
   let restoration: RestorationPlan | null = null;
-  if (!options.browserNativeCss && compositorCapabilities().resolvedBackdrop) {
+  if (options.legacyCssBackdrop && compositorCapabilities().resolvedBackdrop) {
     for (const [id, route] of nativeBackdropGroups(plan, slide, deck))
       native.set(id, route);
     if (options.restoration)
