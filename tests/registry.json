@@ -975,8 +975,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-21",
-    "lastReviewed": "2026-10-22",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points, including two backdrop-reading Effects in one Element when their ordered paint prefixes differ; proven local CSS omits backdrop dependencies while escaped, unknown and external styles remain conservative"
+    "lastReviewed": "2026-10-23",
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points; browser-native CSS now has an explicit backend boundary that disables native-group/restoration planning while explicit scene-input shaders remain on the advanced path; the retained legacy planner remains testable only when explicitly selected"
   },
   {
     "id": "effects-native-composition",
@@ -986,8 +986,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-21",
-    "lastReviewed": "2026-10-22",
-    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-publication readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and unsupported mixed stacks retain the correctness lowering; exact semantic surfaces remain crop-independent while one renderer-scoped materializer can reuse a regionally proven execution projection; mixed image + shape + generated GLSL + image sources use source-agnostic restoration, later paint does not invalidate earlier surfaces, lower source changes do, source publication is coherent, and one failed semantic surface does not disable an independent surface; source-host reference clocks do not invalidate pixels, earlier publications remain immutable, prepared media readiness is awaited, and fractional backing density is explicit"
+    "lastReviewed": "2026-10-23",
+    "reason": "The production renderer contract now keeps ordinary CSS glass on Chromium in both preview and presentation modes: no restoration canvas, CSS backdrop replay, split alpha wrapper, scene materializer activation or CSS effect canvas during Move/Scale/Rotate/Fade and Presence enter/exit; the representative fixture combines image, translucent geometry, text, rounded/clipped glass and later foreground overlap while retaining the same mounted DOM subtree. Generated GLSL still renders through its GPU canvas. Earlier tests in this file continue to exercise the retained SceneSurface/backdrop-restoration implementation explicitly, including materializer reuse, invalidation, publication coherence and failure isolation."
   },
   {
     "id": "effects-css-backdrop-opacity",
