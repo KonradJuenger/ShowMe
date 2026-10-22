@@ -134,7 +134,6 @@ export function createPrefixMaterializer(
     if (nodes.length !== ref.elements.length)
       throw new Error("Scene prefix source is not fully mounted");
 
-    let source!: ReturnType<typeof createScenePrefixRasterSource>;
     const markDirty = () => {
       if (disposed) return;
       invalidations++;
@@ -146,7 +145,7 @@ export function createPrefixMaterializer(
       beforeEffect: "",
       flush: () => {},
     };
-    source = createScenePrefixRasterSource(
+    const source = createScenePrefixRasterSource(
       ref.elements,
       () => ({ slide, deck }),
       context,
