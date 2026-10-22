@@ -1115,6 +1115,67 @@ test("one failed restoration surface leaves an independent consumer operational"
   expect(result.failedPaint).toBe("visible");
 });
 
+test("materializer failure does not poison an independent retained projection", async () => {
+  await mount(page, "glass", 1, false, false, true);
+  for (const id of ["lower", "image-b"])
+    await page
+      .locator('[data-element-id="' + id + '"] img')
+      .first()
+      .evaluate(async (image: HTMLImageElement) => image.decode());
+  await enableScene(page);
+
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const planPath = "/src/components/compositionPlan.ts";
+    const {
+      compileCompositionPlan,
+    }: typeof import("../../../src/components/compositionPlan") = await import(
+      /* @vite-ignore */ planPath
+    );
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    const plan = compileCompositionPlan(slide, w.model.deck);
+    const lowerOnly = plan.surface({
+      kind: "element-entry",
+      elementId: "mixed-rectangle",
+    })!;
+    const withRectangle = plan.surface({
+      kind: "element-entry",
+      elementId: "mixed-shader",
+    })!;
+    const materializer = w.compositor!.materializer;
+    const request = (surface: typeof lowerOnly) => ({
+      surface,
+      region: { x: 0, y: 0, width: 200, height: 160 },
+      density: { x: 1, y: 1 },
+    });
+    const first = await materializer.materialize(request(lowerOnly));
+    w.native.host
+      .querySelector<HTMLElement>('[data-element-id="mixed-rectangle"]')!
+      .remove();
+    await Promise.resolve();
+
+    let failure = "";
+    try {
+      await materializer.materialize(request(withRectangle));
+    } catch (error) {
+      failure = String(error);
+    }
+    const again = await materializer.materialize(request(lowerOnly));
+    return {
+      failure,
+      sameRevision: first.revision === again.revision,
+      sameSource:
+        first.source.kind === "canvas-image" &&
+        again.source.kind === "canvas-image" &&
+        first.source.value === again.source.value,
+    };
+  });
+
+  expect(result.failure).toContain("not fully mounted");
+  expect(result.sameRevision).toBe(true);
+  expect(result.sameSource).toBe(true);
+});
+
 test("source changes commit one coherent frame without an async bitmap gap", async () => {
   await mount(page, "glass", 1, false, true);
   await page
