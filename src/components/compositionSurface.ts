@@ -115,7 +115,11 @@ function nodesFor(
  * primitive painter. Unsupported browser-owned paint remains on fallback. */
 const ownedPrimitiveProvider: PixelSourceProvider = {
   project(surface, slide, irrelevantElementIds) {
-    if (surface.partial.size) return null;
+    // The current primitive provider is proven for complete element-entry
+    // prefixes. Internal effect-entry paint remains exact in CompositionPlan,
+    // but falls back until a provider can reproduce every preceding operation.
+    if (surface.point.kind !== "element-entry" || surface.partial.size)
+      return null;
     const elements = surface.elements.filter(
       (element) => !irrelevantElementIds.has(element.id),
     );
