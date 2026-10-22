@@ -411,6 +411,7 @@ function createRasterSource(
   ) => unknown,
   paintSource: (canvas: HTMLCanvasElement) => void,
   activityNodes: () => readonly HTMLElement[] = () => [context.root],
+  observeEnvironment = true,
 ) {
   const canvas = context.outputCanvas ?? document.createElement("canvas");
   const videos = new Map<HTMLVideoElement, { id: number; revision: number }>();
@@ -419,15 +420,35 @@ function createRasterSource(
     disposed = false,
     fonts = 0,
     dirty = true;
-  const markDirty = () => { dirty = true; invalidate(); };
+  const markDirty = () => {
+    dirty = true;
+    invalidate();
+  };
   const fontChanged = () => {
     fonts++;
     markDirty();
   };
-  document.fonts.addEventListener("loadingdone", fontChanged);
-  const styleObserver = new MutationObserver(markDirty);
-  styleObserver.observe(document.head, { subtree: true, childList: true, attributes: true, characterData: true });
-  for (let ancestor = context.root.parentElement; ancestor; ancestor = ancestor.parentElement) styleObserver.observe(ancestor, { attributes: true, attributeFilter: ["class", "style"] });
+  const styleObserver = observeEnvironment
+    ? new MutationObserver(markDirty)
+    : undefined;
+  if (observeEnvironment) {
+    document.fonts.addEventListener("loadingdone", fontChanged);
+    styleObserver!.observe(document.head, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+    for (
+      let ancestor = context.root.parentElement;
+      ancestor;
+      ancestor = ancestor.parentElement
+    )
+      styleObserver!.observe(ancestor, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+  }
   const seenVideos = new Set<HTMLVideoElement>();
   const scan = (current: Element, target: boolean): unknown[] => {
     const node = visualNode(current, context.root);
@@ -563,8 +584,9 @@ function createRasterSource(
     },
     dispose() {
       disposed = true;
-      styleObserver.disconnect();
-      document.fonts.removeEventListener("loadingdone", fontChanged);
+      styleObserver?.disconnect();
+      if (observeEnvironment)
+        document.fonts.removeEventListener("loadingdone", fontChanged);
       videos.forEach((state, video) => {
         if (state.id) video.cancelVideoFrameCallback(state.id);
       });
@@ -582,6 +604,7 @@ export function createScenePrefixRasterSource(
   scene: () => { slide: Slide; deck: Deck },
   context: RasterContext,
   invalidate: () => void,
+  observeEnvironment = true,
 ) {
   const activityNodes = () =>
     elements.flatMap((element) => {
@@ -612,6 +635,7 @@ export function createScenePrefixRasterSource(
       for (const entry of elements) render(ctx, entry, context, false);
     },
     activityNodes,
+    observeEnvironment,
   );
 }
 
