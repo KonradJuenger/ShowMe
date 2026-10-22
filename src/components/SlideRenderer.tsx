@@ -762,18 +762,21 @@ const ElementView = memo(function ElementView({
       height={frame.height}
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
       backdropMode={
-        nativeBackdrop?.effectId === instance.id
-          ? "hoisted"
-          : restoreBackdrop
-            ? "restoration"
-            : "fallback"
+        resources[instance.resourceId].kind === "css" &&
+        backends.browserNativeCss.has(element.id)
+          ? "browser-native"
+          : nativeBackdrop?.effectId === instance.id
+            ? "hoisted"
+            : restoreBackdrop
+              ? "restoration"
+              : "fallback"
       }
       compositionDependencies={plan.dependencies({
         elementId: element.id,
         effectId: instance.id,
       })}
       rasterContent={
-        resources[instance.resourceId].kind === "css" ||
+        resources[instance.resourceId].kind !== "css" &&
         ["content", "backdrop"].includes(
           resources[instance.resourceId].input ?? "none",
         )
@@ -1051,6 +1054,7 @@ export const SlideRenderer = memo(function SlideRenderer({
           !editingMediaId &&
           !editorOverflow,
         padding: Math.max(2, 2 / backdropDensity),
+        browserNativeCss: true,
         exclude:
           failedBackdrop?.plan === composition ? failedBackdrop.ids : undefined,
       }),
@@ -1073,7 +1077,9 @@ export const SlideRenderer = memo(function SlideRenderer({
     [composition, backends],
   );
   useLayoutEffect(() => {
-    if (!root.current) return;
+    // The scene materializer is an advanced pixel service. Ordinary CSS,
+    // including backdrop-filter, must never activate it.
+    if (!root.current || !sceneBackdrop) return;
     const failed = (ids: readonly string[], error: unknown) => {
       console.error("Composition preparation failed", error);
       setFailedBackdrop((previous) => ({
