@@ -6,7 +6,7 @@ on:
       - chatgpt/general-compositor-fix
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   checks-browser:
@@ -34,9 +34,9 @@ jobs:
           SHOWME_TEST_FILES: '["tests/feature/effects/composition-plan.test.ts"]'
       - name: Whitespace check
         run: git diff --check 407e70d0ec73493dc565c47ba1b92ff1ff1e4a3b HEAD
-      - name: Prettier changed files
+      - name: Format changed files
         run: >-
-          npx prettier --check
+          npx prettier --write
           src/components/compositionPlan.ts
           src/components/compositionSurface.ts
           src/components/compositionBackendPlan.ts
@@ -46,6 +46,17 @@ jobs:
           tests/feature/effects/composition-plan.test.ts
           tests/feature/effects/native-composition.spec.ts
           docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md
+      - name: Commit formatter output
+        shell: pwsh
+        run: |
+          $changed = git status --porcelain -- src/components/compositionPlan.ts src/components/compositionSurface.ts src/components/compositionBackendPlan.ts src/components/backdropRestoration.ts src/components/compositionRuntime.ts src/components/elementRaster.ts tests/feature/effects/composition-plan.test.ts tests/feature/effects/native-composition.spec.ts docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md
+          if ($changed) {
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add src/components/compositionPlan.ts src/components/compositionSurface.ts src/components/compositionBackendPlan.ts src/components/backdropRestoration.ts src/components/compositionRuntime.ts src/components/elementRaster.ts tests/feature/effects/composition-plan.test.ts tests/feature/effects/native-composition.spec.ts docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md
+            git commit -m 'Format compositor changes'
+            git push origin HEAD:chatgpt/general-compositor-fix
+          }
       - run: npx playwright install chromium
       - name: Mixed, CSS backdrop, sampling and audience navigation gates
         run: npx playwright test --config playwright.config.ts --output test-results-compositor-browser
