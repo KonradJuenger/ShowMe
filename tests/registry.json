@@ -997,7 +997,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-19",
-    "lastReviewed": "2026-10-21",
-    "reason": "Retained correctness fallback resolves CSS backdrop before whole-element and parent alpha, including real intermediate Move In, lower custom CSS, live shader motion, transformed cached material and overlapping consumers; independent nested alphas resolve through the same fallback, with whole-subtree exclusion for pixel-reference captures"
+    "lastReviewed": "2026-10-23",
+    "reason": "CSS backdrop-filter now follows Chromium composition semantics directly. The suite verifies native backdrop-filter over generated shader content, parent and nested group opacity, Presence Move In, external stylesheet changes, source transforms/opacity and overlapping glass consumers without CSS backdrop replay, restoration canvases, split visual wrappers or CSS Effect canvases."
   }
 ]
