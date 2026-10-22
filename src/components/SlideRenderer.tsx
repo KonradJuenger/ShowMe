@@ -1087,10 +1087,12 @@ export const SlideRenderer = memo(function SlideRenderer({
     try {
       const mounted = mountCompositionRuntime(
         root.current,
-        sceneBackdrop,
-        deck,
-        failed,
-        effectRender.density,
+        { slide, deck },
+        {
+          restoration: sceneBackdrop,
+          failed,
+          density: effectRender.density,
+        },
       );
       runtime.current = mounted;
       return () => {
