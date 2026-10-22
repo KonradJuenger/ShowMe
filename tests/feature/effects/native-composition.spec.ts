@@ -763,7 +763,8 @@ test("mixed owned prefix is shared across two glass consumers and invalidates on
   expect(initial.captures).toBe(0);
   expect(initial.errors).toEqual([]);
   expect(initial.diagnostics.consumers).toBe(2);
-  expect(initial.diagnostics.uniquePrefixes).toBe(1);
+  expect(initial.diagnostics.uniquePrefixes).toBe(2);
+  expect(initial.diagnostics.prefixes.semanticSurfaces).toBe(2);
   expect(initial.diagnostics.prefixes.surfaces).toBe(1);
   expect(initial.diagnostics.prefixes.builds).toBe(1);
 
@@ -954,12 +955,213 @@ test("mixed owned prefix is shared across two glass consumers and invalidates on
   expect(invalidation.result.shaderSource).toBeGreaterThan(
     invalidation.result.imageSource,
   );
-  expect(invalidation.diagnostics.uniquePrefixes).toBe(1);
+  expect(invalidation.diagnostics.uniquePrefixes).toBe(2);
   expect(invalidation.diagnostics.prefixes.surfaces).toBe(1);
   expect(invalidation.diagnostics.prefixes.reuses).toBeGreaterThan(0);
   expect(invalidation.captures).toBe(0);
   expect(invalidation.cssBackdrop).toBe(0);
   expect(invalidation.errors).toEqual([]);
+});
+
+
+test("scene materializer shares one exact surface across independent regional consumers", async () => {
+  await mount(page, "glass", 2, true, false, true);
+  for (const id of ["lower", "image-b"])
+    await page
+      .locator('[data-element-id="' + id + '"] img')
+      .first()
+      .evaluate(async (image: HTMLImageElement) => image.decode());
+  await enableScene(page);
+
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const plannerPath = "/src/components/compositionBackendPlan.ts";
+    const planPath = "/src/components/compositionPlan.ts";
+    const {
+      planCompositionBackends,
+    }: typeof import("../../../src/components/compositionBackendPlan") =
+      await import(/* @vite-ignore */ plannerPath);
+    const {
+      compileCompositionPlan,
+    }: typeof import("../../../src/components/compositionPlan") = await import(
+      /* @vite-ignore */ planPath
+    );
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    const planningSlide = { ...slide, motion: w.motion };
+    const restoration = planCompositionBackends(
+      compileCompositionPlan(planningSlide, w.model.deck),
+      planningSlide,
+      w.model.deck,
+      { restoration: true, padding: 2 },
+    ).restoration!;
+    const surface = restoration.surfaces.get("glass")!;
+    const materializer = w.compositor!.materializer;
+    const before = materializer.diagnostics();
+    const first = await materializer.materialize({
+      surface,
+      region: { x: 70, y: 60, width: 120, height: 90 },
+      density: { x: 1, y: 1 },
+      irrelevantElementIds: restoration.irrelevantConsumers,
+    });
+    const second = await materializer.materialize({
+      surface,
+      region: { x: 140, y: 100, width: 80, height: 70 },
+      density: { x: 1, y: 1 },
+      irrelevantElementIds: restoration.irrelevantConsumers,
+    });
+    const after = materializer.diagnostics();
+    return {
+      sameSemanticRef: first.surface === second.surface,
+      samePublishedSource:
+        first.source.kind === "canvas-image" &&
+        second.source.kind === "canvas-image" &&
+        first.source.value === second.source.value,
+      sameRevision: first.revision === second.revision,
+      buildDelta: after.builds - before.builds,
+      reuseDelta: after.reuses - before.reuses,
+      semanticId: surface.id,
+    };
+  });
+
+  expect(result.sameSemanticRef).toBe(true);
+  expect(result.samePublishedSource).toBe(true);
+  expect(result.sameRevision).toBe(true);
+  expect(result.buildDelta).toBe(0);
+  expect(result.reuseDelta).toBeGreaterThanOrEqual(2);
+  expect(result.semanticId).toContain("scene:");
+});
+
+test("one failed semantic surface leaves an independent retained surface operational", async () => {
+  await mount(page, "glass", 1, false, false, true);
+  for (const id of ["lower", "image-b"])
+    await page
+      .locator('[data-element-id="' + id + '"] img')
+      .first()
+      .evaluate(async (image: HTMLImageElement) => image.decode());
+  await enableScene(page);
+
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const planPath = "/src/components/compositionPlan.ts";
+    const {
+      compileCompositionPlan,
+    }: typeof import("../../../src/components/compositionPlan") = await import(
+      /* @vite-ignore */ planPath
+    );
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    const plan = compileCompositionPlan(slide, w.model.deck);
+    const lowerOnly = plan.surface({
+      kind: "element-entry",
+      elementId: "mixed-rectangle",
+    })!;
+    const withRectangle = plan.surface({
+      kind: "element-entry",
+      elementId: "mixed-shader",
+    })!;
+    const materializer = w.compositor!.materializer;
+    const request = (surface: typeof lowerOnly) => ({
+      surface,
+      region: { x: 0, y: 0, width: 200, height: 160 },
+      density: { x: 1, y: 1 },
+    });
+    const first = await materializer.materialize(request(lowerOnly));
+    w.native.host
+      .querySelector<HTMLElement>('[data-element-id="mixed-rectangle"]')!
+      .remove();
+    await Promise.resolve();
+
+    let failure = "";
+    try {
+      await materializer.materialize(request(withRectangle));
+    } catch (error) {
+      failure = String(error);
+    }
+    const again = await materializer.materialize(request(lowerOnly));
+    return {
+      failure,
+      sameRevision: first.revision === again.revision,
+      sameSource:
+        first.source.kind === "canvas-image" &&
+        again.source.kind === "canvas-image" &&
+        first.source.value === again.source.value,
+    };
+  });
+
+  expect(result.failure).toContain("not fully mounted");
+  expect(result.sameRevision).toBe(true);
+  expect(result.sameSource).toBe(true);
+});
+
+test("source changes publish a complete restoration revision atomically", async () => {
+  await mount(page, "glass", 1, false, true);
+  await page
+    .locator('[data-element-id="lower"] img')
+    .evaluate(async (image: HTMLImageElement) => image.decode());
+  await enableScene(page);
+  await setAlpha(page, "glass", 0.5);
+  await page.evaluate(() =>
+    (window as unknown as ProbeWindow).compositor!.flush(),
+  );
+
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow & {
+      releasePublication?: () => void;
+    };
+    const compositor = w.compositor!;
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const output = root.querySelector<HTMLCanvasElement>(
+      '[data-backdrop-restore="glass"] canvas',
+    )!;
+    const lower = root.querySelector<HTMLElement>('[data-element-id="lower"]')!;
+    const revision = () =>
+      Math.max(
+        ...Object.values(compositor.diagnostics().prefixes.revisions),
+      );
+    const before = {
+      pixels: output.toDataURL(),
+      revision: revision(),
+    };
+
+    const original = window.createImageBitmap.bind(window);
+    let started!: () => void;
+    let release!: () => void;
+    const publicationStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    window.createImageBitmap = (async (
+      ...args: Parameters<typeof createImageBitmap>
+    ) => {
+      const bitmap = await original(...args);
+      started();
+      await held;
+      return bitmap;
+    }) as typeof createImageBitmap;
+
+    lower.style.transform = "translateX(96px)";
+    await Promise.resolve();
+    const pending = compositor.flush();
+    await publicationStarted;
+    const during = {
+      pixels: output.toDataURL(),
+      revision: revision(),
+    };
+    release();
+    await pending;
+    await compositor.flush();
+    window.createImageBitmap = original;
+    const after = {
+      pixels: output.toDataURL(),
+      revision: revision(),
+    };
+    return { before, during, after };
+  });
+
+  expect(result.during).toEqual(result.before);
+  expect(result.after.revision).toBeGreaterThan(result.before.revision);
+  expect(result.after.pixels).not.toBe(result.before.pixels);
 });
 
 test("overlapping motion envelopes retain the existing backdrop lowering for three and ten cards", async () => {
