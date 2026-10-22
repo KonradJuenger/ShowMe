@@ -12,11 +12,6 @@ import {
   planCompositionBackends,
   type CompositionBackends,
 } from "./compositionBackendPlan";
-import {
-  mountCompositionRuntime,
-  type CompositionRuntime,
-} from "./compositionRuntime";
-import type { MotionRenderSink } from "./motionRuntime";
 import type { EffectResources } from "../core/effects";
 import {
   compileCompositionPlan,
@@ -1007,11 +1002,6 @@ export const SlideRenderer = memo(function SlideRenderer({
     [slide, deck, compositionResources, editingTextId],
   );
   const root = useRef<HTMLDivElement>(null);
-  const runtime = useRef<CompositionRuntime | null>(null);
-  const [failedBackdrop, setFailedBackdrop] = useState<{
-    plan: CompositionPlan;
-    ids: Set<string>;
-  } | null>(null);
   const pixelRatio = useDisplayDensity();
   const width = deck.width,
     height = deck.height;
@@ -1044,92 +1034,17 @@ export const SlideRenderer = memo(function SlideRenderer({
     }),
     [width, height, output, deferImageUpdates, playing, envelopes],
   );
-  const backdropDensity = Math.max(
-    effectRender.density.x,
-    effectRender.density.y,
-  );
-  const hasMotionPreview = !!motionState;
   const backends = useMemo(
     () =>
       planCompositionBackends(composition, slide, deck, {
-        restoration:
-          (presentation || hasMotionPreview) &&
-          !editingTextId &&
-          !editingMediaId &&
-          !editorOverflow,
-        padding: Math.max(2, 2 / backdropDensity),
-        exclude:
-          failedBackdrop?.plan === composition ? failedBackdrop.ids : undefined,
+        restoration: false,
+        padding: 2,
       }),
-    [
-      composition,
-      slide,
-      deck,
-      presentation,
-      hasMotionPreview,
-      editingTextId,
-      editingMediaId,
-      editorOverflow,
-      failedBackdrop,
-      backdropDensity,
-    ],
+    [composition, slide, deck],
   );
-  const sceneBackdrop = backends.restoration;
   const compositionView = useMemo(
     () => ({ plan: composition, backends }),
     [composition, backends],
-  );
-  useLayoutEffect(() => {
-    // The scene materializer is an advanced pixel service. Ordinary CSS,
-    // including backdrop-filter, must never activate it.
-    if (!root.current || !sceneBackdrop) return;
-    const failed = (ids: readonly string[], error: unknown) => {
-      console.error("Composition preparation failed", error);
-      setFailedBackdrop((previous) => ({
-        plan: composition,
-        ids: new Set([
-          ...(previous?.plan === composition ? previous.ids : []),
-          ...ids,
-        ]),
-      }));
-    };
-    try {
-      const mounted = mountCompositionRuntime(
-        root.current,
-        { slide, deck },
-        {
-          restoration: sceneBackdrop,
-          failed,
-          density: effectRender.density,
-        },
-      );
-      runtime.current = mounted;
-      return () => {
-        runtime.current = null;
-        mounted.dispose();
-      };
-    } catch (error) {
-      if (sceneBackdrop) failed([...sceneBackdrop.glass], error);
-      else console.error("Composition runtime failed", error);
-    }
-  }, [sceneBackdrop, slide, deck, composition, effectRender.density]);
-  const hasRestoration = !!sceneBackdrop;
-  const renderSink = useMemo<MotionRenderSink | undefined>(
-    () =>
-      hasRestoration
-        ? {
-            ownsOpacity(id) {
-              return runtime.current?.ownsOpacity?.(id) ?? false;
-            },
-            apply(samples) {
-              runtime.current?.apply(samples);
-            },
-            reset() {
-              runtime.current?.reset();
-            },
-          }
-        : undefined,
-    [hasRestoration],
   );
   useMotionRuntime(
     root,
@@ -1138,7 +1053,6 @@ export const SlideRenderer = memo(function SlideRenderer({
     !!effectClock || !staticVideo,
     effectClock,
     backends,
-    renderSink,
   );
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
