@@ -1,0 +1,52 @@
+name: Temporary compositor formatter
+
+on:
+  push:
+    branches:
+      - chatgpt/general-compositor-fix
+
+permissions:
+  contents: write
+
+concurrency:
+  group: compositor-format-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Format changed compositor files
+        run: >-
+          npx prettier --write
+          src/components/compositionPlan.ts
+          src/components/compositionSurface.ts
+          src/components/compositionBackendPlan.ts
+          src/components/backdropRestoration.ts
+          src/components/compositionRuntime.ts
+          src/components/elementRaster.ts
+          tests/feature/effects/composition-plan.test.ts
+          tests/feature/effects/native-composition.spec.ts
+          docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md
+      - name: Commit formatting
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'No formatting changes needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md tests/feature/effects/composition-plan.test.ts tests/feature/effects/native-composition.spec.ts
+          git commit -m 'Format compositor fix files'
+          git push origin HEAD:chatgpt/general-compositor-fix
