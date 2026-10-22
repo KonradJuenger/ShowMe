@@ -14,6 +14,7 @@ import { createBasicShape } from "../../src/core/elementFactory";
 import { createTextElement } from "../../src/core/text";
 import { blankEffect } from "../../src/core/effectAuthoring";
 import { newEffectInstance } from "../../src/core/effects";
+import type { MotionPreviewState } from "../../src/core/motionPlayback";
 
 export async function mountMixedEffectsHarness(
   input?: PresentationDocument,
@@ -87,6 +88,7 @@ export async function mountMixedEffectsHarness(
   document.body.append(host);
   const root = createRoot(host);
   let zoom = 1;
+  let motionState: MotionPreviewState | null = null;
   const render = () =>
     flushSync(() =>
       root.render(
@@ -109,11 +111,22 @@ export async function mountMixedEffectsHarness(
               : undefined
           }
           renderScale={zoom}
-          effectClock={{
-            presentationStartedAt: 1000,
-            slideStartedAt: 1000,
-            pausedAt: 2000,
-          }}
+          motionState={motionState}
+          effectClock={
+            motionState
+              ? {
+                  presentationStartedAt: 1000,
+                  slideStartedAt: 1000,
+                  stepStartedAt: 1000,
+                  pausedAt: 1000 + motionState.time,
+                  stepIndex: motionState.stageIndex,
+                }
+              : {
+                  presentationStartedAt: 1000,
+                  slideStartedAt: 1000,
+                  pausedAt: 2000,
+                }
+          }
         />,
       ),
     );
@@ -204,6 +217,11 @@ export async function mountMixedEffectsHarness(
     advance,
     inspect,
     host,
+    async setMotion(value: MotionPreviewState | null) {
+      motionState = value;
+      render();
+      await flushEffectSurfaces(host);
+    },
     async setZoom(value: number) {
       zoom = value;
       host.style.transform = `scale(${value})`;

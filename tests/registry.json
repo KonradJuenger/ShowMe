@@ -161,8 +161,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-13",
-    "reason": "Native Chromium capture composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; inherited clocks refresh stylesheet pixels through seeks and stylesheet edits without recapturing unchanged clocks; unused, disabled and unrelated CSS resources preserve primitive sources; excluded animations avoid source refresh while contributing animations update pixels; mounted backdrops reroute after lower CSS/stylesheet edits and release replaced sources; duplicated instances retain independent captured inputs; batched reads preserve pseudo/text/media pixels; retained mirrors preserve mixed text topology and unchanged-media CSS changes; paused caches, viewport/transform changes, failed-capture retry and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss; primitive backdrops repaint after out-of-slide drags without resizing"
+    "lastReviewed": "2026-10-22",
+    "reason": "Native Chromium capture composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; inherited clocks refresh stylesheet pixels through seeks and stylesheet edits without recapturing unchanged clocks; unused, disabled and unrelated CSS resources preserve primitive sources; excluded animations avoid source refresh while contributing animations update pixels; mounted backdrops reroute after lower CSS/stylesheet edits and release replaced sources; duplicated instances retain independent captured inputs; batched reads preserve pseudo/text/media pixels; retained mirrors preserve mixed text topology and unchanged-media CSS changes; paused caches, viewport/transform changes, failed-capture retry and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss; primitive backdrops repaint after out-of-slide drags without resizing; mixed-size shader outputs reuse the presentation buffer with exact pixels and release the idle bridge"
   },
   {
     "id": "editor-scale-properties",
@@ -966,5 +966,38 @@
     "created": "2026-10-18",
     "lastReviewed": "2026-10-18",
     "reason": "Actual storage/recovery integration holds MCP durability through Save, Dont Save and direct close, rejects new admissions, drains accepted publication, prevents retained runtime writes, and reopens admission on cancel or save failure"
+  },
+  {
+    "id": "effects-composition-plan",
+    "path": "tests/feature/effects/composition-plan.test.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-21",
+    "lastReviewed": "2026-10-22",
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; backend-neutral styled inputs name CSS effect-entry paint and completed ancestor dependencies without cycles; proven local CSS omits backdrop dependencies while escaped, unknown and external styles remain conservative"
+  },
+  {
+    "id": "effects-native-composition",
+    "path": "tests/feature/effects/native-composition.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-21",
+    "lastReviewed": "2026-10-22",
+    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-bitmap readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and mixed stacks retain the correctness lowering; centralized regional selection, renderer-owned cropped output prepared before entry, replay/disposal and semantic opacity updates without animated DOM readback; static image backgrounds preserve decoded crop/rotation/flip/content alpha, final Move In boundary pixels, native paint, replay and output resizing without CSS replay handoff"
+  },
+  {
+    "id": "effects-css-backdrop-opacity",
+    "path": "tests/feature/effects/css-backdrop-opacity.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-19",
+    "lastReviewed": "2026-10-21",
+    "reason": "Retained correctness fallback resolves CSS backdrop before whole-element and parent alpha, including real intermediate Move In, lower custom CSS, live shader motion, transformed cached material and overlapping consumers; independent nested alphas resolve through the same fallback, with whole-subtree exclusion for pixel-reference captures"
   }
 ]

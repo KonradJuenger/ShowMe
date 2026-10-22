@@ -1,6 +1,7 @@
 import { createTextEffectRunner } from "./textEffectRunner";
 import { EffectGraph } from "./effectGraph";
 import { EffectSources } from "./effectSources";
+import type { EffectRef } from "./compositionPlan";
 import { frame, cancelFrame } from "motion";
 import {
   affineSamplingDensity,
@@ -16,9 +17,12 @@ import {
   backdropPrefix,
 } from "./elementRaster";
 import { createDomRasterSource } from "./domRaster";
+import { createCssBackdrop } from "./cssBackdrop";
+import { flushCompositionOutputs } from "./compositionReadiness";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
+  shaderOutputTextureBytes,
   neutralShaderBridge,
   type ShaderOutput,
 } from "./shaderOutput";
@@ -51,6 +55,7 @@ function samplingRoot(node: HTMLElement, sampling: EffectSampling) {
   );
 }
 type Surface = {
+  replan(): void;
   inputs(): HTMLElement[];
   materialize(): void;
   gpuOutput(): ShaderOutput | null;
@@ -93,6 +98,7 @@ type Coordinator = {
   graph: EffectGraph<HTMLElement>;
   sources: EffectSources<Raster>;
   nodes: Set<HTMLElement>;
+  references: Map<string, HTMLElement>;
   compiled: boolean;
   observer: MutationObserver;
 };
@@ -117,6 +123,7 @@ function coordinatorFor(root: HTMLElement) {
       graph: new EffectGraph(),
       sources: new EffectSources(),
       nodes: new Set(),
+      references: new Map(),
       compiled: false,
       observer,
     };
@@ -151,11 +158,11 @@ function flushScheduled() {
   scheduled.clear();
   // Read all current transforms after Motion writes, before allocating/painting.
   work.forEach(([, value]) => value.prepare());
-  work.forEach(([node, value]) => {
+  const pending = work.map(([node, value]) => {
     const coordinator = nodeCoordinators.get(node);
     if (coordinator) {
       compileCoordinator(coordinator);
-      void coordinator.graph
+      return coordinator.graph
         .resolve(node, (input) => !!surfaces.get(input)?.gpuOutput())
         .then(() => {
           if (
@@ -169,8 +176,15 @@ function flushScheduled() {
         .catch((error) => {
           node.dataset.effectError = String(error);
         });
-    } else value.draw();
+    } else return value.draw();
   });
+  void Promise.all(pending).then(() =>
+    flushCompositionOutputs(
+      work.map(
+        ([node]) => node.closest<HTMLElement>(".slide-renderer") ?? node,
+      ),
+    ),
+  );
 }
 const nodeCoordinators = new WeakMap<HTMLElement, Coordinator>();
 export function effectSurface(node: HTMLElement) {
@@ -192,8 +206,14 @@ export async function flushEffectSurfaces(root: ParentNode) {
       .get(node)
       ?.flush(coordinator ? cohorts.get(coordinator) : undefined);
   }
-  return !Array.from(root.querySelectorAll('[data-effect-ready="false"]')).some(
-    (node) => !node.closest('[data-presentation-absent="true"]'),
+  const compositionReady = await flushCompositionOutputs(
+    nodes.map((node) => node.closest<HTMLElement>(".slide-renderer") ?? node),
+  );
+  return (
+    compositionReady &&
+    !Array.from(root.querySelectorAll('[data-effect-ready="false"]')).some(
+      (node) => !node.closest('[data-presentation-absent="true"]'),
+    )
   );
 }
 
@@ -395,11 +415,17 @@ export function mountEffectSurface(
     y: devicePixelRatio || 1,
     mode: "live",
   },
+  compositionDependencies?: () => EffectRef[] | undefined,
+  backdropMode: "fallback" | "hoisted" | "restoration" = "fallback",
 ) {
   const refined = executionMode === "refined";
   const useGpu = refined;
   const sceneRoot = samplingRoot(node, initialSampling);
   const coordinator = refined ? coordinatorFor(sceneRoot) : null;
+  const referenceKey = JSON.stringify([
+    node.closest<HTMLElement>("[data-element-id]")?.dataset.elementId,
+    instance.id,
+  ]);
   const dependencies = effectDependencies(definition);
   const cssSource = () =>
     (definition.kind === "css"
@@ -457,7 +483,14 @@ export function mountEffectSurface(
   let logicalSize = size;
   let samplingGeometry = "";
   const prepareSampling = () => {
-    if (!live || definition.kind !== "fragment-glsl") return;
+    if (!live) return;
+    if (definition.kind === "css") {
+      void cssBackdrop
+        ?.prepare(Math.max(sampling.x, sampling.y))
+        .catch(diagnose);
+      return;
+    }
+    if (definition.kind !== "fragment-glsl") return;
     try {
       const owner = node.closest<HTMLElement>("[data-element-id]");
       if (owner) {
@@ -550,6 +583,7 @@ export function mountEffectSurface(
   let sourceRoot: HTMLElement | null = null;
   let sourceContent: HTMLElement | null = null;
   let sourceOpacity = "";
+  let cssBackdrop: ReturnType<typeof createCssBackdrop> = null;
   const ownerAbsent = () => !!node.closest('[data-presentation-absent="true"]');
   const schedule = () => {
     if (live) {
@@ -586,6 +620,20 @@ export function mountEffectSurface(
       sourceChanged();
   };
   const inputDependencies = () => {
+    const planned = compositionDependencies?.();
+    if (planned && coordinator) {
+      return [
+        ...new Set([
+          ...(cssBackdrop?.inputs() ?? []),
+          ...planned.flatMap((ref) => {
+            const mounted = coordinator.references.get(
+              JSON.stringify([ref.elementId, ref.effectId]),
+            );
+            return mounted ? [mounted] : [];
+          }),
+        ]),
+      ];
+    }
     const root =
       definition.kind === "css"
         ? node
@@ -624,12 +672,15 @@ export function mountEffectSurface(
       .sort(dependencyOrder);
     // The outer stage resolves its own inputs. Re-listing every descendant
     // makes a deep stack repeatedly walk and wait on the same subtree.
-    return candidates.filter(
-      (candidate) =>
-        !candidates.some(
-          (other) => other !== candidate && other.contains(candidate),
-        ),
-    );
+    return [
+      ...(cssBackdrop?.inputs() ?? []),
+      ...candidates.filter(
+        (candidate) =>
+          !candidates.some(
+            (other) => other !== candidate && other.contains(candidate),
+          ),
+      ),
+    ];
   };
   let domRevision = -1;
   const materialize = () => {
@@ -644,27 +695,52 @@ export function mountEffectSurface(
     const state = sharedGpu();
     if (state.gl !== shaderOutput.gl || state.gl.isContextLost()) return;
     const { gl, canvas: source } = state;
-    if (source.width !== shaderOutput.width) source.width = shaderOutput.width;
-    if (source.height !== shaderOutput.height)
-      source.height = shaderOutput.height;
+    const { width, height } = shaderOutput;
+    // FBO outputs have independent sizes. Reuse the shared presentation bridge
+    // for smaller outputs instead of reallocating its default drawing buffer
+    // for every thumbnail/main-view alternation. On growth use the requested
+    // dimensions, not a cross-aspect maximum with unbounded retained area.
+    if (source.width < width || source.height < height) {
+      source.width = width;
+      source.height = height;
+      if (
+        gl.drawingBufferWidth < width ||
+        gl.drawingBufferHeight < height ||
+        gl.getError() !== gl.NO_ERROR
+      )
+        throw new Error(
+          `Cannot allocate ${width} × ${height} shader drawing buffer`,
+        );
+    }
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.blitFramebuffer(
       0,
       0,
-      source.width,
-      source.height,
+      width,
+      height,
       0,
       0,
-      source.width,
-      source.height,
+      width,
+      height,
       gl.COLOR_BUFFER_BIT,
       gl.NEAREST,
     );
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const context = resizeRasterCanvas(canvas, source.width, source.height);
-    context.clearRect(0, 0, source.width, source.height);
-    context.drawImage(source, 0, 0);
+    const context = resizeRasterCanvas(canvas, width, height);
+    context.clearRect(0, 0, width, height);
+    // WebGL's lower-left active rectangle maps to the canvas's lower rows.
+    context.drawImage(
+      source,
+      0,
+      source.height - height,
+      width,
+      height,
+      0,
+      0,
+      width,
+      height,
+    );
     domRevision = shaderOutput.revision;
     canvas.style.visibility = "visible";
   };
@@ -690,6 +766,7 @@ export function mountEffectSurface(
   let style: HTMLStyleElement | null = null;
   // Identity belongs to this stage, never to its Element or earlier stages.
   const bypass = () => {
+    cssBackdrop?.hide();
     if (node.dataset.effectStarted !== "false") {
       ++sequence; // A pending worker must not repaint a backward seek.
       lastTextInput = "";
@@ -709,6 +786,7 @@ export function mountEffectSurface(
     node.dataset.effectReady = "true";
   };
   const diagnose = (error: unknown) => {
+    cssBackdrop?.hide();
     node.dataset.effectError =
       error instanceof Error ? error.message : String(error);
     onDiagnostic?.(node.dataset.effectError);
@@ -854,6 +932,36 @@ export function mountEffectSurface(
         for (const [key, value] of Object.entries(params))
           node.style.setProperty(`--${key}`, String(value));
         node.style.setProperty("--duration", String(timing.duration));
+        if (
+          backdropMode === "fallback" &&
+          !cssBackdrop &&
+          getComputedStyle(node).backdropFilter !== "none"
+        )
+          cssBackdrop = createCssBackdrop(
+            node,
+            schedule,
+            (dependencies) => {
+              dependencies.forEach((dependency) =>
+                surfaces.get(dependency)?.materialize(),
+              );
+            },
+            content,
+          );
+        if (cssBackdrop) {
+          pending = cssBackdrop
+            .update(Math.max(sampling.x, sampling.y))
+            .then(() => {
+              if (!live || !timing.started || ownerAbsent())
+                cssBackdrop?.hide();
+              if (live) {
+                delete node.dataset.effectError;
+                onDiagnostic?.("");
+                node.dataset.effectReady = "true";
+              }
+            })
+            .catch(diagnose);
+          return pending;
+        }
       } else if (canvas) {
         const {
           gl,
@@ -1018,7 +1126,7 @@ export function mountEffectSurface(
           node.dataset.effectReady = "true";
           return;
         }
-        if (source.width !== width || source.height !== height) {
+        if (!refined && (source.width !== width || source.height !== height)) {
           source.width = width;
           source.height = height;
           if (
@@ -1196,6 +1304,8 @@ export function mountEffectSurface(
     if (coordinator) {
       coordinator.graph.remove(node);
       coordinator.nodes.delete(node);
+      if (coordinator.references.get(referenceKey) === node)
+        coordinator.references.delete(referenceKey);
       coordinator.compiled = false;
       nodeCoordinators.delete(node);
       if (!coordinator.nodes.size) {
@@ -1205,9 +1315,14 @@ export function mountEffectSurface(
       }
     }
     if (texture) texture.gl.deleteTexture(texture.value);
-    if (shaderOutput) disposeShaderOutput(shaderOutput);
+    if (shaderOutput) {
+      disposeShaderOutput(shaderOutput);
+      if (gpu && shaderOutputTextureBytes() === 0)
+        gpu.canvas.width = gpu.canvas.height = 1;
+    }
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     surfaces.delete(node);
+    cssBackdrop?.dispose();
     runner?.dispose();
     output?.remove();
     if (original && textInputHidden) original.style.opacity = originalOpacity;
@@ -1227,6 +1342,20 @@ export function mountEffectSurface(
       style.media = "not all";
       style.textContent = compileEffectCss(definition.source, scope);
       node.append(style);
+      if (
+        backdropMode === "fallback" &&
+        /backdrop-filter\s*:/.test(definition.source)
+      )
+        cssBackdrop = createCssBackdrop(
+          node,
+          schedule,
+          (dependencies) => {
+            dependencies.forEach((dependency) =>
+              surfaces.get(dependency)?.materialize(),
+            );
+          },
+          content,
+        );
     } else if (definition.kind === "text-js") {
       original = node.querySelector<HTMLElement>("[data-text-content]");
       if (!original) throw new Error("Text effects require a text Element");
@@ -1543,6 +1672,10 @@ export function mountEffectSurface(
     return dispose;
   }
   const surface: Surface = {
+    replan() {
+      if (coordinator) coordinator.compiled = false;
+      schedule();
+    },
     inputs: inputDependencies,
     materialize,
     gpuOutput() {
@@ -1623,7 +1756,10 @@ export function mountEffectSurface(
     async flush(cohort) {
       cancelFrame(draw);
       scheduled.delete(node);
-      if (ownerAbsent()) return;
+      if (ownerAbsent()) {
+        await cssBackdrop?.prepare(Math.max(sampling.x, sampling.y));
+        return;
+      }
       if (coordinator) {
         compileCoordinator(coordinator);
         await coordinator.graph.flush(node, cohort);
@@ -1668,6 +1804,7 @@ export function mountEffectSurface(
   surfaces.set(node, surface);
   if (coordinator) {
     coordinator.nodes.add(node);
+    coordinator.references.set(referenceKey, node);
     coordinator.graph.register(node, async () => {
       void draw();
       await pending;

@@ -17,6 +17,7 @@ import type { Element } from "../core/element";
 import { effectSurface, mountEffectSurface } from "./effectRuntime";
 import { EffectRenderContext } from "./EffectRenderContext";
 import { useDisplayDensity } from "./useDisplayDensity";
+import type { EffectRef } from "./compositionPlan";
 
 export function EffectSurface({
   definition,
@@ -28,12 +29,16 @@ export function EffectSurface({
   textContent,
   rasterContent,
   samplingEnvelope,
+  compositionDependencies,
+  backdropMode = "fallback",
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
   width: number;
   height: number;
   samplingEnvelope?: number;
+  compositionDependencies?: EffectRef[];
+  backdropMode?: "fallback" | "hoisted" | "restoration";
   children?: ReactNode;
   textContent?: TextContent;
   rasterContent?: {
@@ -60,6 +65,9 @@ export function EffectSurface({
 }) {
   const root = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null);
+  const dependencies = useRef(compositionDependencies);
+  dependencies.current = compositionDependencies;
+  const dependencyKey = JSON.stringify(compositionDependencies);
   const [error, setError] = useState("");
   const copyErrors = useContext(EffectErrorCopyContext);
   const render = useContext(EffectRenderContext);
@@ -124,6 +132,9 @@ export function EffectSurface({
       { width, height },
       setError,
       mountedContent,
+      undefined,
+      () => dependencies.current,
+      backdropMode,
     );
   }, [
     mountedDefinition,
@@ -132,7 +143,11 @@ export function EffectSurface({
     height,
     textContent,
     mountedContent,
+    backdropMode,
   ]);
+  useLayoutEffect(() => {
+    if (root.current) effectSurface(root.current)?.replan();
+  }, [dependencyKey]);
   useLayoutEffect(() => {
     if (root.current)
       effectSurface(root.current)?.setSampling({
@@ -172,6 +187,7 @@ export function EffectSurface({
         position: "absolute",
         inset: 0,
         pointerEvents: instance.placement === "content" ? undefined : "none",
+        backdropFilter: backdropMode === "hoisted" ? "none" : undefined,
       }}
     >
       {definition.kind === "fragment-glsl" && (

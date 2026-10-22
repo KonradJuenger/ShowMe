@@ -15,7 +15,7 @@ import {
   type EffectClocks,
 } from "../core/effects";
 import { walkElements } from "../core/element";
-import { createMotionRuntime } from "./motionRuntime";
+import { createMotionRuntime, type MotionRenderSink } from "./motionRuntime";
 
 const stageOffsets = new WeakMap<NonNullable<Slide["motion"]>, number[]>();
 function offsetsFor(slide: Slide) {
@@ -40,6 +40,8 @@ export function useMotionRuntime(
   state?: MotionPreviewState | null,
   continuous = false,
   origins?: EffectClockOrigins,
+  bindingTopology?: object | null,
+  renderer?: MotionRenderSink,
 ) {
   const hasOrigins = Boolean(origins);
   const origin = useRef({
@@ -277,16 +279,20 @@ export function useMotionRuntime(
   const stageIndex = state?.stageIndex;
   useLayoutEffect(() => {
     if (!root.current || stageIndex === undefined || !slide.motion) return;
-    const instance = createMotionRuntime(root.current, slide, stageIndex, () =>
-      clockReader.current(),
+    const instance = createMotionRuntime(
+      root.current,
+      slide,
+      stageIndex,
+      () => clockReader.current(),
+      renderer,
     );
     runtime.current = instance;
     return () => {
       instance.cancel();
       runtime.current = null;
     };
-  }, [root, slide, stageIndex, continuous]);
+  }, [root, slide, stageIndex, continuous, bindingTopology, renderer]);
   useLayoutEffect(() => {
     if (state) runtime.current?.sync(state);
-  }, [state, slide]);
+  }, [state, slide, bindingTopology]);
 }

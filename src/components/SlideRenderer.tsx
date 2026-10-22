@@ -4,15 +4,28 @@ import type { EffectClockOrigins } from "../core/effectClocks";
 import { resolveVisualSlide } from "../core/templates";
 import { usePreparedImage } from "./usePreparedImage";
 import { useSlideImagePlan, type SlideImagePlan } from "./useSlideImagePlan";
-import {
-  type ImageOutputProfile,
-} from "../core/presentationImages";
+import { type ImageOutputProfile } from "../core/presentationImages";
 import type { MotionPreviewState } from "../core/motionPlayback";
 import { useMotionRuntime } from "./useMotionRuntime";
 import { EffectSurface } from "./EffectSurface";
-import { effectPlacement, type EffectResources } from "../core/effects";
+import {
+  planCompositionBackends,
+  type CompositionBackends,
+} from "./compositionBackendPlan";
+import {
+  mountCompositionRuntime,
+  type CompositionRuntime,
+} from "./compositionRuntime";
+import type { MotionRenderSink } from "./motionRuntime";
+import type { EffectResources } from "../core/effects";
+import {
+  compileCompositionPlan,
+  type Composition,
+  type CompositionPlan,
+} from "./compositionPlan";
 import {
   memo,
+  Fragment,
   createContext,
   useMemo,
   useContext,
@@ -53,6 +66,10 @@ const VideoPreparationContext = createContext(false);
 const TextStylesContext = createContext<Deck | undefined>(undefined);
 const EffectResourcesContext = createContext<EffectResources>({});
 const emptyEffectResources: EffectResources = {};
+const CompositionContext = createContext<{
+  plan: CompositionPlan;
+  backends: CompositionBackends;
+} | null>(null);
 
 const ImageDocumentContext = createContext<{
   documentId: string;
@@ -558,8 +575,7 @@ function MediaSurface({
       ? { width: prepared.sourceWidth, height: prepared.sourceHeight }
       : intrinsic,
   );
-  if (!checking && (failed || url === null))
-    return <MissingMediaPlaceholder />;
+  if (!checking && (failed || url === null)) return <MissingMediaPlaceholder />;
   if (!frame)
     return (
       <div data-media-loading={content.type === "image" ? "true" : undefined} />
@@ -720,9 +736,10 @@ const ElementView = memo(function ElementView({
   const resources = useContext(EffectResourcesContext);
   const effectRender = useContext(EffectRenderContext);
   const scene = useContext(RasterSceneContext);
-  const effects = (element.effects ?? []).filter(
-    (e) => e.enabled && resources[e.resourceId],
-  );
+  const { plan, backends } = useContext(CompositionContext)!;
+  const nativeBackdrop = backends.native.get(element.id);
+  const restoreBackdrop = backends.restoration?.glass.has(element.id) ?? false;
+  const group = plan.groups.get(element.id)!;
   const rasterContent = useMemo(
     () => ({
       element,
@@ -732,7 +749,7 @@ const ElementView = memo(function ElementView({
     [element, scene],
   );
   const surface = (
-    instance: (typeof effects)[number],
+    instance: NonNullable<Element["effects"]>[number],
     children?: ReactNode,
   ) => (
     <EffectSurface
@@ -744,7 +761,19 @@ const ElementView = memo(function ElementView({
       width={frame.width}
       height={frame.height}
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
+      backdropMode={
+        nativeBackdrop?.effectId === instance.id
+          ? "hoisted"
+          : restoreBackdrop
+            ? "restoration"
+            : "fallback"
+      }
+      compositionDependencies={plan.dependencies({
+        elementId: element.id,
+        effectId: instance.id,
+      })}
       rasterContent={
+        resources[instance.resourceId].kind === "css" ||
         ["content", "backdrop"].includes(
           resources[instance.resourceId].input ?? "none",
         )
@@ -761,7 +790,7 @@ const ElementView = memo(function ElementView({
       {children}
     </EffectSurface>
   );
-  let content = (
+  const source = (
     <>
       {element.content?.type === "text" && element.id !== editingTextId && (
         <TextView content={element.content} />
@@ -774,27 +803,18 @@ const ElementView = memo(function ElementView({
           editorPlayback={editorPlayback}
         />
       )}
-      {element.children.map((child) => (
-        <ElementView
-          key={child.id}
-          element={child}
-          staticVideo={staticVideo}
-          presentation={presentation}
-          editorPlayback={editorPlayback}
-          editingTextId={editingTextId}
-        />
-      ))}
     </>
   );
-  // JS stages transform strings before layout; CSS/shaders then transform pixels.
-  // Keep string evaluation upstream even when a JS stage follows a pixel filter.
-  for (const effect of effects.filter(
-    (e) =>
-      effectPlacement(resources[e.resourceId], e) === "content" &&
-      resources[e.resourceId].kind === "text-js" &&
-      element.id !== editingTextId,
-  ))
-    content = surface(effect, content);
+  const children = element.children.map((child) => (
+    <ElementView
+      key={child.id}
+      element={child}
+      staticVideo={staticVideo}
+      presentation={presentation}
+      editorPlayback={editorPlayback}
+      editingTextId={editingTextId}
+    />
+  ));
   const shape = element.geometry.type === "ellipse" ? "50%" : appearance.radius;
   const outline: CSSProperties = {
     position: "absolute",
@@ -808,81 +828,122 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
-  const baseVisual = (content: ReactNode) => (
-    <>
-      <div
-        style={{
-          position: "relative",
-          width: "100%",
-          height: "100%",
-          borderRadius: shape,
-          overflow: element.clipChildren ? "hidden" : "visible",
-        }}
-      >
-        {appearance.fill && (
+  const lower = (operation: Composition): ReactNode => {
+    switch (operation.kind) {
+      case "source":
+        return source;
+      case "children":
+        return children;
+      case "effect":
+        return surface(
+          operation.effect,
+          operation.input ? lower(operation.input) : undefined,
+        );
+      case "sequence":
+        return operation.items.map((item, index) => (
+          <Fragment key={index}>{lower(item)}</Fragment>
+        ));
+      case "clip":
+        return (
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              height: "100%",
+              borderRadius: shape,
+              overflow: element.clipChildren ? "hidden" : "visible",
+            }}
+          >
+            {lower(operation.input)}
+          </div>
+        );
+      case "fill":
+        return (
           <div
             aria-hidden="true"
             style={{
               position: "absolute",
               inset: 0,
-              backgroundColor: appearance.fill,
+              backgroundColor: appearance.fill ?? undefined,
               borderRadius: shape,
             }}
           />
-        )}
-        {effects
-          .filter(
-            (e) => effectPlacement(resources[e.resourceId], e) === "background",
-          )
-          .map((e) => surface(e))}
-        {content}
-        {effects
-          .filter(
-            (e) => effectPlacement(resources[e.resourceId], e) === "overlay",
-          )
-          .map((e) => surface(e))}
-      </div>
-      {appearance.strokeWidth > 0 && (
-        <div data-element-stroke="true" aria-hidden="true" style={outline} />
-      )}
-    </>
-  );
-  let visual = baseVisual(content);
-  let filtered = false;
-  for (const effect of effects.filter(
-    (e) =>
-      effectPlacement(resources[e.resourceId], e) === "content" &&
-      resources[e.resourceId].kind !== "text-js" &&
-      element.id !== editingTextId,
-  )) {
-    if (resources[effect.resourceId].input === "content") filtered = true;
-    if (filtered) visual = surface(effect, visual);
-    else {
-      content = surface(effect, content);
-      visual = baseVisual(content);
+        );
+      case "stroke":
+        return (
+          <div data-element-stroke="true" aria-hidden="true" style={outline} />
+        );
     }
-  }
+  };
 
   return (
-    <div
-      data-element-id={element.id}
-      data-template-content={inherited ? "true" : undefined}
-      data-showme-id={`showme-${element.id}`}
-      data-showme-part="self"
-      className={element.cssClasses?.join(" ")}
-      style={{
-        position: "absolute",
-        left: frame.x,
-        top: frame.y,
-        width: frame.width,
-        height: frame.height,
-        transform: frameCssTransform(frame),
-        transformOrigin: frameCssOrigin(frame),
-        opacity: appearance.opacity,
-      }}
-    >
-      {visual}
-    </div>
+    <>
+      <div
+        data-element-id={element.id}
+        data-template-content={inherited ? "true" : undefined}
+        data-showme-id={`showme-${element.id}`}
+        data-showme-part="self"
+        className={element.cssClasses?.join(" ")}
+        style={{
+          position: "absolute",
+          left: frame.x,
+          top: frame.y,
+          width: frame.width,
+          height: frame.height,
+          transform: frameCssTransform(frame),
+          transformOrigin: frameCssOrigin(frame),
+          opacity: nativeBackdrop || restoreBackdrop ? 1 : appearance.opacity,
+        }}
+      >
+        {nativeBackdrop ? (
+          <div
+            data-composition-visual="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              opacity: appearance.opacity,
+              backdropFilter: nativeBackdrop.filter,
+            }}
+          >
+            {lower(group.visual)}
+          </div>
+        ) : restoreBackdrop ? (
+          <div
+            data-composition-paint="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              contentVisibility: "hidden",
+            }}
+          >
+            {lower(group.visual)}
+          </div>
+        ) : (
+          lower(group.visual)
+        )}
+      </div>
+      {restoreBackdrop && (
+        <div
+          data-backdrop-restore={element.id}
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 0,
+            height: 0,
+            pointerEvents: "none",
+            opacity: 0,
+          }}
+        >
+          <canvas
+            width={1}
+            height={1}
+            style={{ width: "100%", height: "100%", display: "block" }}
+          />
+        </div>
+      )}
+    </>
   );
 });
 
@@ -932,7 +993,18 @@ export const SlideRenderer = memo(function SlideRenderer({
   const editingMedia = editingMediaId
     ? locateElement(slide, editingMediaId)
     : null;
+  const compositionResources = slide.effectResources;
+  const composition = useMemo(
+    () =>
+      compileCompositionPlan(slide, deck, editingTextId, compositionResources),
+    [slide, deck, compositionResources, editingTextId],
+  );
   const root = useRef<HTMLDivElement>(null);
+  const runtime = useRef<CompositionRuntime | null>(null);
+  const [failedBackdrop, setFailedBackdrop] = useState<{
+    plan: CompositionPlan;
+    ids: Set<string>;
+  } | null>(null);
   const pixelRatio = useDisplayDensity();
   const width = deck.width,
     height = deck.height;
@@ -965,106 +1037,211 @@ export const SlideRenderer = memo(function SlideRenderer({
     }),
     [width, height, output, deferImageUpdates, playing, envelopes],
   );
+  const backdropDensity = Math.max(
+    effectRender.density.x,
+    effectRender.density.y,
+  );
+  const hasMotionPreview = !!motionState;
+  const backends = useMemo(
+    () =>
+      planCompositionBackends(composition, slide, deck, {
+        restoration:
+          (presentation || hasMotionPreview) &&
+          !editingTextId &&
+          !editingMediaId &&
+          !editorOverflow,
+        padding: Math.max(2, 2 / backdropDensity),
+        exclude:
+          failedBackdrop?.plan === composition ? failedBackdrop.ids : undefined,
+      }),
+    [
+      composition,
+      slide,
+      deck,
+      presentation,
+      hasMotionPreview,
+      editingTextId,
+      editingMediaId,
+      editorOverflow,
+      failedBackdrop,
+      backdropDensity,
+    ],
+  );
+  const sceneBackdrop = backends.restoration;
+  const compositionView = useMemo(
+    () => ({ plan: composition, backends }),
+    [composition, backends],
+  );
+  useLayoutEffect(() => {
+    if (!root.current || !sceneBackdrop) return;
+    const failed = (ids: readonly string[], error: unknown) => {
+      console.error("Composition preparation failed", error);
+      setFailedBackdrop((previous) => ({
+        plan: composition,
+        ids: new Set([
+          ...(previous?.plan === composition ? previous.ids : []),
+          ...ids,
+        ]),
+      }));
+    };
+    try {
+      const mounted = mountCompositionRuntime(
+        root.current,
+        sceneBackdrop,
+        deck,
+        failed,
+        effectRender.density,
+      );
+      runtime.current = mounted;
+      return () => {
+        runtime.current = null;
+        mounted.dispose();
+      };
+    } catch (error) {
+      failed([...sceneBackdrop.glass], error);
+    }
+  }, [sceneBackdrop, deck, composition, effectRender.density]);
+  const hasRestoration = !!sceneBackdrop;
+  const renderSink = useMemo<MotionRenderSink | undefined>(
+    () =>
+      hasRestoration
+        ? {
+            ownsOpacity(id) {
+              return runtime.current?.ownsOpacity?.(id) ?? false;
+            },
+            apply(samples) {
+              runtime.current?.apply(samples);
+            },
+            reset() {
+              runtime.current?.reset();
+            },
+          }
+        : undefined,
+    [hasRestoration],
+  );
   useMotionRuntime(
     root,
     slide,
     motionState,
     !!effectClock || !staticVideo,
     effectClock,
+    backends,
+    renderSink,
   );
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
   const layers = new Map(deck.layers.map((layer) => [layer.id, layer]));
   // Live editor and preview surfaces share the audience variants. Only explicit
   // output profiles (audience negotiation and export) override that default.
-  const imagePlan = useSlideImagePlan(slide, deck, imageProfile, preparedImages, deferImageUpdates);
-  const imageContext = useMemo(() => preparedImages ? {
-    documentId: deck.id,
-    slideId: slide.id,
-    deferUpdates: deferImageUpdates,
-    profile: imageProfile,
-    plan: imagePlan,
-  } : null, [preparedImages, deck.id, slide.id, deferImageUpdates, imageProfile, imagePlan]);
+  const imagePlan = useSlideImagePlan(
+    slide,
+    deck,
+    imageProfile,
+    preparedImages,
+    deferImageUpdates,
+  );
+  const imageContext = useMemo(
+    () =>
+      preparedImages
+        ? {
+            documentId: deck.id,
+            slideId: slide.id,
+            deferUpdates: deferImageUpdates,
+            profile: imageProfile,
+            plan: imagePlan,
+          }
+        : null,
+    [
+      preparedImages,
+      deck.id,
+      slide.id,
+      deferImageUpdates,
+      imageProfile,
+      imagePlan,
+    ],
+  );
   return (
     <EffectRenderContext.Provider value={effectRender}>
       <EffectResourcesContext.Provider
         value={slide.effectResources ?? emptyEffectResources}
       >
-        <RasterSceneContext.Provider value={rasterScene}>
-          <TextStylesContext.Provider value={deck}>
-            <VideoPreparationContext.Provider value={prepareVideo}>
-              <ImageDocumentContext.Provider value={imageContext}>
-                <div
-                  ref={root}
-                  className="slide-renderer"
-                  data-slide-id={slide.id}
-                  style={{
-                    position: "relative",
-                    width: deck.width,
-                    height: deck.height,
-                    background: slide.background,
-                    overflow: editorOverflow ? "visible" : "hidden",
-                  }}
-                >
-                  {deck.stylesheet && (
-                    <style>{`@scope (.slide-renderer) { ${deck.stylesheet} }`}</style>
-                  )}
-                  {layerRoots(slide).map((root) => {
-                    const layer = layers.get(root.id);
-                    if (!layer || layer.hidden) return null;
-                    return (
-                      <div
-                        key={root.id}
-                        data-layer-id={root.id}
-                        data-layer-locked={layer.locked ? "true" : undefined}
-                        style={{ position: "absolute", inset: 0 }}
-                      >
-                        {root.children.map((element) => (
-                          <ElementView
-                            key={element.id}
-                            element={element}
-                            staticVideo={staticVideo}
-                            presentation={presentation}
-                            editorPlayback={editorPlayback}
-                            editingTextId={editingTextId}
-                            inherited={
-                              resolved?.sources.get(element.id) === "template"
-                            }
-                          />
-                        ))}
-                      </div>
-                    );
-                  })}
-                  {editorOverflow &&
-                    editingMedia?.element.content?.type === "image" && (
-                      <div
-                        data-media-edit-reveal={editingMedia.element.id}
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          top: 0,
-                          width: editingMedia.element.frame.width,
-                          height: editingMedia.element.frame.height,
-                          transform: `matrix(${editingMedia.world.join(",")})`,
-                          transformOrigin: "0 0",
-                          opacity: 0.4,
-                          pointerEvents: "none",
-                          clipPath: `polygon(evenodd, -100000px -100000px, 100000px -100000px, 100000px 100000px, -100000px 100000px, -100000px -100000px, 0px 0px, 0px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px 0px, 0px 0px)`,
-                        }}
-                      >
-                        <MediaView
-                          element={editingMedia.element}
-                          staticVideo={true}
-                          presentation={false}
-                          editorPlayback="inactive"
-                        />
-                      </div>
+        <CompositionContext.Provider value={compositionView}>
+          <RasterSceneContext.Provider value={rasterScene}>
+            <TextStylesContext.Provider value={deck}>
+              <VideoPreparationContext.Provider value={prepareVideo}>
+                <ImageDocumentContext.Provider value={imageContext}>
+                  <div
+                    ref={root}
+                    className="slide-renderer"
+                    data-slide-id={slide.id}
+                    style={{
+                      position: "relative",
+                      width: deck.width,
+                      height: deck.height,
+                      background: slide.background,
+                      overflow: editorOverflow ? "visible" : "hidden",
+                    }}
+                  >
+                    {deck.stylesheet && (
+                      <style>{`@scope (.slide-renderer) { ${deck.stylesheet} }`}</style>
                     )}
-                </div>
-              </ImageDocumentContext.Provider>
-            </VideoPreparationContext.Provider>
-          </TextStylesContext.Provider>
-        </RasterSceneContext.Provider>
+                    {layerRoots(slide).map((root) => {
+                      const layer = layers.get(root.id);
+                      if (!layer || layer.hidden) return null;
+                      return (
+                        <div
+                          key={root.id}
+                          data-layer-id={root.id}
+                          data-layer-locked={layer.locked ? "true" : undefined}
+                          style={{ position: "absolute", inset: 0 }}
+                        >
+                          {root.children.map((element) => (
+                            <ElementView
+                              key={element.id}
+                              element={element}
+                              staticVideo={staticVideo}
+                              presentation={presentation}
+                              editorPlayback={editorPlayback}
+                              editingTextId={editingTextId}
+                              inherited={
+                                resolved?.sources.get(element.id) === "template"
+                              }
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {editorOverflow &&
+                      editingMedia?.element.content?.type === "image" && (
+                        <div
+                          data-media-edit-reveal={editingMedia.element.id}
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            top: 0,
+                            width: editingMedia.element.frame.width,
+                            height: editingMedia.element.frame.height,
+                            transform: `matrix(${editingMedia.world.join(",")})`,
+                            transformOrigin: "0 0",
+                            opacity: 0.4,
+                            pointerEvents: "none",
+                            clipPath: `polygon(evenodd, -100000px -100000px, 100000px -100000px, 100000px 100000px, -100000px 100000px, -100000px -100000px, 0px 0px, 0px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px 0px, 0px 0px)`,
+                          }}
+                        >
+                          <MediaView
+                            element={editingMedia.element}
+                            staticVideo={true}
+                            presentation={false}
+                            editorPlayback="inactive"
+                          />
+                        </div>
+                      )}
+                  </div>
+                </ImageDocumentContext.Provider>
+              </VideoPreparationContext.Provider>
+            </TextStylesContext.Provider>
+          </RasterSceneContext.Provider>
+        </CompositionContext.Provider>
       </EffectResourcesContext.Provider>
     </EffectRenderContext.Provider>
   );
