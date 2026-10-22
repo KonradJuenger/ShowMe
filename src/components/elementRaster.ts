@@ -410,6 +410,7 @@ function createRasterSource(
     scan: (element: Element, target: boolean) => unknown[],
   ) => unknown,
   paintSource: (canvas: HTMLCanvasElement) => void,
+  activityNodes: () => readonly HTMLElement[] = () => [context.root],
 ) {
   const canvas = context.outputCanvas ?? document.createElement("canvas");
   const videos = new Map<HTMLVideoElement, { id: number; revision: number }>();
@@ -535,7 +536,11 @@ function createRasterSource(
     update(width: number, height: number) {
       // Browser-driven CSS animations and video without frame callbacks remain
       // conservative dynamic inputs, even for custom unregistered content.
-      const animated = context.root.getAnimations({ subtree: true }).some(animation => animation.playState === "running");
+      const animated = activityNodes().some((node) =>
+        node
+          .getAnimations({ subtree: true })
+          .some((animation) => animation.playState === "running"),
+      );
       const dynamicVideo = [...videos.keys()].some(video => typeof video.requestVideoFrameCallback !== "function" && !video.paused);
       if (!dirty && canvas.width === width && canvas.height === height && !animated && !dynamicVideo) return false;
       const force = dirty || animated || dynamicVideo;
@@ -567,6 +572,47 @@ function createRasterSource(
       canvas.width = canvas.height = 1;
     },
   };
+}
+
+/** Retained slide-space composition for a semantic source prefix. Unlike
+ * createBackdropRasterSource this surface is independent of any consumer
+ * transform, so several consumers can crop the same materialized result. */
+export function createScenePrefixRasterSource(
+  elements: readonly Element[],
+  scene: () => { slide: Slide; deck: Deck },
+  context: RasterContext,
+  invalidate: () => void,
+) {
+  const activityNodes = () =>
+    elements.flatMap((element) => {
+      const node = visualNode(element, context.root);
+      return node ? [node] : [];
+    });
+  return createRasterSource(
+    context,
+    invalidate,
+    (scan) => {
+      const { slide, deck } = scene();
+      return [
+        slide.background,
+        deck.width,
+        deck.height,
+        ...elements.map((entry) => scan(entry, false)),
+      ];
+    },
+    (canvas) => {
+      const { slide, deck } = scene();
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Cannot allocate scene prefix surface");
+      ctx.resetTransform();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(canvas.width / deck.width, canvas.height / deck.height);
+      ctx.fillStyle = slide.background;
+      ctx.fillRect(0, 0, deck.width, deck.height);
+      for (const entry of elements) render(ctx, entry, context, false);
+    },
+    activityNodes,
+  );
 }
 
 /** Complete lower subtrees plus unfinished ancestors. Never visits the target,
