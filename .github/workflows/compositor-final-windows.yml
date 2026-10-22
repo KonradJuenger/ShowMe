@@ -79,6 +79,14 @@ jobs:
         run: npx playwright test --config playwright.electron.config.ts --output test-results-compositor-electron
         env:
           SHOWME_TEST_FILES: '["tests/feature/effects/native-composition.spec.ts"]'
+      - name: All native compositor declarations except reproduced baseline engine mismatch
+        run: >-
+          npx playwright test
+          --config playwright.electron.config.ts
+          --output test-results-compositor-electron-required
+          --grep-invert "eligible native groups preserve resolved pixels through actual Move In without prefix replay"
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/native-composition.spec.ts"]'
       - name: Base native compositor comparator
         id: base_native
         if: steps.branch_native.outcome == 'failure'
