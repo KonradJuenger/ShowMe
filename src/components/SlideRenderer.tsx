@@ -1058,7 +1058,6 @@ export const SlideRenderer = memo(function SlideRenderer({
           !editingMediaId &&
           !editorOverflow,
         padding: Math.max(2, 2 / backdropDensity),
-        browserNativeCss: true,
         exclude:
           failedBackdrop?.plan === composition ? failedBackdrop.ids : undefined,
       }),
