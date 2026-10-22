@@ -18,7 +18,7 @@ import {
 } from "./elementRaster";
 import { createDomRasterSource } from "./domRaster";
 import { createCssBackdrop } from "./cssBackdrop";
-import { flushSceneBackdrops } from "./sceneBackdropRegistry";
+import { flushCompositionOutputs } from "./compositionReadiness";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
@@ -178,7 +178,7 @@ function flushScheduled() {
     } else return value.draw();
   });
   void Promise.all(pending).then(() =>
-    flushSceneBackdrops(
+    flushCompositionOutputs(
       work.map(
         ([node]) => node.closest<HTMLElement>(".slide-renderer") ?? node,
       ),
@@ -205,7 +205,7 @@ export async function flushEffectSurfaces(root: ParentNode) {
       .get(node)
       ?.flush(coordinator ? cohorts.get(coordinator) : undefined);
   }
-  const compositionReady = await flushSceneBackdrops(
+  const compositionReady = await flushCompositionOutputs(
     nodes.map((node) => node.closest<HTMLElement>(".slide-renderer") ?? node),
   );
   return (
@@ -415,6 +415,7 @@ export function mountEffectSurface(
     mode: "live",
   },
   compositionDependencies?: () => EffectRef[] | undefined,
+  backdropMode: "fallback" | "hoisted" | "restoration" = "fallback",
 ) {
   const refined = executionMode === "refined";
   const useGpu = refined;
@@ -905,7 +906,11 @@ export function mountEffectSurface(
         for (const [key, value] of Object.entries(params))
           node.style.setProperty(`--${key}`, String(value));
         node.style.setProperty("--duration", String(timing.duration));
-        if (!cssBackdrop && getComputedStyle(node).backdropFilter !== "none")
+        if (
+          backdropMode === "fallback" &&
+          !cssBackdrop &&
+          getComputedStyle(node).backdropFilter !== "none"
+        )
           cssBackdrop = createCssBackdrop(
             node,
             schedule,
@@ -1307,7 +1312,10 @@ export function mountEffectSurface(
       style.media = "not all";
       style.textContent = compileEffectCss(definition.source, scope);
       node.append(style);
-      if (/backdrop-filter\s*:/.test(definition.source))
+      if (
+        backdropMode === "fallback" &&
+        /backdrop-filter\s*:/.test(definition.source)
+      )
         cssBackdrop = createCssBackdrop(
           node,
           schedule,

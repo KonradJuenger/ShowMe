@@ -1,7 +1,8 @@
 # Ordered composition and native lowering
 
-2026-10-21. First production phases of the compositing architecture: derived
-paint order, explicit pixel dependencies, and a constrained native visual group.
+Updated 2026-10-22. Derived paint order, semantic render samples, centralized
+backend selection and renderer-owned composition outputs. Earlier measurements
+below retain their original revision and scope.
 
 ## Model
 
@@ -39,9 +40,43 @@ ancestor scopes. Indexing stores O(elements) structural state. The primitive and
 DOM capture adapters project their existing element-shaped input from this same
 plan. GLSL backdrop input retains the v1 **element-entry background lens** rule,
 including saved overlay placement coercion. Its input excludes its own source and
-completed ancestor outputs; those would depend on the consumer itself. CSS
-backdrop input remains a browser paint-point read. These are distinct references,
-not permission to reorder persisted effects.
+completed ancestor outputs; those would depend on the consumer itself. CSS names
+its own effect-entry paint point. A persistent operation-prefix index records
+completed scene and ancestor paint at that point, excluding unfinished enclosing
+effects. Foreground dependencies remain separate from that backdrop prefix.
+The semantic input is `styled`, not a `native` backend choice. These references
+do not change the persisted v1 ordering.
+
+## Runtime ownership and backend selection
+
+`compositionBackendPlan.ts` selects native group, bounded restoration or fallback
+per material. `compositionCapabilities.ts` owns scoped declaration parsing,
+declaration capabilities and one tested engine capability table. Native and
+restoration routes do not construct the fallback capture/observer machinery.
+Fallback capture can retain its own implementation-specific optimizations, using
+the same declaration capabilities.
+
+Motion publishes its completed semantic frame (frame geometry, group alpha and
+Presence) through `MotionRenderSink`; it imports no compositor or backend registry.
+The same resolved sample drives Motion's DOM transport writes and the renderer.
+The restoration backend never reconstructs animated state with computed styles
+or world-transform DOM reads. A retained input sample supports asynchronous
+publication; it has no clock or interpolation logic. The hidden DOM alpha proxy
+has been removed.
+
+`SlideRenderer` owns the paint wrapper, restoration sibling and canvas. Presence
+owns the outer element's visibility/content visibility; resource readiness owns
+only the inner paint wrapper. A backend cannot override Presence's fields.
+`compositionRuntime.ts` owns activation/disposal and the renderer sink, while the
+generic `compositionReadiness.ts` lets Effect execution await output preparation
+without importing a particular backend.
+
+Regional admission uses swept paint bounds. A bounded image, clipped subtree or
+ordinary translation elsewhere does not globally disable unrelated restoration.
+An overlap rejects the affected materials. Native text ink is checked once after
+fonts are ready and font changes reject only affected regions. Unknown paint that
+can escape a model bound (for example arbitrary external CSS) remains a
+conservative veto; regional admission does not assume such paint is local.
 
 ## Native visual group
 
@@ -91,8 +126,8 @@ Resolve the original card natively at opacity one, producing R. Overlay its
 incoming opaque backdrop B at opacity `1 - alpha`. Source-over then gives
 `alpha * R + (1 - alpha) * B`: one resolved-group fade, including overlapping
 children, tint, border, shadow and rounded-edge coverage. The card's original fill,
-filter and clips stay in place. Motion writes its existing alpha value to a local
-nonpainting binding; the element node continues to own transport.
+filter and clips stay in place. Motion sends alpha to the renderer sink; the
+element node continues to own transport and keeps native opacity one.
 
 Restoration images stay in slide coordinates as siblings immediately after their
 card. A rectangular clip follows the moving card with a small output-pixel outset.
@@ -113,15 +148,21 @@ that proof, not reconstructed per consumer. Native backdrop filtering still sees
 all actual lower paint, including paint outside the restoration rectangle.
 
 This is not a general retained compositor. Overlapping envelopes, nested alpha,
-mixed effect stacks, media, unsupported motion/CSS and unknown engines retain the
-existing lowering. Static export keeps its existing route. The document model,
+mixed effect stacks, unsupported motion/CSS and unknown engines retain the
+existing lowering. Bounded media elsewhere is regionally admitted. Static export
+keeps its existing route. The document model,
 Presence recipes and authority/persistence path are unchanged.
 
 Snapshot publication follows the effect cohort and participates in audience
 readiness. It uses the existing shader output and GPU-backed bitmap publication;
 there is no DOM backdrop capture, primitive replay, custom blur or CPU pixel read
-in this operation. Completed/hidden cards release their restoration images, and
-there is a 256 MiB logical RGBA surface limit. Optional-capability or preparation
+in this operation. One scene source feeds pixel-grid-aligned cropped images for
+the materials' swept regions. The existing audience-readiness flush prepares all
+admitted crops before their entrance, including currently absent cards. These
+small images remain resident for replay and are released at renderer disposal.
+An unchanged background revision does not republish them for Motion-only changes.
+The 256 MiB logical RGBA limit covers the shared source and cropped current/pending
+images rather than a full-frame image per material. Optional-capability or preparation
 failure restores the existing backend and rebinds Motion at its current time.
 
 The Electron contract covers the actual filled/rounded CSS style over a GLSL
@@ -130,6 +171,12 @@ overlapping translucent children, cancellation, 1/3/10 disjoint consumers, and
 rejection of 3/10 overlapping consumers. Existing parent/nested and mixed handoff
 contracts remain separate. The production-build performance record is below;
 synthetic pixel tests alone are not performance evidence.
+
+The 2026-10-22 contracts additionally cover regional selection with unrelated
+image/translation and overlapping paint, pre-entry crop preparation, replay,
+renderer disposal, ordinary opacity, and a composition update with animated DOM
+reads prohibited. Composition tests verify CSS effect-entry references and
+completed ancestor dependencies while retaining the v1 GLSL entry contract.
 
 Reproduce the independent topology probe:
 

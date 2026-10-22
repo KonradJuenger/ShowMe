@@ -975,8 +975,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-21",
-    "lastReviewed": "2026-10-21",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure"
+    "lastReviewed": "2026-10-22",
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; backend-neutral styled inputs name CSS effect-entry paint and completed ancestor dependencies without cycles"
   },
   {
     "id": "effects-native-composition",
@@ -986,8 +986,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-21",
-    "lastReviewed": "2026-10-21",
-    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-bitmap readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and mixed stacks retain the correctness lowering"
+    "lastReviewed": "2026-10-22",
+    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-bitmap readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and mixed stacks retain the correctness lowering; centralized regional selection, renderer-owned cropped output prepared before entry, replay/disposal and semantic opacity updates without animated DOM readback"
   },
   {
     "id": "effects-css-backdrop-opacity",

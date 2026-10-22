@@ -30,7 +30,7 @@ export function EffectSurface({
   rasterContent,
   samplingEnvelope,
   compositionDependencies,
-  nativeBackdrop = false,
+  backdropMode = "fallback",
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
@@ -38,7 +38,7 @@ export function EffectSurface({
   height: number;
   samplingEnvelope?: number;
   compositionDependencies?: EffectRef[];
-  nativeBackdrop?: boolean;
+  backdropMode?: "fallback" | "hoisted" | "restoration";
   children?: ReactNode;
   textContent?: TextContent;
   rasterContent?: {
@@ -134,6 +134,7 @@ export function EffectSurface({
       mountedContent,
       undefined,
       () => dependencies.current,
+      backdropMode,
     );
   }, [
     mountedDefinition,
@@ -142,6 +143,7 @@ export function EffectSurface({
     height,
     textContent,
     mountedContent,
+    backdropMode,
   ]);
   useLayoutEffect(() => {
     if (root.current) effectSurface(root.current)?.replan();
@@ -185,7 +187,7 @@ export function EffectSurface({
         position: "absolute",
         inset: 0,
         pointerEvents: instance.placement === "content" ? undefined : "none",
-        backdropFilter: nativeBackdrop ? "none" : undefined,
+        backdropFilter: backdropMode === "hoisted" ? "none" : undefined,
       }}
     >
       {definition.kind === "fragment-glsl" && (

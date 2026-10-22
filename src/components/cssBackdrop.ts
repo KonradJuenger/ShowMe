@@ -7,6 +7,7 @@ import type { Element } from "../core/element";
 import type { EffectResources } from "../core/effects";
 import { walkElements } from "../core/element";
 import { cssBackdropOutputs } from "./cssBackdropOutput";
+import { backdropStyleCapabilities } from "./compositionCapabilities";
 
 /** Replay the scene behind a CSS material inside its compositing group. Chromium
  * stops a descendant backdrop-filter at an ancestor's group opacity. Supplying
@@ -70,46 +71,14 @@ export function createCssBackdrop(
       content.element.appearance.strokeWidth ||
       content.element.effects?.filter((effect) => effect.enabled).length !==
         1 ||
-      /url\(/i.test(definition.source) ||
       !stableStyleKey()
     )
       return null;
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(definition.source);
-    const rule = sheet.cssRules[0];
-    if (!(rule instanceof CSSStyleRule)) return null;
-    const entries = Array.from(rule.style).map(
-      (key) => [key, rule.style.getPropertyValue(key)] as const,
+    const material = backdropStyleCapabilities(definition);
+    if (!material?.captureMaterial) return null;
+    const entries = Array.from(material.style).map(
+      (key) => [key, material.style.getPropertyValue(key)] as const,
     );
-    if (
-      entries.some(
-        ([key]) =>
-          !/^(?:background(?:-.*)?|border(?:-.*)?|box-shadow|overflow(?:-.*)?|(?:-webkit-)?backdrop-filter|color|font(?:-.*)?|text(?:-.*)?|line-height|letter-spacing|padding(?:-.*)?)$/.test(
-            key,
-          ),
-      )
-    )
-      return null;
-    const descendants = walkElements(content.element.children),
-      ids = new Set(descendants.map((element) => element.id));
-    if (
-      descendants.some(
-        (element) =>
-          element.effects?.some((effect) => effect.enabled) ||
-          element.content?.type === "video",
-      ) ||
-      state.slide.motion?.stages.some(
-        (stage) =>
-          stage.tracks.some((track) => ids.has(track.elementId)) ||
-          stage.blocks?.some(
-            (block) =>
-              block.binding &&
-              "elementId" in block.binding &&
-              ids.has(block.binding.elementId),
-          ),
-      )
-    )
-      return null;
     declarationCache = {
       ...state,
       element: content.element,

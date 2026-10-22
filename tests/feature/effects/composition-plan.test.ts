@@ -134,11 +134,38 @@ it("background lenses retain element-entry inputs despite saved overlay placemen
   expect(plan.groups.get("lens")!.inputs.get("lens")).toEqual({
     kind: "backdrop",
     elementId: "lens",
+    backdrop: { kind: "element-entry", elementId: "lens" },
   });
   expect(plan.dependencies(ref("lens", "lens"))).toEqual([
     ref("lower", "generator"),
   ]);
   expect(plan.groups.get("lens")!.visual.kind).toBe("sequence");
+});
+
+it("CSS backdrop dependencies name their effect-entry paint point and completed ancestor paint", () => {
+  const lower = shape("lower"),
+    parent = shape("parent"),
+    card = shape("card");
+  parent.children = [card];
+  const f = fixture([lower, parent]);
+  f.add(lower, "lower-bg", "generated", "background");
+  f.add(parent, "parent-bg", "generated", "background");
+  f.add(parent, "unfinished", "shader");
+  f.add(card, "card-bg", "generated", "background");
+  f.add(card, "material", "css");
+  const plan = f.compile();
+  expect(plan.groups.get("card")!.inputs.get("material")).toMatchObject({
+    kind: "styled",
+    backdrop: { kind: "effect-entry", elementId: "card", effectId: "material" },
+  });
+  expect(plan.dependencies(ref("card", "material"))).toEqual([
+    ref("lower", "lower-bg"),
+    ref("parent", "parent-bg"),
+    ref("card", "card-bg"),
+  ]);
+  expect(plan.dependencies(ref("parent", "unfinished"))).toContainEqual(
+    ref("card", "material"),
+  );
 });
 
 it("nested prefixes include earlier siblings and unfinished ancestors without later paint or document mutation", () => {

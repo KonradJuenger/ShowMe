@@ -21,7 +21,6 @@ import {
 } from "../core/motion";
 import { stageDuration } from "../core/motionModel";
 import { effectSurface, flushEffectSurfaces } from "./effectRuntime";
-import { sampleSceneBackdrops } from "./sceneBackdropRegistry";
 import {
   numericEffectParameters,
   effectTiming,
@@ -29,6 +28,20 @@ import {
   type EffectClocks,
 } from "../core/effects";
 import { motionTime, type MotionPlaybackState } from "../core/motionPlayback";
+
+/** A completed semantic sample. The renderer consumes it without another clock
+ * or a readback of Motion's DOM writes. Frames remain in document coordinates. */
+export type MotionVisualSample = {
+  elementId: string;
+  frame: import("../core/element").Element["frame"];
+  opacity: number;
+  present: boolean;
+};
+export interface MotionRenderSink {
+  ownsOpacity?(elementId: string): boolean;
+  apply(samples: readonly MotionVisualSample[]): void;
+  reset(): void;
+}
 
 /** Compile ordinary ShowMe tracks. Delayed first keys are hard cuts, not tweens
  * from the entering state. Pad each property to the stage's common clock. */
@@ -83,6 +96,7 @@ export function createMotionRuntime(
   slide: Slide,
   stageIndex: number,
   clocks?: () => EffectClocks,
+  renderer?: MotionRenderSink,
 ) {
   const finish = presentationSpan("motion-runtime-create", slide.id, {
     stageIndex,
@@ -113,6 +127,7 @@ export function createMotionRuntime(
     {
       node: HTMLElement;
       visual: HTMLElement;
+      renderedAlpha: boolean;
       originalVisualOpacity: string;
       values: Record<string, MotionValue<number>>;
       original: { transform: string; opacity: string; willChange: string };
@@ -137,35 +152,46 @@ export function createMotionRuntime(
       inert: boolean;
     }
   >();
-  const snapshot = (id: string, overlay: ReturnType<typeof resolveMotion>) => {
-    const element = elements.get(id)!;
-    const { frame: f, appearance } = presenceElement(
-      motionElement(element, overlay),
-      sampleElementPresence(
-        slide.motion,
-        id,
-        stageIndex,
-        localTime,
-        clocks?.(),
-      ),
+  const visualSample = (
+    id: string,
+    overlay: ReturnType<typeof resolveMotion>,
+  ): MotionVisualSample => {
+    const presence = sampleElementPresence(
+      slide.motion,
+      id,
+      stageIndex,
+      localTime,
+      clocks?.(),
+    );
+    const element = presenceElement(
+      motionElement(elements.get(id)!, overlay),
+      presence,
     );
     return {
-      x: f.x - element.frame.x,
-      y: f.y - element.frame.y,
+      elementId: id,
+      frame: element.frame,
+      opacity: element.appearance.opacity,
+      present: presence.present,
+    };
+  };
+  const valuesFor = ({ elementId, frame: f, opacity }: MotionVisualSample) => {
+    const base = elements.get(elementId)!.frame;
+    return {
+      x: f.x - base.x,
+      y: f.y - base.y,
       rotate: f.rotation,
       scaleX: (f.flipX ? -1 : 1) * f.scaleX,
       scaleY: (f.flipY ? -1 : 1) * f.scaleY,
-      opacity: appearance.opacity,
+      opacity,
     };
   };
   for (const id of new Set([...Object.keys(initial), ...presenceIds])) {
     const node = nodes.get(id);
     if (!node || !elements.has(id)) continue;
     const values = Object.fromEntries(
-      Object.entries(snapshot(id, initial)).map(([key, value]) => [
-        key,
-        motionValue(value),
-      ]),
+      Object.entries(valuesFor(visualSample(id, initial))).map(
+        ([key, value]) => [key, motionValue(value)],
+      ),
     );
     visibility.set(id, {
       visibility: node.style.visibility,
@@ -181,14 +207,14 @@ export function createMotionRuntime(
     if (compiled.some((track) => track.elementId === id))
       node.style.willChange = "transform";
     const visual =
-      node.querySelector<HTMLElement>(
-        ":scope > [data-composition-visual], :scope > [data-composition-alpha]",
-      ) ?? node;
+      node.querySelector<HTMLElement>(":scope > [data-composition-visual]") ??
+      node;
     const originalVisualOpacity = visual.style.opacity;
+    const renderedAlpha = renderer?.ownsOpacity?.(id) ?? false;
     const { opacity, ...transport } = values;
     const detachTransport = styleEffect(
       node,
-      visual === node ? values : transport,
+      visual === node && !renderedAlpha ? values : transport,
     );
     const detachAlpha =
       visual === node ? () => {} : styleEffect(visual, { opacity });
@@ -201,6 +227,7 @@ export function createMotionRuntime(
     bindings.set(id, {
       node,
       visual,
+      renderedAlpha,
       originalVisualOpacity,
       values,
       original,
@@ -236,7 +263,7 @@ export function createMotionRuntime(
       };
     }
     const alpha = targets.opacity;
-    if (binding.visual !== binding.node && alpha) {
+    if ((binding.visual !== binding.node || binding.renderedAlpha) && alpha) {
       delete targets.opacity;
       return [
         animate(binding.values.opacity, alpha, transitions.opacity),
@@ -316,16 +343,13 @@ export function createMotionRuntime(
   const materialize = (time: number, presenceOnly = false) => {
     localTime = time;
     const overlay = resolveMotion(slide, stageIndex, time);
+    const samples: MotionVisualSample[] = [];
     bindings.forEach((binding, id) => {
+      if (presenceOnly && !presenceIds.has(id) && !renderer) return;
+      const sample = visualSample(id, overlay);
+      if (renderer) samples.push(sample);
       if (presenceOnly && !presenceIds.has(id)) return;
       if (presenceIds.has(id)) {
-        const sample = sampleElementPresence(
-          slide.motion,
-          id,
-          stageIndex,
-          time,
-          clocks?.(),
-        );
         binding.node.style.visibility = sample.present
           ? visibility.get(id)!.visibility
           : "hidden";
@@ -339,13 +363,13 @@ export function createMotionRuntime(
         if (binding.node.dataset.presentationAbsent !== String(!sample.present))
           binding.node.dataset.presentationAbsent = String(!sample.present);
       }
-      Object.entries(snapshot(id, overlay)).forEach(([name, value]) =>
+      Object.entries(valuesFor(sample)).forEach(([name, value]) =>
         binding.values[name].set(value),
       );
       styleEffect.flush(binding.node);
       if (binding.visual !== binding.node) styleEffect.flush(binding.visual);
     });
-    sampleSceneBackdrops(root);
+    renderer?.apply(samples);
     if (presenceOnly) return;
     effectBindings.forEach(({ element, instance, surface, values }) => {
       if (
@@ -411,7 +435,7 @@ export function createMotionRuntime(
         state.time + (state.running ? Math.max(0, now - state.startedAt) : 0);
       materialize(sampleTime);
       cancelAnimationFrame(presenceFrame);
-      if (presenceIds.size && state.running) {
+      if ((presenceIds.size || renderer) && state.running) {
         const tick = () => {
           materialize(
             state.time + Math.max(0, Date.now() - state.startedAt),
@@ -470,7 +494,7 @@ export function createMotionRuntime(
           delete node.dataset.presentationAbsent;
         },
       );
-      sampleSceneBackdrops(root);
+      renderer?.reset();
     },
   };
 }

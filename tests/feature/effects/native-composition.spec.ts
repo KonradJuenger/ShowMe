@@ -52,6 +52,7 @@ type ProbeWindow = Window & {
   model: PresentationDocument;
   motion: SlideMotion;
   disposeScene?: () => void;
+  compositor?: import("../../../src/components/compositionRuntime").CompositionRuntime;
   sceneErrors?: string[];
 };
 
@@ -220,53 +221,131 @@ async function image(page: Page) {
     .toBuffer();
 }
 
-async function enableScene(page: Page) {
-  await page.evaluate(async () => {
+async function enableScene(page: Page, prepare = true) {
+  await page.evaluate(async (prepare) => {
     const w = window as unknown as ProbeWindow;
-    const scenePath = "/src/components/sceneBackdrop.ts",
+    const plannerPath = "/src/components/compositionBackendPlan.ts",
+      runtimePath = "/src/components/compositionRuntime.ts",
       planPath = "/src/components/compositionPlan.ts";
     const {
-      sceneBackdropPlan,
-      mountSceneBackdrop,
-    }: typeof import("../../../src/components/sceneBackdrop") = await import(
-      /* @vite-ignore */ scenePath
-    );
+      planCompositionBackends,
+    }: typeof import("../../../src/components/compositionBackendPlan") =
+      await import(/* @vite-ignore */ plannerPath);
+    const {
+      mountCompositionRuntime,
+    }: typeof import("../../../src/components/compositionRuntime") =
+      await import(/* @vite-ignore */ runtimePath);
     const {
       compileCompositionPlan,
     }: typeof import("../../../src/components/compositionPlan") = await import(
       /* @vite-ignore */ planPath
     );
     const slide = w.model.slides[w.model.deck.slideIds[0]];
-    const plan = sceneBackdropPlan(
-      compileCompositionPlan(slide, w.model.deck),
-      slide,
+    const planningSlide = { ...slide, motion: w.motion };
+    const plan = planCompositionBackends(
+      compileCompositionPlan(planningSlide, w.model.deck),
+      planningSlide,
       w.model.deck,
-    );
+      { restoration: true, padding: 2 },
+    ).restoration;
     if (!plan) throw new Error("Real glass style was not admitted");
     for (const id of plan.glass) {
       const node = [
         ...w.native.host.querySelectorAll<HTMLElement>("[data-element-id]"),
       ].find((n) => n.dataset.elementId === id)!;
-      const visual = document.createElement("div");
-      visual.dataset.compositionAlpha = "true";
-      visual.style.cssText = "display:none;opacity:1;";
-      node.append(visual);
+      // The diagnostic supplies the same renderer-owned output nodes without
+      // starting a second React/Motion sampler. Product ownership is tested below.
+      const paint = document.createElement("div");
+      paint.dataset.compositionPaint = "true";
+      paint.style.cssText =
+        "position:absolute;inset:0;content-visibility:hidden";
+      paint.append(...node.childNodes);
+      node.append(paint);
+      const alpha = document.createElement("div");
+      alpha.dataset.compositionAlpha = "true";
+      alpha.style.cssText = "display:none;opacity:1";
+      node.append(alpha);
       node.style.opacity = "1";
+      const overlay = document.createElement("div");
+      overlay.dataset.backdropRestore = id;
+      overlay.style.cssText = "position:absolute;opacity:0;pointer-events:none";
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      canvas.style.cssText = "width:100%;height:100%;display:block";
+      overlay.append(canvas);
+      node.after(overlay);
     }
     w.sceneErrors = [];
-    w.disposeScene = mountSceneBackdrop(
+    w.compositor = mountCompositionRuntime(
       w.native.host.querySelector<HTMLElement>(".slide-renderer")!,
       plan,
       w.model.deck,
-      (error) => w.sceneErrors!.push(String(error)),
+      (_ids, error) => w.sceneErrors!.push(String(error)),
     );
-    await w.native.advance(0.37);
-  });
+    const apply = w.compositor.apply.bind(w.compositor);
+    // Observe the semantic frame in this diagnostic, independently of output.
+    // Production has no hidden DOM alpha proxy.
+    w.compositor.apply = (samples) => {
+      for (const sample of samples) {
+        const node = [
+          ...w.native.host.querySelectorAll<HTMLElement>("[data-element-id]"),
+        ].find((n) => n.dataset.elementId === sample.elementId);
+        const target = node?.querySelector<HTMLElement>(
+          ":scope > [data-composition-alpha]",
+        );
+        if (target) target.style.opacity = String(sample.opacity);
+      }
+      apply(samples);
+    };
+    w.disposeScene = () => w.compositor!.dispose();
+    if (prepare) await w.native.advance(0.37);
+  }, prepare);
+}
+async function setAlpha(
+  page: Page,
+  which: "all" | "last" | "glass",
+  alpha: number,
+) {
+  await page.evaluate(
+    ({ which, alpha }) => {
+      const w = window as unknown as ProbeWindow;
+      const nodes = [
+        ...w.native.host.querySelectorAll<HTMLElement>(
+          "[data-composition-alpha]",
+        ),
+      ];
+      const chosen =
+        which === "all"
+          ? nodes
+          : which === "last"
+            ? nodes.slice(-1)
+            : nodes.filter(
+                (n) => n.parentElement!.dataset.elementId === "glass",
+              );
+      w.compositor!.apply(
+        chosen.map((target) => {
+          const node = target.parentElement!,
+            id = node.dataset.elementId!;
+          target.style.opacity = String(alpha);
+          const frame = {
+            ...w.model.slides[w.model.deck.slideIds[0]].nodes[0].children.find(
+              (e) => e.id === id,
+            )!.frame,
+          };
+          const matrix = new DOMMatrix(getComputedStyle(node).transform);
+          frame.x += matrix.e;
+          frame.y += matrix.f;
+          return { elementId: id, frame, opacity: alpha, present: true };
+        }),
+      );
+    },
+    { which, alpha },
+  );
 }
 
 test("filled rounded Presence reveals its first restoration with the current Motion sample", async () => {
   await mount(page, "glass");
-  await enableScene(page);
+  await enableScene(page, false);
   await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow & {
       releaseBitmap: () => void;
@@ -299,6 +378,8 @@ test("filled rounded Presence reveals its first restoration with the current Mot
       w.native.host,
       { ...w.model.slides[w.model.deck.slideIds[0]], motion: w.motion },
       0,
+      undefined,
+      w.compositor,
     );
     w.runtime.sync({
       stageId: "stage",
@@ -322,7 +403,9 @@ test("filled rounded Presence reveals its first restoration with the current Mot
     .locator('[data-element-id="glass"]')
     .evaluate((node) => ({
       opacity: Number(getComputedStyle(node).opacity),
-      contentVisibility: getComputedStyle(node).contentVisibility,
+      contentVisibility: getComputedStyle(
+        node.querySelector("[data-composition-paint]")!,
+      ).contentVisibility,
       populated: node.nextElementSibling!.querySelector("canvas")!.width > 1,
     }));
   expect(pending).toEqual({
@@ -362,8 +445,8 @@ test("filled rounded Presence reveals its first restoration with the current Mot
       restoration: Number(getComputedStyle(overlay).opacity),
       populated: canvas.width > 1,
       clip: overlay.style.clipPath.match(/-?[\d.]+/g)!.map(Number),
-      x: world.e,
-      y: world.f,
+      x: world.e - parseFloat(overlay.style.left),
+      y: world.f - parseFloat(overlay.style.top),
     };
   });
   expect(first.populated).toBe(true);
@@ -403,6 +486,8 @@ test("filled rounded glass keeps native edge pixels and one resolved Presence fa
       w.native.host,
       { ...w.model.slides[w.model.deck.slideIds[0]], motion: w.motion },
       0,
+      undefined,
+      w.compositor,
     );
     await w.runtime.sync({
       stageId: "stage",
@@ -423,9 +508,7 @@ test("filled rounded glass keeps native edge pixels and one resolved Presence fa
     return w.native.inspect().diagnostics.captures;
   });
   const faded = await image(page);
-  await page
-    .locator('[data-element-id="glass"] [data-composition-alpha]')
-    .evaluate((node: HTMLElement) => (node.style.opacity = "1"));
+  await setAlpha(page, "glass", 1);
   await page.evaluate(() =>
     (window as unknown as ProbeWindow).native.advance(0.37),
   );
@@ -480,19 +563,12 @@ test("three and ten disjoint filled rounded consumers retain resolved fade pixel
     }
     expect(max).toBeLessThanOrEqual(2);
     expect(sum / actual.length).toBeLessThan(0.2);
-    await page
-      .locator("[data-composition-alpha]")
-      .evaluateAll((nodes) =>
-        nodes.forEach((node) => ((node as HTMLElement).style.opacity = ".5")),
-      );
+    await setAlpha(page, "all", 0.5);
     await page.evaluate(() =>
       (window as unknown as ProbeWindow).native.advance(0.37),
     );
     const faded = await image(page);
-    await page
-      .locator("[data-composition-alpha]")
-      .last()
-      .evaluate((node: HTMLElement) => (node.style.opacity = "1"));
+    await setAlpha(page, "last", 1);
     await page.evaluate(() =>
       (window as unknown as ProbeWindow).native.advance(0.37),
     );
@@ -525,27 +601,296 @@ test("overlapping motion envelopes retain the existing backdrop lowering for thr
     await mount(page, "glass", count);
     const eligible = await page.evaluate(async () => {
       const w = window as unknown as ProbeWindow;
-      const scenePath = "/src/components/sceneBackdrop.ts",
+      const scenePath = "/src/components/compositionBackendPlan.ts",
         planPath = "/src/components/compositionPlan.ts";
       const {
-        sceneBackdropPlan,
-      }: typeof import("../../../src/components/sceneBackdrop") = await import(
-        /* @vite-ignore */ scenePath
-      );
+        planCompositionBackends,
+      }: typeof import("../../../src/components/compositionBackendPlan") =
+        await import(/* @vite-ignore */ scenePath);
       const {
         compileCompositionPlan,
       }: typeof import("../../../src/components/compositionPlan") =
         await import(/* @vite-ignore */ planPath);
       const slide = w.model.slides[w.model.deck.slideIds[0]];
-      return !!sceneBackdropPlan(
+      return !!planCompositionBackends(
         compileCompositionPlan(slide, w.model.deck),
         slide,
         w.model.deck,
-      );
+        { restoration: true, padding: 2 },
+      ).restoration;
     });
     expect(eligible).toBe(false);
     await expect(page.locator("[data-backdrop-restore]")).toHaveCount(0);
   }
+});
+
+test("backend selection is regional for bounded unrelated paint and overlapping consumers", async () => {
+  await mount(page, "glass", 3, true);
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const plannerPath = "/src/components/compositionBackendPlan.ts",
+      planPath = "/src/components/compositionPlan.ts",
+      factoryPath = "/src/core/elementFactory.ts";
+    const {
+      planCompositionBackends,
+    }: typeof import("../../../src/components/compositionBackendPlan") =
+      await import(/* @vite-ignore */ plannerPath);
+    const {
+      compileCompositionPlan,
+    }: typeof import("../../../src/components/compositionPlan") = await import(
+      /* @vite-ignore */ planPath
+    );
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    const unrelated = createBasicShape("unrelated", "rectangle", {
+      x: 500,
+      y: 260,
+    });
+    unrelated.frame.width = 80;
+    unrelated.frame.height = 60;
+    unrelated.clipChildren = true;
+    unrelated.content = {
+      type: "image",
+      assetId: "missing",
+      filename: "missing.png",
+      mediaType: "image",
+      lockAspect: true,
+      opacity: 1,
+      transform: {
+        rule: "fit",
+        intrinsicWidth: 80,
+        intrinsicHeight: 60,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        rotation: 0,
+        flipX: false,
+        flipY: false,
+      },
+    };
+    slide.nodes[0].children.push(unrelated);
+    const select = () =>
+      planCompositionBackends(
+        compileCompositionPlan(slide, w.model.deck),
+        slide,
+        w.model.deck,
+        { restoration: true, padding: 2 },
+      );
+    const before = [...select().restoration!.glass];
+    // Ordinary motion elsewhere has a bounded sweep and is not a global veto.
+    slide.motion = {
+      stages: [
+        {
+          id: "stage",
+          blocks: [],
+          tracks: [
+            {
+              id: "move",
+              elementId: "unrelated",
+              property: "transform.x",
+              keyframes: [
+                {
+                  id: "a",
+                  at: 0,
+                  value: { type: "absolute", value: 480 },
+                  easeToNext: [0, 0, 1, 1],
+                },
+                { id: "b", at: 1000, value: { type: "absolute", value: 500 } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const moved = [...select().restoration!.glass];
+    const overlap = createBasicShape("overlap", "rectangle", { x: 25, y: 25 });
+    overlap.frame.width = 20;
+    overlap.frame.height = 20;
+    slide.nodes[0].children.push(overlap);
+    const after = select();
+    return {
+      before,
+      moved,
+      after: [...after.restoration!.glass],
+      route: after.routes.get("glass"),
+    };
+  });
+  expect(result.before).toEqual(["glass", "glass-1", "glass-2"]);
+  expect(result.moved).toEqual(result.before);
+  expect(result.after).toEqual(["glass-1", "glass-2"]);
+  expect(result.route).toBe("fallback");
+});
+
+test("renderer-owned cropped restoration is prepared before entry and remains coherent through replay and disposal", async () => {
+  await mount(page, "glass");
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    slide.motion = w.motion;
+    const state = {
+      stageId: "stage",
+      stageIndex: 0,
+      time: 0,
+      running: false,
+      startedAt: 1000,
+    };
+    await w.native.setMotion(state);
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const node = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
+    const overlay = root.querySelector<HTMLElement>(
+      '[data-backdrop-restore="glass"]',
+    )!;
+    const canvas = overlay.querySelector("canvas")!;
+    const source = root.querySelector<HTMLCanvasElement>(
+      '[data-element-id="lower"] canvas',
+    )!;
+    const prepared = {
+      width: canvas.width,
+      height: canvas.height,
+      sourceWidth: source.width,
+      sourceHeight: source.height,
+    };
+    await w.native.setMotion({ ...state, time: 1 });
+    const first = {
+      opacity: Number(node.style.opacity),
+      restoration: Number(overlay.style.opacity),
+      ready: canvas.width > 1,
+      paint: getComputedStyle(node.querySelector("[data-composition-paint]")!)
+        .contentVisibility,
+    };
+    await w.native.setMotion({ ...state, time: 1000 });
+    const retained =
+      canvas.width === prepared.width && canvas.height === prepared.height;
+    await w.native.setMotion({ ...state, time: 1 });
+    const replay = {
+      ready: canvas.width > 1,
+      restoration: Number(overlay.style.opacity),
+    };
+    const backend = root.dataset.compositionBackend;
+    await w.native.setMotion(null);
+    return {
+      prepared,
+      first,
+      retained,
+      replay,
+      backend,
+      remaining: root.querySelectorAll("[data-backdrop-restore]").length,
+      released: canvas.width === 1 && canvas.height === 1,
+      captures: w.native.inspect().diagnostics.captures,
+    };
+  });
+  expect(result.backend).toBe("native-backdrop-restore");
+  expect(result.prepared.width).toBeLessThan(result.prepared.sourceWidth);
+  expect(result.prepared.height).toBeLessThan(result.prepared.sourceHeight);
+  expect(result.first.ready).toBe(true);
+  expect(result.first.paint).toBe("visible");
+  expect(result.first.opacity).toBe(1);
+  expect(result.first.restoration).toBeCloseTo(0.999, 5);
+  expect(result.retained).toBe(true);
+  expect(result.replay.ready).toBe(true);
+  expect(result.replay.restoration).toBeCloseTo(result.first.restoration, 5);
+  expect(result.remaining).toBe(0);
+  expect(result.released).toBe(true);
+  expect(result.captures).toBe(0);
+});
+
+test("restoration consumes ordinary opacity samples without reading animated DOM values", async () => {
+  await mount(page, "glass");
+  await page.evaluate(() => {
+    const w = window as unknown as ProbeWindow;
+    w.motion = {
+      stages: [
+        {
+          id: "stage",
+          blocks: [],
+          tracks: [
+            {
+              id: "fade",
+              elementId: "glass",
+              property: "appearance.opacity",
+              keyframes: [
+                {
+                  id: "start",
+                  at: 0,
+                  value: { type: "absolute", value: 0 },
+                  easeToNext: [0, 0, 1, 1],
+                },
+                { id: "end", at: 1000, value: { type: "absolute", value: 1 } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  });
+  await enableScene(page);
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const path = "/src/components/motionRuntime.ts";
+    const {
+      createMotionRuntime,
+    }: typeof import("../../../src/components/motionRuntime") = await import(
+      /* @vite-ignore */ path
+    );
+    const slide = {
+      ...w.model.slides[w.model.deck.slideIds[0]],
+      motion: w.motion,
+    };
+    const runtime = createMotionRuntime(
+      w.native.host,
+      slide,
+      0,
+      undefined,
+      w.compositor,
+    );
+    runtime.sync({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 250,
+      running: false,
+      startedAt: 0,
+    });
+    const node = w.native.host.querySelector<HTMLElement>(
+      '[data-element-id="glass"]',
+    )!;
+    const overlay = node.nextElementSibling as HTMLElement;
+    const sampled = {
+      nativeOpacity: node.style.opacity,
+      restoration: Number(overlay.style.opacity),
+    };
+    const computed = window.getComputedStyle;
+    window.getComputedStyle = () => {
+      throw new Error("Compositor read animated DOM");
+    };
+    try {
+      w.compositor!.apply([
+        {
+          elementId: "glass",
+          frame: slide.nodes[0].children[1].frame,
+          opacity: 0.6,
+          present: true,
+        },
+      ]);
+    } finally {
+      window.getComputedStyle = computed;
+    }
+    const direct = Number(overlay.style.opacity);
+    runtime.cancel();
+    return {
+      sampled,
+      direct,
+      cancelled: {
+        opacity: node.style.opacity,
+        restoration: Number(overlay.style.opacity),
+      },
+    };
+  });
+  expect(result.sampled).toEqual({ nativeOpacity: "1", restoration: 0.75 });
+  expect(result.direct).toBeCloseTo(0.4, 5);
+  expect(result.cancelled).toEqual({ opacity: "1", restoration: 0 });
 });
 
 test("eligible native groups preserve resolved pixels through actual Move In without prefix replay", async () => {

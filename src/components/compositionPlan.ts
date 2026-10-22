@@ -18,11 +18,16 @@ export type Composition =
   | { kind: "effect"; effect: ElementEffect; input?: Composition };
 
 export type EffectRef = { elementId: string; effectId: string };
+/** v1 shaders read the element-entry prefix; CSS backdrop reads the paint at
+ * its own effect entry. These semantic points precede backend selection. */
+export type BackdropPoint =
+  | { kind: "element-entry"; elementId: string }
+  | { kind: "effect-entry"; elementId: string; effectId: string };
 export type EffectInput =
   | { kind: "none" }
   | { kind: "text" | "content"; operation: Composition }
-  | { kind: "native"; operation?: Composition }
-  | { kind: "backdrop"; elementId: string };
+  | { kind: "styled"; operation?: Composition; backdrop: BackdropPoint }
+  | { kind: "backdrop"; elementId: string; backdrop: BackdropPoint };
 
 export type VisualGroup = {
   element: Element;
@@ -60,13 +65,25 @@ export function compileVisualGroup(
     inputs.set(
       instance.id,
       definition.input === "backdrop"
-        ? { kind: "backdrop", elementId: element.id }
+        ? {
+            kind: "backdrop",
+            elementId: element.id,
+            backdrop: { kind: "element-entry", elementId: element.id },
+          }
         : definition.kind === "text-js" && input
           ? { kind: "text", operation: input }
           : definition.input === "content" && input
             ? { kind: "content", operation: input }
             : definition.kind === "css"
-              ? { kind: "native", operation: input }
+              ? {
+                  kind: "styled",
+                  operation: input,
+                  backdrop: {
+                    kind: "effect-entry",
+                    elementId: element.id,
+                    effectId: instance.id,
+                  },
+                }
               : { kind: "none" },
     );
     return { kind: "effect", effect: instance, input };
@@ -203,15 +220,64 @@ export function compileCompositionPlan(
         return [];
     }
   };
+  // Persistent effect-entry prefixes include completed ancestor paint without
+  // depending on unfinished enclosing filters. Record a wrapper's entry before
+  // descending into its input; its completed output replaces that input in the
+  // prefix seen by following paint. No DOM traversal determines these inputs.
+  type PaintPrefix = { previous?: PaintPrefix; ref: EffectRef };
+  const paintEntries = new Map<string, PaintPrefix | undefined>();
+  const key = (ref: EffectRef) => JSON.stringify([ref.elementId, ref.effectId]);
+  const indexPaint = (
+    operation: Composition,
+    group: VisualGroup,
+    prefix?: PaintPrefix,
+  ): PaintPrefix | undefined => {
+    switch (operation.kind) {
+      case "effect": {
+        const ref = {
+          elementId: group.element.id,
+          effectId: operation.effect.id,
+        };
+        paintEntries.set(key(ref), prefix);
+        if (operation.input) indexPaint(operation.input, group, prefix);
+        return { previous: prefix, ref };
+      }
+      case "sequence":
+        for (const item of operation.items)
+          prefix = indexPaint(item, group, prefix);
+        return prefix;
+      case "clip":
+        return indexPaint(operation.input, group, prefix);
+      case "children":
+        for (const child of group.children)
+          prefix = indexPaint(child.visual, child, prefix);
+        return prefix;
+      default:
+        return prefix;
+    }
+  };
+  let paintPrefix: PaintPrefix | undefined;
+  for (const group of roots)
+    paintPrefix = indexPaint(group.visual, group, paintPrefix);
   const dependencies = ({ elementId, effectId }: EffectRef): EffectRef[] => {
     const group = groups.get(elementId),
       input = group?.inputs.get(effectId);
     if (!group || !input) return [];
-    if (
-      input.kind === "text" ||
-      input.kind === "content" ||
-      input.kind === "native"
-    )
+    if (input.kind === "styled") {
+      const prior: EffectRef[] = [];
+      for (
+        let entry = paintEntries.get(key({ elementId, effectId }));
+        entry;
+        entry = entry.previous
+      )
+        prior.push(entry.ref);
+      const result = [
+        ...prior.reverse(),
+        ...(input.operation ? terminals(input.operation, group) : []),
+      ];
+      return [...new Map(result.map((ref) => [key(ref), ref])).values()];
+    }
+    if (input.kind === "text" || input.kind === "content")
       return input.operation ? terminals(input.operation, group) : [];
     if (input.kind !== "backdrop") return [];
     const result: EffectRef[] = [];
