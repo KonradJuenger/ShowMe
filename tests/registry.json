@@ -976,7 +976,7 @@
     "runtime": "unit",
     "created": "2026-10-21",
     "lastReviewed": "2026-10-22",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; backend-neutral styled inputs name CSS effect-entry paint and completed ancestor dependencies without cycles; proven local CSS omits backdrop dependencies while escaped, unknown and external styles remain conservative"
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points, including two backdrop-reading Effects in one Element when their ordered paint prefixes differ; proven local CSS omits backdrop dependencies while escaped, unknown and external styles remain conservative"
   },
   {
     "id": "effects-native-composition",
@@ -987,7 +987,7 @@
     "runtime": "electron",
     "created": "2026-10-21",
     "lastReviewed": "2026-10-22",
-    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-bitmap readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and unsupported mixed stacks retain the correctness lowering; centralized regional selection, renderer-owned cropped output prepared before entry, replay/disposal and semantic opacity updates without animated DOM readback; static image backgrounds preserve decoded crop/rotation/flip/content alpha and final Move In continuity; the general-compositor prototype additionally proves one shared retained prefix for image + shape + generated GLSL + image sources, source-agnostic restoration, no CSS/DOM fallback, and local invalidation that ignores consumer Motion and later unrelated paint"
+    "reason": "Native visual alpha and bounded backdrop restoration preserve resolved glass pixels through real Presence Motion; filled rounded cards retain native paint order, edge/fade parity, children and cancellation, including first-publication readiness with current Motion alpha/placement and 1/3/10 disjoint consumers; overlapping motion envelopes, nested alpha and unsupported mixed stacks retain the correctness lowering; exact semantic surfaces remain crop-independent while one renderer-scoped materializer can reuse a regionally proven execution projection; mixed image + shape + generated GLSL + image sources use source-agnostic restoration, later paint does not invalidate earlier surfaces, lower source changes do, source publication is coherent, and one failed semantic surface does not disable an independent surface"
   },
   {
     "id": "effects-css-backdrop-opacity",
