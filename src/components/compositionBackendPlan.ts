@@ -5,14 +5,16 @@ import { resolveMotionValue } from "../core/motion";
 import {
   localMatrix,
   transformPoint,
-  multiply,
-  resolveMediaFrame,
   walkElements,
 } from "../core/element";
 import {
   compositorCapabilities,
   backdropStyleCapabilities,
 } from "./compositionCapabilities";
+import {
+  planOwnedPrefixSurface,
+  type PrefixSurfaceRef,
+} from "./compositionSurface";
 /** A native lowering is legal only if the backdrop stage and the group's entry
  * have identical paint inputs and bounds. Keep opaque CSS on the original path.
  * This is a backend capability check, never a different Effect representation. */
@@ -102,67 +104,27 @@ const overlap = (a: Bounds, b: Bounds, padding: number) =>
   a.top - padding < b.bottom + padding &&
   b.top - padding < a.bottom + padding;
 
-/** Backdrop restoration implements mix(B,R,a) as R overlaid with B at 1-a.
- * R remains entirely native, including fill-before-filter and rounded AA. The
- * current capability is disjoint flat cards over one procedural or static image background;
- * prior cards cannot contribute pixels inside another card's swept bounds.
- * Unsupported overlap, nested alpha and mixed stacks retain the usual backend. */
+/** Backdrop restoration implements mix(B,R,a) as R overlaid with B at
+ * 1-alpha. Admission now asks the compositor for the semantic prefix surface;
+ * source-type knowledge lives behind that boundary. The first prototype keeps
+ * consumers top-level and disjoint so an earlier glass card cannot contribute
+ * pixels to a later card's requested crop. */
 function restorationPlan(
   plan: CompositionPlan,
   slide: Slide,
   deck: Deck,
   padding = 2,
 ) {
-  if (
-    deck.stylesheet ||
-    !/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(slide.background)
-  )
-    return null;
-  const background = plan.roots[0];
-  if (!background) return null;
-  const bg = background.element,
-    frame = bg.frame;
-  const imageBackground =
-    bg.content?.type === "image" &&
-    bg.clipChildren &&
-    !background.inputs.size &&
-    !bg.cssClasses?.length;
-  if (
-    bg.geometry.type !== "rect" ||
-    (!imageBackground &&
-      (frame.x ||
-        frame.y ||
-        frame.width !== deck.width ||
-        frame.height !== deck.height)) ||
-    frame.rotation ||
-    frame.scaleX !== 1 ||
-    frame.scaleY !== 1 ||
-    frame.flipX ||
-    frame.flipY ||
-    bg.appearance.opacity !== 1 ||
-    bg.appearance.radius ||
-    bg.appearance.strokeWidth ||
-    (!imageBackground && bg.content) ||
-    bg.children.length ||
-    (!imageBackground && background.inputs.size !== 1)
-  )
-    return null;
-  if (!imageBackground) {
-    const [effectId, input] = [...background.inputs][0],
-      instance = bg.effects!.find((i) => i.id === effectId)!;
-    if (
-      input.kind !== "none" ||
-      instance.placement !== "background" ||
-      slide.effectResources![instance.resourceId].kind !== "fragment-glsl"
-    )
-      return null;
-  }
+  if (deck.stylesheet) return null;
+
   const glass = new Set<string>(),
     envelopes = new Map<string, Bounds>();
+  for (const group of plan.roots)
+    envelopes.set(group.element.id, bounds(group));
+
   for (const group of plan.groups.values()) {
     const e = group.element;
-    if (!group.parentId) envelopes.set(e.id, bounds(group));
-    if (!group.inputs.size || group === background || group.parentId) continue;
+    if (!group.inputs.size || group.parentId) continue;
     if (
       walkElements([e]).some(
         (child) =>
@@ -173,7 +135,6 @@ function restorationPlan(
     )
       continue;
     if (
-      group.parentId ||
       group.inputs.size !== 1 ||
       !(e.appearance.fill || e.appearance.radius) ||
       e.geometry.type !== "rect" ||
@@ -187,43 +148,35 @@ function restorationPlan(
     )
       continue;
     const [id, entry] = [...group.inputs][0],
-      effect = e.effects!.find((i) => i.id === id)!,
+      effect = e.effects!.find((instance) => instance.id === id)!,
       definition = slide.effectResources![effect.resourceId];
     if (
       definition.kind !== "css" ||
       effect.placement !== "content" ||
       entry.kind !== "styled" ||
-      !entry.operation
+      !entry.operation ||
+      !entry.backdrop
     )
       continue;
     if (!backdropStyleCapabilities(definition)?.restoration) continue;
     glass.add(e.id);
   }
   if (!glass.size) return null;
-  const unbounded = new Set<string>();
+
   const rootFor = (id: string) => {
     let group = plan.groups.get(id);
     while (group?.parentId) group = plan.groups.get(group.parentId);
     return group;
   };
+
+  // Consumer Motion changes only the crop/alpha. Expand the conservative crop
+  // envelope without creating a second animation state. Unsupported consumer
+  // transforms stay on the existing fallback route.
   for (const stage of slide.motion?.stages ?? []) {
-    if (
-      stage.tracks.some((track) => track.elementId === bg.id) ||
-      stage.blocks?.some(
-        (block) =>
-          block.binding &&
-          "elementId" in block.binding &&
-          block.binding.elementId === bg.id,
-      )
-    )
-      return null;
     for (const track of stage.tracks) {
       const owner = rootFor(track.elementId);
-      if (!owner) continue;
+      if (!owner || !glass.has(owner.element.id)) continue;
       if (track.property === "appearance.opacity") continue;
-      glass.delete(owner.element.id);
-      // Ordinary translation of a root has a finite sweep. Other transforms
-      // and descendant animation need a proven paint envelope before admission.
       if (
         owner.element.id !== track.elementId ||
         owner.element.frame.rotation ||
@@ -231,15 +184,15 @@ function restorationPlan(
         owner.element.frame.scaleY !== 1 ||
         !["transform.x", "transform.y"].includes(track.property) ||
         track.keyframes.some(
-          (k) =>
-            Array.isArray(k.easeToNext) &&
-            (k.easeToNext[1] < 0 ||
-              k.easeToNext[1] > 1 ||
-              k.easeToNext[3] < 0 ||
-              k.easeToNext[3] > 1),
+          (key) =>
+            Array.isArray(key.easeToNext) &&
+            (key.easeToNext[1] < 0 ||
+              key.easeToNext[1] > 1 ||
+              key.easeToNext[3] < 0 ||
+              key.easeToNext[3] > 1),
         )
       ) {
-        unbounded.add(owner.element.id);
+        glass.delete(owner.element.id);
         continue;
       }
       const box = envelopes.get(owner.element.id)!;
@@ -256,16 +209,16 @@ function restorationPlan(
         }
       }
     }
+
     for (const block of stage.blocks ?? []) {
       if (!block.binding || !("elementId" in block.binding)) continue;
       const group = rootFor(block.binding.elementId);
-      if (!group) continue;
+      if (!group || !glass.has(group.element.id)) continue;
       if (
         block.binding.kind !== "presence" ||
         group.element.id !== block.binding.elementId
       ) {
         glass.delete(group.element.id);
-        unbounded.add(group.element.id);
         continue;
       }
       const box = envelopes.get(group.element.id)!;
@@ -283,7 +236,6 @@ function restorationPlan(
               transition.easing[3] > 1))
         ) {
           glass.delete(group.element.id);
-          unbounded.add(group.element.id);
           continue;
         }
         for (const progress of [0, 1]) {
@@ -302,88 +254,8 @@ function restorationPlan(
       }
     }
   }
-  // A bounded native object elsewhere cannot disable an unrelated material.
-  // Arbitrary stylesheet paint remains unbounded until it can be proven local.
-  for (const group of plan.roots) {
-    if (group === background || glass.has(group.element.id)) continue;
-    const e = group.element;
-    const boundedTree = walkElements([e]).every(
-      (node) =>
-        !node.cssClasses?.length &&
-        (node.effects ?? [])
-          .filter((effect) => effect.enabled)
-          .every((instance) => {
-            const definition = slide.effectResources![instance.resourceId];
-            return (
-              definition?.kind === "css" &&
-              !!backdropStyleCapabilities(definition)?.captureMaterial
-            );
-          }),
-    );
-    const boundedEffects = e.clipChildren && boundedTree;
-    if (
-      !boundedTree ||
-      (group.inputs.size && !boundedEffects) ||
-      (group.children.length && !e.clipChildren)
-    )
-      unbounded.add(e.id);
-    if (e.content && e.content.type !== "text") {
-      const media = resolveMediaFrame(e);
-      if (media && !e.clipChildren) {
-        const box = envelopes.get(e.id)!;
-        const base = bounds(group);
-        const delta = {
-          left: box.left - base.left,
-          right: box.right - base.right,
-          top: box.top - base.top,
-          bottom: box.bottom - base.bottom,
-        };
-        const m = multiply(localMatrix(e.frame), localMatrix(media));
-        for (const x of [0, media.width])
-          for (const y of [0, media.height]) {
-            const point = transformPoint(m, { x, y });
-            box.left = Math.min(box.left, point.x + delta.left);
-            box.right = Math.max(box.right, point.x + delta.right);
-            box.top = Math.min(box.top, point.y + delta.top);
-            box.bottom = Math.max(box.bottom, point.y + delta.bottom);
-          }
-      }
-    }
-  }
-  // Cull preceding sources only when they cannot contribute to a restore rect.
-  // Native backdrop filtering still sees their actual pixels outside that rect.
-  for (const id of glass)
-    for (const [other, box] of envelopes) {
-      if (other === id || other === bg.id) continue;
-      if (unbounded.has(other)) {
-        glass.delete(id);
-        break;
-      }
-      const element = plan.groups.get(other)!.element;
-      if (
-        element.content?.type === "text" &&
-        !element.appearance.fill &&
-        !element.appearance.strokeWidth
-      )
-        continue; // Check native line bounds after fonts are ready.
-      const stroke =
-        (element.appearance.strokeWidth / 2) *
-        Math.max(element.frame.scaleX, element.frame.scaleY);
-      if (
-        overlap(
-          envelopes.get(id)!,
-          {
-            left: box.left - stroke,
-            top: box.top - stroke,
-            right: box.right + stroke,
-            bottom: box.bottom + stroke,
-          },
-          padding,
-        )
-      )
-        glass.delete(id);
-    }
-  for (const id of glass) {
+
+  for (const id of [...glass]) {
     const box = envelopes.get(id)!;
     if (
       box.right + padding <= 0 ||
@@ -393,8 +265,46 @@ function restorationPlan(
     )
       glass.delete(id);
   }
+
+  // The prototype shares a lower prefix only where consumer cards are provably
+  // disjoint. Otherwise an earlier card is part of the later card's backdrop.
+  const conflicts = new Set<string>();
+  const consumers = [...glass];
+  for (let i = 0; i < consumers.length; i++)
+    for (let j = i + 1; j < consumers.length; j++)
+      if (
+        overlap(
+          envelopes.get(consumers[i])!,
+          envelopes.get(consumers[j])!,
+          padding,
+        )
+      ) {
+        conflicts.add(consumers[i]);
+        conflicts.add(consumers[j]);
+      }
+  for (const id of conflicts) glass.delete(id);
   if (!glass.size) return null;
-  return { plan, glass, background, envelopes, padding };
+
+  const ignoredConsumers = new Set(consumers);
+  const surfaces = new Map<string, PrefixSurfaceRef>();
+  for (const id of [...glass]) {
+    const group = plan.groups.get(id)!;
+    const [, entry] = [...group.inputs][0];
+    const ref =
+      entry.kind === "styled" && entry.backdrop
+        ? planOwnedPrefixSurface(
+            plan,
+            slide,
+            entry.backdrop,
+            ignoredConsumers,
+          )
+        : null;
+    if (!ref) glass.delete(id);
+    else surfaces.set(id, ref);
+  }
+  if (!glass.size) return null;
+
+  return { plan, slide, glass, surfaces, envelopes, padding };
 }
 
 export type RestorationPlan = NonNullable<ReturnType<typeof restorationPlan>>;
