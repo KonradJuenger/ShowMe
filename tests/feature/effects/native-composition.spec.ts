@@ -1038,65 +1038,79 @@ test("scene materializer shares one exact surface across independent regional co
   expect(result.semanticId).toContain("scene:");
 });
 
-test("one failed semantic surface leaves an independent retained surface operational", async () => {
-  await mount(page, "glass", 1, false, false, true);
+test("one failed restoration surface leaves an independent consumer operational", async () => {
+  await mount(page, "glass", 2, true, false, true);
   for (const id of ["lower", "image-b"])
     await page
       .locator('[data-element-id="' + id + '"] img')
       .first()
       .evaluate(async (image: HTMLImageElement) => image.decode());
-  await enableScene(page);
+  await enableScene(page, false);
 
   const result = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow;
+    const plannerPath = "/src/components/compositionBackendPlan.ts";
     const planPath = "/src/components/compositionPlan.ts";
+    const {
+      planCompositionBackends,
+    }: typeof import("../../../src/components/compositionBackendPlan") =
+      await import(/* @vite-ignore */ plannerPath);
     const {
       compileCompositionPlan,
     }: typeof import("../../../src/components/compositionPlan") = await import(
       /* @vite-ignore */ planPath
     );
     const slide = w.model.slides[w.model.deck.slideIds[0]];
-    const plan = compileCompositionPlan(slide, w.model.deck);
-    const lowerOnly = plan.surface({
-      kind: "element-entry",
-      elementId: "mixed-rectangle",
-    })!;
-    const withRectangle = plan.surface({
-      kind: "element-entry",
-      elementId: "mixed-shader",
-    })!;
+    const planningSlide = { ...slide, motion: w.motion };
+    const restoration = planCompositionBackends(
+      compileCompositionPlan(planningSlide, w.model.deck),
+      planningSlide,
+      w.model.deck,
+      { restoration: true, padding: 2 },
+    ).restoration!;
+    const failedSurface = restoration.surfaces.get("glass-1")!;
     const materializer = w.compositor!.materializer;
-    const request = (surface: typeof lowerOnly) => ({
-      surface,
-      region: { x: 0, y: 0, width: 200, height: 160 },
-      density: { x: 1, y: 1 },
-    });
-    const first = await materializer.materialize(request(lowerOnly));
-    w.native.host
-      .querySelector<HTMLElement>('[data-element-id="mixed-rectangle"]')!
-      .remove();
-    await Promise.resolve();
+    const original = materializer.materialize.bind(materializer);
+    materializer.materialize = async (request) => {
+      if (request.surface.id === failedSurface.id)
+        throw new Error("deliberate semantic surface failure");
+      return original(request);
+    };
 
-    let failure = "";
-    try {
-      await materializer.materialize(request(withRectangle));
-    } catch (error) {
-      failure = String(error);
-    }
-    const again = await materializer.materialize(request(lowerOnly));
+    await w.compositor!.flush();
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const good = root.querySelector<HTMLCanvasElement>(
+      '[data-backdrop-restore="glass"] canvas',
+    )!;
+    const failed = root.querySelector<HTMLCanvasElement>(
+      '[data-backdrop-restore="glass-1"] canvas',
+    )!;
     return {
-      failure,
-      sameRevision: first.revision === again.revision,
-      sameSource:
-        first.source.kind === "canvas-image" &&
-        again.source.kind === "canvas-image" &&
-        first.source.value === again.source.value,
+      errors: w.sceneErrors,
+      goodPopulated: good.width > 1,
+      failedPopulated: failed.width > 1,
+      goodOwned: w.compositor!.ownsOpacity("glass"),
+      failedOwned: w.compositor!.ownsOpacity("glass-1"),
+      goodPaint: getComputedStyle(
+        root.querySelector(
+          '[data-element-id="glass"] [data-composition-paint]',
+        )!,
+      ).contentVisibility,
+      failedPaint: getComputedStyle(
+        root.querySelector(
+          '[data-element-id="glass-1"] [data-composition-paint]',
+        )!,
+      ).contentVisibility,
     };
   });
 
-  expect(result.failure).toContain("not fully mounted");
-  expect(result.sameRevision).toBe(true);
-  expect(result.sameSource).toBe(true);
+  expect(result.errors).toEqual(["Error: deliberate semantic surface failure"]);
+  expect(result.goodPopulated).toBe(true);
+  expect(result.failedPopulated).toBe(false);
+  expect(result.goodOwned).toBe(true);
+  expect(result.failedOwned).toBe(false);
+  expect(result.goodPaint).toBe("visible");
+  expect(result.failedPaint).toBe("visible");
 });
 
 test("source changes commit one coherent frame without an async bitmap gap", async () => {
