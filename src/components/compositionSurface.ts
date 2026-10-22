@@ -8,6 +8,7 @@ import {
   type RasterContext,
 } from "./elementRaster";
 import { effectSurface } from "./effectRuntime";
+import { waitForSlideImages } from "./audienceImagePreparation";
 
 export type SurfaceRegion = {
   x: number;
@@ -64,7 +65,11 @@ interface PixelSourceProvider {
     deck: Deck,
     invalidated: () => void,
   ): ReturnType<typeof createScenePrefixRasterSource>;
-  prepare(projection: SourceProjection, root: HTMLElement): Promise<void>;
+  prepare(
+    projection: SourceProjection,
+    root: HTMLElement,
+    signal: AbortSignal,
+  ): Promise<void>;
 }
 
 function effectKey(refs: readonly { elementId: string; effectId: string }[]) {
@@ -157,10 +162,17 @@ const ownedPrimitiveProvider: PixelSourceProvider = {
       false,
     );
   },
-  async prepare(projection, root) {
+  async prepare(projection, root, signal) {
     const nodes = nodesFor(root, projection);
     if (nodes.length !== projection.elements.length)
       throw new Error("Scene surface source is not fully mounted");
+
+    // The mounted MediaSurface may still be resolving its prepared URL and have
+    // no img yet. Use the existing native readiness boundary, scoped to this
+    // projection, before inspecting decoded resources or painting its pixels.
+    await Promise.all(nodes.map((node) => waitForSlideImages(node, signal)));
+    if (signal.aborted)
+      throw new Error("Scene surface materializer is disposed");
 
     const images = nodes.flatMap((node) =>
       Array.from(node.querySelectorAll<HTMLImageElement>("img")),
@@ -258,6 +270,7 @@ export function createSceneSurfaceMaterializer(
   let reuses = 0;
   let invalidations = 0;
   let disposed = false;
+  const preparation = new AbortController();
 
   const notify = () => {
     if (disposed) return;
@@ -281,6 +294,15 @@ export function createSceneSurfaceMaterializer(
     observer = new MutationObserver((records) => {
       const dirty = new Set<string>();
       for (const record of records) {
+        // Shader output events/revisions own pixel invalidation; host reference
+        // clocks also change styles when the owned pixels remain unchanged.
+        if (
+          record.type === "attributes" &&
+          record.attributeName === "style" &&
+          record.target instanceof HTMLElement &&
+          record.target.dataset.effectId
+        )
+          continue;
         const id = ownerId(record.target);
         if (id) dirty.add(id);
         if (record.type === "childList")
@@ -312,6 +334,10 @@ export function createSceneSurfaceMaterializer(
   };
 
   const ensure = (request: MaterializeRequest) => {
+    if (deck.stylesheet)
+      throw new Error(
+        "Scene surface with deck CSS requires browser-owned paint",
+      );
     startObserving();
     const irrelevant = request.irrelevantElementIds ?? new Set<string>();
     const selected = projectionFor(request.surface, slide, irrelevant);
@@ -347,7 +373,11 @@ export function createSceneSurfaceMaterializer(
     const selected = projectionFor(request.surface, slide, irrelevant);
     if (!selected || selected.projection.key !== state.projection.key)
       throw new Error("Scene surface provider changed during materialization");
-    await selected.provider.prepare(selected.projection, root);
+    await selected.provider.prepare(
+      selected.projection,
+      root,
+      preparation.signal,
+    );
 
     const { density } = request;
     if (!(density.x > 0 && density.y > 0))
@@ -388,12 +418,16 @@ export function createSceneSurfaceMaterializer(
         width: deck.width,
         height: deck.height,
       },
-      density: { x: density.x, y: density.y },
+      // The primitive painter maps the logical slide to the rounded backing
+      // size. Publish that actual mapping so fractional-DPI crops use precisely
+      // the same coordinates as the source pixels.
+      density: { x: width / deck.width, y: height / deck.height },
       pixelSize: { width, height },
     };
-    const previous = state.published;
     state.published = next;
-    closePublished(previous);
+    // Previously returned publications may still be held by another consumer.
+    // Clearing their canvas here destroys that revision's pixels. Canvas backing
+    // stores are reclaimed when the publication and its consumers release them.
     return next;
   };
 
@@ -445,6 +479,7 @@ export function createSceneSurfaceMaterializer(
     },
     dispose() {
       disposed = true;
+      preparation.abort();
       observer?.disconnect();
       if (observer) {
         root.removeEventListener("showme-effect-output", sourceSignal);

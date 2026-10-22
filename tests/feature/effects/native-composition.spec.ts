@@ -417,7 +417,7 @@ async function enableScene(page: Page, prepare = true) {
       {
         restoration: plan,
         failed: (_ids, error) => w.sceneErrors!.push(String(error)),
-        density: { x: 1, y: 1 },
+        density: { x: devicePixelRatio, y: devicePixelRatio },
       },
     );
     const apply = w.compositor.apply.bind(w.compositor);
@@ -920,6 +920,14 @@ test("mixed owned prefix is shared across two glass consumers and invalidates on
     await compositor.flush();
     result.laterElement = builds();
 
+    const shaderHost = root.querySelector<HTMLElement>(
+      '[data-element-id="mixed-shader"] [data-effect-id]',
+    )!;
+    shaderHost.style.setProperty("--presentationTime", "999");
+    await Promise.resolve();
+    await compositor.flush();
+    result.sourceReferenceClock = builds();
+
     const lower = root.querySelector<HTMLElement>('[data-element-id="lower"]')!;
     const sourceImage = [
       ...lower.querySelectorAll<HTMLImageElement>("img"),
@@ -959,6 +967,7 @@ test("mixed owned prefix is shared across two glass consumers and invalidates on
   });
   expect(invalidation.result.consumerMotion).toBe(invalidation.result.initial);
   expect(invalidation.result.laterElement).toBe(invalidation.result.initial);
+  expect(invalidation.result.sourceReferenceClock).toBe(invalidation.result.initial);
   expect(invalidation.result.imageSource).toBeGreaterThan(
     invalidation.result.laterElement,
   );
@@ -1009,16 +1018,47 @@ test("scene materializer shares one exact surface across independent regional co
     const first = await materializer.materialize({
       surface,
       region: { x: 70, y: 60, width: 120, height: 90 },
-      density: { x: 1, y: 1 },
+      density: { x: devicePixelRatio, y: devicePixelRatio },
       irrelevantElementIds: restoration.irrelevantConsumers,
     });
     const second = await materializer.materialize({
       surface,
       region: { x: 140, y: 100, width: 80, height: 70 },
-      density: { x: 1, y: 1 },
+      density: { x: devicePixelRatio, y: devicePixelRatio },
       irrelevantElementIds: restoration.irrelevantConsumers,
     });
     const after = materializer.diagnostics();
+    if (
+      first.source.kind !== "canvas-image" ||
+      !(first.source.value instanceof HTMLCanvasElement)
+    )
+      throw new Error("Expected the owned Canvas2D publication");
+    const originalPixels = first.source.value.toDataURL();
+    w.native.host.querySelector<HTMLElement>('[data-element-id="lower"]')!
+      .style.opacity = "0.5";
+    await Promise.resolve();
+    const updated = await materializer.materialize({
+      surface,
+      region: { x: 70, y: 60, width: 120, height: 90 },
+      density: { x: devicePixelRatio, y: devicePixelRatio },
+      irrelevantElementIds: restoration.irrelevantConsumers,
+    });
+    const loading = document.createElement("span");
+    loading.dataset.mediaLoading = "true";
+    w.native.host.querySelector('[data-element-id="lower"]')!.append(loading);
+    let settled = false;
+    const prepared = materializer.materialize({
+      surface,
+      region: { x: 70, y: 60, width: 120, height: 90 },
+      density: { x: 1.333, y: 1.333 },
+      irrelevantElementIds: restoration.irrelevantConsumers,
+    }).then((value) => { settled = true; return value; });
+    // Let the task finish: decoding existing imgs alone must not bypass the
+    // MediaSurface marker while its replacement image has not mounted yet.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const waitedForMedia = !settled;
+    loading.remove();
+    const fractional = await prepared;
     return {
       sameSemanticRef: first.surface === second.surface,
       samePublishedSource:
@@ -1029,6 +1069,14 @@ test("scene materializer shares one exact surface across independent regional co
       buildDelta: after.builds - before.builds,
       reuseDelta: after.reuses - before.reuses,
       semanticId: surface.id,
+      previousPublicationIntact: first.source.value.toDataURL() === originalPixels,
+      updatedRevision: updated.revision > first.revision,
+      waitedForMedia,
+      actualDensity: fractional.density,
+      expectedDensity: {
+        x: fractional.pixelSize.width / fractional.logicalBounds.width,
+        y: fractional.pixelSize.height / fractional.logicalBounds.height,
+      },
     };
   });
 
@@ -1038,6 +1086,10 @@ test("scene materializer shares one exact surface across independent regional co
   expect(result.buildDelta).toBe(0);
   expect(result.reuseDelta).toBeGreaterThanOrEqual(2);
   expect(result.semanticId).toContain("scene:");
+  expect(result.previousPublicationIntact).toBe(true);
+  expect(result.updatedRevision).toBe(true);
+  expect(result.waitedForMedia).toBe(true);
+  expect(result.actualDensity).toEqual(result.expectedDensity);
 });
 
 test("one failed restoration surface leaves an independent consumer operational", async () => {
