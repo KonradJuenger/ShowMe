@@ -50,6 +50,7 @@ jobs:
           tests/feature/effects/composition-plan.test.ts
           tests/feature/effects/native-composition.spec.ts
           tests/registry.json
+          tests/stats.json
           docs/rendering/GENERAL_COMPOSITOR_PROTOTYPE.md
       - run: npx playwright install chromium
       - name: Mixed, CSS backdrop, sampling and audience navigation gates
