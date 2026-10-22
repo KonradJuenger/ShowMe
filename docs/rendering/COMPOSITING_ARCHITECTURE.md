@@ -6,6 +6,32 @@ below retain their original revision and scope.
 
 ## Current verification: 2026-10-22
 
+Image-background follow-up, renderer `229bffc`: the supplied image deck selected
+the fallback route because restoration admitted only a full-slide shader. A fixed
+geometry probe changed the final consumer's alpha from 0.999999 to 1; releasing
+fallback material changed earlier panels by maximum RGB 110/131. Their native
+material therefore did not match the replay at the completion handoff. Static
+clipped images now feed the existing restoration operation, removing that handoff
+without changing native card paint or the unsupported-case fallback.
+
+The new named image regression verifies first-frame readiness, independent source
+placement/content alpha with rotated/flipped media, near-finish continuity, exact
+static native reference, replay, output resizing and cancellation. The native
+selection command below passed all 11 declarations; its image declaration passed
+again after adding the resize assertion. The same browser selection passed all
+26 declarations, including both audience-navigation tests. Registry-selected
+effects/Motion units passed 138 declarations; build, typecheck, changed-file ESLint,
+stats/audit (642 active tests) and whitespace checks passed.
+
+The real image-deck finish filmstrip was reviewed without the flash: 614 visible
+partial-alpha observations had populated restoration and matching inverse alpha,
+and no CSS replay output. All three production lifecycle modes retained
+`native-backdrop-restore`, no missing assets and no effect errors. Cold entry
+retained one 110 ms rAF gap. The
+[image follow-up evidence](evidence/image-background-restoration-2026-10-22.json)
+records the probe, source/build digests and timing provenance. Earlier results
+below describe the original procedural-background workload.
+
 Renderer `506fd7c` follows semantic coordination commit `cba8c57`. Proven local
 CSS omits unnecessary backdrop dependencies; unknown, escaped and external styles
 remain conservative. Regional admission checks descendant effects before treating

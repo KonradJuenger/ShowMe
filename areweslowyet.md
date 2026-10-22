@@ -354,3 +354,38 @@ history in `.benchmark-data/animation/history.jsonl`.
 [Compact evidence](docs/rendering/evidence/composition-coordination-2026-10-22.json)
 records clean revision, source/build/helper digests, environment, all timing
 summaries, regression results and the final real-deck entrance probe.
+
+## 2026-10-22: static image background follow-up
+
+Clean production renderer `229bffc`, supplied
+`ShowMe — Ideas in motion-imagebg.sme` slide 4, normal console/preview, isolated
+library/user data, 1440 ms Presence entrance and six-second observation. The helper
+also copies template assets into the isolated library. No tests/build ran alongside
+the measurement. Electron exited with code 0.
+
+| Lifecycle | Entrance p95 gap | Maximum entrance gap | Steady p95 gap |
+| --- | ---: | ---: | ---: |
+| Cold entry | 16.5 ms | 110.0 ms | 12.7 ms |
+| Warm replay | 18.2 ms | 22.8 ms | 9.7 ms |
+| New audience navigation | 17.4 ms | 33.2 ms | 11.5 ms |
+
+Cold entry had one gap over 33.34 ms; the other entrance and steady intervals had
+none. All modes used three restoration outputs, zero CSS replay outputs, no
+missing assets and no effect errors. Static images do not need continuous shader
+publication. This is a different workload from the procedural-background deck;
+the observations are not a controlled speedup comparison or a claim of physical
+display delivery. A long cold gap remains.
+
+After `npm run build`:
+
+```powershell
+$env:SHOWME_BENCHMARK_OUTPUT='test-results-imagebg-restoration'
+node .agenttmp/benchmark-imagebg.mjs '<path-to-image-background.sme>' 4
+```
+
+[Compact evidence](docs/rendering/evidence/image-background-restoration-2026-10-22.json)
+contains clean revision, environment, source/build/helper digests, timings and the
+real-deck finish probe. The native glass selection passed 11 declarations, CSS/
+mixed composition and both audience-navigation tests passed 26, effects/Motion
+units passed 138, and build/static/registry checks passed (642 active tests).
+Full/release, packaging, macOS and explicit export visual checks were not run.
