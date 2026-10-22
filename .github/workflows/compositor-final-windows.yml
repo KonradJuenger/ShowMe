@@ -48,6 +48,7 @@ jobs:
           src/components/compositionBackendPlan.ts
           src/components/backdropRestoration.ts
           src/components/compositionRuntime.ts
+          src/components/SlideRenderer.tsx
           src/components/elementRaster.ts
           tests/feature/effects/composition-plan.test.ts
           tests/feature/effects/native-composition.spec.ts
