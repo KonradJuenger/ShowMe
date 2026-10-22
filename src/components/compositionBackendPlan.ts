@@ -322,11 +322,30 @@ export function planCompositionBackends(
     restoration: boolean;
     padding: number;
     exclude?: ReadonlySet<string>;
+    /** Ordinary CSS is browser paint. Keep the legacy backdrop backends only
+     * for explicit compositor validation / future scene-pixel consumers. */
+    browserNativeCss?: boolean;
   },
 ) {
+  const browserNativeCss = new Set<string>();
+  if (options.browserNativeCss) {
+    const resources = slide.effectResources ?? {};
+    for (const [id, group] of plan.groups) {
+      if (
+        [...group.inputs.keys()].some((effectId) => {
+          const instance = group.element.effects?.find(
+            (effect) => effect.id === effectId,
+          );
+          return !!instance && resources[instance.resourceId]?.kind === "css";
+        })
+      )
+        browserNativeCss.add(id);
+    }
+  }
+
   const native = new Map<string, { effectId: string; filter: string }>();
   let restoration: RestorationPlan | null = null;
-  if (compositorCapabilities().resolvedBackdrop) {
+  if (!options.browserNativeCss && compositorCapabilities().resolvedBackdrop) {
     for (const [id, route] of nativeBackdropGroups(plan, slide, deck))
       native.set(id, route);
     if (options.restoration)
@@ -338,18 +357,20 @@ export function planCompositionBackends(
   }
   const routes = new Map<
     string,
-    "native-group" | "backdrop-restoration" | "fallback"
+    "browser-native" | "native-group" | "backdrop-restoration" | "fallback"
   >();
   for (const [id, group] of plan.groups)
     if (group.inputs.size)
       routes.set(
         id,
-        native.has(id)
-          ? "native-group"
-          : restoration?.glass.has(id)
-            ? "backdrop-restoration"
-            : "fallback",
+        browserNativeCss.has(id)
+          ? "browser-native"
+          : native.has(id)
+            ? "native-group"
+            : restoration?.glass.has(id)
+              ? "backdrop-restoration"
+              : "fallback",
       );
-  return { native, restoration, routes };
+  return { browserNativeCss, native, restoration, routes };
 }
 export type CompositionBackends = ReturnType<typeof planCompositionBackends>;
