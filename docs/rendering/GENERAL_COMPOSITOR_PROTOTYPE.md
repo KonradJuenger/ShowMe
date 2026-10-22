@@ -72,8 +72,12 @@ intersect B's requested region. The semantic refs remain distinct.
 
 ## Renderer ownership and lifetime
 
-`compositionRuntime.ts` owns one `SceneSurfaceMaterializer` for the active
-composition runtime and passes the service to `backdropRestoration.ts`.
+`SlideRenderer` mounts one `CompositionRuntime` for the active rendered
+scene. That runtime owns one `SceneSurfaceMaterializer` from the scene's
+`{ slide, deck }`, independently of whether restoration is present.
+`backdropRestoration.ts` is registered as the current consumer. The materializer
+starts DOM/source observation lazily on its first pixel request, so scenes with
+no pixel consumer do not pay an idle observation cost.
 
 The materializer owns:
 
