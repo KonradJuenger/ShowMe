@@ -1,35 +1,80 @@
 import type { Deck, Slide } from "../core/document";
-import type { Element } from "../core/element";
+import type { Element as ShowMeElement } from "../core/element";
 import { effectPlacement } from "../core/effects";
 import type { RenderDensity } from "../core/renderProfile";
-import {
-  prefixElements,
-  type BackdropPoint,
-  type CompositionPlan,
-} from "./compositionPlan";
+import type { SceneSurfaceRef } from "./compositionPlan";
 import {
   createScenePrefixRasterSource,
   type RasterContext,
 } from "./elementRaster";
 import { effectSurface } from "./effectRuntime";
 
-export type PrefixSurfaceRef = {
-  id: string;
-  elements: readonly Element[];
+export type SurfaceRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
-export type MaterializedPrefix = {
-  ref: PrefixSurfaceRef;
-  canvas: HTMLCanvasElement;
+export type MaterializeRequest = {
+  surface: SceneSurfaceRef;
+  region: SurfaceRegion;
+  density: Pick<RenderDensity, "x" | "y">;
+  /** Backend proof only. It can optimize materialization but never changes
+   * SceneSurfaceRef identity or semantic paint ordering. */
+  irrelevantElementIds?: ReadonlySet<string>;
+};
+
+export type MaterializedSurfaceSource =
+  | { kind: "canvas-image"; value: CanvasImageSource }
+  | { kind: "gpu-texture"; value: WebGLTexture };
+
+export type MaterializedSurface = {
+  surface: SceneSurfaceRef;
+  source: MaterializedSurfaceSource;
   revision: number;
+  logicalBounds: SurfaceRegion;
+  density: Pick<RenderDensity, "x" | "y">;
+  pixelSize: { width: number; height: number };
 };
 
-const references = new WeakMap<
-  CompositionPlan,
-  Map<string, PrefixSurfaceRef>
->();
+type SourceProjection = {
+  key: string;
+  elements: readonly ShowMeElement[];
+  dependencyIds: ReadonlySet<string>;
+};
 
-function supportsOwnedElement(element: Element, slide: Slide): boolean {
+type RetainedSource = {
+  projection: SourceProjection;
+  source: ReturnType<typeof createScenePrefixRasterSource>;
+  published?: Omit<MaterializedSurface, "surface">;
+  pending?: Promise<Omit<MaterializedSurface, "surface">>;
+};
+
+interface PixelSourceProvider {
+  project(
+    surface: SceneSurfaceRef,
+    slide: Slide,
+    irrelevantElementIds: ReadonlySet<string>,
+  ): SourceProjection | null;
+  create(
+    projection: SourceProjection,
+    root: HTMLElement,
+    slide: Slide,
+    deck: Deck,
+    invalidated: () => void,
+  ): ReturnType<typeof createScenePrefixRasterSource>;
+  prepare(
+    projection: SourceProjection,
+    root: HTMLElement,
+  ): Promise<void>;
+}
+
+function effectKey(refs: readonly { elementId: string; effectId: string }[]) {
+  return JSON.stringify(refs.map((ref) => [ref.elementId, ref.effectId]));
+}
+
+function ownedElementSupported(element: ShowMeElement, slide: Slide): boolean {
   if (element.cssClasses?.length) return false;
   if (element.content && element.content.type !== "image") return false;
   for (const instance of element.effects ?? []) {
@@ -43,58 +88,126 @@ function supportsOwnedElement(element: Element, slide: Slide): boolean {
     )
       return false;
   }
-  return element.children.every((child) => supportsOwnedElement(child, slide));
+  return element.children.every((child) => ownedElementSupported(child, slide));
 }
 
-/** Resolve a semantic backdrop point to one renderer-local retained source.
- * Equal ordered owned-source prefixes inside one CompositionPlan share identity.
- * Restoration consumers can be omitted only when their caller has already
- * proven that they cannot contribute to the requested regions. */
-export function planOwnedPrefixSurface(
-  plan: CompositionPlan,
-  slide: Slide,
-  point: BackdropPoint,
-  ignoredElements: ReadonlySet<string> = new Set(),
-): PrefixSurfaceRef | null {
-  if (point.kind === "effect-entry") {
-    const input = plan.groups.get(point.elementId)?.inputs.get(point.effectId);
-    if (input?.kind !== "styled" || !input.backdrop) return null;
-  }
-  const prefix = prefixElements(plan, point.elementId);
-  if (prefix.partial.size) return null;
-  const elements = prefix.elements.filter(
-    (element) => !ignoredElements.has(element.id),
-  );
-  if (!elements.every((element) => supportsOwnedElement(element, slide)))
-    return null;
+function dependencyIds(elements: readonly ShowMeElement[]) {
+  const ids = new Set<string>();
+  const visit = (element: ShowMeElement) => {
+    ids.add(element.id);
+    element.children.forEach(visit);
+  };
+  elements.forEach(visit);
+  return ids;
+}
 
-  let byKey = references.get(plan);
-  if (!byKey) {
-    byKey = new Map();
-    references.set(plan, byKey);
-  }
-  const key = elements.map((element) => element.id).join("\u001f");
-  let ref = byKey.get(key);
-  if (!ref) {
-    ref = {
-      id: `prefix:${key || "slide-background"}`,
+function nodesFor(
+  root: HTMLElement,
+  projection: SourceProjection,
+): HTMLElement[] {
+  const ids = new Set(projection.elements.map((element) => element.id));
+  return Array.from(
+    root.querySelectorAll<HTMLElement>("[data-element-id]"),
+  ).filter((node) => !!node.dataset.elementId && ids.has(node.dataset.elementId));
+}
+
+/** Capability and execution live together so admission cannot drift from the
+ * primitive painter. Unsupported browser-owned paint remains on fallback. */
+const ownedPrimitiveProvider: PixelSourceProvider = {
+  project(surface, slide, irrelevantElementIds) {
+    if (surface.partial.size) return null;
+    const elements = surface.elements.filter(
+      (element) => !irrelevantElementIds.has(element.id),
+    );
+    if (!elements.every((element) => ownedElementSupported(element, slide)))
+      return null;
+
+    const relevantEntry = surface.entryEffects.filter(
+      (ref) => !irrelevantElementIds.has(ref.elementId),
+    );
+    const relevantPaint = surface.paintEffects.filter(
+      (ref) => !irrelevantElementIds.has(ref.elementId),
+    );
+    // The element projection can reproduce exactly the element-entry paint.
+    // Extra same-element effect-entry paint is not approximated.
+    if (effectKey(relevantEntry) !== effectKey(relevantPaint)) return null;
+
+    const ids = elements.map((element) => element.id);
+    return {
+      key: JSON.stringify([ids, effectKey(relevantPaint)]),
       elements,
+      dependencyIds: dependencyIds(elements),
     };
-    byKey.set(key, ref);
-  }
-  return ref;
-}
+  },
+  create(projection, root, slide, deck, invalidated) {
+    const context: RasterContext = {
+      root,
+      resources: slide.effectResources ?? {},
+      beforeEffect: "",
+      flush: () => {},
+    };
+    return createScenePrefixRasterSource(
+      projection.elements,
+      () => ({ slide, deck }),
+      context,
+      invalidated,
+      false,
+    );
+  },
+  async prepare(projection, root) {
+    const nodes = nodesFor(root, projection);
+    if (nodes.length !== projection.elements.length)
+      throw new Error("Scene surface source is not fully mounted");
 
-type RetainedSource = {
-  ref: PrefixSurfaceRef;
-  source: ReturnType<typeof createScenePrefixRasterSource>;
-  nodes: HTMLElement[];
-  observer: MutationObserver;
-  eventDirty: EventListener;
+    const images = nodes.flatMap((node) =>
+      Array.from(node.querySelectorAll<HTMLImageElement>("img")),
+    );
+    await Promise.all(
+      images.map(async (image) => {
+        if (!image.complete || !image.naturalWidth) await image.decode();
+        if (!image.naturalWidth)
+          throw new Error("Scene surface image failed to decode");
+      }),
+    );
+    for (const node of nodes)
+      for (const effect of node.querySelectorAll<HTMLElement>("[data-effect-id]")) {
+        if (effect.dataset.effectError)
+          throw new Error(effect.dataset.effectError);
+        effectSurface(effect)?.materialize();
+        if (
+          effect.dataset.effectStarted !== "false" &&
+          !effect.querySelector("canvas")
+        )
+          throw new Error("Scene surface effect output is unavailable");
+      }
+  },
 };
 
-export type PrefixMaterializerDiagnostics = {
+const providers: readonly PixelSourceProvider[] = [ownedPrimitiveProvider];
+
+function projectionFor(
+  surface: SceneSurfaceRef,
+  slide: Slide,
+  irrelevantElementIds: ReadonlySet<string>,
+) {
+  for (const provider of providers) {
+    const projection = provider.project(surface, slide, irrelevantElementIds);
+    if (projection) return { provider, projection };
+  }
+  return null;
+}
+
+export function canMaterializeOwnedSurface(
+  surface: SceneSurfaceRef,
+  slide: Slide,
+  irrelevantElementIds: ReadonlySet<string> = new Set(),
+) {
+  return !!projectionFor(surface, slide, irrelevantElementIds);
+}
+
+export type SceneSurfaceMaterializerDiagnostics = {
   surfaces: number;
+  semanticSurfaces: number;
   materializeCalls: number;
   builds: number;
   reuses: number;
@@ -102,142 +215,227 @@ export type PrefixMaterializerDiagnostics = {
   revisions: Record<string, number>;
 };
 
-function ownedNodes(root: HTMLElement, ref: PrefixSurfaceRef) {
-  const ids = new Set(ref.elements.map((element) => element.id));
-  return Array.from(
-    root.querySelectorAll<HTMLElement>("[data-element-id]"),
-  ).filter((node) => !!node.dataset.elementId && ids.has(node.dataset.elementId));
+function ownerId(target: EventTarget | Node | null) {
+  const node =
+    target instanceof HTMLElement || target instanceof SVGElement
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null;
+  return node?.closest<HTMLElement>("[data-element-id]")?.dataset.elementId;
 }
 
-/** Canvas2D is deliberately the retained representation for this prototype.
- * Source-specific knowledge remains in elementRaster/effectRuntime. The
- * materializer owns identity, invalidation and reuse, not paint semantics. */
-export function createPrefixMaterializer(
+function closePublished(
+  published: Omit<MaterializedSurface, "surface"> | undefined,
+) {
+  if (
+    published?.source.kind === "canvas-image" &&
+    published.source.value instanceof ImageBitmap
+  )
+    published.source.value.close();
+}
+
+/** One scene-scoped materializer owns retained source lifetime and immutable
+ * publication. Consumers request semantic surfaces plus regions; Canvas2D may
+ * still retain a full-slide implementation without exposing that assumption. */
+export function createSceneSurfaceMaterializer(
   root: HTMLElement,
   slide: Slide,
   deck: Deck,
-  density: Pick<RenderDensity, "x" | "y">,
-  invalidated: () => void,
 ) {
   const retained = new Map<string, RetainedSource>();
-  let materializeCalls = 0,
-    builds = 0,
-    reuses = 0,
-    invalidations = 0,
-    disposed = false;
+  const semanticSurfaces = new Set<string>();
+  const listeners = new Set<() => void>();
+  let materializeCalls = 0;
+  let builds = 0;
+  let reuses = 0;
+  let invalidations = 0;
+  let disposed = false;
 
-  const ensure = (ref: PrefixSurfaceRef) => {
-    const existing = retained.get(ref.id);
-    if (existing) return existing;
+  const notify = () => {
+    if (disposed) return;
+    for (const listener of listeners) listener();
+  };
 
-    const nodes = ownedNodes(root, ref);
-    if (nodes.length !== ref.elements.length)
-      throw new Error("Scene prefix source is not fully mounted");
-
-    const markDirty = () => {
-      if (disposed) return;
+  const markElementDirty = (elementId: string | undefined) => {
+    if (!elementId || disposed) return;
+    for (const state of retained.values()) {
+      if (!state.projection.dependencyIds.has(elementId)) continue;
       invalidations++;
-      source.markDirty();
-    };
-    const context: RasterContext = {
-      root,
-      resources: slide.effectResources ?? {},
-      beforeEffect: "",
-      flush: () => {},
-    };
-    const source = createScenePrefixRasterSource(
-      ref.elements,
-      () => ({ slide, deck }),
-      context,
-      () => {
-        if (!disposed) invalidated();
-      },
-    );
-
-    const observer = new MutationObserver(markDirty);
-    for (const node of nodes)
-      observer.observe(node, {
-        subtree: true,
-        childList: true,
-        characterData: true,
-        attributes: true,
-        attributeFilter: ["style", "class", "src"],
-      });
-    const eventDirty: EventListener = () => markDirty();
-    for (const node of nodes) {
-      node.addEventListener("showme-effect-output", eventDirty);
-      node.addEventListener("load", eventDirty, true);
-      node.addEventListener("error", eventDirty, true);
+      state.source.markDirty();
     }
-    const state = { ref, source, nodes, observer, eventDirty };
-    retained.set(ref.id, state);
+  };
+
+  const observer = new MutationObserver((records) => {
+    const dirty = new Set<string>();
+    for (const record of records) {
+      const id = ownerId(record.target);
+      if (id) dirty.add(id);
+      if (record.type === "childList")
+        for (const node of [...record.addedNodes, ...record.removedNodes]) {
+          const childId = ownerId(node);
+          if (childId) dirty.add(childId);
+        }
+    }
+    dirty.forEach(markElementDirty);
+  });
+  observer.observe(root, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: [
+      "style",
+      "class",
+      "src",
+      "data-effect-revision",
+      "data-effect-error",
+      "data-effect-started",
+      "data-presentation-absent",
+    ],
+  });
+
+  const sourceSignal = (event: Event) => markElementDirty(ownerId(event.target));
+  root.addEventListener("showme-effect-output", sourceSignal);
+  root.addEventListener("load", sourceSignal, true);
+  root.addEventListener("error", sourceSignal, true);
+
+  const ensure = (request: MaterializeRequest) => {
+    const irrelevant = request.irrelevantElementIds ?? new Set<string>();
+    const selected = projectionFor(request.surface, slide, irrelevant);
+    if (!selected)
+      throw new Error("Scene surface is not materializable by an owned provider");
+    const density = request.density;
+    const key =
+      selected.projection.key +
+      "|density:" +
+      density.x +
+      "x" +
+      density.y;
+    const existing = retained.get(key);
+    if (existing) return existing;
+    const source = selected.provider.create(
+      selected.projection,
+      root,
+      slide,
+      deck,
+      notify,
+    );
+    const state: RetainedSource = {
+      projection: selected.projection,
+      source,
+    };
+    retained.set(key, state);
     return state;
   };
 
-  const prepareOwnedResources = async (state: RetainedSource) => {
-    const images = state.nodes.flatMap((node) =>
-      Array.from(node.querySelectorAll<HTMLImageElement>("img")),
-    );
-    await Promise.all(
-      images.map(async (image) => {
-        if (!image.complete || !image.naturalWidth) await image.decode();
-        if (!image.naturalWidth)
-          throw new Error("Scene prefix image failed to decode");
-      }),
-    );
-    for (const node of state.nodes)
-      for (const effect of node.querySelectorAll<HTMLElement>("[data-effect-id]")) {
-        if (effect.dataset.effectError)
-          throw new Error(effect.dataset.effectError);
-        effectSurface(effect)?.materialize();
-        if (effect.dataset.effectStarted !== "false" && !effect.querySelector("canvas"))
-          throw new Error("Scene prefix effect output is unavailable");
-      }
+  const build = async (
+    state: RetainedSource,
+    request: MaterializeRequest,
+  ): Promise<Omit<MaterializedSurface, "surface">> => {
+    const irrelevant = request.irrelevantElementIds ?? new Set<string>();
+    const selected = projectionFor(request.surface, slide, irrelevant);
+    if (!selected || selected.projection.key !== state.projection.key)
+      throw new Error("Scene surface provider changed during materialization");
+    await selected.provider.prepare(selected.projection, root);
+
+    const { density } = request;
+    if (!(density.x > 0 && density.y > 0))
+      throw new Error("Scene surface density is unavailable");
+    const width = Math.max(1, Math.ceil(deck.width * density.x));
+    const height = Math.max(1, Math.ceil(deck.height * density.y));
+    const changed = state.source.update(width, height);
+    if (!changed && state.published) {
+      reuses++;
+      return state.published;
+    }
+
+    builds++;
+    const frozen = document.createElement("canvas");
+    frozen.width = width;
+    frozen.height = height;
+    const context = frozen.getContext("2d");
+    if (!context) throw new Error("Cannot allocate scene publication surface");
+    context.drawImage(state.source.canvas, 0, 0);
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(frozen);
+    } finally {
+      frozen.width = frozen.height = 1;
+    }
+    if (disposed) {
+      bitmap.close();
+      throw new Error("Scene surface materializer is disposed");
+    }
+
+    const next: Omit<MaterializedSurface, "surface"> = {
+      source: { kind: "canvas-image", value: bitmap },
+      revision: state.source.revision,
+      logicalBounds: {
+        x: 0,
+        y: 0,
+        width: deck.width,
+        height: deck.height,
+      },
+      density: { x: density.x, y: density.y },
+      pixelSize: { width, height },
+    };
+    const previous = state.published;
+    state.published = next;
+    closePublished(previous);
+    return next;
   };
 
   return {
-    async materialize(ref: PrefixSurfaceRef): Promise<MaterializedPrefix> {
-      if (disposed) throw new Error("Prefix materializer is disposed");
+    async materialize(request: MaterializeRequest): Promise<MaterializedSurface> {
+      if (disposed) throw new Error("Scene surface materializer is disposed");
+      if (
+        !Number.isFinite(request.region.x) ||
+        !Number.isFinite(request.region.y) ||
+        !(request.region.width > 0) ||
+        !(request.region.height > 0)
+      )
+        throw new Error("Scene surface region is invalid");
       materializeCalls++;
-      const state = ensure(ref);
-      await prepareOwnedResources(state);
-      if (!(density.x > 0 && density.y > 0))
-        throw new Error("Scene prefix density is unavailable");
-      const width = Math.max(1, Math.ceil(deck.width * density.x));
-      const height = Math.max(1, Math.ceil(deck.height * density.y));
-      const changed = state.source.update(width, height);
-      if (changed) builds++;
+      semanticSurfaces.add(request.surface.id);
+      const state = ensure(request);
+      if (!state.pending)
+        state.pending = build(state, request).finally(() => {
+          state.pending = undefined;
+        });
       else reuses++;
-      return {
-        ref,
-        canvas: state.source.canvas,
-        revision: state.source.revision,
-      };
+      const published = await state.pending;
+      return { surface: request.surface, ...published };
     },
-    diagnostics(): PrefixMaterializerDiagnostics {
+    subscribeInvalidation(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    diagnostics(): SceneSurfaceMaterializerDiagnostics {
       return {
         surfaces: retained.size,
+        semanticSurfaces: semanticSurfaces.size,
         materializeCalls,
         builds,
         reuses,
         invalidations,
         revisions: Object.fromEntries(
-          [...retained.values()].map((state) => [
-            state.ref.id,
-            state.source.revision,
+          [...retained.entries()].map(([key, state]) => [
+            key,
+            state.published?.revision ?? state.source.revision,
           ]),
         ),
       };
     },
     dispose() {
       disposed = true;
+      observer.disconnect();
+      root.removeEventListener("showme-effect-output", sourceSignal);
+      root.removeEventListener("load", sourceSignal, true);
+      root.removeEventListener("error", sourceSignal, true);
+      listeners.clear();
       for (const state of retained.values()) {
-        state.observer.disconnect();
-        for (const node of state.nodes) {
-          node.removeEventListener("showme-effect-output", state.eventDirty);
-          node.removeEventListener("load", state.eventDirty, true);
-          node.removeEventListener("error", state.eventDirty, true);
-        }
+        closePublished(state.published);
         state.source.dispose();
       }
       retained.clear();
@@ -245,4 +443,6 @@ export function createPrefixMaterializer(
   };
 }
 
-export type PrefixMaterializer = ReturnType<typeof createPrefixMaterializer>;
+export type SceneSurfaceMaterializer = ReturnType<
+  typeof createSceneSurfaceMaterializer
+>;
