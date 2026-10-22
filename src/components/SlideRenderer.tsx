@@ -732,8 +732,6 @@ const ElementView = memo(function ElementView({
   const effectRender = useContext(EffectRenderContext);
   const scene = useContext(RasterSceneContext);
   const { plan, backends } = useContext(CompositionContext)!;
-  const nativeBackdrop = backends.native.get(element.id);
-  const restoreBackdrop = backends.restoration?.glass.has(element.id) ?? false;
   const group = plan.groups.get(element.id)!;
   const rasterContent = useMemo(
     () => ({
@@ -760,11 +758,7 @@ const ElementView = memo(function ElementView({
         resources[instance.resourceId].kind === "css" &&
         backends.browserNativeCss.has(element.id)
           ? "browser-native"
-          : nativeBackdrop?.effectId === instance.id
-            ? "hoisted"
-            : restoreBackdrop
-              ? "restoration"
-              : "fallback"
+          : "fallback"
       }
       compositionDependencies={
         resources[instance.resourceId].kind === "css"
@@ -879,73 +873,25 @@ const ElementView = memo(function ElementView({
   };
 
   return (
-    <>
-      <div
-        data-element-id={element.id}
-        data-template-content={inherited ? "true" : undefined}
-        data-showme-id={`showme-${element.id}`}
-        data-showme-part="self"
-        className={element.cssClasses?.join(" ")}
-        style={{
-          position: "absolute",
-          left: frame.x,
-          top: frame.y,
-          width: frame.width,
-          height: frame.height,
-          transform: frameCssTransform(frame),
-          transformOrigin: frameCssOrigin(frame),
-          opacity: nativeBackdrop || restoreBackdrop ? 1 : appearance.opacity,
-        }}
-      >
-        {nativeBackdrop ? (
-          <div
-            data-composition-visual="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              opacity: appearance.opacity,
-              backdropFilter: nativeBackdrop.filter,
-            }}
-          >
-            {lower(group.visual)}
-          </div>
-        ) : restoreBackdrop ? (
-          <div
-            data-composition-paint="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              contentVisibility: "hidden",
-            }}
-          >
-            {lower(group.visual)}
-          </div>
-        ) : (
-          lower(group.visual)
-        )}
-      </div>
-      {restoreBackdrop && (
-        <div
-          data-backdrop-restore={element.id}
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: 0,
-            height: 0,
-            pointerEvents: "none",
-            opacity: 0,
-          }}
-        >
-          <canvas
-            width={1}
-            height={1}
-            style={{ width: "100%", height: "100%", display: "block" }}
-          />
-        </div>
-      )}
-    </>
+    <div
+      data-element-id={element.id}
+      data-template-content={inherited ? "true" : undefined}
+      data-showme-id={`showme-${element.id}`}
+      data-showme-part="self"
+      className={element.cssClasses?.join(" ")}
+      style={{
+        position: "absolute",
+        left: frame.x,
+        top: frame.y,
+        width: frame.width,
+        height: frame.height,
+        transform: frameCssTransform(frame),
+        transformOrigin: frameCssOrigin(frame),
+        opacity: appearance.opacity,
+      }}
+    >
+      {lower(group.visual)}
+    </div>
   );
 });
 
