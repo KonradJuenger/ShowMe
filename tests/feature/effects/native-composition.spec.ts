@@ -484,9 +484,10 @@ test("filled rounded Presence reveals its first restoration with the current Mot
   await enableScene(page, false);
   await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow & {
-      releaseBitmap: () => void;
-      bitmapStarted: Promise<void>;
+      releasePublication: () => void;
+      publicationStarted: Promise<void>;
       entranceFlush: Promise<unknown>;
+      restoreMaterialize: () => void;
     };
     const runtimePath = "/src/components/motionRuntime.ts";
     const {
@@ -494,22 +495,24 @@ test("filled rounded Presence reveals its first restoration with the current Mot
     }: typeof import("../../../src/components/motionRuntime") = await import(
       /* @vite-ignore */ runtimePath
     );
-    const original = window.createImageBitmap.bind(window);
+    const materializer = w.compositor!.materializer;
+    const original = materializer.materialize.bind(materializer);
     let started!: () => void;
-    w.bitmapStarted = new Promise<void>((resolve) => {
+    w.publicationStarted = new Promise<void>((resolve) => {
       started = resolve;
     });
     const held = new Promise<void>((resolve) => {
-      w.releaseBitmap = resolve;
+      w.releasePublication = resolve;
     });
-    window.createImageBitmap = (async (
-      ...args: Parameters<typeof createImageBitmap>
-    ) => {
-      const bitmap = await original(...args);
+    materializer.materialize = async (request) => {
+      const published = await original(request);
       started();
       await held;
-      return bitmap;
-    }) as typeof createImageBitmap;
+      return published;
+    };
+    w.restoreMaterialize = () => {
+      materializer.materialize = original;
+    };
     w.runtime = createMotionRuntime(
       w.native.host,
       { ...w.model.slides[w.model.deck.slideIds[0]], motion: w.motion },
@@ -525,13 +528,13 @@ test("filled rounded Presence reveals its first restoration with the current Mot
       startedAt: 0,
     });
     w.entranceFlush = w.native.advance(0.37);
-    await w.bitmapStarted;
-    // Advance the existing sampler while publication is pending. The eventual
-    // reveal must use this sample, not the one captured before the await.
+    await w.publicationStarted;
+    // Advance the existing sampler while the materializer response is held.
+    // The eventual reveal must use this sample, not the one before the await.
     w.runtime.samplePresence(100);
   });
-  // A screenshot forces an actual painted boundary while the first bitmap is
-  // pending; the fully opaque native card must not paint by itself.
+  // Force an actual paint while restoration is still waiting for its first
+  // materialized response. The fully opaque native card must not paint alone.
   await page.locator(".slide-renderer").screenshot({
     path: "test-results-native-composition/entrance-pending.png",
   });
@@ -552,11 +555,13 @@ test("filled rounded Presence reveals its first restoration with the current Mot
   await expect(page.locator("[data-css-backdrop]:visible")).toHaveCount(0);
   const first = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow & {
-      releaseBitmap: () => void;
+      releasePublication: () => void;
       entranceFlush: Promise<unknown>;
+      restoreMaterialize: () => void;
     };
-    w.releaseBitmap();
+    w.releasePublication();
     await w.entranceFlush;
+    w.restoreMaterialize();
     const node = w.native.host.querySelector<HTMLElement>(
         '[data-element-id="glass"]',
       )!,
