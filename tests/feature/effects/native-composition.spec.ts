@@ -58,7 +58,13 @@ type ProbeWindow = Window & {
 
 async function mount(
   page: Page,
-  mode: "native" | "parent" | "rounded" | "fill" | "glass" = "native",
+  mode:
+    | "native"
+    | "parent"
+    | "rounded"
+    | "fill"
+    | "glass"
+    | "browser-native" = "native",
   count = 1,
   disjoint = false,
   imageBackground = false,
@@ -73,7 +79,8 @@ async function mount(
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
       factoryPath = "/src/core/elementFactory.ts",
       authoringPath = "/src/core/effectAuthoring.ts",
-      effectsPath = "/src/core/effects.ts";
+      effectsPath = "/src/core/effects.ts",
+      textPath = "/src/core/text.ts";
     const {
       mountMixedEffectsHarness,
     }: typeof import("../../helpers/mixedEffectsHarness") = await import(
@@ -88,6 +95,8 @@ async function mount(
       await import(/* @vite-ignore */ authoringPath);
     const { newEffectInstance }: typeof import("../../../src/core/effects") =
       await import(/* @vite-ignore */ effectsPath);
+    const { createTextElement }: typeof import("../../../src/core/text") =
+      await import(/* @vite-ignore */ textPath);
     if (imageBackground || mixedPrefix) {
       const platformPath = "/src/platform/index.ts";
       const { platform }: typeof import("../../../src/platform") = await import(
@@ -127,7 +136,7 @@ async function mount(
             source:
               ":scope { backdrop-filter: blur(12px); background: #ffffff22; }",
           };
-          if (mode === "glass")
+          if (mode === "glass" || mode === "browser-native")
             css.source =
               ":scope { background: linear-gradient(135deg, rgba(255,255,255,.68), rgba(255,255,255,.24)); backdrop-filter: blur(26px) saturate(125%); border: 1px solid rgba(255,255,255,.78); border-radius: 28px; box-shadow: 0 24px 65px rgba(39,65,130,.12), inset 0 1px 0 rgba(255,255,255,.8); overflow: hidden; }";
           slide.effectResources = { shader, css };
@@ -197,10 +206,16 @@ async function mount(
           glass.frame.width = 300;
           glass.frame.height = 200;
           glass.appearance.fill =
-            mode === "fill" || mode === "glass" ? "#ffffff22" : "";
+            mode === "fill" || mode === "glass" || mode === "browser-native"
+              ? "#ffffff22"
+              : "";
           glass.appearance.radius =
-            mode === "glass" ? 28 : mode === "rounded" ? 18 : 0;
-          if (mode === "glass") glass.clipChildren = true;
+            mode === "glass" || mode === "browser-native"
+              ? 28
+              : mode === "rounded"
+                ? 18
+                : 0;
+          if (mode === "glass" || mode === "browser-native") glass.clipChildren = true;
           glass.effects = [newEffectInstance("css", css, "content")];
           const a = createBasicShape("a", "rectangle", { x: 40, y: 40 }),
             b = createBasicShape("b", "rectangle", { x: 80, y: 80 });
@@ -211,6 +226,17 @@ async function mount(
           a.appearance.fill = "#ff000088";
           b.appearance.fill = "#00ff0088";
           glass.children = [a, b];
+          if (mode === "browser-native") {
+            const label = createTextElement("glass-label", { x: 28, y: 132 });
+            label.frame.width = 230;
+            label.frame.height = 46;
+            if (label.content?.type === "text") {
+              label.content.text = "Native CSS glass";
+              if (label.content.format.kind === "local")
+                label.content.format.typography.fontSize = 24;
+            }
+            glass.children.push(label);
+          }
           const group = createBasicShape("group", "rectangle", {
             x: 0,
             y: 0,
@@ -267,8 +293,30 @@ async function mount(
             };
             sources.push(rectangle, shaderLayer, imageB);
           }
-          slide.nodes[0].children =
-            mode === "parent" ? [lower, group] : [...sources, glass];
+          if (mode === "browser-native") {
+            const underlay = createBasicShape("translucent-underlay", "rectangle", {
+              x: 36,
+              y: 42,
+            });
+            underlay.frame.width = 380;
+            underlay.frame.height = 230;
+            underlay.appearance.fill = "#ef3c7d66";
+            const foreground = createBasicShape("foreground", "ellipse", {
+              x: 330,
+              y: 118,
+            });
+            foreground.frame.width = 180;
+            foreground.frame.height = 180;
+            foreground.appearance.fill = "#18c9d999";
+            slide.nodes[0].children = [
+              ...sources,
+              underlay,
+              glass,
+              foreground,
+            ];
+          } else
+            slide.nodes[0].children =
+              mode === "parent" ? [lower, group] : [...sources, glass];
           for (let index = 1; index < count; index++) {
             const copy = structuredClone(glass);
             copy.id = `glass-${index}`;
@@ -304,46 +352,172 @@ async function mount(
             later.appearance.fill = "#22dd88";
             slide.nodes[0].children.push(later);
           }
-          slide.motion = {
-            stages: [
-              {
-                id: "stage",
-                tracks: [],
-                blocks: [
-                  {
-                    id: "presence",
-                    label: "Presence",
-                    members: [],
-                    binding: {
-                      kind: "presence",
-                      elementId: mode === "parent" ? "group" : "glass",
+          if (mode === "browser-native") {
+            slide.motion = {
+              stages: [
+                {
+                  id: "stage",
+                  tracks: [
+                    {
+                      id: "browser-move-x",
+                      elementId: "glass",
+                      property: "transform.x",
+                      keyframes: [
+                        {
+                          id: "browser-move-x-a",
+                          at: 0,
+                          value: { type: "absolute", value: 80 },
+                          easeToNext: [0, 0, 1, 1],
+                        },
+                        {
+                          id: "browser-move-x-b",
+                          at: 1000,
+                          value: { type: "absolute", value: 170 },
+                        },
+                      ],
                     },
-                    presenceSchedule: {
-                      version: 1,
-                      startOffsetMs: 0,
-                      end: { mode: "none" },
-                      enterTransition: {
-                        kind: "move",
-                        durationMs: 1000,
-                        easing: [0, 0, 1, 1],
-                        direction: "Up",
-                        distance: 30,
-                      },
-                      exitTransition: {
-                        kind: "none",
-                        durationMs: 1000,
-                        easing: [0, 0, 1, 1],
+                    {
+                      id: "browser-scale-x",
+                      elementId: "glass",
+                      property: "transform.scaleX",
+                      keyframes: [
+                        {
+                          id: "browser-scale-x-a",
+                          at: 0,
+                          value: { type: "absolute", value: 0.9 },
+                          easeToNext: [0, 0, 1, 1],
+                        },
+                        {
+                          id: "browser-scale-x-b",
+                          at: 1000,
+                          value: { type: "absolute", value: 1.12 },
+                        },
+                      ],
+                    },
+                    {
+                      id: "browser-scale-y",
+                      elementId: "glass",
+                      property: "transform.scaleY",
+                      keyframes: [
+                        {
+                          id: "browser-scale-y-a",
+                          at: 0,
+                          value: { type: "absolute", value: 0.92 },
+                          easeToNext: [0, 0, 1, 1],
+                        },
+                        {
+                          id: "browser-scale-y-b",
+                          at: 1000,
+                          value: { type: "absolute", value: 1.05 },
+                        },
+                      ],
+                    },
+                    {
+                      id: "browser-rotate",
+                      elementId: "glass",
+                      property: "transform.rotation",
+                      keyframes: [
+                        {
+                          id: "browser-rotate-a",
+                          at: 0,
+                          value: { type: "absolute", value: -6 },
+                          easeToNext: [0, 0, 1, 1],
+                        },
+                        {
+                          id: "browser-rotate-b",
+                          at: 1000,
+                          value: { type: "absolute", value: 10 },
+                        },
+                      ],
+                    },
+                    {
+                      id: "browser-fade",
+                      elementId: "glass",
+                      property: "appearance.opacity",
+                      keyframes: [
+                        {
+                          id: "browser-fade-a",
+                          at: 0,
+                          value: { type: "absolute", value: 0.25 },
+                          easeToNext: [0, 0, 1, 1],
+                        },
+                        {
+                          id: "browser-fade-b",
+                          at: 1000,
+                          value: { type: "absolute", value: 0.9 },
+                        },
+                      ],
+                    },
+                  ],
+                  blocks: [
+                    {
+                      id: "browser-presence",
+                      label: "Presence",
+                      members: [],
+                      binding: { kind: "presence", elementId: "glass" },
+                      presenceSchedule: {
+                        version: 1,
+                        startOffsetMs: 0,
+                        end: { mode: "after", durationMs: 1000 },
+                        enterTransition: {
+                          kind: "move",
+                          durationMs: 250,
+                          easing: [0, 0, 1, 1],
+                          direction: "Up",
+                          distance: 30,
+                        },
+                        exitTransition: {
+                          kind: "fade",
+                          durationMs: 300,
+                          easing: [0, 0, 1, 1],
+                        },
                       },
                     },
-                  },
-                ],
-              },
-            ],
-          };
-          (window as unknown as ProbeWindow).motion = slide.motion;
-          // The diagnostic owns exact Motion samples. Do not also start the
-          // harness hook's separate Presence sampler for the same element.
-          if (mode !== "parent") delete slide.motion;
+                  ],
+                },
+              ],
+            };
+          } else {
+            slide.motion = {
+              stages: [
+                {
+                  id: "stage",
+                  tracks: [],
+                  blocks: [
+                    {
+                      id: "presence",
+                      label: "Presence",
+                      members: [],
+                      binding: {
+                        kind: "presence",
+                        elementId: mode === "parent" ? "group" : "glass",
+                      },
+                      presenceSchedule: {
+                        version: 1,
+                        startOffsetMs: 0,
+                        end: { mode: "none" },
+                        enterTransition: {
+                          kind: "move",
+                          durationMs: 1000,
+                          easing: [0, 0, 1, 1],
+                          direction: "Up",
+                          distance: 30,
+                        },
+                        exitTransition: {
+                          kind: "none",
+                          durationMs: 1000,
+                          easing: [0, 0, 1, 1],
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            };
+          }
+          (window as unknown as ProbeWindow).motion = slide.motion!;
+          // Legacy compositor diagnostics own exact samples themselves.
+          if (mode !== "parent" && mode !== "browser-native") delete slide.motion;
         },
       },
     );
@@ -1472,206 +1646,140 @@ test("backend selection is regional for bounded unrelated paint and overlapping 
   expect(result.route).toBe("backdrop-restoration");
 });
 
-test("renderer-owned cropped restoration is prepared before entry and remains coherent through replay and disposal", async () => {
-  await mount(page, "glass");
+test("browser-native CSS glass bypasses compositor materialization during ordinary Motion", async () => {
+  await mount(page, "browser-native", 1, false, true);
+  await page
+    .locator('[data-element-id="lower"] img')
+    .evaluate(async (image: HTMLImageElement) => image.decode());
   const result = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow;
+    await w.native.setMotion({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 500,
+      running: false,
+      startedAt: 1000,
+    });
+    await w.native.advance(0.37);
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const glass = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
+    const effect = glass.querySelector<HTMLElement>("[data-effect-id]")!;
+    const foreground = root.querySelector<HTMLElement>(
+      '[data-element-id="foreground"]',
+    )!;
+    return {
+      backend: root.dataset.compositionBackend ?? null,
+      restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+      replay: root.querySelectorAll("[data-css-backdrop]").length,
+      splitVisual: root.querySelectorAll("[data-composition-visual]").length,
+      effectCanvas: effect.querySelectorAll(":scope > canvas").length,
+      backdrop: getComputedStyle(effect).backdropFilter,
+      opacity: Number(glass.style.opacity),
+      transform: getComputedStyle(glass).transform,
+      text: glass.textContent,
+      foregroundAfter: Boolean(
+        glass.compareDocumentPosition(foreground) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+      captures: w.native.inspect().diagnostics.captures,
+    };
+  });
+  expect(result.backend).toBeNull();
+  expect(result.restoration).toBe(0);
+  expect(result.replay).toBe(0);
+  expect(result.splitVisual).toBe(0);
+  expect(result.effectCanvas).toBe(0);
+  expect(result.backdrop).not.toBe("none");
+  expect(result.opacity).toBeGreaterThan(0.25);
+  expect(result.opacity).toBeLessThan(0.9);
+  expect(result.transform).not.toBe("none");
+  expect(result.text).toContain("Native CSS glass");
+  expect(result.foregroundAfter).toBe(true);
+  expect(result.captures).toBe(0);
+});
+
+test("Move Scale Rotate and Fade stay on the mounted DOM hot path", async () => {
+  await mount(page, "browser-native", 1, false, true);
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const runtimePath = "/src/components/motionRuntime.ts";
+    const {
+      createMotionRuntime,
+    }: typeof import("../../../src/components/motionRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
     const slide = w.model.slides[w.model.deck.slideIds[0]];
-    slide.motion = w.motion;
-    const state = {
+    const glass = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
+    const effect = glass.querySelector<HTMLElement>("[data-effect-id]")!;
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((next) => records.push(...next));
+    observer.observe(root, { subtree: true, childList: true, attributes: true });
+    const runtime = createMotionRuntime(root, slide, 0);
+    runtime.sync({
       stageId: "stage",
       stageIndex: 0,
       time: 0,
       running: false,
-      startedAt: 1000,
+      startedAt: 0,
+    });
+    const start = {
+      transform: getComputedStyle(glass).transform,
+      opacity: Number(glass.style.opacity),
     };
-    await w.native.setMotion(state);
-    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
-    const node = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
-    const overlay = root.querySelector<HTMLElement>(
-      '[data-backdrop-restore="glass"]',
-    )!;
-    const canvas = overlay.querySelector("canvas")!;
-    const source = root.querySelector<HTMLCanvasElement>(
-      '[data-element-id="lower"] canvas',
-    )!;
-    const prepared = {
-      width: canvas.width,
-      height: canvas.height,
-      sourceWidth: source.width,
-      sourceHeight: source.height,
+    runtime.sync({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 500,
+      running: false,
+      startedAt: 0,
+    });
+    const middle = {
+      transform: getComputedStyle(glass).transform,
+      opacity: Number(glass.style.opacity),
+      sameNode:
+        glass ===
+          root.querySelector<HTMLElement>('[data-element-id="glass"]') &&
+        effect === glass.querySelector<HTMLElement>("[data-effect-id]"),
     };
-    await w.native.setMotion({ ...state, time: 1 });
-    const first = {
-      opacity: Number(node.style.opacity),
-      restoration: Number(overlay.style.opacity),
-      ready: canvas.width > 1,
-      paint: getComputedStyle(node.querySelector("[data-composition-paint]")!)
-        .contentVisibility,
-    };
-    await w.native.setMotion({ ...state, time: 1000 });
-    const retained =
-      canvas.width === prepared.width && canvas.height === prepared.height;
-    await w.native.setMotion({ ...state, time: 1 });
-    const replay = {
-      ready: canvas.width > 1,
-      restoration: Number(overlay.style.opacity),
-    };
-    const backend = root.dataset.compositionBackend;
-    await w.native.setMotion(null);
+    runtime.sync({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 900,
+      running: false,
+      startedAt: 0,
+    });
+    await Promise.resolve();
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+    const childList = records.filter(
+      (record) => record.type === "childList",
+    ).length;
+    const attributes = records.filter(
+      (record) => record.type === "attributes",
+    ).length;
+    runtime.cancel();
     return {
-      prepared,
-      first,
-      retained,
-      replay,
-      backend,
-      remaining: root.querySelectorAll("[data-backdrop-restore]").length,
-      released: canvas.width === 1 && canvas.height === 1,
-      captures: w.native.inspect().diagnostics.captures,
+      start,
+      middle,
+      childList,
+      attributes,
+      restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+      replay: root.querySelectorAll("[data-css-backdrop]").length,
+      restored: {
+        opacity: glass.style.opacity,
+        absent: glass.dataset.presentationAbsent,
+      },
     };
   });
-  expect(result.backend).toBe("native-backdrop-restore");
-  expect(result.prepared.width).toBeLessThan(result.prepared.sourceWidth);
-  expect(result.prepared.height).toBeLessThan(result.prepared.sourceHeight);
-  expect(result.first.ready).toBe(true);
-  expect(result.first.paint).toBe("visible");
-  expect(result.first.opacity).toBe(1);
-  expect(result.first.restoration).toBeCloseTo(0.999, 5);
-  expect(result.retained).toBe(true);
-  expect(result.replay.ready).toBe(true);
-  expect(result.replay.restoration).toBeCloseTo(result.first.restoration, 5);
-  expect(result.remaining).toBe(0);
-  expect(result.released).toBe(true);
-  expect(result.captures).toBe(0);
-});
-
-test("image-backed glass keeps native paint through the final Move In frame and replay", async () => {
-  await mount(page, "glass", 1, false, true);
-  await page
-    .locator('[data-element-id="lower"] img')
-    .evaluate(async (image: HTMLImageElement) => image.decode());
-  const reference = await image(page);
-  const state = {
-    stageId: "stage",
-    stageIndex: 0,
-    time: 0,
-    running: false,
-    startedAt: 1000,
-  };
-  const sample = async (time: number) =>
-    page.evaluate(
-      async (state) => {
-        const w = window as unknown as ProbeWindow;
-        const slide = w.model.slides[w.model.deck.slideIds[0]];
-        slide.motion = w.motion;
-        await w.native.setMotion(state);
-        const root =
-          w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
-        const node = root.querySelector<HTMLElement>(
-          '[data-element-id="glass"]',
-        )!;
-        const output = root.querySelector<HTMLElement>(
-          '[data-backdrop-restore="glass"]',
-        )!;
-        return {
-          backend: root.dataset.compositionBackend,
-          opacity: Number(node.style.opacity),
-          alpha: Number(output.style.opacity),
-          ready: output.querySelector("canvas")!.width > 1,
-          width: output.querySelector("canvas")!.width,
-          paint: getComputedStyle(
-            node.querySelector("[data-composition-paint]")!,
-          ).contentVisibility,
-          captures: w.native.inspect().diagnostics.captures,
-          replay: root.querySelectorAll("[data-css-backdrop]").length,
-        };
-      },
-      { ...state, time },
-    );
-  const first = await sample(1);
-  expect(first).toMatchObject({
-    backend: "native-backdrop-restore",
-    opacity: 1,
-    ready: true,
-    paint: "visible",
-    captures: 0,
-    replay: 0,
-  });
-  expect(first.alpha).toBeCloseTo(0.999, 5);
-  const near = await sample(999.999);
-  const almost = await image(page);
-  const final = await sample(1000);
-  const complete = await image(page);
-  expect(near.ready).toBe(true);
-  expect(near.alpha).toBeCloseTo(0.000001, 6);
-  expect(final).toMatchObject({
-    backend: "native-backdrop-restore",
-    opacity: 1,
-    alpha: 0,
-    ready: true,
-    captures: 0,
-    replay: 0,
-  });
-  let boundaryMax = 0,
-    referenceMax = 0,
-    boundaryError = 0;
-  for (let i = 0; i < complete.length; i++) {
-    boundaryMax = Math.max(boundaryMax, Math.abs(almost[i] - complete[i]));
-    referenceMax = Math.max(referenceMax, Math.abs(reference[i] - complete[i]));
-    boundaryError += Math.abs(almost[i] - complete[i]);
-  }
-  // The final subpixel translation can change native edge antialiasing.
-  expect(boundaryMax).toBeLessThanOrEqual(8);
-  expect(boundaryError / complete.length).toBeLessThan(0.1);
-  expect(referenceMax).toBeLessThanOrEqual(2);
-  // Check the image source independently of the finish comparison: keeping a
-  // wrongly placed source would also avoid a handoff, but would not compose.
-  await sample(1000);
-  await page.evaluate(() => {
-    const w = window as unknown as ProbeWindow;
-    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
-    root.querySelector<HTMLElement>(
-      '[data-backdrop-restore="glass"]',
-    )!.style.opacity = "0.5";
-    root.querySelector<HTMLElement>(
-      '[data-element-id="glass"]',
-    )!.style.transform = "none";
-  });
-  const faded = await image(page);
-  await page
-    .locator('[data-element-id="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.visibility = "hidden";
-    });
-  await page
-    .locator('[data-backdrop-restore="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.opacity = "0";
-    });
-  const background = await image(page);
-  let error = 0;
-  for (let i = 0; i < faded.length; i++)
-    error = Math.max(
-      error,
-      Math.abs(faded[i] - (complete[i] + background[i]) * 0.5),
-    );
-  expect(error).toBeLessThanOrEqual(3);
-  await page
-    .locator('[data-element-id="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.visibility = "";
-    });
-  expect((await sample(1)).alpha).toBeCloseTo(first.alpha, 5);
-  await page.evaluate(() =>
-    (window as unknown as ProbeWindow).native.setZoom(0.5),
-  );
-  const resized = await sample(1);
-  expect(resized.ready).toBe(true);
-  expect(resized.width).toBeLessThan(first.width);
-  await page.evaluate(() =>
-    (window as unknown as ProbeWindow).native.setMotion(null),
-  );
-  await expect(page.locator("[data-backdrop-restore]")).toHaveCount(0);
+  expect(result.middle.sameNode).toBe(true);
+  expect(result.middle.transform).not.toBe(result.start.transform);
+  expect(result.middle.opacity).toBeGreaterThan(result.start.opacity);
+  expect(result.childList).toBe(0);
+  expect(result.attributes).toBeGreaterThan(0);
+  expect(result.restoration).toBe(0);
+  expect(result.replay).toBe(0);
+  expect(result.restored.absent).toBeUndefined();
 });
 
 test("restoration consumes ordinary opacity samples without reading animated DOM values", async () => {
@@ -1770,212 +1878,152 @@ test("restoration consumes ordinary opacity samples without reading animated DOM
   expect(result.cancelled).toEqual({ opacity: "1", restoration: 0 });
 });
 
-test("eligible native groups preserve resolved pixels through actual Move In without prefix replay", async () => {
-  await mount(page);
+test("Presence enter and exit keeps the native CSS subtree mounted", async () => {
+  await mount(page, "browser-native", 1, false, true);
   const result = await page.evaluate(async () => {
-    const h = (window as unknown as ProbeWindow).native;
+    const w = window as unknown as ProbeWindow;
     const runtimePath = "/src/components/motionRuntime.ts";
     const {
       createMotionRuntime,
     }: typeof import("../../../src/components/motionRuntime") = await import(
       /* @vite-ignore */ runtimePath
     );
-    const slide = h.host.querySelector(".slide-renderer")!;
-    const model = (window as unknown as ProbeWindow).model;
-    const s = {
-      ...model.slides[model.deck.slideIds[0]],
-      motion: (window as unknown as ProbeWindow).motion,
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    const glass = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
+    const effect = glass.querySelector<HTMLElement>("[data-effect-id]")!;
+    const runtime = createMotionRuntime(root, slide, 0);
+    const sample = (time: number) => {
+      runtime.sync({
+        stageId: "stage",
+        stageIndex: 0,
+        time,
+        running: false,
+        startedAt: 0,
+      });
+      return {
+        absent: glass.dataset.presentationAbsent,
+        visibility: glass.style.visibility,
+        contentVisibility: glass.style.contentVisibility,
+        pointerEvents: glass.style.pointerEvents,
+        inert: glass.inert,
+        opacity: Number(glass.style.opacity),
+        sameEffect: effect === glass.querySelector("[data-effect-id]"),
+      };
     };
-    const rt = createMotionRuntime(slide as HTMLElement, s, 0);
-    (window as unknown as ProbeWindow).runtime = rt;
-    await rt.sync({
+    const entering = sample(100);
+    const present = sample(800);
+    const exiting = sample(1200);
+    const absent = sample(1300);
+    runtime.cancel();
+    return {
+      entering,
+      present,
+      exiting,
+      absent,
+      restored: {
+        visibility: glass.style.visibility,
+        contentVisibility: glass.style.contentVisibility,
+        inert: glass.inert,
+        absent: glass.dataset.presentationAbsent,
+      },
+      customOutputs:
+        root.querySelectorAll("[data-backdrop-restore], [data-css-backdrop]")
+          .length,
+    };
+  });
+  expect(result.entering.absent).toBe("false");
+  expect(result.entering.sameEffect).toBe(true);
+  expect(result.present.absent).toBe("false");
+  expect(result.exiting.absent).toBe("false");
+  expect(result.exiting.opacity).toBeLessThan(result.present.opacity);
+  expect(result.absent).toMatchObject({
+    absent: "true",
+    visibility: "hidden",
+    contentVisibility: "hidden",
+    pointerEvents: "none",
+    inert: true,
+    sameEffect: true,
+  });
+  expect(result.restored).toEqual({
+    visibility: "",
+    contentVisibility: "",
+    inert: false,
+    absent: undefined,
+  });
+  expect(result.customOutputs).toBe(0);
+});
+
+test("later foreground content and group alpha keep Chromium CSS semantics", async () => {
+  await mount(page, "browser-native", 1, false, true);
+  const result = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    await w.native.setMotion({
       stageId: "stage",
       stageIndex: 0,
       time: 500,
       running: false,
       startedAt: 0,
     });
-    await h.advance(0.37);
-    // Motion's clock delivery queues an Effect flush; settle that cohort before
-    // freezing the shader for all three pixel observations.
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)),
-    );
-    await h.advance(0.37);
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)),
-    );
-    const node = slide.querySelector<HTMLElement>('[data-element-id="glass"]')!,
-      visual = node.querySelector<HTMLElement>(
-        ":scope > [data-composition-visual]",
-      )!;
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const glass = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
+    const effect = glass.querySelector<HTMLElement>("[data-effect-id]")!;
+    const foreground = root.querySelector<HTMLElement>(
+      '[data-element-id="foreground"]',
+    )!;
+    glass.style.opacity = "0.5";
+    await w.native.advance(0.37);
     return {
-      alpha: Number(visual.style.opacity),
-      transportAlpha: node.style.opacity,
-      transform: node.style.transform,
-      captures: h.inspect().diagnostics.captures,
-      errors: h.inspect().errors,
+      opacity: Number(getComputedStyle(glass).opacity),
+      backdrop: getComputedStyle(effect).backdropFilter,
+      restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+      replay: root.querySelectorAll("[data-css-backdrop]").length,
+      splitVisual: root.querySelectorAll("[data-composition-visual]").length,
+      foregroundAfter: Boolean(
+        glass.compareDocumentPosition(foreground) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
     };
   });
-  expect(result.alpha).toBeCloseTo(0.5);
-  expect(result.transportAlpha).toBe("1");
-  expect(result.transform).not.toBe("none");
-  expect(result.errors).toEqual([]);
-  const faded = await image(page);
-  await page
-    .locator("[data-composition-visual]")
-    .evaluate((node: HTMLElement) => {
-      node.style.opacity = "1";
-    });
-  const full = await image(page);
-  await page
-    .locator("[data-composition-visual]")
-    .evaluate((visual: HTMLElement) => {
-      visual.style.backdropFilter = "none";
-      visual
-        .querySelector<HTMLElement>("[data-effect-id]")!
-        .style.removeProperty("backdrop-filter");
-    });
-  const reference = await image(page);
-  let staticMax = 0;
-  for (let i = 0; i < full.length; i++)
-    staticMax = Math.max(staticMax, Math.abs(full[i] - reference[i]));
-  expect(staticMax).toBeLessThanOrEqual(1);
-  await page
-    .locator("[data-composition-visual]")
-    .evaluate((visual: HTMLElement) => {
-      visual.style.backdropFilter = "blur(12px)";
-      visual.querySelector<HTMLElement>(
-        "[data-effect-id]",
-      )!.style.backdropFilter = "none";
-    });
-  await page
-    .locator('[data-element-id="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.visibility = "hidden";
-    });
-  const backdrop = await image(page);
-  let max = 0,
-    sum = 0;
-  for (let i = 0; i < faded.length; i++) {
-    const error = Math.abs(faded[i] - (full[i] + backdrop[i]) * 0.5);
-    max = Math.max(max, error);
-    sum += error;
-  }
-  expect(sum / faded.length).toBeLessThan(0.2);
-  expect(max).toBeLessThanOrEqual(2);
-  expect(result.captures).toBe(0);
-  await expect(page.locator("[data-css-backdrop]")).toHaveCount(0);
-  const restored = await page.evaluate(() => {
+  expect(result.opacity).toBeCloseTo(0.5);
+  expect(result.backdrop).not.toBe("none");
+  expect(result.restoration).toBe(0);
+  expect(result.replay).toBe(0);
+  expect(result.splitVisual).toBe(0);
+  expect(result.foregroundAfter).toBe(true);
+});
+
+test("generated shader layers remain operational beside browser-native CSS", async () => {
+  await mount(page, "native");
+  const result = await page.evaluate(async () => {
     const w = window as unknown as ProbeWindow;
-    w.runtime!.cancel();
-    const owner = w.native.host.querySelector<HTMLElement>(
-      '[data-element-id="glass"]',
+    await w.native.advance(0.37);
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const generated = root.querySelector<HTMLElement>(
+      '[data-element-id="lower"] [data-effect-id]',
+    )!;
+    const canvas = generated.querySelector<HTMLCanvasElement>(":scope > canvas")!;
+    const css = root.querySelector<HTMLElement>(
+      '[data-element-id="glass"] [data-effect-id]',
     )!;
     return {
-      alpha: owner.querySelector<HTMLElement>("[data-composition-visual]")!
-        .style.opacity,
-      transport: owner.style.opacity,
+      generatedReady: generated.dataset.effectReady,
+      shaderWidth: canvas.width,
+      shaderHeight: canvas.height,
+      cssCanvas: css.querySelectorAll(":scope > canvas").length,
+      backdrop: getComputedStyle(css).backdropFilter,
+      restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+      replay: root.querySelectorAll("[data-css-backdrop]").length,
+      errors: w.native.inspect().errors,
     };
   });
-  expect(restored).toEqual({ alpha: "1", transport: "1" });
-});
-
-test("outer alpha, rounded clipping and intervening fill retain the correctness fallback", async () => {
-  for (const mode of ["parent", "rounded", "fill"] as const) {
-    await mount(page, mode);
-    await expect(page.locator("[data-composition-visual]")).toHaveCount(0);
-    const owner = mode === "parent" ? "group" : "glass";
-    await page
-      .locator(`[data-element-id="${owner}"]`)
-      .evaluate((node: HTMLElement) => {
-        node.style.opacity = ".5";
-      });
-    await page.evaluate(() =>
-      (window as unknown as ProbeWindow).native.advance(0.37),
-    );
-    await expect(page.locator("[data-css-backdrop]")).toBeVisible();
-  }
-});
-
-test("ordinary opacity and move tracks share the split targets and restore both owners", async () => {
-  await mount(page);
-  const result = await page.evaluate(async () => {
-    const w = window as unknown as ProbeWindow;
-    const runtimePath = "/src/components/motionRuntime.ts";
-    const {
-      createMotionRuntime,
-    }: typeof import("../../../src/components/motionRuntime") = await import(
-      /* @vite-ignore */ runtimePath
-    );
-    const slide = { ...w.model.slides[w.model.deck.slideIds[0]] };
-    slide.motion = {
-      stages: [
-        {
-          id: "stage",
-          tracks: [
-            {
-              id: "move",
-              elementId: "glass",
-              property: "transform.x",
-              keyframes: [
-                {
-                  id: "x0",
-                  at: 0,
-                  value: { type: "absolute", value: 80 },
-                  easeToNext: [0, 0, 1, 1],
-                },
-                { id: "x1", at: 1000, value: { type: "absolute", value: 180 } },
-              ],
-            },
-            {
-              id: "fade",
-              elementId: "glass",
-              property: "appearance.opacity",
-              keyframes: [
-                {
-                  id: "o0",
-                  at: 0,
-                  value: { type: "absolute", value: 0 },
-                  easeToNext: [0, 0, 1, 1],
-                },
-                { id: "o1", at: 1000, value: { type: "absolute", value: 1 } },
-              ],
-            },
-          ],
-        },
-      ],
-    };
-    const rt = createMotionRuntime(w.native.host, slide, 0);
-    rt.sync({
-      stageId: "stage",
-      stageIndex: 0,
-      time: 500,
-      running: false,
-      startedAt: 0,
-    });
-    const owner = w.native.host.querySelector<HTMLElement>(
-        '[data-element-id="glass"]',
-      )!,
-      visual = owner.querySelector<HTMLElement>("[data-composition-visual]")!;
-    const intermediate = {
-      alpha: Number(visual.style.opacity),
-      outer: owner.style.opacity,
-      movement: new DOMMatrix(getComputedStyle(owner).transform).e,
-    };
-    rt.cancel();
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)),
-    );
-    return {
-      intermediate,
-      restored: { alpha: visual.style.opacity, outer: owner.style.opacity },
-      replay: w.native.host.querySelectorAll("[data-css-backdrop]").length,
-    };
-  });
-  expect(result.intermediate.alpha).toBeCloseTo(0.5);
-  expect(result.intermediate.outer).toBe("1");
-  expect(result.intermediate.movement).toBeCloseTo(50);
-  expect(result.restored).toEqual({ alpha: "1", outer: "1" });
+  expect(result.generatedReady).toBe("true");
+  expect(result.shaderWidth).toBeGreaterThan(1);
+  expect(result.shaderHeight).toBeGreaterThan(1);
+  expect(result.cssCanvas).toBe(0);
+  expect(result.backdrop).not.toBe("none");
+  expect(result.restoration).toBe(0);
   expect(result.replay).toBe(0);
+  expect(result.errors).toEqual([]);
 });
+
