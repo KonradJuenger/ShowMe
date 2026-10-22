@@ -64,10 +64,7 @@ interface PixelSourceProvider {
     deck: Deck,
     invalidated: () => void,
   ): ReturnType<typeof createScenePrefixRasterSource>;
-  prepare(
-    projection: SourceProjection,
-    root: HTMLElement,
-  ): Promise<void>;
+  prepare(projection: SourceProjection, root: HTMLElement): Promise<void>;
 }
 
 function effectKey(refs: readonly { elementId: string; effectId: string }[]) {
@@ -108,7 +105,9 @@ function nodesFor(
   const ids = new Set(projection.elements.map((element) => element.id));
   return Array.from(
     root.querySelectorAll<HTMLElement>("[data-element-id]"),
-  ).filter((node) => !!node.dataset.elementId && ids.has(node.dataset.elementId));
+  ).filter(
+    (node) => !!node.dataset.elementId && ids.has(node.dataset.elementId),
+  );
 }
 
 /** Capability and execution live together so admission cannot drift from the
@@ -174,7 +173,9 @@ const ownedPrimitiveProvider: PixelSourceProvider = {
       }),
     );
     for (const node of nodes)
-      for (const effect of node.querySelectorAll<HTMLElement>("[data-effect-id]")) {
+      for (const effect of node.querySelectorAll<HTMLElement>(
+        "[data-effect-id]",
+      )) {
         if (effect.dataset.effectError)
           throw new Error(effect.dataset.effectError);
         effectSurface(effect)?.materialize();
@@ -301,7 +302,8 @@ export function createSceneSurfaceMaterializer(
     ],
   });
 
-  const sourceSignal = (event: Event) => markElementDirty(ownerId(event.target));
+  const sourceSignal = (event: Event) =>
+    markElementDirty(ownerId(event.target));
   root.addEventListener("showme-effect-output", sourceSignal);
   root.addEventListener("load", sourceSignal, true);
   root.addEventListener("error", sourceSignal, true);
@@ -310,14 +312,12 @@ export function createSceneSurfaceMaterializer(
     const irrelevant = request.irrelevantElementIds ?? new Set<string>();
     const selected = projectionFor(request.surface, slide, irrelevant);
     if (!selected)
-      throw new Error("Scene surface is not materializable by an owned provider");
+      throw new Error(
+        "Scene surface is not materializable by an owned provider",
+      );
     const density = request.density;
     const key =
-      selected.projection.key +
-      "|density:" +
-      density.x +
-      "x" +
-      density.y;
+      selected.projection.key + "|density:" + density.x + "x" + density.y;
     const existing = retained.get(key);
     if (existing) return existing;
     const source = selected.provider.create(
@@ -394,7 +394,9 @@ export function createSceneSurfaceMaterializer(
   };
 
   return {
-    async materialize(request: MaterializeRequest): Promise<MaterializedSurface> {
+    async materialize(
+      request: MaterializeRequest,
+    ): Promise<MaterializedSurface> {
       if (disposed) throw new Error("Scene surface materializer is disposed");
       if (
         !Number.isFinite(request.region.x) ||

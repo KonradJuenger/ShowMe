@@ -283,8 +283,9 @@ async function mount(
             slide.nodes[0].children.push(copy);
           }
           if (disjoint) {
-            const cards = slide.nodes[0].children.filter((element) =>
-              element.id === "glass" || element.id.startsWith("glass-"),
+            const cards = slide.nodes[0].children.filter(
+              (element) =>
+                element.id === "glass" || element.id.startsWith("glass-"),
             );
             cards.forEach((card, index) => {
               card.frame.x = 20 + (index % 5) * 124;
@@ -890,7 +891,9 @@ test("mixed owned prefix is shared across two glass consumers and invalidates on
     const result: Record<string, number> = { initial: builds() };
 
     const slide = w.model.slides[w.model.deck.slideIds[0]];
-    const glass = slide.nodes[0].children.find((element) => element.id === "glass")!;
+    const glass = slide.nodes[0].children.find(
+      (element) => element.id === "glass",
+    )!;
     compositor.apply([
       {
         elementId: glass.id,
@@ -911,9 +914,9 @@ test("mixed owned prefix is shared across two glass consumers and invalidates on
     result.laterElement = builds();
 
     const lower = root.querySelector<HTMLElement>('[data-element-id="lower"]')!;
-    const sourceImage = [...lower.querySelectorAll<HTMLImageElement>("img")].find(
-      (image) => getComputedStyle(image).display !== "none",
-    )!;
+    const sourceImage = [
+      ...lower.querySelectorAll<HTMLImageElement>("img"),
+    ].find((image) => getComputedStyle(image).display !== "none")!;
     const changed = document.createElement("canvas");
     changed.width = 300;
     changed.height = 200;
@@ -962,7 +965,6 @@ test("mixed owned prefix is shared across two glass consumers and invalidates on
   expect(invalidation.cssBackdrop).toBe(0);
   expect(invalidation.errors).toEqual([]);
 });
-
 
 test("scene materializer shares one exact surface across independent regional consumers", async () => {
   await mount(page, "glass", 2, true, false, true);
@@ -1117,9 +1119,7 @@ test("source changes commit one coherent frame without an async bitmap gap", asy
     )!;
     const lower = root.querySelector<HTMLElement>('[data-element-id="lower"]')!;
     const revision = () =>
-      Math.max(
-        ...Object.values(compositor.diagnostics().prefixes.revisions),
-      );
+      Math.max(...Object.values(compositor.diagnostics().prefixes.revisions));
     const before = {
       pixels: output.toDataURL(),
       revision: revision(),

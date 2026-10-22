@@ -214,10 +214,7 @@ export function mountBackdropRestoration(
     return { x: left, y: top, width: right - left, height: bottom - top };
   };
 
-  const cropFor = (
-    material: Material,
-    source: MaterializedSurface,
-  ) => {
+  const cropFor = (material: Material, source: MaterializedSurface) => {
     if (source.source.kind !== "canvas-image")
       throw new Error("Restoration requires a canvas-readable scene surface");
     const bounds = plan.envelopes.get(material.id)!;
@@ -369,7 +366,9 @@ export function mountBackdropRestoration(
     },
     apply(samples) {
       for (const sample of samples) {
-        const material = materials.find((entry) => entry.id === sample.elementId);
+        const material = materials.find(
+          (entry) => entry.id === sample.elementId,
+        );
         if (material) material.sample = sample;
       }
       present();
@@ -395,8 +394,9 @@ export function mountBackdropRestoration(
     diagnostics() {
       return {
         consumers: materials.length,
-        uniquePrefixes: new Set(materials.map((material) => material.surface.id))
-          .size,
+        uniquePrefixes: new Set(
+          materials.map((material) => material.surface.id),
+        ).size,
         prefixes: materializer.diagnostics(),
       };
     },

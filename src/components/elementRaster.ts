@@ -13,7 +13,9 @@ import {
 /** A primitive renderer, not a DOM screenshot. DOM bindings supply already
  * decoded resources and Motion's current local transform/font measurements. */
 let sourceScans = 0;
-export function rasterSourceDiagnostics() { return { scans: sourceScans }; }
+export function rasterSourceDiagnostics() {
+  return { scans: sourceScans };
+}
 
 export type RasterContext = {
   root: HTMLElement;
@@ -562,8 +564,19 @@ function createRasterSource(
           .getAnimations({ subtree: true })
           .some((animation) => animation.playState === "running"),
       );
-      const dynamicVideo = [...videos.keys()].some(video => typeof video.requestVideoFrameCallback !== "function" && !video.paused);
-      if (!dirty && canvas.width === width && canvas.height === height && !animated && !dynamicVideo) return false;
+      const dynamicVideo = [...videos.keys()].some(
+        (video) =>
+          typeof video.requestVideoFrameCallback !== "function" &&
+          !video.paused,
+      );
+      if (
+        !dirty &&
+        canvas.width === width &&
+        canvas.height === height &&
+        !animated &&
+        !dynamicVideo
+      )
+        return false;
       const force = dirty || animated || dynamicVideo;
       dirty = false;
       sourceScans++;

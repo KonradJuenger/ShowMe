@@ -6,11 +6,7 @@ import type {
 } from "./compositionPlan";
 import { presenceElement } from "../core/presence";
 import { resolveMotionValue } from "../core/motion";
-import {
-  localMatrix,
-  transformPoint,
-  walkElements,
-} from "../core/element";
+import { localMatrix, transformPoint, walkElements } from "../core/element";
 import {
   compositorCapabilities,
   backdropStyleCapabilities,
@@ -300,10 +296,7 @@ function restorationPlan(
       entry.kind === "styled" && entry.backdrop
         ? plan.surface({ kind: "element-entry", elementId: id })
         : null;
-    if (
-      !ref ||
-      !canMaterializeOwnedSurface(ref, slide, irrelevantConsumers)
-    )
+    if (!ref || !canMaterializeOwnedSurface(ref, slide, irrelevantConsumers))
       glass.delete(id);
     else surfaces.set(id, ref);
   }

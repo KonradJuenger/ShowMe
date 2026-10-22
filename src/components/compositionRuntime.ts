@@ -16,11 +16,7 @@ export function mountCompositionRuntime(
   failed: (ids: readonly string[], error: unknown) => void,
   density: Pick<RenderDensity, "x" | "y">,
 ) {
-  const materializer = createSceneSurfaceMaterializer(
-    root,
-    plan.slide,
-    deck,
-  );
+  const materializer = createSceneSurfaceMaterializer(root, plan.slide, deck);
   let backend: ReturnType<typeof mountBackdropRestoration>;
   try {
     backend = mountBackdropRestoration(
