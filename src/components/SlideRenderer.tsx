@@ -1073,7 +1073,7 @@ export const SlideRenderer = memo(function SlideRenderer({
     [composition, backends],
   );
   useLayoutEffect(() => {
-    if (!root.current || !sceneBackdrop) return;
+    if (!root.current) return;
     const failed = (ids: readonly string[], error: unknown) => {
       console.error("Composition preparation failed", error);
       setFailedBackdrop((previous) => ({
@@ -1100,9 +1100,10 @@ export const SlideRenderer = memo(function SlideRenderer({
         mounted.dispose();
       };
     } catch (error) {
-      failed([...sceneBackdrop.glass], error);
+      if (sceneBackdrop) failed([...sceneBackdrop.glass], error);
+      else console.error("Composition runtime failed", error);
     }
-  }, [sceneBackdrop, deck, composition, effectRender.density]);
+  }, [sceneBackdrop, slide, deck, composition, effectRender.density]);
   const hasRestoration = !!sceneBackdrop;
   const renderSink = useMemo<MotionRenderSink | undefined>(
     () =>
