@@ -4,6 +4,35 @@ Updated 2026-10-22. Derived paint order, semantic render samples, centralized
 backend selection and renderer-owned composition outputs. Earlier measurements
 below retain their original revision and scope.
 
+## Current verification: 2026-10-22
+
+Renderer `506fd7c` follows semantic coordination commit `cba8c57`. Proven local
+CSS omits unnecessary backdrop dependencies; unknown, escaped and external styles
+remain conservative. Regional admission checks descendant effects before treating
+a clipped subtree as bounded. The shared shader presentation buffer is reused
+for smaller outputs, copies only the active rectangle and releases to 1×1 when
+the last output is disposed. Independent multi-scale gradient pixel tests verify
+orientation, alpha and idle release; existing context-loss tests also pass.
+
+Final Windows verification:
+
+- `SHOWME_TEST_FILES='["tests/feature/effects/native-composition.spec.ts"]'; npx playwright test --config playwright.electron.config.ts`: 10 passed, including first-frame readiness, current-sample placement, replay, ordinary opacity and cancellation.
+- `SHOWME_TEST_FILES='["tests/feature/effects/css-backdrop-opacity.spec.ts","tests/feature/effects/mixed-compositing.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'; SHOWME_TEST_PORT=5181; npx playwright test --config playwright.config.ts`: 26 passed, including both audience-navigation declarations.
+- Registry-selected active effects/Motion unit files, `npx vitest run`: 138 passed across 14 files. `npm test`: 15 core tests passed.
+- `npm run build`, changed-file `npx eslint`, `npm run test:stats`, `npm run test:audit` and `git diff --check`: passed; 641 active tests.
+
+The final original slide-4 filmstrip shows no entrance flash. All 140 visible
+partial-alpha observations had populated restoration and matching inverse alpha
+(tolerance 0.00001). Three cropped outputs total 311,386 pixels at the probe scale,
+versus 4,005,540 pixels for three full-source copies; the shared source remains
+1,335,180 pixels. The route remains `native-backdrop-restore`.
+
+[Compact evidence](evidence/composition-coordination-2026-10-22.json) and
+`areweslowyet.md` record production timing and provenance. Cold entry retains
+occasional longer gaps. Full/release, packaging, macOS and explicit export visual
+checks were not run. Document ownership, persistence, v1 formats and fallback
+correctness remain unchanged. No main integration.
+
 ## Model
 
 An Element is a visual group with an independent transport matrix and one final

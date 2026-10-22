@@ -313,3 +313,44 @@ stats/audit (635 active tests) and whitespace checks pass. The real slide-4 entr
 filmstrip was reviewed without the flash; 134 visible partial-alpha samples had
 populated restoration and matching inverse alpha. Full/release, packaging,
 macOS and explicit export visual checks were not run. No main integration.
+
+## 2026-10-22: semantic coordination and cropped restoration
+
+Clean renderer `506fd7c`, original slide 4, Windows/Electron 44.4.1, production
+build, normal console/preview, isolated library/user data, 1440 ms entrance and
+six-second observation. One sequential observation per mode, without concurrent
+tests/builds:
+
+| Lifecycle | Entrance p95 gap | Maximum entrance gap | Steady p95 gap |
+| --- | ---: | ---: | ---: |
+| Cold entry | 33.3 ms | 50.7 ms | 16.8 ms |
+| Warm replay | 16.8 ms | 16.9 ms | 16.8 ms |
+| New audience navigation | 16.8 ms | 33.3 ms | 16.8 ms |
+
+Cold entrance retained three gaps over 33.34 ms; warm/new-audience entrance and
+all steady intervals had none. All modes used three `native-backdrop-restore`
+outputs, zero CSS replay outputs and no effect errors or missing assets. The user
+also reported good deck performance. These rAF observations do not establish
+physical display delivery, uniform smoothness or a controlled speedup.
+
+The refactor shares semantic Motion samples, prepares cropped restoration before
+entry and centralizes backend policy. An intermediate `cba8c57` cold trace showed
+editor GPU allocation waits while the audience main-thread maximum task was
+6.1 ms. The final renderer reuses the shader presentation buffer across smaller
+outputs; multi-scale pixel/alpha/orientation, context-loss and idle-release tests
+pass. Final timing does not establish elimination of every cold stall.
+
+After `npm run build`:
+
+```powershell
+$env:SHOWME_BENCHMARK_OUTPUT='test-results-compositing-final-coordination'
+node .agenttmp/benchmark-clean-composition.mjs '<path-to-original.sme>' 4
+```
+
+The helper derives from Git blob `1e0a8936ca1dcd3475be87cb220a94047ffbd090`,
+observing restoration alpha without the removed hidden DOM proxy. Electron exited
+normally with code 0. Raw traces remain in the output directory and append-only
+history in `.benchmark-data/animation/history.jsonl`.
+[Compact evidence](docs/rendering/evidence/composition-coordination-2026-10-22.json)
+records clean revision, source/build/helper digests, environment, all timing
+summaries, regression results and the final real-deck entrance probe.
