@@ -29,6 +29,8 @@ jobs:
       - run: npm run typecheck:ts6
       - run: npm run lint
       - run: npm run test:stats
+      - name: Generated test stats are committed
+        run: git diff --exit-code -- tests/stats.json
       - run: npm run test:audit
       - run: npm test
       - run: npm run build
