@@ -148,6 +148,8 @@ it("CSS backdrop dependencies name their effect-entry paint point and completed 
     card = shape("card");
   parent.children = [card];
   const f = fixture([lower, parent]);
+  f.slide.effectResources!.css.source =
+    ":scope { backdrop-filter: blur(10px); }";
   f.add(lower, "lower-bg", "generated", "background");
   f.add(parent, "parent-bg", "generated", "background");
   f.add(parent, "unfinished", "shader");
@@ -166,6 +168,25 @@ it("CSS backdrop dependencies name their effect-entry paint point and completed 
   expect(plan.dependencies(ref("parent", "unfinished"))).toContainEqual(
     ref("card", "material"),
   );
+});
+
+it("local CSS without a backdrop read does not depend on unrelated earlier paint", () => {
+  const lower = shape("lower"),
+    owner = shape("owner");
+  const f = fixture([lower, owner]);
+  f.slide.effectResources!.css.source = ":scope { color: red; }";
+  f.add(lower, "generated", "generated", "background");
+  f.add(owner, "style");
+  expect(f.compile().dependencies(ref("owner", "style"))).toEqual([]);
+  f.slide.effectResources!.css.source = String.raw`:scope { \62 ackdrop-filter: blur(5px); }`;
+  expect(f.compile().dependencies(ref("owner", "style"))).toEqual([
+    ref("lower", "generated"),
+  ]);
+  f.slide.effectResources!.css.source = ":scope { color: red; }";
+  f.deck.stylesheet = "[data-effect-id] { backdrop-filter: blur(5px); }";
+  expect(f.compile().dependencies(ref("owner", "style"))).toEqual([
+    ref("lower", "generated"),
+  ]);
 });
 
 it("nested prefixes include earlier siblings and unfinished ancestors without later paint or document mutation", () => {

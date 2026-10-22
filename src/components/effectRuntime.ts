@@ -22,6 +22,7 @@ import { flushCompositionOutputs } from "./compositionReadiness";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
+  shaderOutputTextureBytes,
   neutralShaderBridge,
   type ShaderOutput,
 } from "./shaderOutput";
@@ -694,27 +695,52 @@ export function mountEffectSurface(
     const state = sharedGpu();
     if (state.gl !== shaderOutput.gl || state.gl.isContextLost()) return;
     const { gl, canvas: source } = state;
-    if (source.width !== shaderOutput.width) source.width = shaderOutput.width;
-    if (source.height !== shaderOutput.height)
-      source.height = shaderOutput.height;
+    const { width, height } = shaderOutput;
+    // FBO outputs have independent sizes. Reuse the shared presentation bridge
+    // for smaller outputs instead of reallocating its default drawing buffer
+    // for every thumbnail/main-view alternation. On growth use the requested
+    // dimensions, not a cross-aspect maximum with unbounded retained area.
+    if (source.width < width || source.height < height) {
+      source.width = width;
+      source.height = height;
+      if (
+        gl.drawingBufferWidth < width ||
+        gl.drawingBufferHeight < height ||
+        gl.getError() !== gl.NO_ERROR
+      )
+        throw new Error(
+          `Cannot allocate ${width} × ${height} shader drawing buffer`,
+        );
+    }
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.blitFramebuffer(
       0,
       0,
-      source.width,
-      source.height,
+      width,
+      height,
       0,
       0,
-      source.width,
-      source.height,
+      width,
+      height,
       gl.COLOR_BUFFER_BIT,
       gl.NEAREST,
     );
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const context = resizeRasterCanvas(canvas, source.width, source.height);
-    context.clearRect(0, 0, source.width, source.height);
-    context.drawImage(source, 0, 0);
+    const context = resizeRasterCanvas(canvas, width, height);
+    context.clearRect(0, 0, width, height);
+    // WebGL's lower-left active rectangle maps to the canvas's lower rows.
+    context.drawImage(
+      source,
+      0,
+      source.height - height,
+      width,
+      height,
+      0,
+      0,
+      width,
+      height,
+    );
     domRevision = shaderOutput.revision;
     canvas.style.visibility = "visible";
   };
@@ -1100,7 +1126,7 @@ export function mountEffectSurface(
           node.dataset.effectReady = "true";
           return;
         }
-        if (source.width !== width || source.height !== height) {
+        if (!refined && (source.width !== width || source.height !== height)) {
           source.width = width;
           source.height = height;
           if (
@@ -1289,7 +1315,11 @@ export function mountEffectSurface(
       }
     }
     if (texture) texture.gl.deleteTexture(texture.value);
-    if (shaderOutput) disposeShaderOutput(shaderOutput);
+    if (shaderOutput) {
+      disposeShaderOutput(shaderOutput);
+      if (gpu && shaderOutputTextureBytes() === 0)
+        gpu.canvas.width = gpu.canvas.height = 1;
+    }
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     surfaces.delete(node);
     cssBackdrop?.dispose();

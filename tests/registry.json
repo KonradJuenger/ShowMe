@@ -161,8 +161,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-13",
-    "reason": "Native Chromium capture composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; inherited clocks refresh stylesheet pixels through seeks and stylesheet edits without recapturing unchanged clocks; unused, disabled and unrelated CSS resources preserve primitive sources; excluded animations avoid source refresh while contributing animations update pixels; mounted backdrops reroute after lower CSS/stylesheet edits and release replaced sources; duplicated instances retain independent captured inputs; batched reads preserve pseudo/text/media pixels; retained mirrors preserve mixed text topology and unchanged-media CSS changes; paused caches, viewport/transform changes, failed-capture retry and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss; primitive backdrops repaint after out-of-slide drags without resizing"
+    "lastReviewed": "2026-10-22",
+    "reason": "Native Chromium capture composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; inherited clocks refresh stylesheet pixels through seeks and stylesheet edits without recapturing unchanged clocks; unused, disabled and unrelated CSS resources preserve primitive sources; excluded animations avoid source refresh while contributing animations update pixels; mounted backdrops reroute after lower CSS/stylesheet edits and release replaced sources; duplicated instances retain independent captured inputs; batched reads preserve pseudo/text/media pixels; retained mirrors preserve mixed text topology and unchanged-media CSS changes; paused caches, viewport/transform changes, failed-capture retry and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss; primitive backdrops repaint after out-of-slide drags without resizing; mixed-size shader outputs reuse the presentation buffer with exact pixels and release the idle bridge"
   },
   {
     "id": "editor-scale-properties",
@@ -976,7 +976,7 @@
     "runtime": "unit",
     "created": "2026-10-21",
     "lastReviewed": "2026-10-22",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; backend-neutral styled inputs name CSS effect-entry paint and completed ancestor dependencies without cycles"
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; backend-neutral styled inputs name CSS effect-entry paint and completed ancestor dependencies without cycles; proven local CSS omits backdrop dependencies while escaped, unknown and external styles remain conservative"
   },
   {
     "id": "effects-native-composition",

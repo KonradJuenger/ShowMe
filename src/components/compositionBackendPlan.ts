@@ -299,18 +299,22 @@ function restorationPlan(
   for (const group of plan.roots) {
     if (group === background || glass.has(group.element.id)) continue;
     const e = group.element;
-    const boundedEffects =
-      e.clipChildren &&
-      [...group.inputs].every(([id]) => {
-        const instance = e.effects!.find((effect) => effect.id === id)!;
-        const definition = slide.effectResources![instance.resourceId];
-        return (
-          definition.kind === "css" &&
-          !!backdropStyleCapabilities(definition)?.captureMaterial
-        );
-      });
+    const boundedTree = walkElements([e]).every(
+      (node) =>
+        !node.cssClasses?.length &&
+        (node.effects ?? [])
+          .filter((effect) => effect.enabled)
+          .every((instance) => {
+            const definition = slide.effectResources![instance.resourceId];
+            return (
+              definition?.kind === "css" &&
+              !!backdropStyleCapabilities(definition)?.captureMaterial
+            );
+          }),
+    );
+    const boundedEffects = e.clipChildren && boundedTree;
     if (
-      e.cssClasses?.length ||
+      !boundedTree ||
       (group.inputs.size && !boundedEffects) ||
       (group.children.length && !e.clipChildren)
     )

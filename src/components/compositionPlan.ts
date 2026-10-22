@@ -1,5 +1,6 @@
 import type { Deck, Slide } from "../core/document";
 import type { Element } from "../core/element";
+import { styleMayReadBackdrop } from "./compositionCapabilities";
 import {
   effectPlacement,
   type ElementEffect,
@@ -26,7 +27,7 @@ export type BackdropPoint =
 export type EffectInput =
   | { kind: "none" }
   | { kind: "text" | "content"; operation: Composition }
-  | { kind: "styled"; operation?: Composition; backdrop: BackdropPoint }
+  | { kind: "styled"; operation?: Composition; backdrop?: BackdropPoint }
   | { kind: "backdrop"; elementId: string; backdrop: BackdropPoint };
 
 export type VisualGroup = {
@@ -52,6 +53,7 @@ export function compileVisualGroup(
   element: Element,
   resources: EffectResources,
   editingTextId?: string | null,
+  externalStyles = false,
 ): VisualGroup {
   const effects = (element.effects ?? []).filter(
     (e) => e.enabled && resources[e.resourceId],
@@ -78,11 +80,14 @@ export function compileVisualGroup(
               ? {
                   kind: "styled",
                   operation: input,
-                  backdrop: {
-                    kind: "effect-entry",
-                    elementId: element.id,
-                    effectId: instance.id,
-                  },
+                  backdrop:
+                    externalStyles || styleMayReadBackdrop(definition.source)
+                      ? {
+                          kind: "effect-entry",
+                          elementId: element.id,
+                          effectId: instance.id,
+                        }
+                      : undefined,
                 }
               : { kind: "none" },
     );
@@ -138,7 +143,7 @@ export function compileVisualGroup(
     visual,
     inputs,
     children: element.children.map((child) =>
-      compileVisualGroup(child, resources, editingTextId),
+      compileVisualGroup(child, resources, editingTextId, externalStyles),
     ),
   };
 }
@@ -167,7 +172,7 @@ export type CompositionPlan = {
 
 export function compileCompositionPlan(
   slide: Slide,
-  deck: Pick<Deck, "layers">,
+  deck: Pick<Deck, "layers"> & Partial<Pick<Deck, "stylesheet">>,
   editingTextId?: string | null,
   resources: EffectResources = slide.effectResources ?? {},
 ): CompositionPlan {
@@ -177,7 +182,12 @@ export function compileCompositionPlan(
     )
     .flatMap((root) =>
       root.children.map((element) =>
-        compileVisualGroup(element, resources, editingTextId),
+        compileVisualGroup(
+          element,
+          resources,
+          editingTextId,
+          !!deck.stylesheet,
+        ),
       ),
     );
   const groups = new Map<string, VisualGroup>(),
@@ -264,6 +274,8 @@ export function compileCompositionPlan(
       input = group?.inputs.get(effectId);
     if (!group || !input) return [];
     if (input.kind === "styled") {
+      if (!input.backdrop)
+        return input.operation ? terminals(input.operation, group) : [];
       const prior: EffectRef[] = [];
       for (
         let entry = paintEntries.get(key({ elementId, effectId }));

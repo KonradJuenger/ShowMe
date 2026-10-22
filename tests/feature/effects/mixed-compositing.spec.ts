@@ -888,6 +888,98 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
   expect(result.remaining).toBe(0);
 });
 
+test("mixed-size shader outputs reuse their presentation buffer without changing pixels or retaining an idle bridge", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
+      runtimePath = "/src/components/effectRuntime.ts",
+      factoryPath = "/src/core/elementFactory.ts",
+      authoringPath = "/src/core/effectAuthoring.ts",
+      effectsPath = "/src/core/effects.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const runtime: typeof import("../../../src/components/effectRuntime") =
+      await import(/* @vite-ignore */ runtimePath);
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const { blankEffect }: typeof import("../../../src/core/effectAuthoring") =
+      await import(/* @vite-ignore */ authoringPath);
+    const { newEffectInstance }: typeof import("../../../src/core/effects") =
+      await import(/* @vite-ignore */ effectsPath);
+    const source =
+      "#version 300 es\nprecision highp float;in vec2 v_uv;out vec4 outColor;void main(){outColor=vec4(v_uv.x,v_uv.y,0.25,0.75);}";
+    const run = async (gpu: boolean) => {
+      runtime.setEffectExecutionForTests(gpu ? "refined" : "naive");
+      const h = await mountMixedEffectsHarness(undefined, 0, undefined, {
+        configure(model) {
+          model.deck.stylesheet = "";
+          const slide = model.slides[model.deck.slideIds[0]];
+          const shader = {
+            ...blankEffect("shader"),
+            input: "none" as const,
+            source,
+          };
+          slide.effectResources = { shader };
+          slide.nodes[0].children = ["large", "small"].map((id) => {
+            const node = createBasicShape(id, "rectangle", { x: 0, y: 0 });
+            node.appearance.fill = "";
+            node.frame.width = id === "large" ? 640 : 80;
+            node.frame.height = id === "large" ? 360 : 60;
+            node.effects = [newEffectInstance("shader", shader, "background")];
+            return node;
+          });
+        },
+      });
+      const samples = [];
+      for (const zoom of [1, 0.5, 1.25]) {
+        await h.setZoom(zoom);
+        await h.advance(0.37);
+        const canvas = h.host.querySelector<HTMLCanvasElement>(
+          '[data-element-id="small"] canvas',
+        )!;
+        samples.push({
+          width: canvas.width,
+          height: canvas.height,
+          pixels: Array.from(
+            canvas
+              .getContext("2d")!
+              .getImageData(0, 0, canvas.width, canvas.height).data,
+          ),
+        });
+      }
+      h.dispose();
+      const bridge = runtime.shaderProgram(source).canvas;
+      return { samples, idle: bridge.width === 1 && bridge.height === 1 };
+    };
+    try {
+      const reference = await run(false),
+        actual = await run(true);
+      let max = 0;
+      for (let j = 0; j < reference.samples.length; j++) {
+        const a = actual.samples[j],
+          b = reference.samples[j];
+        if (a.width !== b.width || a.height !== b.height)
+          throw new Error("Output bounds changed");
+        for (let i = 0; i < a.pixels.length; i++)
+          max = Math.max(max, Math.abs(a.pixels[i] - b.pixels[i]));
+      }
+      return { max, idle: actual.idle };
+    } finally {
+      runtime.setEffectExecutionForTests("refined");
+    }
+  });
+  expect(result.max).toBeLessThanOrEqual(1);
+  expect(result.idle).toBe(true);
+});
+
 test("backdrop pixels retain the red element's world position at editor zoom and fractional display scaling", async ({
   page,
 }) => {

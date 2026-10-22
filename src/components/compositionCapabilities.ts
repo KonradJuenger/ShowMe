@@ -14,6 +14,21 @@ export function compositorCapabilities(userAgent = navigator.userAgent) {
   };
 }
 
+/** Pure conservative read classification for the semantic planner. Unknown or
+ * escaped CSS retains an entry dependency; only proven local styles omit it. */
+export function styleMayReadBackdrop(source: string) {
+  const block = /^\s*:scope\s*\{([^{}\\]*)\}\s*$/.exec(source);
+  if (!block) return true;
+  return block[1].split(";").some((declaration) => {
+    if (!declaration.trim()) return false;
+    return (
+      !/^\s*(?:color|font(?:-[\w-]+)?|text(?:-[\w-]+)?|line-height|letter-spacing|opacity|transform(?:-origin)?|background(?:-[\w-]+)?|border(?:-[\w-]+)?|box-shadow|overflow(?:-[\w-]+)?|padding(?:-[\w-]+)?)\s*:[^{}]*$/i.test(
+        declaration,
+      ) || /\b(?:url|element|paint)\s*\(/i.test(declaration)
+    );
+  });
+}
+
 const declarations = new WeakMap<
   EffectDefinition,
   CSSStyleDeclaration | null
