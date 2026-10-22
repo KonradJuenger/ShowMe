@@ -1,343 +1,381 @@
-# General compositor prototype
+# General compositor foundation
 
-Status: prototype implemented on `chatgpt/general-compositor-prototype`, then corrected on `chatgpt/general-compositor-fix`. The correction keeps the hybrid renderer and narrows claims where exact materialization is not yet implemented.
+Status: corrected implementation on `chatgpt/general-compositor-fix`, based on
+the prototype at `407e70d0ec73493dc565c47ba1b92ff1ff1e4a3b`.
 
-## Architecture correction: exact semantic surfaces
+This branch does not broaden the set of source types. It corrects the abstraction
+under the prototype so retained pixels can become shared renderer infrastructure
+without weakening ShowMe's semantic paint model.
 
-The production-facing abstraction is now an exact `SceneSurfaceRef` owned by
-`CompositionPlan`. A surface is identified by a semantic paint point plus the
-plan's structural prefix and ordered Effect paint dependencies. An
-`effect-entry` point includes its `effectId`; it cannot collapse onto another
-Effect in the same Element merely because both have the same external Elements.
-An `element-entry` point remains the exact incoming scene before the Element.
+## Core model
 
-The current owned Canvas2D provider intentionally materializes complete
-`element-entry` surfaces only. Exact `effect-entry` references still exist for
-future CSS backdrop and GLSL backdrop consumers, but they fall back until a
-provider can reproduce every preceding operation at that internal point. This is
-preferable to approximating an effect-entry surface with an element-entry raster.
+The compositor remains hybrid:
 
-Backdrop restoration explicitly requests the Element-entry scene because its
-inverse-alpha term is the incoming scene before the whole resolved group. The
-CSS Effect's own backdrop point remains separately modeled for Effect ordering.
+- native DOM/CSS where the browser is the correct representation
+- retained ShowMe-owned pixels where ShowMe can reproduce the source exactly
+- existing GPU Effect outputs reused by the primitive painter
+- existing DOM/capture behavior as correctness fallback for unresolved paint
+- one document model, one Effect model and one Motion/Presence timing model
 
-A crop is not part of semantic identity. Regional irrelevance is a backend proof:
+No compositor scene graph, animation clock or persisted surface was added.
+
+`CompositionPlan` remains the authority for semantic paint order. It now exposes
+an exact renderer-local `SceneSurfaceRef` for a `BackdropPoint`.
 
 ```text
 CompositionPlan
     |
-    v
-SceneSurfaceRef
-  exact semantic paint point
+    +--> element-entry
+    |      exact scene immediately before an Element
     |
-    v
-MaterializeRequest
-  surface + logical region + explicit density
-    |
-    v
-SceneSurfaceMaterializer
-  provider capability + one renderer-scoped retained cache
-    |
-    +--> immutable published revision
-    |       current Canvas2D implementation may retain full-slide pixels
-    |
-    +--> backdrop restoration
-    +--> future GLSL backdrop consumer
-    +--> future capture fallback consumer
-    +--> future export consumer
+    +--> effect-entry(elementId, effectId)
+           exact paint immediately before that Effect
 ```
 
-For the existing disjoint glass optimization, two cards can therefore have two
-different exact `SceneSurfaceRef` values while the materializer reuses one
-execution projection after the backend proves that the earlier card cannot
-intersect the later card's requested region. The optimization never rewrites the
-semantic surface.
+The surface identity contains the semantic point, the persistent structural
+prefix and the ordered Effect paint dependencies at that point. It is
+renderer-independent and does not depend on mounted DOM order.
 
-## Ownership, region contract and publication
+Two CSS backdrop Effects in one Element therefore cannot collapse merely because
+the same external Elements precede both. If Effect B is painted after Effect A,
+B's surface records A in its paint prefix while A's surface does not.
+
+The current Canvas2D provider intentionally materializes complete
+`element-entry` surfaces only. Exact `effect-entry` refs are available to
+future consumers, but unresolved internal Effect paint falls back rather than
+being approximated.
+
+## Semantic identity versus regional optimization
+
+A semantic surface always describes exact ordered paint. Crop or overlap
+information never changes that identity.
+
+```text
+SceneSurfaceRef
+  exact ordered paint
+        |
+        v
+MaterializeRequest
+  surface
+  + logical region R
+  + explicit density
+        |
+        v
+backend/provider
+  may cull paint only when the caller proves it irrelevant to R
+```
+
+The existing disjoint-glass optimization is implemented at this lower layer.
+Glass A and glass B can have different semantic surfaces while the provider
+reuses one retained execution projection if the backend has proven that A cannot
+intersect B's requested region. The semantic refs remain distinct.
+
+## Renderer ownership and lifetime
 
 `compositionRuntime.ts` owns one `SceneSurfaceMaterializer` for the active
-composition runtime and passes it to restoration. `backdropRestoration.ts` no
-longer creates or disposes a retained source cache. The materializer owns source
-providers, retained outputs, revisions, invalidation, publication and disposal.
+composition runtime and passes the service to `backdropRestoration.ts`.
 
-The public request includes a logical `SurfaceRegion` and explicit
-`RenderDensity`. The result includes the semantic surface, logical bounds,
-density, pixel size, revision and a backend-tagged source. Consumers do not infer
-logical scale from canvas dimensions. The current source variant is
-`canvas-image`; the contract already permits a future `gpu-texture` source
-without changing semantic planning.
+The materializer owns:
 
-The Canvas2D implementation still rasterizes a full-slide retained source. That
-is an implementation choice, not an API requirement. Regional allocation and
-regional caching can replace it later without changing callers.
+- provider selection
+- retained execution surfaces
+- source revisions
+- invalidation
+- publication
+- reuse
+- lifetime and disposal
 
-Publication is revisioned and immutable. The mutable primitive raster is copied
-into a fresh retained Canvas2D snapshot and that complete backing store is swapped
-into the published revision synchronously. This deliberately removes the old
-`createImageBitmap()` publication gap: a source Motion DOM write, source
-invalidation, retained repaint and restoration crop can settle in the same
-microtask checkpoint before the browser paints. No new Motion clock or independent
-DOM animation sampler is involved.
+A consumer owns:
 
-## Invalidation and source providers
+- the exact `SceneSurfaceRef` it needs
+- the logical region it needs
+- how those pixels are combined with its output
 
-Retained scene surfaces use one renderer-root observer plus source events instead
-of one broad observer per retained prefix. The observer maps mutations back to
-semantic source Element IDs and dirties only retained projections depending on
-those IDs. Owned scene-prefix raster sources disable their legacy environment
-observer; legacy raster callers keep it.
+The runtime exposes the same materializer service, so another compositor consumer
+can request the same surface without creating a restoration-specific cache.
 
-Capability detection and materialization now live behind the same small
-`PixelSourceProvider`. The current provider remains deliberately narrow:
+## Materialization contract
+
+A request is spatial and density-explicit:
+
+```text
+MaterializeRequest
+  surface: SceneSurfaceRef
+  region: { x, y, width, height } in slide coordinates
+  density: { x, y }
+```
+
+A result carries:
+
+```text
+MaterializedSurface
+  surface
+  source
+  revision
+  logicalBounds
+  density
+  pixelSize
+```
+
+Consumers do not infer scale from `canvas.width / deck.width`.
+
+The source is backend-tagged. Today the owned provider publishes a Canvas image
+source. The contract can later return a GPU texture without changing
+`CompositionPlan` or semantic surface identity.
+
+The current Canvas2D implementation still retains a full-slide execution surface.
+That is an implementation choice only. Regional allocation/caching can replace
+it later without changing callers.
+
+## Source providers
+
+Capability detection and execution are behind the same small
+`PixelSourceProvider` boundary. This prevents a separate
+`supportsOwnedElement()` table from drifting away from the actual painter.
+
+The current owned provider accepts approximately:
 
 - slide background
-- shape fill and stroke
+- rectangle/ellipse fill and stroke
 - static image content using the canonical media transform
-- supported nesting and clipping in the primitive painter
+- nesting and clipping already supported by the primitive painter
 - generated fragment GLSL with `input: "none"`
 
-Text, video, arbitrary CSS classes, CSS Effects, text-JS, content/backdrop GLSL,
-partial ancestor prefixes and other unresolved browser-owned paint remain on the
-existing correctness fallback.
+It conservatively declines:
 
-## Sharing and failure isolation
+- text
+- video
+- arbitrary CSS classes
+- CSS Effects
+- text-JS
+- fragment GLSL requiring `content` or `backdrop`
+- unresolved partial ancestor prefixes
+- internal effect-entry paint the provider cannot reproduce exactly
+- any other browser-owned paint it cannot prove equivalent
 
-The materializer cache is shared independently of restoration. Different
-consumer implementations can request the same semantic surface and receive the
-same published source revision. Region differences do not alter semantic
-identity; the current full-slide implementation can reuse the same publication.
+Those cases retain the existing correctness fallback.
 
-Failures are scoped to a semantic surface. Restoration disables only consumers
-whose requested surface failed and leaves unrelated surfaces active. A retained
-source failure does not poison other cache entries. The renderer can then replan
-the failed consumers onto the existing fallback route.
+## Invalidation flow
 
-`backdropRestoration.ts` remains source-agnostic. It knows only the semantic
-surface, requested region, published pixels, the consumer's
-`MotionVisualSample`, and the resolved native material. It contains no image
-Fit/Fill logic, shader lookup, GLSL rules, primitive traversal or source-specific
-invalidation.
+Retained scene surfaces use one renderer-root invalidation path rather than one
+broad observer per retained prefix.
+
+```text
+source DOM / resource / Effect output changes
+        |
+        v
+renderer-level source signal
+        |
+        v
+source Element identity
+        |
+        v
+dependent retained projections marked dirty
+        |
+        v
+materializer rebuilds changed source revision
+        |
+        v
+dependent consumers publish the new revision
+```
+
+The owned scene-prefix raster disables its older environment observer when used
+through this materializer. Legacy raster callers retain their existing
+conservative observation behavior.
+
+Later unrelated paint is not a dependency of an earlier semantic surface and
+does not dirty it. A lower image/style change or generated Effect-output revision
+does.
+
+## Coherent publication
+
+The reviewed prototype had an asynchronous stale-frame window:
+
+```text
+source DOM changes
+  -> prefix repaints
+  -> createImageBitmap crop is pending
+  -> old restoration pixels remain visible
+```
+
+The corrected path no longer depends on asynchronous `createImageBitmap()`
+publication for retained restoration pixels.
+
+The mutable primitive raster is copied synchronously into a fresh Canvas2D
+snapshot. The materializer swaps the published revision only after that snapshot
+is complete. Restoration then copies the requested crop from that published
+snapshot into its visible canvas and presents after the materialized revision is
+available.
+
+For source Motion, the DOM write, mutation delivery, retained rebuild and
+restoration publication settle through the existing renderer/readiness flow. No
+second Motion sample, animation clock, interpolation path or computed-style
+animation read was added.
+
+The compositor may keep the previous complete published revision while a source
+resource itself is not ready. It does not label an old retained snapshot as the
+new source revision.
+
+## Backdrop restoration
+
+`backdropRestoration.ts` remains source-agnostic.
+
+It consumes only:
+
+- the semantic backdrop surface
+- a requested region
+- published source pixels/revision
+- the consumer's existing `MotionVisualSample`
+- the native resolved material
+
+It still implements the established restoration equation:
+
+```text
+B = incoming scene
+R = native resolved material at opacity 1
+a = canonical Motion group alpha
+
+output = aR + (1-a)B
+```
+
+For this group-alpha operation, B is the Element-entry scene before the entire
+resolved Element. The CSS Effect's own effect-entry backdrop point remains
+separately modeled by `CompositionPlan`.
+
+Restoration contains no image Fit/Fill logic, media transforms, shader lookup,
+GLSL knowledge, shape traversal or source-specific invalidation.
+
+## Sharing
+
+Semantic and execution sharing are separate.
+
+- Repeated requests for the same exact `SceneSurfaceRef` reuse the same
+  materializer entry and published revision.
+- Different consumer implementations can use the renderer-owned materializer
+  rather than creating their own cache.
+- Different semantic surfaces can reuse one execution projection only after a
+  backend supplies a safe regional irrelevance proof.
+- Region differences do not alter semantic identity.
+
+## Failure isolation
+
+Failure state is owned per semantic surface at the consumer boundary.
+
+If semantic surface A cannot be materialized, only consumers depending on A are
+disabled and returned to the existing fallback route. Consumers using independent
+surface B remain operational. A failed request does not globally reject every
+restoration consumer.
+
+## Data flow
+
+```text
+document / Effects / Motion
+        |
+        v
+CompositionPlan
+  exact semantic paint order
+        |
+        v
+SceneSurfaceRef
+        |
+        v
+CompositionRuntime
+  one SceneSurfaceMaterializer
+        |
+        +--> PixelSourceProvider
+        |      +--> primitive Canvas2D painter
+        |      +--> decoded image / canonical transform
+        |      +--> existing generated GLSL output
+        |
+        +--> published revision
+               |
+               +--> backdrop restoration
+               +--> future GLSL backdrop input
+               +--> future capture fallback
+               +--> future export consumer
+
+unsupported exact paint
+        |
+        v
+existing correctness fallback
+```
+
+## Regression contracts
+
+The branch adds or strengthens tests for these contracts:
+
+1. Two different effect-entry points in one Element do not collapse when their
+   paint prefixes differ.
+2. Semantic surface identity is independent of consumer crop.
+3. Repeated and independent consumers can reuse one renderer-scoped retained
+   materialization.
+4. A lower owned source change publishes a coherent restoration revision with no
+   asynchronous bitmap-publication gap.
+5. Failure of one semantic surface leaves an independent surface usable.
+6. Multiple requests for one surface build once and reuse.
+7. Later unrelated paint does not invalidate an earlier surface.
+8. Lower source mutation does invalidate dependent retained paint.
+
+Existing native-composition coverage continues to protect first-frame readiness,
+Presence replay/cancellation, image-backed restoration, mixed owned prefixes,
+regional backend selection and fallback boundaries.
+
+## Decision standard
+
+1. **Can two different effect-entry points inside one Element resolve to the
+   same `SceneSurfaceRef` when their paint differs?** No. The point and ordered
+   paint dependencies are part of the structural key. The composition-plan
+   regression creates two same-Element CSS backdrop Effects and verifies distinct
+   refs and prefixes.
+
+2. **Is a semantic surface independent of the crop requested by a consumer?**
+   Yes. Region exists only on `MaterializeRequest`; it is not part of
+   `SceneSurfaceRef`. Native-composition materializer tests request different
+   regions from the same ref and verify reuse.
+
+3. **Can unrelated consumer implementations share one retained
+   materialization?** Yes. The materializer belongs to `CompositionRuntime`,
+   is exposed as a service, and sharing is tested through independent requests
+   outside restoration's private implementation.
+
+4. **Can lower-source Motion expose pixels from an older retained revision as
+   the new composition revision?** No. Publication uses a complete synchronous
+   snapshot and increments the visible retained revision only with that complete
+   snapshot. The source-change regression holds the legacy async bitmap primitive
+   and verifies that the coherent painted frame does not depend on it.
+
+5. **Does one source failure affect only consumers depending on that source?**
+   Yes. Restoration tracks failed semantic surface IDs independently, and the
+   failure-isolation regression verifies an unrelated retained surface remains
+   usable.
+
+6. **Is `backdropRestoration.ts` source-agnostic?** Yes. Source capability,
+   resource preparation, primitive paint and invalidation live in
+   `compositionSurface.ts` / `elementRaster.ts`.
+
+7. **Can the materialization API later use a GPU texture instead of Canvas2D
+   without changing semantic planning?** Yes. `MaterializedSurfaceSource` is
+   backend-tagged and `SceneSurfaceRef` has no renderer representation.
+
+8. **Does the architecture still use one canonical Motion/effect timing
+   model?** Yes. Restoration consumes the existing `MotionVisualSample`;
+   Effect timing remains in the existing Effect runtime. No compositor clock or
+   parallel Motion state was introduced.
 
 ## Intentionally deferred
 
-This branch does not add text/video/general CSS materialization, DOM capture as a
-new provider, a GPU scene graph, arbitrary overlapping-glass support, export
-integration, new Effects, document changes or another timing model. Canvas2D is
-sufficient to validate the corrected abstraction for the currently owned source
-set. Continuous shader-heavy performance may still justify a GPU retained
-implementation later.
+This branch deliberately does not add:
 
-## What the renderer already had
+- text materialization
+- video materialization
+- general CSS capture as a new materializer provider
+- a retained GPU scene graph
+- arbitrary overlapping glass support
+- new Effects
+- export integration
+- document schema changes
+- historical compatibility paths
 
-The current renderer already contained most of the semantic pieces needed for a retained prefix.
-
-- `compositionPlan.ts` owns semantic paint order. Its `ScenePrefix` chain is persistent structural data and already excludes the target element from an element-entry backdrop.
-- `elementRaster.ts` is the existing ShowMe-owned primitive painter. It can combine slide background, shape fill/stroke, decoded image media using the canonical media DOM transform, child groups, and mounted shader outputs.
-- `effectRuntime.ts` publishes an `effectRevision` and exposes mounted Effect surfaces.
-- `MotionVisualSample` is the existing semantic Motion boundary and remains the only consumer-animation state.
-- `cssBackdrop.ts` already provides the expensive correctness fallback.
-
-The old `backdropRestoration.ts` was the wrong source boundary. It selected shader versus image, looked up Effect canvases, reproduced image Fit/Fill/Free reconstruction, and owned a source canvas. That knowledge now sits behind the compositor/materialization boundary.
-
-The pre-existing `createBackdropRasterSource` is not a retained semantic prefix because it rasterizes in consumer-local coordinates and includes the target transform in its source signature. The prototype therefore uses a slide-space retained surface and crops it per consumer.
-
-## Resulting data flow
-
-```text
-CompositionPlan
-    |
-    v
-BackdropPoint
-    |
-    v
-planOwnedPrefixSurface()
-    |
-    v
-PrefixSurfaceRef
-  structural identity = ordered semantic source elements
-    |
-    v
-PrefixMaterializer
-  retained surface per PrefixSurfaceRef
-  source revisions / invalidation
-    |
-    v
-createScenePrefixRasterSource()
-    |
-    +--> existing elementRaster primitive painter
-    |      +--> image pixels / canonical media transform
-    |      +--> shapes / fills / strokes
-    |      +--> mounted generated GLSL output
-    |
-    v
-MaterializedPrefix { canvas, revision }
-    |
-    +------------------------+
-    |                        |
-    v                        v
-crop for glass A        crop for glass B
-    |                        |
-    +-----------+------------+
-                |
-                v
-backdropRestoration
-  B = materialized prefix crop
-  R = native resolved CSS glass/card
-  a = MotionVisualSample alpha
-  output = aR + (1-a)B
-```
-
-`SceneSurfaceRef` is renderer-local derived state. It is not persisted into the ShowMe document.
-
-## Surface identity
-
-Semantic identity and retained execution identity are separate:
-
-1. `SceneSurfaceRef` identifies the exact CompositionPlan paint point. Its identity is structural, crop-independent and renderer-independent.
-2. A provider may derive an execution projection for a particular materialization request only after the backend proves some paint cannot intersect the requested region.
-3. Material revision belongs to that retained execution source and changes when its source pixels repaint.
-
-For the two-consumer fixture, glass A and glass B have distinct semantic
-element-entry surfaces because glass A is painted before glass B. Their disjoint
-regional envelopes nevertheless prove glass A irrelevant to glass B's requested
-crop, so the owned provider can reuse the same lower execution projection. The
-semantic refs do not collapse.
-
-A later element is not part of either semantic surface. Paint after a backdrop
-point therefore cannot invalidate that earlier point.
-
-## Generic materialization boundary
-
-`backdropRestoration.ts` asks the scene materializer for a
-`SceneSurfaceRef + SurfaceRegion + RenderDensity` and receives a published
-source/revision with explicit logical bounds and pixel size. It contains no
-source-specific painting or invalidation logic.
-
-Source-specific capability and painting are delegated to the same
-`PixelSourceProvider`, backed by the existing `elementRaster.ts` primitive
-painter and `effectRuntime.ts` generated-output publication. The current
-provider uses one retained Canvas2D slide-space accumulator per execution
-projection. Generated GLSL reuses its already-published Effect canvas rather than
-performing synchronous GPU readback.
-
-## Supported owned-prefix sources
-
-The corrected owned path accepts complete element-entry prefixes containing:
-
-- slide background
-- ordinary shapes, fills and strokes
-- decoded static images
-- generated fragment GLSL with `input: "none"`
-- nesting/clipping already supported by the primitive painter
-
-Effect-entry refs are still exact semantic identities, but the current provider
-does not claim to reproduce internal effect-entry paint. Text, video, arbitrary
-CSS, CSS Effects, text-JS, content/backdrop GLSL and partial prefixes continue to
-fall back.
-
-## Invalidation result
-
-The materializer uses one root observer and source-output events, then maps each
-signal to retained projections by source Element ID. Consumer Motion and later
-unrelated paint do not dirty an earlier source projection. Lower image/style
-changes and generated Effect-output revision events do.
-
-The mixed-prefix regressions separately assert:
-
-- two exact semantic glass surfaces
-- one reusable execution surface after regional culling
-- multiple requests build once and reuse
-- later unrelated paint does not rebuild
-- lower image and GLSL source changes do rebuild
-- one failed retained surface does not poison an independent retained surface
-- source Motion produces a coherent painted frame without waiting on
-  `createImageBitmap()`
-
-A continuously running source shader is different from consumer Motion. Advancing
-that shader legitimately publishes a new source revision and can rebuild its
-dependent retained surface.
-
-## Motion result
-
-There remains one Motion state.
-
-The prototype does not add compositor clocks, DOM transform sampling, requestAnimationFrame delays, or timeouts. Move In/Fade remains sourced by `MotionVisualSample`.
-
-The glass restoration overlay uses the current semantic frame/alpha while the prefix surface remains independent of that consumer state. The existing final-frame continuity tests continue to pass, including the transition from partial restoration alpha to fully native resolved CSS paint.
-
-## Fallback boundary
-
-`cssBackdrop.ts` was not rewritten. It remains the correctness fallback when the owned-prefix materializer cannot prove the requested pixels.
-
-The current prototype declines or leaves on the existing fallback route at least these cases:
-
-- deck-level stylesheet interactions that make native paint difficult to reproduce safely
-- text as a prefix source
-- video as a prefix source
-- CSS classes on source elements
-- CSS source effects
-- text-JS source effects
-- fragment shaders that require `content` or `backdrop` input rather than generated `input: "none"`
-- incomplete/partial prefixes through an ancestor
-- overlapping restoration consumers whose own resolved glass could contribute to a later consumer
-- restoration consumers outside the existing safe glass topology, such as unsupported transforms, nesting or effect stacks
-
-These are prototype admission limits, not claims that Canvas2D cannot eventually handle all of them. Text/CSS in particular are good candidates to remain browser-owned and use capture only at the unresolved scene-prefix operation.
-
-The known-source mixed fixture produces no `cssBackdrop` output and no DOM capture.
-
-## Verification
-
-Focused compositor verification on the prototype candidate passed:
-
-```text
-tests/feature/effects/native-composition.spec.ts
-12 passed
-```
-
-The headless Linux sandbox required Chromium SwiftShader launch flags to expose WebGL2. Without those flags the renderer correctly reported that WebGL2 was unavailable, so GLSL assertions were not meaningful. The flags were used only in the ephemeral test harness and were not committed to ShowMe.
-
-Static checks also passed:
-
-```text
-npm run typecheck
-focused ESLint on changed implementation/test files
-npm run test:stats
-npm run test:audit
-```
-
-## What was learned
-
-1. **Can ShowMe represent semantic scene prefixes cleanly?** Yes. The existing `CompositionPlan` is already the right structural authority. No second scene graph was required.
-
-2. **Can different source types feed one generic prefix?** Yes for the prototype set. Image, shape and generated GLSL all feed the same retained surface through the existing primitive rasterizer.
-
-3. **Can consumers share the same prefix?** Yes. Two glass consumers used one `PrefixSurfaceRef`, one retained surface and one initial build.
-
-4. **Can invalidation remain local?** Yes at the architectural level. Consumer Motion and later paint do not rebuild the prefix; source changes do. Browser resource events may issue multiple dirty notifications and could be coalesced later.
-
-5. **Can restoration become source-agnostic?** Yes. The prototype restoration module no longer knows image/shader/shape source semantics.
-
-6. **Can `cssBackdrop.ts` naturally become a fallback provider?** Yes. Nothing in the generic path requires it to be the primary representation. Unsupported prefix operations can fall through to the existing capture route.
-
-7. **Is Canvas2D sufficient for the retained prefix?** Sufficient for this architecture prototype. It proves identity, sharing, invalidation and mixed-source composition without a retained GPU scene graph. This does not yet prove that Canvas2D is the final performance representation for continuously changing shader-heavy scenes.
-
-8. **Does this make CSS + GLSL + images feel like one renderer?** Structurally, yes. CSS glass remains native CSS while its incoming backdrop is represented as a semantic prefix whose source types are hidden behind one materialization boundary.
-
-## Production recommendation
-
-Develop this direction further rather than discard it.
-
-The useful production abstraction is small: semantic prefix identity plus a reusable materialization boundary. Do not promote the prototype into a large retained compositor framework yet.
-
-Before productionizing it:
-
-- formalize the source/pixel-density contract rather than leaving it implicit in a canvas
-- decide how browser-owned text/CSS joins the prefix as a fallback provider
-- coalesce noisy resource invalidations
-- make retained-surface lifetime/eviction explicit
-- add diagnostics that distinguish source-clock rebuilds from structural invalidation
-- measure continuously animated GLSL scenes before deciding whether the retained representation should stay Canvas2D or move to GPU textures
-- preserve the current rule that restoration remains a consumer of pixels, never the owner of source semantics
-
-The prototype does not provide evidence that a full persistent GPU scene graph is necessary.
+Canvas2D remains sufficient for the corrected foundation and current owned-source
+scope. Continuously animated shader-heavy scenes may later justify a GPU retained
+implementation, but that is a backend decision rather than a semantic rewrite.
