@@ -236,7 +236,7 @@ async function mount(
             shaderLayer.frame.width = 640;
             shaderLayer.frame.height = 360;
             shaderLayer.effects = [
-              newEffectInstance("shader-layer", shader, "background"),
+              newEffectInstance("shader", shader, "background"),
             ];
 
             const imageB = createBasicShape("image-b", "rectangle", {
@@ -729,6 +729,226 @@ test("three and ten disjoint filled rounded consumers retain resolved fade pixel
       await page.evaluate(() => (window as unknown as ProbeWindow).sceneErrors),
     ).toEqual([]);
   }
+});
+
+test("mixed owned prefix is shared across two glass consumers and invalidates only from its sources", async () => {
+  await mount(page, "glass", 2, true, false, true);
+  for (const id of ["lower", "image-b"])
+    await page
+      .locator(`[data-element-id="${id}"] img`)
+      .first()
+      .evaluate(async (image: HTMLImageElement) => image.decode());
+
+  await enableScene(page);
+  await expect(page.locator("[data-backdrop-restore]")).toHaveCount(2);
+  await expect(page.locator("[data-css-backdrop]")).toHaveCount(0);
+
+  const initial = await page.evaluate(() => {
+    const w = window as unknown as ProbeWindow;
+    return {
+      diagnostics: w.compositor!.diagnostics(),
+      captures: w.native.inspect().diagnostics.captures,
+      errors: w.sceneErrors,
+    };
+  });
+  expect(initial.captures).toBe(0);
+  expect(initial.errors).toEqual([]);
+  expect(initial.diagnostics.consumers).toBe(2);
+  expect(initial.diagnostics.uniquePrefixes).toBe(1);
+  expect(initial.diagnostics.prefixes.surfaces).toBe(1);
+  expect(initial.diagnostics.prefixes.builds).toBe(1);
+
+  const motion = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const runtimePath = "/src/components/motionRuntime.ts";
+    const {
+      createMotionRuntime,
+    }: typeof import("../../../src/components/motionRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    w.runtime = createMotionRuntime(
+      w.native.host,
+      { ...slide, motion: w.motion },
+      0,
+      undefined,
+      w.compositor,
+    );
+    const before = w.compositor!.diagnostics().prefixes.builds;
+    w.runtime.sync({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 500,
+      running: false,
+      startedAt: 0,
+    });
+    await w.compositor!.flush();
+    const middle = w.compositor!.diagnostics();
+    const glass = w.native.host.querySelector<HTMLElement>(
+      '[data-element-id="glass"]',
+    )!;
+    const overlay = w.native.host.querySelector<HTMLElement>(
+      '[data-backdrop-restore="glass"]',
+    )!;
+    return {
+      before,
+      after: middle.prefixes.builds,
+      reuses: middle.prefixes.reuses,
+      transform: getComputedStyle(glass).transform,
+      restorationAlpha: Number(overlay.style.opacity),
+    };
+  });
+  expect(motion.after).toBe(motion.before);
+  expect(motion.reuses).toBeGreaterThan(0);
+  expect(motion.transform).not.toBe("none");
+  expect(motion.restorationAlpha).toBeGreaterThan(0);
+  expect(motion.restorationAlpha).toBeLessThan(1);
+
+  await page.evaluate(() => {
+    const w = window as unknown as ProbeWindow;
+    w.runtime!.sync({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 999.999,
+      running: false,
+      startedAt: 0,
+    });
+  });
+  const almost = await image(page);
+  await page.evaluate(() => {
+    const w = window as unknown as ProbeWindow;
+    w.runtime!.sync({
+      stageId: "stage",
+      stageIndex: 0,
+      time: 1000,
+      running: false,
+      startedAt: 0,
+    });
+  });
+  const complete = await image(page);
+  let boundaryMax = 0,
+    boundaryMean = 0;
+  for (let i = 0; i < complete.length; i++) {
+    const error = Math.abs(almost[i] - complete[i]);
+    boundaryMax = Math.max(boundaryMax, error);
+    boundaryMean += error;
+  }
+  expect(boundaryMax).toBeLessThanOrEqual(8);
+  expect(boundaryMean / complete.length).toBeLessThan(0.1);
+
+  await page.evaluate(() => {
+    const w = window as unknown as ProbeWindow;
+    w.runtime!.cancel();
+    w.runtime = undefined;
+  });
+
+  await setAlpha(page, "all", 1);
+  const full = await image(page);
+  await setAlpha(page, "all", 0.5);
+  const faded = await image(page);
+  await setAlpha(page, "all", 1);
+  await page
+    .locator('[data-element-id="glass"], [data-element-id^="glass-"]')
+    .evaluateAll((nodes) => {
+      nodes.forEach(
+        (node) => ((node as HTMLElement).style.visibility = "hidden"),
+      );
+    });
+  const background = await image(page);
+  await page
+    .locator('[data-element-id="glass"], [data-element-id^="glass-"]')
+    .evaluateAll((nodes) => {
+      nodes.forEach((node) => ((node as HTMLElement).style.visibility = ""));
+    });
+
+  let fadeMax = 0,
+    fadeMean = 0;
+  for (let i = 0; i < faded.length; i++) {
+    const error = Math.abs(faded[i] - (full[i] + background[i]) * 0.5);
+    fadeMax = Math.max(fadeMax, error);
+    fadeMean += error;
+  }
+  expect(fadeMax).toBeLessThanOrEqual(3);
+  expect(fadeMean / faded.length).toBeLessThan(0.1);
+
+  const invalidation = await page.evaluate(async () => {
+    const w = window as unknown as ProbeWindow;
+    const compositor = w.compositor!;
+    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const builds = () => compositor.diagnostics().prefixes.builds;
+    const result: Record<string, number> = { initial: builds() };
+
+    const slide = w.model.slides[w.model.deck.slideIds[0]];
+    const glass = slide.nodes[0].children.find((element) => element.id === "glass")!;
+    compositor.apply([
+      {
+        elementId: glass.id,
+        frame: { ...glass.frame, x: glass.frame.x + 12 },
+        opacity: 0.35,
+        present: true,
+      },
+    ]);
+    await compositor.flush();
+    result.consumerMotion = builds();
+
+    const later = root.querySelector<HTMLElement>(
+      '[data-element-id="later-unrelated"]',
+    )!;
+    later.style.transform = "translateX(7px)";
+    await Promise.resolve();
+    await compositor.flush();
+    result.laterElement = builds();
+
+    const lower = root.querySelector<HTMLElement>('[data-element-id="lower"]')!;
+    const sourceImage = [...lower.querySelectorAll<HTMLImageElement>("img")].find(
+      (image) => getComputedStyle(image).display !== "none",
+    )!;
+    const changed = document.createElement("canvas");
+    changed.width = 300;
+    changed.height = 200;
+    const changedContext = changed.getContext("2d")!;
+    changedContext.fillStyle = "#f05a24";
+    changedContext.fillRect(0, 0, changed.width, changed.height);
+    changedContext.fillStyle = "#1535cc";
+    changedContext.fillRect(0, 0, 130, changed.height);
+    sourceImage.src = changed.toDataURL();
+    await sourceImage.decode();
+    await compositor.flush();
+    result.imageSource = builds();
+
+    const shader = root.querySelector<HTMLElement>(
+      '[data-element-id="mixed-shader"] [data-effect-id]',
+    )!;
+    shader.dataset.effectRevision = String(
+      Number(shader.dataset.effectRevision ?? 0) + 1,
+    );
+    shader.dispatchEvent(
+      new CustomEvent("showme-effect-output", { bubbles: true }),
+    );
+    await compositor.flush();
+    result.shaderSource = builds();
+
+    return {
+      result,
+      diagnostics: compositor.diagnostics(),
+      captures: w.native.inspect().diagnostics.captures,
+      cssBackdrop: root.querySelectorAll("[data-css-backdrop]").length,
+      errors: w.sceneErrors,
+    };
+  });
+  expect(invalidation.result.consumerMotion).toBe(invalidation.result.initial);
+  expect(invalidation.result.laterElement).toBe(invalidation.result.initial);
+  expect(invalidation.result.imageSource).toBeGreaterThan(
+    invalidation.result.laterElement,
+  );
+  expect(invalidation.result.shaderSource).toBeGreaterThan(
+    invalidation.result.imageSource,
+  );
+  expect(invalidation.diagnostics.uniquePrefixes).toBe(1);
+  expect(invalidation.diagnostics.prefixes.surfaces).toBe(1);
+  expect(invalidation.captures).toBe(0);
+  expect(invalidation.cssBackdrop).toBe(0);
+  expect(invalidation.errors).toEqual([]);
 });
 
 test("overlapping motion envelopes retain the existing backdrop lowering for three and ten cards", async () => {
