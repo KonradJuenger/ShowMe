@@ -69,13 +69,28 @@ async function mount(
   disjoint = false,
   imageBackground = false,
   mixedPrefix = false,
+  presentation = false,
 ) {
   await page.goto(
     `http://127.0.0.1:${port}/tests/helpers/effects-harness.html`,
   );
-  const options = { mode, count, disjoint, imageBackground, mixedPrefix };
+  const options = {
+    mode,
+    count,
+    disjoint,
+    imageBackground,
+    mixedPrefix,
+    presentation,
+  };
   await page.evaluate(async (options) => {
-    const { mode, count, disjoint, imageBackground, mixedPrefix } = options;
+    const {
+      mode,
+      count,
+      disjoint,
+      imageBackground,
+      mixedPrefix,
+      presentation,
+    } = options;
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
       factoryPath = "/src/core/elementFactory.ts",
       authoringPath = "/src/core/effectAuthoring.ts",
@@ -119,6 +134,7 @@ async function mount(
       0,
       undefined,
       {
+        liveMedia: presentation,
         configure(model: PresentationDocument) {
           (window as unknown as ProbeWindow).model = model;
           model.deck.stylesheet = "";
@@ -1647,55 +1663,59 @@ test("backend selection is regional for bounded unrelated paint and overlapping 
 });
 
 test("browser-native CSS glass bypasses compositor materialization during ordinary Motion", async () => {
-  await mount(page, "browser-native", 1, false, true);
-  await page
-    .locator('[data-element-id="lower"] img')
-    .evaluate(async (image: HTMLImageElement) => image.decode());
-  const result = await page.evaluate(async () => {
-    const w = window as unknown as ProbeWindow;
-    await w.native.setMotion({
-      stageId: "stage",
-      stageIndex: 0,
-      time: 500,
-      running: false,
-      startedAt: 1000,
+  for (const presentation of [false, true]) {
+    await mount(page, "browser-native", 1, false, true, false, presentation);
+    await page
+      .locator('[data-element-id="lower"] img')
+      .evaluate(async (image: HTMLImageElement) => image.decode());
+    const result = await page.evaluate(async () => {
+      const w = window as unknown as ProbeWindow;
+      await w.native.setMotion({
+        stageId: "stage",
+        stageIndex: 0,
+        time: 500,
+        running: false,
+        startedAt: 1000,
+      });
+      await w.native.advance(0.37);
+      const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
+      const glass = root.querySelector<HTMLElement>(
+        '[data-element-id="glass"]',
+      )!;
+      const effect = glass.querySelector<HTMLElement>("[data-effect-id]")!;
+      const foreground = root.querySelector<HTMLElement>(
+        '[data-element-id="foreground"]',
+      )!;
+      return {
+        backend: root.dataset.compositionBackend ?? null,
+        restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+        replay: root.querySelectorAll("[data-css-backdrop]").length,
+        splitVisual: root.querySelectorAll("[data-composition-visual]").length,
+        effectCanvas: effect.querySelectorAll(":scope > canvas").length,
+        backdrop: getComputedStyle(effect).backdropFilter,
+        opacity: Number(glass.style.opacity),
+        transform: getComputedStyle(glass).transform,
+        text: glass.textContent,
+        foregroundAfter: Boolean(
+          glass.compareDocumentPosition(foreground) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+        captures: w.native.inspect().diagnostics.captures,
+      };
     });
-    await w.native.advance(0.37);
-    const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
-    const glass = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
-    const effect = glass.querySelector<HTMLElement>("[data-effect-id]")!;
-    const foreground = root.querySelector<HTMLElement>(
-      '[data-element-id="foreground"]',
-    )!;
-    return {
-      backend: root.dataset.compositionBackend ?? null,
-      restoration: root.querySelectorAll("[data-backdrop-restore]").length,
-      replay: root.querySelectorAll("[data-css-backdrop]").length,
-      splitVisual: root.querySelectorAll("[data-composition-visual]").length,
-      effectCanvas: effect.querySelectorAll(":scope > canvas").length,
-      backdrop: getComputedStyle(effect).backdropFilter,
-      opacity: Number(glass.style.opacity),
-      transform: getComputedStyle(glass).transform,
-      text: glass.textContent,
-      foregroundAfter: Boolean(
-        glass.compareDocumentPosition(foreground) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-      captures: w.native.inspect().diagnostics.captures,
-    };
-  });
-  expect(result.backend).toBeNull();
-  expect(result.restoration).toBe(0);
-  expect(result.replay).toBe(0);
-  expect(result.splitVisual).toBe(0);
-  expect(result.effectCanvas).toBe(0);
-  expect(result.backdrop).not.toBe("none");
-  expect(result.opacity).toBeGreaterThan(0.25);
-  expect(result.opacity).toBeLessThan(0.9);
-  expect(result.transform).not.toBe("none");
-  expect(result.text).toContain("Native CSS glass");
-  expect(result.foregroundAfter).toBe(true);
-  expect(result.captures).toBe(0);
+    expect(result.backend).toBeNull();
+    expect(result.restoration).toBe(0);
+    expect(result.replay).toBe(0);
+    expect(result.splitVisual).toBe(0);
+    expect(result.effectCanvas).toBe(0);
+    expect(result.backdrop).not.toBe("none");
+    expect(result.opacity).toBeGreaterThan(0.25);
+    expect(result.opacity).toBeLessThan(0.9);
+    expect(result.transform).not.toBe("none");
+    expect(result.text).toContain("Native CSS glass");
+    expect(result.foregroundAfter).toBe(true);
+    expect(result.captures).toBe(0);
+  }
 });
 
 test("Move Scale Rotate and Fade stay on the mounted DOM hot path", async () => {
