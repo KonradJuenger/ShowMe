@@ -571,7 +571,7 @@ async function enableScene(page: Page, prepare = true) {
       compileCompositionPlan(planningSlide, w.model.deck),
       planningSlide,
       w.model.deck,
-      { restoration: true, padding: 2 },
+      { restoration: true, padding: 2, legacyCssBackdrop: true },
     ).restoration;
     if (!plan) throw new Error("Real glass style was not admitted");
     for (const id of plan.glass) {
@@ -1200,7 +1200,7 @@ test("scene materializer shares one exact surface across independent regional co
       compileCompositionPlan(planningSlide, w.model.deck),
       planningSlide,
       w.model.deck,
-      { restoration: true, padding: 2 },
+      { restoration: true, padding: 2, legacyCssBackdrop: true },
     ).restoration!;
     const surface = restoration.surfaces.get("glass")!;
     const materializer = w.compositor!.materializer;
@@ -1310,7 +1310,7 @@ test("one failed restoration surface leaves an independent consumer operational"
       compileCompositionPlan(planningSlide, w.model.deck),
       planningSlide,
       w.model.deck,
-      { restoration: true, padding: 2 },
+      { restoration: true, padding: 2, legacyCssBackdrop: true },
     ).restoration!;
     const failedSurface = restoration.surfaces.get("glass-1")!;
     const materializer = w.compositor!.materializer;
@@ -1553,7 +1553,7 @@ test("overlapping motion envelopes retain the existing backdrop lowering for thr
         compileCompositionPlan(slide, w.model.deck),
         slide,
         w.model.deck,
-        { restoration: true, padding: 2 },
+        { restoration: true, padding: 2, legacyCssBackdrop: true },
       ).restoration;
     });
     expect(eligible).toBe(false);
@@ -1614,7 +1614,7 @@ test("backend selection is regional for bounded unrelated paint and overlapping 
         compileCompositionPlan(slide, w.model.deck),
         slide,
         w.model.deck,
-        { restoration: true, padding: 2 },
+        { restoration: true, padding: 2, legacyCssBackdrop: true },
       );
     const before = [...select().restoration!.glass];
     // Ordinary motion elsewhere has a bounded sweep and is not a global veto.
