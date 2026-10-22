@@ -61,7 +61,7 @@ export function EffectSampleImage({
     visual.frame.height = 140;
     return visual;
   }, []);
-  const rasterContent = useMemo(() => ({ element, resources: {} }), [element]);
+  const sceneTextureSource = useMemo(() => ({ element, resources: {} }), [element]);
   return (
     <div data-element-id={element.id} style={{ width: "100%", height: "100%" }}>
       <EffectSurface
@@ -69,7 +69,7 @@ export function EffectSampleImage({
         instance={instance}
         width={280}
         height={140}
-        rasterContent={rasterContent}
+        sceneTextureSource={sceneTextureSource}
         previewTiming={{
           progress,
           time,

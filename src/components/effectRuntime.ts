@@ -458,6 +458,7 @@ export function mountEffectSurface(
   let lastCssOutput = "";
   let inputPending = false;
   let sceneTexture: SceneTextureProvider | null = null;
+  let shaderOutput: ShaderOutput | null = null;
   let sourceContent: HTMLElement | null = null;
   let sourceOpacity = "";
   const ownerAbsent = () => !!node.closest('[data-presentation-absent="true"]');
