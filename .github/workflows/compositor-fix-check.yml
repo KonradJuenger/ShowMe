@@ -68,7 +68,7 @@ jobs:
           SHOWME_TEST_FILES: '["tests/feature/effects/mixed-compositing.spec.ts","tests/feature/effects/css-backdrop-opacity.spec.ts","tests/feature/effects/render-sampling.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'
 
   electron-effects:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -78,6 +78,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Native compositor Electron regressions
-        run: npx playwright test --config playwright.electron.config.ts --output test-results-compositor-electron
+        run: xvfb-run -a npx playwright test --config playwright.electron.config.ts --output test-results-compositor-electron
         env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
           SHOWME_TEST_FILES: '["tests/feature/effects/native-composition.spec.ts"]'
