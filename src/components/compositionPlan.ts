@@ -362,6 +362,9 @@ export function compileCompositionPlan(
       entry.earlier.map((group) => group.element.id),
     ]);
     const structuralKey = JSON.stringify([
+      point.kind === "effect-entry"
+        ? [point.kind, point.elementId, point.effectId]
+        : [point.kind, point.elementId],
       structuralPrefix,
       paintEffects.map((ref) => [ref.elementId, ref.effectId]),
     ]);
