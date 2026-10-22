@@ -384,7 +384,6 @@ it("browser-native CSS is an explicit boundary while scene-input shaders stay ad
   const native = planCompositionBackends(plan, f.slide, f.deck, {
     restoration: true,
     padding: 2,
-    browserNativeCss: true,
   });
   expect([...native.browserNativeCss]).toEqual(["card"]);
   expect(native.native.size).toBe(0);
@@ -396,6 +395,7 @@ it("browser-native CSS is an explicit boundary while scene-input shaders stay ad
   const legacy = planCompositionBackends(plan, f.slide, f.deck, {
     restoration: true,
     padding: 2,
+    legacyCssBackdrop: true,
   });
   expect(legacy.restoration?.glass.has("card")).toBe(true);
 });
