@@ -416,16 +416,18 @@ export function mountEffectSurface(
     mode: "live",
   },
   compositionDependencies?: () => EffectRef[] | undefined,
-  backdropMode:
+  backdropMode?:
     | "browser-native"
     | "fallback"
     | "hoisted"
-    | "restoration" = "fallback",
+    | "restoration",
 ) {
   const refined = executionMode === "refined";
   const useGpu = refined;
+  const resolvedBackdropMode =
+    backdropMode ?? (definition.kind === "css" ? "browser-native" : "fallback");
   const browserNativeCss =
-    definition.kind === "css" && backdropMode === "browser-native";
+    definition.kind === "css" && resolvedBackdropMode === "browser-native";
   const sceneRoot = samplingRoot(node, initialSampling);
   // Native CSS participates directly in Chromium paint. It needs neither the
   // scene effect graph nor its subtree MutationObserver.
@@ -942,7 +944,7 @@ export function mountEffectSurface(
           node.style.setProperty(`--${key}`, String(value));
         node.style.setProperty("--duration", String(timing.duration));
         if (
-          backdropMode === "fallback" &&
+          resolvedBackdropMode === "fallback" &&
           !cssBackdrop &&
           getComputedStyle(node).backdropFilter !== "none"
         )
@@ -1352,7 +1354,7 @@ export function mountEffectSurface(
       style.textContent = compileEffectCss(definition.source, scope);
       node.append(style);
       if (
-        backdropMode === "fallback" &&
+        resolvedBackdropMode === "fallback" &&
         /backdrop-filter\s*:/.test(definition.source)
       )
         cssBackdrop = createCssBackdrop(
