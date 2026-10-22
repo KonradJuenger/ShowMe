@@ -46,14 +46,6 @@ export function legacySceneTextureTextureBytes() {
   );
 }
 
-function dependencyOrder(a: HTMLElement, b: HTMLElement) {
-  if (a.contains(b)) return 1;
-  if (b.contains(a)) return -1;
-  return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
-    ? -1
-    : 1;
-}
-
 function hasText(elements: readonly Element[]): boolean {
   return elements.some(
     (element) =>
@@ -93,6 +85,9 @@ export function createLegacySceneTextureProvider(
   let pending: Promise<void> | null = null;
   let lease: ReturnType<EffectSources<Raster>["acquire"]> | null = null;
   let leaseKey = "";
+  let publicRevision = 0;
+  let publishedLeaseKey = "";
+  let publishedSourceRevision = -1;
   let allowed = new Set<string>();
   let partial = new Set<string>();
   const prefixElements = new Map<string, Element>();
@@ -163,13 +158,8 @@ export function createLegacySceneTextureProvider(
           (!!owner && allowed.has(owner) && !partial.has(owner))
         );
       })
-      .sort(dependencyOrder);
-    return candidates.filter(
-      (candidate) =>
-        !candidates.some(
-          (other) => other !== candidate && other.contains(candidate),
-        ),
-    );
+      .reverse();
+    return candidates;
   };
 
   const flushDependencies = async () => {
@@ -339,6 +329,15 @@ export function createLegacySceneTextureProvider(
   ) => {
     if (disposed || lease !== activeLease) return;
     preparedKey = key;
+    const sourceRevision = activeLease.source.revision;
+    if (
+      publishedLeaseKey !== leaseKey ||
+      publishedSourceRevision !== sourceRevision
+    ) {
+      publicRevision++;
+      publishedLeaseKey = leaseKey;
+      publishedSourceRevision = sourceRevision;
+    }
     if (dirtyVersion === version) dirty = false;
   };
 
@@ -401,7 +400,7 @@ export function createLegacySceneTextureProvider(
       const activeLease = lease;
       return {
         get revision() {
-          return activeLease.source.revision;
+          return publicRevision;
         },
         bind(gl: WebGL2RenderingContext) {
           activeLease.upload(gl);
