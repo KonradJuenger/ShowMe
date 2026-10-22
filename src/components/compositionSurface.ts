@@ -139,7 +139,6 @@ export function createPrefixMaterializer(
       if (disposed) return;
       invalidations++;
       source.markDirty();
-      invalidated();
     };
     const context: RasterContext = {
       root,
