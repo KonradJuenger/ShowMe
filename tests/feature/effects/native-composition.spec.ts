@@ -1091,8 +1091,8 @@ test("one failed restoration surface leaves an independent consumer operational"
       errors: w.sceneErrors,
       goodPopulated: good.width > 1,
       failedPopulated: failed.width > 1,
-      goodOwned: w.compositor!.ownsOpacity("glass"),
-      failedOwned: w.compositor!.ownsOpacity("glass-1"),
+      goodOwned: w.compositor!.ownsOpacity?.("glass") ?? false,
+      failedOwned: w.compositor!.ownsOpacity?.("glass-1") ?? false,
       goodPaint: getComputedStyle(
         root.querySelector(
           '[data-element-id="glass"] [data-composition-paint]',
