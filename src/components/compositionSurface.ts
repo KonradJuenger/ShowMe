@@ -349,7 +349,11 @@ export function createSceneSurfaceMaterializer(
     const width = Math.max(1, Math.ceil(deck.width * density.x));
     const height = Math.max(1, Math.ceil(deck.height * density.y));
     const changed = state.source.update(width, height);
-    if (!changed && state.published) {
+    if (
+      !changed &&
+      state.published &&
+      state.published.revision === state.source.revision
+    ) {
       reuses++;
       return state.published;
     }
@@ -403,13 +407,16 @@ export function createSceneSurfaceMaterializer(
       materializeCalls++;
       semanticSurfaces.add(request.surface.id);
       const state = ensure(request);
-      if (!state.pending)
-        state.pending = build(state, request).finally(() => {
-          state.pending = undefined;
-        });
-      else reuses++;
-      const published = await state.pending;
-      return { surface: request.surface, ...published };
+      const existing = state.pending;
+      const pending = existing ?? build(state, request);
+      if (existing) reuses++;
+      else state.pending = pending;
+      try {
+        const published = await pending;
+        return { surface: request.surface, ...published };
+      } finally {
+        if (state.pending === pending) state.pending = undefined;
+      }
     },
     subscribeInvalidation(listener: () => void) {
       listeners.add(listener);
