@@ -413,10 +413,12 @@ async function enableScene(page: Page, prepare = true) {
     w.sceneErrors = [];
     w.compositor = mountCompositionRuntime(
       w.native.host.querySelector<HTMLElement>(".slide-renderer")!,
-      plan,
-      w.model.deck,
-      (_ids, error) => w.sceneErrors!.push(String(error)),
-      { x: 1, y: 1 },
+      { slide: planningSlide, deck: w.model.deck },
+      {
+        restoration: plan,
+        failed: (_ids, error) => w.sceneErrors!.push(String(error)),
+        density: { x: 1, y: 1 },
+      },
     );
     const apply = w.compositor.apply.bind(w.compositor);
     // Observe the semantic frame in this diagnostic, independently of output.
