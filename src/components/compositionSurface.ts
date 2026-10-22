@@ -273,42 +273,46 @@ export function createSceneSurfaceMaterializer(
     }
   };
 
-  const observer = new MutationObserver((records) => {
-    const dirty = new Set<string>();
-    for (const record of records) {
-      const id = ownerId(record.target);
-      if (id) dirty.add(id);
-      if (record.type === "childList")
-        for (const node of [...record.addedNodes, ...record.removedNodes]) {
-          const childId = ownerId(node);
-          if (childId) dirty.add(childId);
-        }
-    }
-    dirty.forEach(markElementDirty);
-  });
-  observer.observe(root, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-    attributes: true,
-    attributeFilter: [
-      "style",
-      "class",
-      "src",
-      "data-effect-revision",
-      "data-effect-error",
-      "data-effect-started",
-      "data-presentation-absent",
-    ],
-  });
-
+  let observer: MutationObserver | null = null;
   const sourceSignal = (event: Event) =>
     markElementDirty(ownerId(event.target));
-  root.addEventListener("showme-effect-output", sourceSignal);
-  root.addEventListener("load", sourceSignal, true);
-  root.addEventListener("error", sourceSignal, true);
+  const startObserving = () => {
+    if (observer || disposed) return;
+    observer = new MutationObserver((records) => {
+      const dirty = new Set<string>();
+      for (const record of records) {
+        const id = ownerId(record.target);
+        if (id) dirty.add(id);
+        if (record.type === "childList")
+          for (const node of [...record.addedNodes, ...record.removedNodes]) {
+            const childId = ownerId(node);
+            if (childId) dirty.add(childId);
+          }
+      }
+      dirty.forEach(markElementDirty);
+    });
+    observer.observe(root, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: [
+        "style",
+        "class",
+        "src",
+        "data-effect-revision",
+        "data-effect-error",
+        "data-effect-started",
+        "data-presentation-absent",
+      ],
+    });
+    root.addEventListener("showme-effect-output", sourceSignal);
+    root.addEventListener("load", sourceSignal, true);
+    root.addEventListener("error", sourceSignal, true);
+  };
 
   const ensure = (request: MaterializeRequest) => {
+    startObserving();
     const irrelevant = request.irrelevantElementIds ?? new Set<string>();
     const selected = projectionFor(request.surface, slide, irrelevant);
     if (!selected)
@@ -441,10 +445,12 @@ export function createSceneSurfaceMaterializer(
     },
     dispose() {
       disposed = true;
-      observer.disconnect();
-      root.removeEventListener("showme-effect-output", sourceSignal);
-      root.removeEventListener("load", sourceSignal, true);
-      root.removeEventListener("error", sourceSignal, true);
+      observer?.disconnect();
+      if (observer) {
+        root.removeEventListener("showme-effect-output", sourceSignal);
+        root.removeEventListener("load", sourceSignal, true);
+        root.removeEventListener("error", sourceSignal, true);
+      }
       listeners.clear();
       for (const state of retained.values()) {
         closePublished(state.published);
