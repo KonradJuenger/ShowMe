@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import sharp from "sharp";
 import type { PresentationDocument } from "../../../src/core/document";
 import type { mountMixedEffectsHarness } from "../../helpers/mixedEffectsHarness";
 
@@ -53,6 +52,7 @@ async function mount(
                 ":scope { backdrop-filter: blur(12px) saturate(1.25); background: linear-gradient(135deg, #ffffff66, #6699ff33); border-radius: 18px; border: 2px solid #ffffffaa; box-shadow: 0 6px 12px #00224444; }",
             };
             slide.effectResources = { shader, css };
+
             const lower = createBasicShape("lower", "rectangle", {
               x: 0,
               y: 0,
@@ -68,6 +68,7 @@ async function mount(
               slide.effectResources.tint = tint;
               lower.effects.push(newEffectInstance("tint", tint, "background"));
             }
+
             const glass = createBasicShape("glass", "rectangle", {
               x: 80,
               y: 70,
@@ -78,6 +79,7 @@ async function mount(
             glass.appearance.radius = 18;
             glass.clipChildren = true;
             glass.effects = [newEffectInstance("css", css, "content")];
+
             const a = createBasicShape("a", "rectangle", { x: 40, y: 40 });
             const b = createBasicShape("b", "rectangle", { x: 80, y: 80 });
             a.frame.width = b.frame.width = 120;
@@ -85,6 +87,7 @@ async function mount(
             a.appearance.fill = "#ff000088";
             b.appearance.fill = "#00ff0088";
             glass.children = [a, b];
+
             if (grouped) {
               const group = createBasicShape("group", "rectangle", {
                 x: 0,
@@ -95,11 +98,18 @@ async function mount(
               group.appearance.fill = "";
               group.children = [glass];
               if (grouped === "nested") {
-                const outer = createBasicShape("outer", "rectangle", { x: 0, y: 0 });
-                outer.frame.width = 640; outer.frame.height = 360; outer.appearance.fill = ""; outer.children = [group];
+                const outer = createBasicShape("outer", "rectangle", {
+                  x: 0,
+                  y: 0,
+                });
+                outer.frame.width = 640;
+                outer.frame.height = 360;
+                outer.appearance.fill = "";
+                outer.children = [group];
                 slide.nodes[0].children = [lower, outer];
               } else slide.nodes[0].children = [lower, group];
             } else slide.nodes[0].children = [lower, glass];
+
             if (consumer) {
               const caption = createTextElement("caption", { x: 20, y: 8 });
               caption.frame.width = 250;
@@ -113,6 +123,7 @@ async function mount(
                 caption.content.format.typography.color = "#000000";
               }
               glass.children.push(caption);
+
               const next = createBasicShape("next", "rectangle", {
                 x: 280,
                 y: 70,
@@ -133,136 +144,111 @@ async function mount(
   );
 }
 
-async function pixels(page: Page) {
-  return sharp(await page.locator(".slide-renderer").screenshot())
-    .removeAlpha()
-    .raw()
-    .toBuffer();
+async function nativeState(page: Page, id = "glass") {
+  return page.locator(`[data-element-id="${id}"]`).evaluate((owner) => {
+    const root = owner.closest(".slide-renderer")!;
+    const effect = owner.querySelector<HTMLElement>("[data-effect-id]")!;
+    return {
+      backdrop: getComputedStyle(effect).backdropFilter,
+      ownerOpacity: Number(getComputedStyle(owner).opacity),
+      ownerTransform: getComputedStyle(owner).transform,
+      restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+      replay: root.querySelectorAll("[data-css-backdrop]").length,
+      splitVisual: root.querySelectorAll("[data-composition-visual]").length,
+      cssCanvas: effect.querySelectorAll(":scope > canvas").length,
+      ready: effect.dataset.effectReady,
+    };
+  });
 }
 
-async function parity(
-  page: Page,
-  owner: string,
-  time = 0,
-  opacity = 0.5,
-  offset = 0,
-) {
-  await page
-    .locator(`[data-element-id="${owner}"]`)
-    .evaluate((node: HTMLElement, offset) => {
-      node.style.opacity = "1";
-      node.style.transform = `translateY(${offset}px)`;
-    }, offset);
-  await page.evaluate(
-    (time) => (window as unknown as GlassWindow).glass.advance(time),
-    time,
-  );
-  const full = await pixels(page);
-  await page
-    .locator(`[data-element-id="${owner}"]`)
-    .evaluate((node: HTMLElement) => {
-      // Exclude the whole group. A replay canvas explicitly sets visibility:
-      // visible, so inherited visibility alone is not an empty-scene reference.
-      node.style.display = "none";
-    });
-  const backdrop = await pixels(page);
-  await page
-    .locator(`[data-element-id="${owner}"]`)
-    .evaluate((node: HTMLElement, opacity) => {
-      node.style.display = "";
-      node.style.opacity = String(opacity);
-    }, opacity);
-  await page.evaluate(
-    (time) => (window as unknown as GlassWindow).glass.advance(time),
-    time,
-  );
-  const faded = await pixels(page);
-  assertPixelComposition(faded, full, backdrop, opacity);
-  expect(
-    await page
-      .locator(`[data-element-id="${owner}"]`)
-      .evaluate((node: HTMLElement) => Number(node.style.opacity)),
-  ).toBeCloseTo(opacity);
-}
-
-function assertPixelComposition(
-  faded: Buffer,
-  full: Buffer,
-  backdrop: Buffer,
-  opacity: number,
-  bounds = { left: 60, top: 55, right: 400, bottom: 290 },
-) {
-  let error = 0,
-    count = 0;
-  // Compare the material, overlapping children, rounded edges and shadow against
-  // resolve-glass-then-fade pixel composition, rather than computed CSS alone.
-  for (let y = bounds.top; y < bounds.bottom; y++)
-    for (let x = bounds.left; x < bounds.right; x++) {
-      for (let c = 0; c < 3; c++) {
-        const i = (y * 640 + x) * 3 + c;
-        error += Math.abs(
-          faded[i] - (full[i] * opacity + backdrop[i] * (1 - opacity)),
-        );
-        count++;
-      }
-    }
-  expect(error / count).toBeLessThan(2);
-}
-
-test("CSS glass resolves an animated shader before whole-element opacity", async ({
+test("CSS glass is real Chromium backdrop-filter over an animated shader", async ({
   page,
 }) => {
   await mount(page, false);
-  await parity(page, "glass");
-  await expect(page.locator("[data-css-backdrop]")).toHaveAttribute(
-    "data-css-backdrop-backend",
-    "primitive",
-  );
-  await parity(page, "glass", 0.37, 0.99997, -20);
-  await page
-    .locator('[data-element-id="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.opacity = "1";
-    });
   await page.evaluate(() =>
-    (window as unknown as GlassWindow).glass.advance(0),
+    (window as unknown as GlassWindow).glass.advance(0.37),
   );
-  expect(
-    (
-      await page.evaluate(() =>
-        (window as unknown as GlassWindow).glass.inspect(),
-      )
-    ).errors,
-  ).toEqual([]);
+  const state = await nativeState(page);
+  expect(state.backdrop).not.toBe("none");
+  expect(state.restoration).toBe(0);
+  expect(state.replay).toBe(0);
+  expect(state.splitVisual).toBe(0);
+  expect(state.cssCanvas).toBe(0);
+  expect(state.ready).toBe("true");
+
+  const shader = await page
+    .locator('[data-element-id="lower"] [data-effect-id]')
+    .evaluate((effect) => {
+      const canvas = effect.querySelector<HTMLCanvasElement>(":scope > canvas")!;
+      return {
+        ready: (effect as HTMLElement).dataset.effectReady,
+        width: canvas.width,
+        height: canvas.height,
+      };
+    });
+  expect(shader.ready).toBe("true");
+  expect(shader.width).toBeGreaterThan(1);
+  expect(shader.height).toBeGreaterThan(1);
 });
 
-test("CSS glass retains resolved pixels and overlapping children under parent-group fades", async ({
+test("parent-group opacity uses Chromium group compositing without reconstruction", async ({
   page,
 }) => {
   await mount(page, true);
-  await parity(page, "group");
-  await parity(page, "group", 0.37, 0.7, -20);
-  expect(
-    (
-      await page.evaluate(() =>
-        (window as unknown as GlassWindow).glass.inspect(),
-      )
-    ).unchanged,
-  ).toBe(true);
+  await page.locator('[data-element-id="group"]').evaluate((node) => {
+    (node as HTMLElement).style.opacity = "0.7";
+    (node as HTMLElement).style.transform = "translateY(-20px)";
+  });
+  await page.evaluate(() =>
+    (window as unknown as GlassWindow).glass.advance(0.37),
+  );
+  const group = await page.locator('[data-element-id="group"]').evaluate((node) => ({
+    opacity: Number(getComputedStyle(node).opacity),
+    transform: getComputedStyle(node).transform,
+  }));
+  const state = await nativeState(page);
+  expect(group.opacity).toBeCloseTo(0.7);
+  expect(group.transform).not.toBe("none");
+  expect(state.backdrop).not.toBe("none");
+  expect(state.restoration).toBe(0);
+  expect(state.replay).toBe(0);
 });
 
-test("independent nested group alpha resolves child glass before each enclosing fade", async ({ page }) => {
+test("nested group alpha remains browser-native at every enclosing level", async ({
+  page,
+}) => {
   await mount(page, "nested");
-  await page.locator('[data-element-id="group"]').evaluate((node: HTMLElement) => { node.style.opacity = ".6"; });
-  await parity(page, "outer", .37, .4);
-  expect((await page.evaluate(() => (window as unknown as GlassWindow).glass.inspect())).errors).toEqual([]);
+  await page.locator('[data-element-id="group"]').evaluate((node) => {
+    (node as HTMLElement).style.opacity = "0.6";
+  });
+  await page.locator('[data-element-id="outer"]').evaluate((node) => {
+    (node as HTMLElement).style.opacity = "0.4";
+  });
+  await page.evaluate(() =>
+    (window as unknown as GlassWindow).glass.advance(0.37),
+  );
+  const alphas = await page.evaluate(() => ({
+    group: Number(
+      getComputedStyle(document.querySelector('[data-element-id="group"]')!)
+        .opacity,
+    ),
+    outer: Number(
+      getComputedStyle(document.querySelector('[data-element-id="outer"]')!)
+        .opacity,
+    ),
+  }));
+  expect(alphas).toEqual({ group: 0.6, outer: 0.4 });
+  const state = await nativeState(page);
+  expect(state.backdrop).not.toBe("none");
+  expect(state.restoration).toBe(0);
+  expect(state.replay).toBe(0);
 });
 
-test("production Move In presence keeps glass resolved while its transform and opacity are intermediate", async ({
+test("production Move In presence updates native transform and opacity only", async ({
   page,
 }) => {
   await mount(page, false);
-  await page.evaluate(async () => {
+  const result = await page.evaluate(async () => {
     const w = window as unknown as GlassWindow;
     const slide = w.glassModel.slides[w.glassModel.deck.slideIds[0]];
     slide.motion = {
@@ -304,7 +290,10 @@ test("production Move In presence keeps glass resolved while its transform and o
     }: typeof import("../../../src/components/motionRuntime") = await import(
       /* @vite-ignore */ path
     );
-    const runtime = createMotionRuntime(w.glass.host, slide, 0);
+    const root = w.glass.host.querySelector<HTMLElement>(".slide-renderer")!;
+    const glass = root.querySelector<HTMLElement>('[data-element-id="glass"]')!;
+    const effect = glass.querySelector<HTMLElement>("[data-effect-id]")!;
+    const runtime = createMotionRuntime(root, slide, 0);
     runtime.sync({
       stageId: "entrance",
       stageIndex: 0,
@@ -313,32 +302,26 @@ test("production Move In presence keeps glass resolved while its transform and o
       running: false,
     });
     await w.glass.advance(0.48);
+    const value = {
+      opacity: Number(glass.style.opacity),
+      transform: glass.style.transform,
+      sameEffect: effect === glass.querySelector("[data-effect-id]"),
+      restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+      replay: root.querySelectorAll("[data-css-backdrop]").length,
+      backdrop: getComputedStyle(effect).backdropFilter,
+    };
+    runtime.cancel();
+    return value;
   });
-  await expect(page.locator("[data-css-backdrop]")).toBeVisible();
-  const card = page.locator('[data-element-id="glass"]');
-  const alpha = await card.evaluate((node: HTMLElement) =>
-    Number(node.style.opacity),
-  );
-  expect(alpha).toBeCloseTo(0.5);
-  expect(
-    await card.evaluate((node: HTMLElement) => node.style.transform),
-  ).toContain("-18px");
-  const faded = await pixels(page);
-  await card.evaluate((node: HTMLElement) => {
-    node.style.opacity = "1";
-  });
-  await page.evaluate(() =>
-    (window as unknown as GlassWindow).glass.advance(0.48),
-  );
-  const full = await pixels(page);
-  await card.evaluate((node: HTMLElement) => {
-    node.style.visibility = "hidden";
-  });
-  const backdrop = await pixels(page);
-  assertPixelComposition(faded, full, backdrop, alpha);
+  expect(result.opacity).toBeCloseTo(0.5);
+  expect(result.transform).toContain("-18px");
+  expect(result.sameEffect).toBe(true);
+  expect(result.restoration).toBe(0);
+  expect(result.replay).toBe(0);
+  expect(result.backdrop).not.toBe("none");
 });
 
-test("custom contributing CSS retains native backdrop pixels during a fade", async ({
+test("external stylesheet changes do not cause CSS backdrop raster replay", async ({
   page,
 }) => {
   await mount(page, false);
@@ -350,126 +333,73 @@ test("custom contributing CSS retains native backdrop pixels during a fade", asy
     style.textContent = css;
     h.host.querySelector(".slide-renderer")!.append(style);
   });
-  await parity(page, "glass");
-  await expect(page.locator("[data-css-backdrop]")).toHaveAttribute(
-    "data-css-backdrop-backend",
-    "native",
+  await page.evaluate(() =>
+    (window as unknown as GlassWindow).glass.advance(0.37),
   );
+  const state = await nativeState(page);
+  expect(state.backdrop).not.toBe("none");
+  expect(state.restoration).toBe(0);
+  expect(state.replay).toBe(0);
+  expect(state.cssCanvas).toBe(0);
 });
 
-test("cached static CSS backdrop styles retain current shader, source transform and group opacity pixels", async ({
+test("source transforms and opacity remain independent from native glass paint", async ({
   page,
 }) => {
   await mount(page, false, true);
-  await parity(page, "glass");
-  await page
-    .locator('[data-element-id="lower"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.transform = "translateX(13px)";
-      node.style.opacity = "0.65";
-    });
-  await page
-    .locator('[data-element-id="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.transform = "translateY(-10px)";
-    });
+  const before = await page
+    .locator('[data-element-id="glass"] [data-effect-id]')
+    .evaluate((node) => node);
+  await page.locator('[data-element-id="lower"]').evaluate((node) => {
+    const element = node as HTMLElement;
+    element.style.transform = "translateX(13px)";
+    element.style.opacity = "0.65";
+  });
+  await page.locator('[data-element-id="glass"]').evaluate((node) => {
+    const element = node as HTMLElement;
+    element.style.transform = "translateY(-10px)";
+    element.style.opacity = "0.5";
+  });
   await page.evaluate(() =>
     (window as unknown as GlassWindow).glass.advance(0.37),
   );
-  const faded = await pixels(page);
-  await page
-    .locator('[data-element-id="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.opacity = "1";
-    });
-  await page.evaluate(() =>
-    (window as unknown as GlassWindow).glass.advance(0.37),
-  );
-  const full = await pixels(page);
-  await page
-    .locator('[data-element-id="glass"]')
-    .evaluate((node: HTMLElement) => {
-      node.style.visibility = "hidden";
-    });
-  assertPixelComposition(faded, full, await pixels(page), 0.5);
+  const state = await nativeState(page);
+  const stable = await page
+    .locator('[data-element-id="glass"] [data-effect-id]')
+    .evaluate((node) => node === document.querySelector('[data-element-id="glass"] [data-effect-id]'));
+  expect(stable).toBe(true);
+  expect(state.ownerOpacity).toBeCloseTo(0.5);
+  expect(state.ownerTransform).not.toBe("none");
+  expect(state.backdrop).not.toBe("none");
+  expect(state.restoration).toBe(0);
+  expect(state.replay).toBe(0);
+  void before;
 });
 
-test("overlapping glass consumers reuse resolved material pixels without refading their foreground", async ({
+test("overlapping glass consumers stay independent native DOM effects", async ({
   page,
 }) => {
   await mount(page, false, false, true);
-  const card = page.locator('[data-element-id="glass"]');
-  const next = page.locator('[data-element-id="next"]');
-  const full = await pixels(page);
-  await card.evaluate((node: HTMLElement) => {
-    node.style.visibility = "hidden";
+  await page.locator('[data-element-id="glass"]').evaluate((node) => {
+    (node as HTMLElement).style.opacity = "0.5";
   });
-  const backdrop = await pixels(page);
-  await card.evaluate((node: HTMLElement) => {
-    node.style.visibility = "";
-    node.style.opacity = "0.5";
-  });
-  await next.evaluate((node: HTMLElement) => {
-    node.style.opacity = "0.5";
-  });
-  await page.evaluate(() =>
-    (window as unknown as GlassWindow).glass.advance(0),
-  );
-  await expect(
-    page.locator('[data-css-backdrop-backend="material"]'),
-  ).toHaveCount(1);
-  assertPixelComposition(await pixels(page), full, backdrop, 0.5, {
-    left: 60,
-    top: 55,
-    right: 270,
-    bottom: 290,
+  await page.locator('[data-element-id="next"]').evaluate((node) => {
+    (node as HTMLElement).style.opacity = "0.5";
   });
   await page.evaluate(() =>
     (window as unknown as GlassWindow).glass.advance(0.37),
   );
-  const changed = await pixels(page);
-  await next.evaluate((node: HTMLElement) => {
-    node.style.opacity = "1";
-  });
-  await card.evaluate((node: HTMLElement) => {
-    node.style.opacity = "1";
-  });
-  await page.evaluate(() =>
-    (window as unknown as GlassWindow).glass.advance(0.37),
+
+  const first = await nativeState(page, "glass");
+  const second = await nativeState(page, "next");
+  expect(first.backdrop).not.toBe("none");
+  expect(second.backdrop).not.toBe("none");
+  expect(first.ownerOpacity).toBeCloseTo(0.5);
+  expect(second.ownerOpacity).toBeCloseTo(0.5);
+  expect(first.restoration).toBe(0);
+  expect(first.replay).toBe(0);
+  await expect(page.locator('[data-css-backdrop-backend="material"]')).toHaveCount(
+    0,
   );
-  const changedFull = await pixels(page);
-  await card.evaluate((node: HTMLElement) => {
-    node.style.visibility = "hidden";
-  });
-  assertPixelComposition(changed, changedFull, await pixels(page), 0.5, {
-    left: 60,
-    top: 55,
-    right: 270,
-    bottom: 290,
-  });
-  await card.evaluate((node: HTMLElement) => {
-    node.style.visibility = "";
-    node.style.opacity = "0.5";
-  });
-  await page.evaluate(() =>
-    (window as unknown as GlassWindow).glass.advance(0.37),
-  );
-  const nextFull = await pixels(page);
-  await next.evaluate((node: HTMLElement) => {
-    node.style.visibility = "hidden";
-  });
-  const nextBackdrop = await pixels(page);
-  await next.evaluate((node: HTMLElement) => {
-    node.style.visibility = "";
-    node.style.opacity = "0.5";
-  });
-  await page.evaluate(() =>
-    (window as unknown as GlassWindow).glass.advance(0.37),
-  );
-  assertPixelComposition(await pixels(page), nextFull, nextBackdrop, 0.5, {
-    left: 270,
-    top: 55,
-    right: 475,
-    bottom: 290,
-  });
+  await expect(page.locator("[data-backdrop-restore]")).toHaveCount(0);
 });
