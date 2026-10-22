@@ -1,6 +1,131 @@
 # General compositor prototype
 
-Status: prototype implemented and verified on `chatgpt/general-compositor-prototype`. This is research code, not a production merge recommendation by itself.
+Status: prototype implemented on \`chatgpt/general-compositor-prototype\`, then corrected on \`chatgpt/general-compositor-fix\`. The correction keeps the hybrid renderer and narrows claims where exact materialization is not yet implemented.
+
+## Architecture correction: exact semantic surfaces
+
+The production-facing abstraction is now an exact \`SceneSurfaceRef\` owned by
+\`CompositionPlan\`. A surface is identified by a semantic paint point plus the
+plan's structural prefix and ordered Effect paint dependencies. An
+\`effect-entry\` point includes its \`effectId\`; it cannot collapse onto another
+Effect in the same Element merely because both have the same external Elements.
+An \`element-entry\` point remains the exact incoming scene before the Element.
+
+The current owned Canvas2D provider intentionally materializes complete
+\`element-entry\` surfaces only. Exact \`effect-entry\` references still exist for
+future CSS backdrop and GLSL backdrop consumers, but they fall back until a
+provider can reproduce every preceding operation at that internal point. This is
+preferable to approximating an effect-entry surface with an element-entry raster.
+
+Backdrop restoration explicitly requests the Element-entry scene because its
+inverse-alpha term is the incoming scene before the whole resolved group. The
+CSS Effect's own backdrop point remains separately modeled for Effect ordering.
+
+A crop is not part of semantic identity. Regional irrelevance is a backend proof:
+
+\`\`\`text
+CompositionPlan
+    |
+    v
+SceneSurfaceRef
+  exact semantic paint point
+    |
+    v
+MaterializeRequest
+  surface + logical region + explicit density
+    |
+    v
+SceneSurfaceMaterializer
+  provider capability + one renderer-scoped retained cache
+    |
+    +--> immutable published revision
+    |       current Canvas2D implementation may retain full-slide pixels
+    |
+    +--> backdrop restoration
+    +--> future GLSL backdrop consumer
+    +--> future capture fallback consumer
+    +--> future export consumer
+\`\`\`
+
+For the existing disjoint glass optimization, two cards can therefore have two
+different exact \`SceneSurfaceRef\` values while the materializer reuses one
+execution projection after the backend proves that the earlier card cannot
+intersect the later card's requested region. The optimization never rewrites the
+semantic surface.
+
+## Ownership, region contract and publication
+
+\`compositionRuntime.ts\` owns one \`SceneSurfaceMaterializer\` for the active
+composition runtime and passes it to restoration. \`backdropRestoration.ts\` no
+longer creates or disposes a retained source cache. The materializer owns source
+providers, retained outputs, revisions, invalidation, publication and disposal.
+
+The public request includes a logical \`SurfaceRegion\` and explicit
+\`RenderDensity\`. The result includes the semantic surface, logical bounds,
+density, pixel size, revision and a backend-tagged source. Consumers do not infer
+logical scale from canvas dimensions. The current source variant is
+\`canvas-image\`; the contract already permits a future \`gpu-texture\` source
+without changing semantic planning.
+
+The Canvas2D implementation still rasterizes a full-slide retained source. That
+is an implementation choice, not an API requirement. Regional allocation and
+regional caching can replace it later without changing callers.
+
+Publication is revisioned and immutable. The mutable primitive raster is copied
+to a private snapshot and converted to an \`ImageBitmap\`; only after that async
+step completes does the materializer replace the published revision. While a new
+snapshot is pending, consumers keep the previous complete publication. Restoration
+then copies its crop synchronously into its visible canvas and presents all
+updates after the materialized revision is complete. No new Motion clock or DOM
+animation sampler is involved.
+
+## Invalidation and source providers
+
+Retained scene surfaces use one renderer-root observer plus source events instead
+of one broad observer per retained prefix. The observer maps mutations back to
+semantic source Element IDs and dirties only retained projections depending on
+those IDs. Owned scene-prefix raster sources disable their legacy environment
+observer; legacy raster callers keep it.
+
+Capability detection and materialization now live behind the same small
+\`PixelSourceProvider\`. The current provider remains deliberately narrow:
+
+- slide background
+- shape fill and stroke
+- static image content using the canonical media transform
+- supported nesting and clipping in the primitive painter
+- generated fragment GLSL with \`input: "none"\`
+
+Text, video, arbitrary CSS classes, CSS Effects, text-JS, content/backdrop GLSL,
+partial ancestor prefixes and other unresolved browser-owned paint remain on the
+existing correctness fallback.
+
+## Sharing and failure isolation
+
+The materializer cache is shared independently of restoration. Different
+consumer implementations can request the same semantic surface and receive the
+same published source revision. Region differences do not alter semantic
+identity; the current full-slide implementation can reuse the same publication.
+
+Failures are scoped to a semantic surface. Restoration disables only consumers
+whose requested surface failed and leaves unrelated surfaces active. A retained
+source failure does not poison other cache entries. The renderer can then replan
+the failed consumers onto the existing fallback route.
+
+\`backdropRestoration.ts\` remains source-agnostic. It knows only the semantic
+surface, requested region, published pixels, the consumer's
+\`MotionVisualSample\`, and the resolved native material. It contains no image
+Fit/Fill logic, shader lookup, GLSL rules, primitive traversal or source-specific
+invalidation.
+
+## Intentionally deferred
+
+This branch does not add text/video/general CSS materialization, DOM capture as a
+new provider, a GPU scene graph, arbitrary overlapping-glass support, export
+integration, new Effects, document changes or another timing model. Canvas2D is
+sufficient to validate the corrected abstraction for the currently owned source
+set. Continuous shader-heavy performance may still justify a GPU retained
+implementation later.
 
 ## What the renderer already had
 
