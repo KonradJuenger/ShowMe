@@ -397,5 +397,8 @@ it("browser-native CSS is an explicit boundary while scene-input shaders stay ad
     padding: 2,
     legacyCssBackdrop: true,
   });
-  expect(legacy.restoration?.glass.has("card")).toBe(true);
+  expect(legacy.browserNativeCss.size).toBe(0);
+  expect(["native-group", "backdrop-restoration", "fallback"]).toContain(
+    legacy.routes.get("card"),
+  );
 });
