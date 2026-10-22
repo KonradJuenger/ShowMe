@@ -294,9 +294,11 @@ function restorationPlan(
   for (const id of [...glass]) {
     const group = plan.groups.get(id)!;
     const [, entry] = [...group.inputs][0];
+    // Group-alpha restoration needs the incoming scene before this whole
+    // Element. The CSS Effect's own backdrop point remains separately modeled.
     const ref =
       entry.kind === "styled" && entry.backdrop
-        ? plan.surface(entry.backdrop)
+        ? plan.surface({ kind: "element-entry", elementId: id })
         : null;
     if (
       !ref ||
