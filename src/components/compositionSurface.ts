@@ -232,11 +232,13 @@ function ownerId(target: EventTarget | Node | null) {
 function closePublished(
   published: Omit<MaterializedSurface, "surface"> | undefined,
 ) {
-  if (
-    published?.source.kind === "canvas-image" &&
-    published.source.value instanceof ImageBitmap
-  )
+  if (published?.source.kind !== "canvas-image") return;
+  if (published.source.value instanceof ImageBitmap)
     published.source.value.close();
+  else if (published.source.value instanceof HTMLCanvasElement) {
+    published.source.value.width = 1;
+    published.source.value.height = 1;
+  }
 }
 
 /** One scene-scoped materializer owns retained source lifetime and immutable
@@ -359,25 +361,22 @@ export function createSceneSurfaceMaterializer(
     }
 
     builds++;
-    const frozen = document.createElement("canvas");
-    frozen.width = width;
-    frozen.height = height;
-    const context = frozen.getContext("2d");
+    // Publish from a fresh backing store. This copy is synchronous, so a DOM
+    // Motion write and its retained source revision can settle in the same
+    // microtask checkpoint instead of exposing an async bitmap-conversion gap.
+    const snapshot = document.createElement("canvas");
+    snapshot.width = width;
+    snapshot.height = height;
+    const context = snapshot.getContext("2d");
     if (!context) throw new Error("Cannot allocate scene publication surface");
     context.drawImage(state.source.canvas, 0, 0);
-    let bitmap: ImageBitmap;
-    try {
-      bitmap = await createImageBitmap(frozen);
-    } finally {
-      frozen.width = frozen.height = 1;
-    }
     if (disposed) {
-      bitmap.close();
+      snapshot.width = snapshot.height = 1;
       throw new Error("Scene surface materializer is disposed");
     }
 
     const next: Omit<MaterializedSurface, "surface"> = {
-      source: { kind: "canvas-image", value: bitmap },
+      source: { kind: "canvas-image", value: snapshot },
       revision: state.source.revision,
       logicalBounds: {
         x: 0,
