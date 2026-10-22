@@ -1,5 +1,9 @@
 import type { Deck, Slide } from "../core/document";
-import type { CompositionPlan, VisualGroup } from "./compositionPlan";
+import type {
+  CompositionPlan,
+  SceneSurfaceRef,
+  VisualGroup,
+} from "./compositionPlan";
 import { presenceElement } from "../core/presence";
 import { resolveMotionValue } from "../core/motion";
 import {
@@ -11,10 +15,7 @@ import {
   compositorCapabilities,
   backdropStyleCapabilities,
 } from "./compositionCapabilities";
-import {
-  planOwnedPrefixSurface,
-  type PrefixSurfaceRef,
-} from "./compositionSurface";
+import { canMaterializeOwnedSurface } from "./compositionSurface";
 /** A native lowering is legal only if the backdrop stage and the group's entry
  * have identical paint inputs and bounds. Keep opaque CSS on the original path.
  * This is a backend capability check, never a different Effect representation. */
@@ -285,26 +286,36 @@ function restorationPlan(
   for (const id of conflicts) glass.delete(id);
   if (!glass.size) return null;
 
-  const ignoredConsumers = new Set(consumers);
-  const surfaces = new Map<string, PrefixSurfaceRef>();
+  // Regional equivalence is a backend proof only. The semantic surface stays
+  // exact, including earlier disjoint restoration consumers. The provider may
+  // cull those elements only while materializing these proven-disjoint crops.
+  const irrelevantConsumers = new Set(consumers);
+  const surfaces = new Map<string, SceneSurfaceRef>();
   for (const id of [...glass]) {
     const group = plan.groups.get(id)!;
     const [, entry] = [...group.inputs][0];
     const ref =
       entry.kind === "styled" && entry.backdrop
-        ? planOwnedPrefixSurface(
-            plan,
-            slide,
-            entry.backdrop,
-            ignoredConsumers,
-          )
+        ? plan.surface(entry.backdrop)
         : null;
-    if (!ref) glass.delete(id);
+    if (
+      !ref ||
+      !canMaterializeOwnedSurface(ref, slide, irrelevantConsumers)
+    )
+      glass.delete(id);
     else surfaces.set(id, ref);
   }
   if (!glass.size) return null;
 
-  return { plan, slide, glass, surfaces, envelopes, padding };
+  return {
+    plan,
+    slide,
+    glass,
+    surfaces,
+    envelopes,
+    padding,
+    irrelevantConsumers,
+  };
 }
 
 export type RestorationPlan = NonNullable<ReturnType<typeof restorationPlan>>;
