@@ -18,11 +18,19 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - name: Architecture and composition unit regressions
-        run: npx vitest run tests/feature/effects/renderer-architecture.test.ts tests/feature/effects/composition-plan.test.ts
+        run: npx vitest run
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/renderer-architecture.test.ts","tests/feature/effects/composition-plan.test.ts"]'
       - run: npx playwright install --with-deps chromium
       - name: SceneTexture and generated shader browser regressions
-        run: npx playwright test tests/feature/effects/render-sampling.spec.ts tests/feature/effects/mixed-compositing.spec.ts --config playwright.config.ts --output test-results-scene-texture
+        run: npx playwright test --config playwright.config.ts --output test-results-scene-texture
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/render-sampling.spec.ts","tests/feature/effects/mixed-compositing.spec.ts"]'
       - name: Audience rendering regression
-        run: npx playwright test tests/feature/presenter/audience-navigation.spec.ts --config playwright.config.ts --output test-results-audience
+        run: npx playwright test --config playwright.config.ts --output test-results-audience
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/presenter/audience-navigation.spec.ts"]'
       - name: Native CSS and legacy compositor isolation
-        run: xvfb-run -a npx playwright test tests/feature/effects/native-composition.spec.ts --config playwright.electron.config.ts --output test-results-native-composition
+        run: xvfb-run -a npx playwright test --config playwright.electron.config.ts --output test-results-native-composition
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/native-composition.spec.ts"]'
