@@ -347,9 +347,6 @@ test("source transforms and opacity remain independent from native glass paint",
   page,
 }) => {
   await mount(page, false, true);
-  const before = await page
-    .locator('[data-element-id="glass"] [data-effect-id]')
-    .evaluate((node) => node);
   await page.locator('[data-element-id="lower"]').evaluate((node) => {
     const element = node as HTMLElement;
     element.style.transform = "translateX(13px)";
@@ -373,7 +370,6 @@ test("source transforms and opacity remain independent from native glass paint",
   expect(state.backdrop).not.toBe("none");
   expect(state.restoration).toBe(0);
   expect(state.replay).toBe(0);
-  void before;
 });
 
 test("overlapping glass consumers stay independent native DOM effects", async ({
