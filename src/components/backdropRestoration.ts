@@ -308,14 +308,12 @@ export function mountBackdropRestoration(
         if (material.canvas.height !== crop.height)
           material.canvas.height = crop.height;
         material.output.clearRect(0, 0, crop.width, crop.height);
+        if (source.source.kind !== "canvas-image")
+          throw new Error(
+            "Restoration requires a canvas-readable scene surface",
+          );
         material.output.drawImage(
-          source.source.kind === "canvas-image"
-            ? source.source.value
-            : (() => {
-                throw new Error(
-                  "Restoration requires a canvas-readable scene surface",
-                );
-              })(),
+          source.source.value,
           crop.x,
           crop.y,
           crop.width,
