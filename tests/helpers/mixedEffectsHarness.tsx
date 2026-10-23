@@ -217,6 +217,8 @@ export async function mountMixedEffectsHarness(
   );
   await stage(0);
   return {
+    model,
+    slide,
     stage,
     advance,
     inspect,
