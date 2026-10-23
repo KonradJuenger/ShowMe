@@ -973,13 +973,10 @@ export function mountEffectSurface(
       if (diagnostics.length) throw new Error(diagnostics.join("; "));
       if (!shaderChain) throw new Error("Shader surface has no GPU chain.");
       shaderProgram(definition.source, shaderChain);
-      if (
-        (definition.input === "content" && !directShaderInput) ||
-        definition.input === "backdrop"
-      ) {
+      if (definition.input === "content" || definition.input === "backdrop") {
         if (!content)
           throw new Error(
-            "Pixel-input shaders require a SceneTexture source.",
+            "Pixel-input shaders require an owned or SceneTexture source.",
           );
         sourceContent =
           (Array.from(node.children).find(
@@ -991,35 +988,39 @@ export function mountEffectSurface(
         if (!owner || (definition.input === "content" && !sourceContent))
           throw new Error("Content shader source is not mounted yet.");
         sourceOpacity = sourceContent?.style.opacity ?? "";
-        const inputRoot =
-          definition.input === "backdrop"
-            ? owner.closest<HTMLElement>(".slide-renderer")
-            : sourceContent;
-        if (!inputRoot) throw new Error("SceneTexture source is not mounted yet.");
-        sceneTextureFactory = () =>
-          createSceneTextureProvider(
-            {
-              kind: definition.input === "backdrop" ? "backdrop" : "element",
-              elementId: content.element.id,
-              effectId: instance.id,
-            },
-            {
-              effectNode: node,
-              owner,
-              inputRoot,
-              element: content.element,
-              resources: () =>
-                content.scene
-                  ? (content.scene().slide.effectResources ?? {})
-                  : content.resources,
-              scene: content.scene,
-              refined,
-              flushEffect: (dependency) => surfaces.get(dependency)?.flush(),
-              materializeEffect: (dependency) =>
-                surfaces.get(dependency)?.materialize(),
-              invalidate: schedule,
-            },
-          );
+        if (!directShaderInput || definition.input === "backdrop") {
+          const inputRoot =
+            definition.input === "backdrop"
+              ? owner.closest<HTMLElement>(".slide-renderer")
+              : sourceContent;
+          if (!inputRoot)
+            throw new Error("SceneTexture source is not mounted yet.");
+          sceneTextureFactory = () =>
+            createSceneTextureProvider(
+              {
+                kind:
+                  definition.input === "backdrop" ? "backdrop" : "element",
+                elementId: content.element.id,
+                effectId: instance.id,
+              },
+              {
+                effectNode: node,
+                owner,
+                inputRoot,
+                element: content.element,
+                resources: () =>
+                  content.scene
+                    ? (content.scene().slide.effectResources ?? {})
+                    : content.resources,
+                scene: content.scene,
+                refined,
+                flushEffect: (dependency) => surfaces.get(dependency)?.flush(),
+                materializeEffect: (dependency) =>
+                  surfaces.get(dependency)?.materialize(),
+                invalidate: schedule,
+              },
+            );
+        }
       }
     }
   } catch (error) {
