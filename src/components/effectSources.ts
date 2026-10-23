@@ -16,28 +16,56 @@ type Texture = {
 export class EffectSources<Source extends PixelSource> {
   private entries = new Map<
     string,
-    { source: Source; texture: Texture | null; users: Set<() => void> }
+    {
+      source: Source;
+      texture: Texture | null;
+      users: Set<() => void>;
+      lastUsed: number;
+    }
   >();
+  constructor(private readonly maxIdleEntries = 0) {}
+
+  private disposeEntry(key: string) {
+    const entry = this.entries.get(key);
+    if (!entry) return;
+    entry.source.dispose();
+    if (entry.texture) entry.texture.gl.deleteTexture(entry.texture.value);
+    this.entries.delete(key);
+  }
+
+  private trimIdle() {
+    if (!this.maxIdleEntries) return;
+    const idle = [...this.entries.entries()]
+      .filter(([, entry]) => !entry.users.size)
+      .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+    while (idle.length > this.maxIdleEntries)
+      this.disposeEntry(idle.shift()![0]);
+  }
   acquire(
     key: string,
     create: (invalidate: () => void) => Source,
     invalidate: () => void,
   ) {
     let entry = this.entries.get(key);
+    const reused = !!entry;
     if (!entry) {
       const users = new Set<() => void>();
       entry = {
         source: create(() => users.forEach((user) => user())),
         texture: null,
         users,
+        lastUsed: performance.now(),
       };
       this.entries.set(key, entry);
     }
     entry.users.add(invalidate);
+    entry.lastUsed = performance.now();
+    this.trimIdle();
     const owned = entry;
     let released = false;
     return {
       source: owned.source,
+      reused,
       upload(gl: WebGL2RenderingContext) {
         if (!owned.texture || owned.texture.gl !== gl) {
           if (owned.texture)
@@ -79,12 +107,9 @@ export class EffectSources<Source extends PixelSource> {
         if (released) return;
         released = true;
         owned.users.delete(invalidate);
-        if (!owned.users.size) {
-          owned.source.dispose();
-          if (owned.texture)
-            owned.texture.gl.deleteTexture(owned.texture.value);
-          this.entries.delete(key);
-        }
+        owned.lastUsed = performance.now();
+        if (!owned.users.size && !this.maxIdleEntries) this.disposeEntry(key);
+        else this.trimIdle();
       },
     };
   }
