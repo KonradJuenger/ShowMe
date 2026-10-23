@@ -119,3 +119,52 @@ That is measured app cadence, not physical-display FPS.
 The results support a separately measured Phase 2 resource-generation/query reduction
 experiment. Earlier profile percentages are hypotheses, not predicted gains after
 this policy change. Stop here as requested; no later phase or main integration.
+
+## Phase 2 — owned GPU resources and linked bindings
+
+Requested follow-up; Phase 3 was not implemented. Phase 1 baseline `c0b99a8`,
+Phase 2 measured commit `ae445b3`. Same hardware/viewport/deck as Phase 1.
+Three serial alternating ten-second pairs, clean production builds, identical
+harness/deck/GPU/viewport/DPR. Both retain the static non-audience workload policy.
+
+Hypothesis: synchronous object-validity probes and repeated program lookups add
+main-thread/GPU synchronization overhead. Replace per-draw ownership probes with
+a context-loss generation token. Cache active uniform locations, the position
+attribute and a VAO once per linked program; release VAOs with programs. Context
+loss invalidates old resource generations and restoration rebuilds them.
+
+Removed steady isTexture/isFramebuffer queries from outputs, retained inputs and
+owned media. Default drawing-buffer error/size validation now runs when resized,
+not when its dimensions are unchanged. Compilation, linking, allocation, upload,
+and restoration checks remain. No resolution, drawing-buffer pool, SceneTexture
+assembly or scheduling change was made.
+
+| Version | Audience FPS median [min, max] | Glass publications/sec | Frame p95 ms      | Maximum stall ms     |
+| ------- | ------------------------------ | ---------------------- | ----------------- | -------------------- |
+| phase1  | 28.3 [26.0, 28.6]              | 14.1 [13.0, 14.2]      | 66.8 [66.7, 83.1] | 133.7 [116.4, 150.1] |
+| phase2  | 29.4 [28.6, 34.0]              | 14.6 [14.3, 16.9]      | 66.8 [66.3, 66.8] | 83.8 [82.8, 99.8]    |
+
+Median audience rate increased about 4%; one pair was essentially flat. The ranges
+overlap, so this is a small/inconsistent gain, not evidence of a major FPS win.
+The 2:1 glass cadence remains. Lower maximum stalls in these short samples are
+observations, not an established tail-latency guarantee.
+
+Keep the ownership/cache refactor: it makes resource lifetime explicit, removes
+measured hot API calls, and shows no observed performance penalty. Do not present
+the earlier profiling percentages as recoverable FPS. Phase 3 (isolating drawing
+buffer resizing) remains a separate hypothesis to test next. No 60 FPS claim.
+
+Focused verification: execution-graph unit file **11 passed** (mock contexts now
+model actual loss events and reject validity probes); mixed-compositing selection
+`--grep 'GPU shader handoff|continuous invalidation|neutral live video'` **3 passed**,
+including live video, alpha/pixels, static/live context restoration and a warm
+shader loop asserting zero uniform/attribute lookups. Production build, typecheck
+within build, build invariants, focused ESLint and diff checks passed. Broader
+suites were not repeated for this focused iteration. Commands: `npx vitest run`
+with execution-graph in SHOWME_TEST_FILES; `npx playwright test --config
+playwright.config.ts --grep 'GPU shader handoff|continuous invalidation|neutral
+live video' --output test-results-phase2`; `npm run build`;
+`npm run verify:build`. Measurements ran via the same local fps-phase1.mjs
+harness in alternating Phase 1/Phase 2 worktrees.
+
+[Raw Phase 2 evidence](evidence/native-presentation-phase2-2026-10-23.json).

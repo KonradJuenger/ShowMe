@@ -1,0 +1,762 @@
+{
+  "date": "2026-10-23",
+  "note": "Three serial alternating clean production-build pairs. Same GPU, harness and deck digest, viewport and DPR. Original app remained running. No concurrent verification. App frame callbacks and publication counts, not physical-display FPS. Editor/dock per-ID publication deltas are ambiguous because IDs repeat; not used.",
+  "summary": [
+    {
+      "phase": "phase1",
+      "revision": "c0b99a8420cedc05a559c2c456a1246acd8a0755",
+      "fps": {
+        "median": 28.27455290238785,
+        "min": 26.01026458726695,
+        "max": 28.58138724300965
+      },
+      "glass": {
+        "median": 14.087321410730343,
+        "min": 12.95530420055442,
+        "max": 14.240900263938608
+      },
+      "p50Ms": {
+        "median": 33.30000000000018,
+        "min": 33.29999999999927,
+        "max": 33.30000000000109
+      },
+      "p95Ms": {
+        "median": 66.80000000000018,
+        "min": 66.69999999999982,
+        "max": 83.10000000000036
+      },
+      "maxMs": {
+        "median": 133.69999999999982,
+        "min": 116.40000000000055,
+        "max": 150.10000000000036
+      }
+    },
+    {
+      "phase": "phase2",
+      "revision": "ae445b325ba68d96b2554b849c3e633b36e36246",
+      "fps": {
+        "median": 29.36345991144678,
+        "min": 28.58227898709615,
+        "max": 33.96651160933482
+      },
+      "glass": {
+        "median": 14.631961379602293,
+        "min": 14.291139493548075,
+        "max": 16.933451535445514
+      },
+      "p50Ms": {
+        "median": 33.29999999999927,
+        "min": 33.100000000000364,
+        "max": 33.30000000000018
+      },
+      "p95Ms": {
+        "median": 66.80000000000018,
+        "min": 66.30000000000018,
+        "max": 66.80000000000018
+      },
+      "maxMs": {
+        "median": 83.80000000000018,
+        "min": 82.80000000000109,
+        "max": 99.80000000000018
+      }
+    }
+  ],
+  "rows": [
+    {
+      "phase": "phase1",
+      "run": 0,
+      "durationMs": 10034.499999964237,
+      "frames": 261,
+      "fps": 26.01026458726695,
+      "p50Ms": 33.30000000000109,
+      "p95Ms": 83.10000000000036,
+      "maxMs": 150.10000000000036,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "282",
+          "updatesPerSecond": 26.01026458726695
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "142",
+          "updatesPerSecond": 12.95530420055442
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 65.056,
+          "ScriptDuration": 39.946000000000005,
+          "LayoutDuration": 5.636,
+          "RecalcStyleDuration": 0.13999999999999999,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 2
+        },
+        "thumbnail": {
+          "TaskDuration": 1.278,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 10011.849,
+          "ScriptDuration": 2275.9939999999997,
+          "LayoutDuration": 15.973999999999998,
+          "RecalcStyleDuration": 98.01599999999999,
+          "LayoutCount": 266,
+          "RecalcStyleCount": 397
+        },
+        "presenter": {
+          "TaskDuration": 49.831,
+          "ScriptDuration": 26.693,
+          "LayoutDuration": 4.475,
+          "RecalcStyleDuration": 0.283,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 2
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.089341770901439,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.4948427923716638,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 26.209576959583174,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 13.054960386712532,
+            "ready": "false"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "c0b99a8420cedc05a559c2c456a1246acd8a0755",
+      "dirty": false,
+      "harnessSha256": "839f8abe5a5cb5cc199067f14dafed700aaa4710c4376e2a5f1e7741a72e82a1",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase2",
+      "run": 0,
+      "durationMs": 10046.499999988078,
+      "frames": 295,
+      "fps": 29.36345991144678,
+      "p50Ms": 33.29999999999927,
+      "p95Ms": 66.80000000000018,
+      "maxMs": 83.80000000000018,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "318",
+          "updatesPerSecond": 29.36345991144678
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "160",
+          "updatesPerSecond": 14.631961379602293
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 46.43,
+          "ScriptDuration": 24.665,
+          "LayoutDuration": 5.023,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.1019999999999999,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9979.5,
+          "ScriptDuration": 1645.086,
+          "LayoutDuration": 17.236,
+          "RecalcStyleDuration": 117.06,
+          "LayoutCount": 296,
+          "RecalcStyleCount": 444
+        },
+        "presenter": {
+          "TaskDuration": 33.272999999999996,
+          "ScriptDuration": 17.378999999999998,
+          "LayoutDuration": 5.3790000000000004,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.2847260239923513,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.5925944358750794,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 29.562534215931162,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 14.731498531844485,
+            "ready": "false"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "ae445b325ba68d96b2554b849c3e633b36e36246",
+      "dirty": false,
+      "harnessSha256": "839f8abe5a5cb5cc199067f14dafed700aaa4710c4376e2a5f1e7741a72e82a1",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase1",
+      "run": 1,
+      "durationMs": 10041.499999976159,
+      "frames": 287,
+      "fps": 28.58138724300965,
+      "p50Ms": 33.30000000000018,
+      "p95Ms": 66.69999999999982,
+      "maxMs": 116.40000000000055,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "316",
+          "updatesPerSecond": 28.58138724300965
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "159",
+          "updatesPerSecond": 14.240900263938608
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 36.918,
+          "ScriptDuration": 17.61,
+          "LayoutDuration": 3.9810000000000003,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.0539999999999998,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 10034.258999999998,
+          "ScriptDuration": 2129.13,
+          "LayoutDuration": 13.895000000000001,
+          "RecalcStyleDuration": 85.229,
+          "LayoutCount": 288,
+          "RecalcStyleCount": 433
+        },
+        "presenter": {
+          "TaskDuration": 24.88,
+          "ScriptDuration": 12.122000000000002,
+          "LayoutDuration": 4.048,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.087188169105572,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.4938007269865672,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 28.880147388406964,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 14.440073694203482,
+            "ready": "false"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "c0b99a8420cedc05a559c2c456a1246acd8a0755",
+      "dirty": false,
+      "harnessSha256": "839f8abe5a5cb5cc199067f14dafed700aaa4710c4376e2a5f1e7741a72e82a1",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase2",
+      "run": 1,
+      "durationMs": 10006.199999976157,
+      "frames": 286,
+      "fps": 28.58227898709615,
+      "p50Ms": 33.30000000000018,
+      "p95Ms": 66.80000000000018,
+      "maxMs": 99.80000000000018,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "309",
+          "updatesPerSecond": 28.58227898709615
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "156",
+          "updatesPerSecond": 14.291139493548075
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 43.45099999999999,
+          "ScriptDuration": 22.433,
+          "LayoutDuration": 5.054,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.68,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9959.380000000001,
+          "ScriptDuration": 1474.328,
+          "LayoutDuration": 16.095,
+          "RecalcStyleDuration": 109.304,
+          "LayoutCount": 288,
+          "RecalcStyleCount": 431
+        },
+        "presenter": {
+          "TaskDuration": 34.04,
+          "ScriptDuration": 16.251,
+          "LayoutDuration": 5.188,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.098079190909023,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.4990705762463015,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 28.882093102345408,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 14.491015570380915,
+            "ready": "true"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "ae445b325ba68d96b2554b849c3e633b36e36246",
+      "dirty": false,
+      "harnessSha256": "839f8abe5a5cb5cc199067f14dafed700aaa4710c4376e2a5f1e7741a72e82a1",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase1",
+      "run": 2,
+      "durationMs": 10009,
+      "frames": 283,
+      "fps": 28.27455290238785,
+      "p50Ms": 33.29999999999927,
+      "p95Ms": 66.80000000000018,
+      "maxMs": 133.69999999999982,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "308",
+          "updatesPerSecond": 28.27455290238785
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "155",
+          "updatesPerSecond": 14.087321410730343
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 45.227999999999994,
+          "ScriptDuration": 23.123,
+          "LayoutDuration": 5.158,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.793,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9982.697,
+          "ScriptDuration": 2269.73,
+          "LayoutDuration": 16.527,
+          "RecalcStyleDuration": 101.416,
+          "LayoutCount": 284,
+          "RecalcStyleCount": 427
+        },
+        "presenter": {
+          "TaskDuration": 27.429,
+          "ScriptDuration": 12.958,
+          "LayoutDuration": 4.3020000000000005,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.496852832450794,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.6984713757618144,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 28.574283145169346,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 14.287141572584673,
+            "ready": "false"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "c0b99a8420cedc05a559c2c456a1246acd8a0755",
+      "dirty": false,
+      "harnessSha256": "839f8abe5a5cb5cc199067f14dafed700aaa4710c4376e2a5f1e7741a72e82a1",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase2",
+      "run": 2,
+      "durationMs": 10039.300000011921,
+      "frames": 341,
+      "fps": 33.96651160933482,
+      "p50Ms": 33.100000000000364,
+      "p95Ms": 66.30000000000018,
+      "maxMs": 82.80000000000109,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "366",
+          "updatesPerSecond": 33.96651160933482
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "184",
+          "updatesPerSecond": 16.933451535445514
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 43.134,
+          "ScriptDuration": 20.884,
+          "LayoutDuration": 4.118,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 11,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 0.9850000000000002,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9772.291,
+          "ScriptDuration": 1466.0179999999998,
+          "LayoutDuration": 17.427000000000003,
+          "RecalcStyleDuration": 112.151,
+          "LayoutCount": 342,
+          "RecalcStyleCount": 513
+        },
+        "presenter": {
+          "TaskDuration": 28.517999999999997,
+          "ScriptDuration": 13.082999999999998,
+          "LayoutDuration": 4.081,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.4862988455329,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.6933451535445514,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 34.16572868622242,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 17.03306007388931,
+            "ready": "false"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "ae445b325ba68d96b2554b849c3e633b36e36246",
+      "dirty": false,
+      "harnessSha256": "839f8abe5a5cb5cc199067f14dafed700aaa4710c4376e2a5f1e7741a72e82a1",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    }
+  ]
+}
