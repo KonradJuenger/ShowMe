@@ -168,7 +168,7 @@ try {
     const canvas = finalCanvas ? { width: finalCanvas.width, height: finalCanvas.height } : null;
     window.__showMeSharedTextureLegacyHarness = harness;
     return { startedAt, endedAt, observedStopAt, durationMs, frameTicks, rafTimes, publications, viewport, canvas, errors, before, after };
-  }, { width, height, durationMs });
+  }, { width, height, durationMs, warmupMs });
 
   if (evidence) {
     const target = path.resolve(evidence);
@@ -195,7 +195,7 @@ try {
     intervals: { raf: intervals(result.rafTimes), shaderPublications: intervals(result.publications) },
     diagnostics: deltaDiagnostics(result.before, result.after),
     errors: result.errors,
-    processMetrics: { initial: beforeMetrics, final: afterMetrics, cumulativeCpuDeltas: cpuDeltas(beforeMetrics, afterMetrics) },
+    processMetrics: { scope: "whole fixture run; not directly comparable to shared transport CPU cost", initial: beforeMetrics, final: afterMetrics, cumulativeCpuDeltas: cpuDeltas(beforeMetrics, afterMetrics) },
     gpu,
     claims: {
       usesCurrentSceneTextureImplementation: true,
