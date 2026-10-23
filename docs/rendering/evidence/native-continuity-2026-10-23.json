@@ -1,0 +1,118 @@
+{
+  "date": "2026-10-23",
+  "branch": "experimental/browser-native-renderer",
+  "parentRevision": "e0dbef672255cb44933afdc2c33c3ca3187cb4b5",
+  "dirty": true,
+  "candidateSourceSha256": "8a19a9c5d0fef43238445d0caa9094b436d2c0f43bc1a8b2cd9a2e1774c2c26f",
+  "sourceFiles": [
+    "src/components/nativeOpacity.ts",
+    "src/components/SlideRenderer.tsx",
+    "src/components/EffectSurface.tsx",
+    "src/components/motionRuntime.ts"
+  ],
+  "nativeFixture": {
+    "environment": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.78 Electron/44.4.1 Safari/537.36",
+    "framePacing": {
+      "p95Ms": 3.400000000000091,
+      "p99Ms": 3.5,
+      "longestGapMs": 8,
+      "samples": 624
+    },
+    "capturedSeekResponseMs": [
+      99,
+      88,
+      100,
+      90,
+      87
+    ],
+    "units": "rAF intervals and native presentation callback receipt latency; not physical-display latency"
+  },
+  "visualCapture": {
+    "injectedFaultStates": [
+      20,
+      40,
+      60,
+      80,
+      100
+    ],
+    "missingAcknowledgedStates": 0,
+    "naturalRate": {
+      "emittedStates": 609,
+      "capturedSamples": 62,
+      "unobservedStates": 547,
+      "detectedFaults": [],
+      "coverage": "sampled; some display states unobserved"
+    },
+    "limitation": "Native subscription downsamples high-refresh playback. Acknowledged-state injection detection is complete for its test sequence, not proof of full-refresh-rate single-frame detection."
+  },
+  "audienceStress": {
+    "runs": 3,
+    "workload": {
+      "version": 2,
+      "slides": 30,
+      "imagesPerSlide": 12,
+      "textsPerSlide": 39,
+      "shapesPerSlide": 36,
+      "shadersPerSlide": 3,
+      "cssEffectsPerSlide": 6,
+      "motionTracksPerSlide": 24,
+      "uniqueImageAssets": 96,
+      "shaderPanelWidth": 580,
+      "shaderPanelHeight": 280,
+      "logicalWidth": 1920,
+      "logicalHeight": 1080
+    },
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+      "dpr": 1,
+      "width": 1920,
+      "height": 1080,
+      "platform": "win32",
+      "arch": "x64",
+      "cpu": "AMD Ryzen AI 9 365 w/ Radeon 880M              ",
+      "logicalCpus": 20,
+      "totalMemoryBytes": 33412722688
+    },
+    "metrics": {
+      "firstNavigationP95Ms": 435.30000001192093,
+      "revisitNavigationP95Ms": 410.80000001192093,
+      "frameIntervalP95Ms": 100,
+      "taskCpuMs": 43693.01700000001,
+      "longTaskTotalMs": 10664,
+      "heapBytes": 34919012
+    },
+    "ranges": {
+      "firstNavigationP95Ms": {
+        "min": 394,
+        "max": 440.80000001192093
+      },
+      "revisitNavigationP95Ms": {
+        "min": 361.69999998807907,
+        "max": 458.4000000357628
+      },
+      "frameIntervalP95Ms": {
+        "min": 99.89999999999782,
+        "max": 100
+      },
+      "taskCpuMs": {
+        "min": 41288.217000000004,
+        "max": 43919.098
+      },
+      "longTaskTotalMs": {
+        "min": 9111,
+        "max": 10810
+      },
+      "heapBytes": {
+        "min": 34882432,
+        "max": 34977456
+      }
+    },
+    "interpretation": "Exploratory dirty candidate; not attributed to parent revision. Some local verification overlapped the benchmark. No paired clean baseline or improvement claim. The dense headless workload remains above the native fixture frame budget."
+  },
+  "artifacts": {
+    "native": "test-results-native-verified",
+    "audience": "test-results-native-audience",
+    "localDeckProbe": "test-results-blur-investigation/after-native-routing.log"
+  },
+  "scope": "Repository fixtures plus first-slide local probes of both Ideas in motion decks. Full manual deck/MCP, physical display capture, cross-platform and packaged export checks not performed."
+}

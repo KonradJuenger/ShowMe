@@ -179,7 +179,8 @@ test("CSS glass is real Chromium backdrop-filter over an animated shader", async
   const shader = await page
     .locator('[data-element-id="lower"] [data-effect-id]')
     .evaluate((effect) => {
-      const canvas = effect.querySelector<HTMLCanvasElement>(":scope > canvas")!;
+      const canvas =
+        effect.querySelector<HTMLCanvasElement>(":scope > canvas")!;
       return {
         ready: (effect as HTMLElement).dataset.effectReady,
         width: canvas.width,
@@ -202,10 +203,12 @@ test("parent-group opacity uses Chromium group compositing without reconstructio
   await page.evaluate(() =>
     (window as unknown as GlassWindow).glass.advance(0.37),
   );
-  const group = await page.locator('[data-element-id="group"]').evaluate((node) => ({
-    opacity: Number(getComputedStyle(node).opacity),
-    transform: getComputedStyle(node).transform,
-  }));
+  const group = await page
+    .locator('[data-element-id="group"]')
+    .evaluate((node) => ({
+      opacity: Number(getComputedStyle(node).opacity),
+      transform: getComputedStyle(node).transform,
+    }));
   const state = await nativeState(page);
   expect(group.opacity).toBeCloseTo(0.7);
   expect(group.transform).not.toBe("none");
@@ -244,7 +247,7 @@ test("nested group alpha remains browser-native at every enclosing level", async
   expect(state.replay).toBe(0);
 });
 
-test("production Move In presence updates native transform and opacity only", async ({
+test("production Move In keeps transport opaque and fades the native glass material", async ({
   page,
 }) => {
   await mount(page, false);
@@ -303,7 +306,8 @@ test("production Move In presence updates native transform and opacity only", as
     });
     await w.glass.advance(0.48);
     const value = {
-      opacity: Number(glass.style.opacity),
+      opacity: Number(getComputedStyle(effect).opacity),
+      transportOpacity: Number(getComputedStyle(glass).opacity),
       transform: glass.style.transform,
       sameEffect: effect === glass.querySelector("[data-effect-id]"),
       restoration: root.querySelectorAll("[data-backdrop-restore]").length,
@@ -314,6 +318,7 @@ test("production Move In presence updates native transform and opacity only", as
     return value;
   });
   expect(result.opacity).toBeCloseTo(0.5);
+  expect(result.transportOpacity).toBe(1);
   expect(result.transform).toContain("-18px");
   expect(result.sameEffect).toBe(true);
   expect(result.restoration).toBe(0);
@@ -363,7 +368,11 @@ test("source transforms and opacity remain independent from native glass paint",
   const state = await nativeState(page);
   const stable = await page
     .locator('[data-element-id="glass"] [data-effect-id]')
-    .evaluate((node) => node === document.querySelector('[data-element-id="glass"] [data-effect-id]'));
+    .evaluate(
+      (node) =>
+        node ===
+        document.querySelector('[data-element-id="glass"] [data-effect-id]'),
+    );
   expect(stable).toBe(true);
   expect(state.ownerOpacity).toBeCloseTo(0.5);
   expect(state.ownerTransform).not.toBe("none");
@@ -394,8 +403,8 @@ test("overlapping glass consumers stay independent native DOM effects", async ({
   expect(second.ownerOpacity).toBeCloseTo(0.5);
   expect(first.restoration).toBe(0);
   expect(first.replay).toBe(0);
-  await expect(page.locator('[data-css-backdrop-backend="material"]')).toHaveCount(
-    0,
-  );
+  await expect(
+    page.locator('[data-css-backdrop-backend="material"]'),
+  ).toHaveCount(0);
   await expect(page.locator("[data-backdrop-restore]")).toHaveCount(0);
 });

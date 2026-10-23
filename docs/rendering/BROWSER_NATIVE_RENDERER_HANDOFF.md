@@ -4,7 +4,9 @@ Branch: `experimental/browser-native-renderer`
 
 Handoff baseline before this document: `7c8c8f37bb4683abd529593acd037f91605377d9`
 
-Do not merge this branch into `main`. Do not create a pull request unless explicitly requested later.
+Do not merge this branch into `main` without separate integration authorization.
+The developer explicitly requested a PR on 2026-10-23; that request supersedes
+the earlier instruction to keep the experiment without a PR.
 
 ## Goal
 

@@ -1699,7 +1699,7 @@ test("browser-native CSS glass bypasses compositor materialization during ordina
         splitVisual: root.querySelectorAll("[data-composition-visual]").length,
         effectCanvas: effect.querySelectorAll(":scope > canvas").length,
         backdrop: getComputedStyle(effect).backdropFilter,
-        opacity: Number(glass.style.opacity),
+        opacity: Number(getComputedStyle(effect).opacity),
         transform: getComputedStyle(glass).transform,
         text: glass.textContent,
         foregroundAfter: Boolean(
@@ -1753,7 +1753,7 @@ test("Move Scale Rotate and Fade stay on the mounted DOM hot path", async () => 
     });
     const start = {
       transform: getComputedStyle(glass).transform,
-      opacity: Number(glass.style.opacity),
+      opacity: Number(getComputedStyle(effect).opacity),
     };
     runtime.sync({
       stageId: "stage",
@@ -1764,7 +1764,7 @@ test("Move Scale Rotate and Fade stay on the mounted DOM hot path", async () => 
     });
     const middle = {
       transform: getComputedStyle(glass).transform,
-      opacity: Number(glass.style.opacity),
+      opacity: Number(getComputedStyle(effect).opacity),
       sameNode:
         glass ===
           root.querySelector<HTMLElement>('[data-element-id="glass"]') &&
@@ -1935,7 +1935,7 @@ test("Presence enter and exit keeps the native CSS subtree mounted", async () =>
         contentVisibility: glass.style.contentVisibility,
         pointerEvents: glass.style.pointerEvents,
         inert: glass.inert,
-        opacity: Number(glass.style.opacity),
+        opacity: Number(getComputedStyle(effect).opacity),
         sameEffect: effect === glass.querySelector("[data-effect-id]"),
       };
     };

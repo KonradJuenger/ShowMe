@@ -1,0 +1,527 @@
+{
+  "date": "2026-10-23",
+  "branch": "experimental/browser-native-renderer",
+  "dirty": true,
+  "kind": "exploratory CPU attribution, not a paired performance benchmark",
+  "commands": [
+    "node test-results-slow-profile/profile.mjs",
+    "node test-results-slow-profile/profile.mjs --electron"
+  ],
+  "headless": {
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "vendor": "Google Inc. (Google)"
+    },
+    "results": [
+      {
+        "label": "full-steady",
+        "frames": {
+          "samples": 161,
+          "p50": 16.800000000000182,
+          "p95": 33.40000000000009,
+          "max": 33.400000000000546
+        },
+        "rasterDelta": {
+          "captures": 0,
+          "clones": 0,
+          "styleReads": 1512
+        },
+        "metrics": {
+          "TaskDuration": 4.3062320000000005,
+          "ScriptDuration": 0.12093899999999999,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.06755799999999999,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 1449
+        },
+        "top": [
+          {
+            "name": "drawImage",
+            "url": "",
+            "line": 0,
+            "samples": 2042,
+            "percent": 77.90919496375429
+          },
+          {
+            "name": "(program)",
+            "url": "",
+            "line": 0,
+            "samples": 158,
+            "percent": 6.0282334986646315
+          },
+          {
+            "name": "getPropertyValue",
+            "url": "",
+            "line": 0,
+            "samples": 99,
+            "percent": 3.7771842808088514
+          },
+          {
+            "name": "",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 372,
+            "samples": 97,
+            "percent": 3.700877527661198
+          },
+          {
+            "name": "getAnimations",
+            "url": "",
+            "line": 0,
+            "samples": 20,
+            "percent": 0.7630675314765357
+          },
+          {
+            "name": "prepareSampling",
+            "url": "http://127.0.0.1:5196/src/components/effectRuntime.ts",
+            "line": 236,
+            "samples": 17,
+            "percent": 0.6486074017550553
+          },
+          {
+            "name": "declarations",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 181,
+            "samples": 15,
+            "percent": 0.5723006486074017
+          },
+          {
+            "name": "read",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 224,
+            "samples": 14,
+            "percent": 0.5341472720335749
+          }
+        ]
+      },
+      {
+        "label": "after-navigation",
+        "frames": {
+          "samples": 97,
+          "p50": 33.29999999999927,
+          "p95": 33.400000000001455,
+          "max": 33.400000000001455
+        },
+        "rasterDelta": {
+          "captures": 0,
+          "clones": 0,
+          "styleReads": 927
+        },
+        "metrics": {
+          "TaskDuration": 2.7341770000000007,
+          "ScriptDuration": 0.08805000000000007,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.049055000000000015,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 927
+        },
+        "top": [
+          {
+            "name": "drawImage",
+            "url": "",
+            "line": 0,
+            "samples": 1230,
+            "percent": 75.78558225508318
+          },
+          {
+            "name": "(program)",
+            "url": "",
+            "line": 0,
+            "samples": 110,
+            "percent": 6.777572396796057
+          },
+          {
+            "name": "getPropertyValue",
+            "url": "",
+            "line": 0,
+            "samples": 70,
+            "percent": 4.313000616142945
+          },
+          {
+            "name": "",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 372,
+            "samples": 55,
+            "percent": 3.3887861983980283
+          },
+          {
+            "name": "getAnimations",
+            "url": "",
+            "line": 0,
+            "samples": 13,
+            "percent": 0.8009858287122612
+          },
+          {
+            "name": "prepareSampling",
+            "url": "http://127.0.0.1:5196/src/components/effectRuntime.ts",
+            "line": 236,
+            "samples": 11,
+            "percent": 0.6777572396796057
+          },
+          {
+            "name": "draw",
+            "url": "http://127.0.0.1:5196/src/components/effectRuntime.ts",
+            "line": 390,
+            "samples": 11,
+            "percent": 0.6777572396796057
+          },
+          {
+            "name": "read",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 224,
+            "samples": 10,
+            "percent": 0.6161429451632778
+          }
+        ]
+      }
+    ],
+    "navigation": [
+      {
+        "index": 1,
+        "readyMs": 281
+      },
+      {
+        "index": 2,
+        "readyMs": 339
+      },
+      {
+        "index": 3,
+        "readyMs": 310
+      },
+      {
+        "index": 4,
+        "readyMs": 332
+      },
+      {
+        "index": 5,
+        "readyMs": 326
+      },
+      {
+        "index": 0,
+        "readyMs": 446
+      }
+    ]
+  },
+  "electron": {
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.78 Electron/44.4.1 Safari/537.36",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "renderer": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "vendor": "Google Inc. (AMD)"
+    },
+    "results": [
+      {
+        "label": "full-steady",
+        "frames": {
+          "samples": 977,
+          "p50": 3.300000000000182,
+          "p95": 6.700000000000273,
+          "max": 16.699999999999818
+        },
+        "rasterDelta": {
+          "captures": 0,
+          "clones": 0,
+          "styleReads": 8874
+        },
+        "metrics": {
+          "TaskDuration": 4.0964469999999995,
+          "ScriptDuration": 0.550431,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.269205,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 8492
+        },
+        "top": [
+          {
+            "name": "",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 372,
+            "samples": 577,
+            "percent": 22.654102866117
+          },
+          {
+            "name": "getPropertyValue",
+            "url": "",
+            "line": 0,
+            "samples": 555,
+            "percent": 21.790341578327443
+          },
+          {
+            "name": "(program)",
+            "url": "",
+            "line": 0,
+            "samples": 376,
+            "percent": 14.762465645857873
+          },
+          {
+            "name": "declarations",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 181,
+            "samples": 85,
+            "percent": 3.337259521005104
+          },
+          {
+            "name": "getAnimations",
+            "url": "",
+            "line": 0,
+            "samples": 75,
+            "percent": 2.944640753828033
+          },
+          {
+            "name": "",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 184,
+            "samples": 59,
+            "percent": 2.316450726344719
+          },
+          {
+            "name": "(idle)",
+            "url": "",
+            "line": 0,
+            "samples": 59,
+            "percent": 2.316450726344719
+          },
+          {
+            "name": "drawImage",
+            "url": "",
+            "line": 0,
+            "samples": 55,
+            "percent": 2.159403219473891
+          }
+        ]
+      },
+      {
+        "label": "after-navigation",
+        "frames": {
+          "samples": 560,
+          "p50": 3.399999999999636,
+          "p95": 6.700000000000728,
+          "max": 20
+        },
+        "rasterDelta": {
+          "captures": 0,
+          "clones": 0,
+          "styleReads": 5112
+        },
+        "metrics": {
+          "TaskDuration": 2.603624999999999,
+          "ScriptDuration": 0.34352099999999997,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.17402800000000002,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 5112
+        },
+        "top": [
+          {
+            "name": "",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 372,
+            "samples": 340,
+            "percent": 21.316614420062695
+          },
+          {
+            "name": "(program)",
+            "url": "",
+            "line": 0,
+            "samples": 323,
+            "percent": 20.25078369905956
+          },
+          {
+            "name": "getPropertyValue",
+            "url": "",
+            "line": 0,
+            "samples": 307,
+            "percent": 19.247648902821318
+          },
+          {
+            "name": "read",
+            "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+            "line": 224,
+            "samples": 64,
+            "percent": 4.012539184952978
+          },
+          {
+            "name": "prepareSampling",
+            "url": "http://127.0.0.1:5196/src/components/effectRuntime.ts",
+            "line": 236,
+            "samples": 46,
+            "percent": 2.884012539184953
+          },
+          {
+            "name": "drawImage",
+            "url": "",
+            "line": 0,
+            "samples": 44,
+            "percent": 2.7586206896551726
+          },
+          {
+            "name": "getPropertyValue",
+            "url": "",
+            "line": 0,
+            "samples": 42,
+            "percent": 2.633228840125392
+          },
+          {
+            "name": "getAnimations",
+            "url": "",
+            "line": 0,
+            "samples": 35,
+            "percent": 2.19435736677116
+          }
+        ]
+      }
+    ],
+    "navigation": [
+      {
+        "index": 1,
+        "readyMs": 175
+      },
+      {
+        "index": 2,
+        "readyMs": 191
+      },
+      {
+        "index": 3,
+        "readyMs": 195
+      },
+      {
+        "index": 4,
+        "readyMs": 159
+      },
+      {
+        "index": 5,
+        "readyMs": 312
+      },
+      {
+        "index": 0,
+        "readyMs": 378
+      }
+    ],
+    "navigationProfile": {
+      "rasterDelta": {
+        "captures": 57,
+        "clones": 24,
+        "styleReads": 756
+      },
+      "top": [
+        {
+          "name": "(program)",
+          "url": "",
+          "line": 0,
+          "samples": 85,
+          "percent": 9.249183895538629
+        },
+        {
+          "name": "toDataURL",
+          "url": "",
+          "line": 0,
+          "samples": 82,
+          "percent": 8.922742110990207
+        },
+        {
+          "name": "getPropertyValue",
+          "url": "",
+          "line": 0,
+          "samples": 75,
+          "percent": 8.161044613710555
+        },
+        {
+          "name": "projection",
+          "url": "http://127.0.0.1:5196/src/core/documentRuntime.ts",
+          "line": 72,
+          "samples": 54,
+          "percent": 5.8759521218716
+        },
+        {
+          "name": "",
+          "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+          "line": 372,
+          "samples": 44,
+          "percent": 4.787812840043525
+        },
+        {
+          "name": "(idle)",
+          "url": "",
+          "line": 0,
+          "samples": 39,
+          "percent": 4.243743199129488
+        },
+        {
+          "name": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "samples": 25,
+          "percent": 2.720348204570185
+        },
+        {
+          "name": "getError",
+          "url": "",
+          "line": 0,
+          "samples": 23,
+          "percent": 2.50272034820457
+        },
+        {
+          "name": "declarations",
+          "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+          "line": 181,
+          "samples": 21,
+          "percent": 2.2850924918389555
+        },
+        {
+          "name": "refresh",
+          "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+          "line": 186,
+          "samples": 17,
+          "percent": 1.8498367791077257
+        },
+        {
+          "name": "run",
+          "url": "",
+          "line": 0,
+          "samples": 16,
+          "percent": 1.7410228509249184
+        },
+        {
+          "name": "getAnimations",
+          "url": "",
+          "line": 0,
+          "samples": 15,
+          "percent": 1.632208922742111
+        },
+        {
+          "name": "read",
+          "url": "http://127.0.0.1:5196/src/components/domRaster.ts",
+          "line": 224,
+          "samples": 13,
+          "percent": 1.4145810663764962
+        },
+        {
+          "name": "checkFramebufferStatus",
+          "url": "",
+          "line": 0,
+          "samples": 12,
+          "percent": 1.3057671381936888
+        },
+        {
+          "name": "prepareSampling",
+          "url": "http://127.0.0.1:5196/src/components/effectRuntime.ts",
+          "line": 236,
+          "samples": 10,
+          "percent": 1.088139281828074
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Dev-server workload and CPU profiler overhead; no physical presentation timing measured.",
+    "Headless and Electron have different Chromium versions and rendering backends.",
+    "Navigation includes synthetic image generation in the harness, including synchronous toDataURL.",
+    "Freeze/restore diagnostic phases excluded: removing the absence attribute did not restart the shader loop, so no reversible A/B claim is made.",
+    "Raw CPU profiles and diagnostic script retained locally in ignored test-results-slow-profile."
+  ]
+}

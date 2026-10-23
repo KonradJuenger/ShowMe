@@ -998,7 +998,7 @@
     "runtime": "browser",
     "created": "2026-10-19",
     "lastReviewed": "2026-10-23",
-    "reason": "CSS backdrop-filter now follows Chromium composition semantics directly. The suite verifies native backdrop-filter over generated shader content, parent and nested group opacity, Presence Move In, external stylesheet changes, source transforms/opacity and overlapping glass consumers without CSS backdrop replay, restoration canvases, split visual wrappers or CSS Effect canvases."
+    "reason": "CSS backdrop-filter now follows Chromium composition semantics directly. The suite verifies native backdrop-filter over generated shader content, parent and nested group opacity, Presence Move In, external stylesheet changes, source transforms/opacity and overlapping glass consumers without CSS backdrop replay, restoration canvases, split visual wrappers or CSS Effect canvases. Production Move In now keeps transform transport opaque and binds the supported scoped material alpha; authored direct CSS group-opacity semantics remain native."
   },
   {
     "id": "effects-renderer-architecture",
@@ -1010,5 +1010,27 @@
     "created": "2026-10-23",
     "lastReviewed": "2026-10-23",
     "reason": "Structural boundary regression: SlideRenderer and normal Effect surfaces cannot import legacy compositor/capture modules; the production import graph keeps the old CSS compositor isolated; elementRaster/domRaster are reachable only inside the legacy island plus sceneTextureLegacy; CSS has no backend selection; generated shaders and compatible direct GPU chaining bypass SceneTexture; MutationObserver and scene traversal remain outside the normal Motion hot path."
+  },
+  {
+    "id": "effects-native-opacity",
+    "path": "tests/feature/effects/native-opacity.test.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-23",
+    "lastReviewed": "2026-10-23",
+    "reason": "Native visual alpha routing preserves ordinary group opacity, distributes ancestor alpha once to independent scoped materials, and retains authored CSS, stylesheet, nested-material and shader boundaries without capture."
+  },
+  {
+    "id": "effects-native-continuity",
+    "path": "tests/feature/effects/native-continuity.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-23",
+    "lastReviewed": "2026-10-23",
+    "reason": "Painted-pixel continuity across image/shader-backed Presence entrance, exit, nested groups, overlaps and backward seeks; injected disappearance and missing blur must be detected. Electron presentation subscription acknowledges every fixture state and detects hidden elements, missing blur, blank shader layers, alpha jumps and stale output. Acknowledged capture is not a claim of full-rate display coverage. Also covers natural-rate sampled presentation continuity with explicit capture gaps, capture-free native frame pacing, captured seek latency, bounded overlap error, and a moving VP9 video plus JS text."
   }
 ]

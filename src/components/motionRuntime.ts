@@ -130,7 +130,13 @@ export function createMotionRuntime(
       renderedAlpha: boolean;
       originalVisualOpacity: string;
       values: Record<string, MotionValue<number>>;
-      original: { transform: string; opacity: string; willChange: string };
+      original: {
+        transform: string;
+        opacity: string;
+        willChange: string;
+        alphaProperty?: string;
+        alpha: string;
+      };
       detach: () => void;
     }
   >();
@@ -203,6 +209,10 @@ export function createMotionRuntime(
       transform: node.style.transform,
       opacity: node.style.opacity,
       willChange: node.style.willChange,
+      alphaProperty: node.dataset.nativeOpacity,
+      alpha: node.dataset.nativeOpacity
+        ? node.style.getPropertyValue(node.dataset.nativeOpacity)
+        : "",
     };
     if (compiled.some((track) => track.elementId === id))
       node.style.willChange = "transform";
@@ -214,7 +224,11 @@ export function createMotionRuntime(
     const { opacity, ...transport } = values;
     const detachTransport = styleEffect(
       node,
-      visual === node && !renderedAlpha ? values : transport,
+      original.alphaProperty
+        ? { ...transport, [original.alphaProperty]: values.opacity }
+        : visual === node && !renderedAlpha
+          ? values
+          : transport,
     );
     const detachAlpha =
       visual === node ? () => {} : styleEffect(visual, { opacity });
@@ -482,6 +496,11 @@ export function createMotionRuntime(
           Object.values(values).forEach((value) => value.destroy());
           node.style.transform = original.transform;
           node.style.opacity = original.opacity;
+          if (original.alphaProperty) {
+            if (original.alpha)
+              node.style.setProperty(original.alphaProperty, original.alpha);
+            else node.style.removeProperty(original.alphaProperty);
+          }
           node.style.willChange = original.willChange;
           if (visual !== node) visual.style.opacity = originalVisualOpacity;
           const saved = visibility.get(node.dataset.elementId!);

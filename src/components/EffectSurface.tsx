@@ -28,12 +28,14 @@ export function EffectSurface({
   textContent,
   sceneTextureSource,
   samplingEnvelope,
+  nativeOpacity,
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
   width: number;
   height: number;
   samplingEnvelope?: number;
+  nativeOpacity?: string;
   children?: ReactNode;
   textContent?: TextContent;
   sceneTextureSource?: {
@@ -91,7 +93,12 @@ export function EffectSurface({
   // Authority updates may clone unchanged definitions/instances. A backdrop's
   // mounted source depends on the frame and effect, not its own children or
   // higher scene objects. The scene getter continues to read accepted updates.
-  const mountInput = useRef({ key: "", definition, instance, sceneTextureSource });
+  const mountInput = useRef({
+    key: "",
+    definition,
+    instance,
+    sceneTextureSource,
+  });
   const backdropKey =
     definition.input === "backdrop"
       ? JSON.stringify([
@@ -172,6 +179,7 @@ export function EffectSurface({
       style={{
         position: "absolute",
         inset: 0,
+        opacity: nativeOpacity,
         pointerEvents: instance.placement === "content" ? undefined : "none",
       }}
     >

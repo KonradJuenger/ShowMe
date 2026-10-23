@@ -1199,7 +1199,7 @@ test("representative browser-native presentation crosses SceneTexture only for e
           input: "none" as const,
           target: "background" as const,
           source:
-            "#version 300 es\\nprecision highp float; uniform float u_t; in vec2 v_uv; out vec4 outColor; void main(){ outColor=vec4(v_uv.x,.25+.08*sin(u_t),1.-v_uv.x,.22); }",
+            "#version 300 es\nprecision highp float; uniform float u_t; in vec2 v_uv; out vec4 outColor; void main(){ outColor=vec4(v_uv.x,.25+.08*sin(u_t),1.-v_uv.x,.22); }",
         };
         const generatedLayer = createBasicShape(
           "generated-layer",

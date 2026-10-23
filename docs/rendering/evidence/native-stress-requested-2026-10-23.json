@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-23",
+  "command": "SHOWME_TEST_PORT=5197 npm run benchmark:audience -- --runs 3 --output test-results-native-stress-requested",
+  "branch": "experimental/browser-native-renderer",
+  "parentRevision": "e0dbef672255cb44933afdc2c33c3ca3187cb4b5",
+  "dirty": true,
+  "runs": 3,
+  "correctness": "3 passed",
+  "concurrentVerificationJobs": false,
+  "workload": {
+    "version": 2,
+    "slides": 30,
+    "imagesPerSlide": 12,
+    "textsPerSlide": 39,
+    "shapesPerSlide": 36,
+    "shadersPerSlide": 3,
+    "cssEffectsPerSlide": 6,
+    "motionTracksPerSlide": 24,
+    "uniqueImageAssets": 96,
+    "shaderPanelWidth": 580,
+    "shaderPanelHeight": 280,
+    "logicalWidth": 1920,
+    "logicalHeight": 1080
+  },
+  "environment": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "dpr": 1,
+    "width": 1920,
+    "height": 1080,
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen AI 9 365 w/ Radeon 880M              ",
+    "logicalCpus": 20,
+    "totalMemoryBytes": 33412722688
+  },
+  "metrics": {
+    "firstNavigationP95Ms": 370.19999998807907,
+    "revisitNavigationP95Ms": 349.69999998807907,
+    "frameIntervalP95Ms": 83.39999999999782,
+    "taskCpuMs": 38781.712,
+    "longTaskTotalMs": 8014,
+    "heapBytes": 34919592
+  },
+  "ranges": {
+    "firstNavigationP95Ms": {
+      "min": 369.89999997615814,
+      "max": 370.80000001192093
+    },
+    "revisitNavigationP95Ms": {
+      "min": 347.19999998807907,
+      "max": 357
+    },
+    "frameIntervalP95Ms": {
+      "min": 83.30000000000291,
+      "max": 83.39999999999964
+    },
+    "taskCpuMs": {
+      "min": 38773.83,
+      "max": 39131.452
+    },
+    "longTaskTotalMs": {
+      "min": 7887,
+      "max": 8081
+    },
+    "heapBytes": {
+      "min": 34881316,
+      "max": 34943992
+    }
+  },
+  "limitations": "Headless Chromium measurements on an uncommitted candidate. No paired clean baseline or speedup claim. Correctness pass does not certify smooth playback or every-frame flicker absence."
+}

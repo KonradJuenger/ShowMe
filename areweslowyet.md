@@ -1,5 +1,71 @@
 # Are we slow yet?
 
+## Native continuity experiment — 2026-10-23
+
+### Attribution follow-up
+
+Diagnostic CPU sampling (`node test-results-slow-profile/profile.mjs` and
+`node test-results-slow-profile/profile.mjs --electron`) showed that the headless
+run uses **SwiftShader software WebGL**, whereas visible Electron 44 uses the
+**Radeon 880M / D3D11**. At 1920×1080/DPR 1, steady playback measured rAF p95
+33.4 ms headless and 6.7 ms in Electron. These short profiled runs are attribution
+experiments, not matched benchmark replacements or physical-display measurements.
+
+In headless steady playback, about 78% of CPU samples landed in `drawImage`
+called by `effectRuntime.materialize`, which transfers shader output to the
+visible 2D canvas. Both environments recorded zero new DOM captures/clones during
+steady playback. Electron still performed 8,874 style reads over four seconds;
+style collection and property access were its largest sampled hotspots.
+
+Six profiled Electron navigation requests took 159–378 ms and produced 57 captures,
+24 clones and 756 style reads. Navigation samples also exposed synchronous
+`canvas.toDataURL()` in the **test image mock** (8.9% of samples), so these timings
+include fixture generation as well as real renderer preparation. The earlier
+83.4 ms aggregate includes repeated navigation and must not be described as
+native steady-playback performance. Optimize source-style invalidation, preparation
+and shader presentation separately; preserve the full correctness workload.
+See [attribution evidence](docs/rendering/evidence/native-slow-attribution-2026-10-23.json).
+
+### Requested standalone stress rerun
+
+Command: `npm run benchmark:audience -- --runs 3 --output test-results-native-stress-requested`
+with `SHOWME_TEST_PORT=5197`. All three dense stress correctness runs passed in
+2.3 minutes, with no other verification jobs launched alongside them. The candidate
+remained dirty on `experimental/browser-native-renderer`; no production code was
+changed for this rerun and these results are not attributed to its parent commit.
+
+Median per-run p95: **370.2 ms first entry**, **349.7 ms revisit**, and **83.4 ms
+frame interval** (per-run frame p95 range 83.3–83.4 ms). Renderer task CPU was
+38.78 s, long-task total 8.01 s and retained heap 34.92 MB. This is still slow;
+the correctness pass is not a smoothness or full-frame flicker certification.
+The run used headless Chromium 153 at 1920×1080/DPR 1, not a visible native
+audience window. Do not infer a renderer speedup from the difference against the
+earlier run with overlapping local verification. Raw results are in local audience
+history and the [standalone stress evidence](docs/rendering/evidence/native-stress-requested-2026-10-23.json).
+
+Dirty `experimental/browser-native-renderer` candidate based on `e0dbef6`; these
+measurements are not attributed to that parent commit and do not establish an
+improvement over a paired baseline. See the [candidate evidence](docs/rendering/evidence/native-continuity-2026-10-23.json)
+and [validation](docs/rendering/NATIVE_RENDERER_CONTINUITY_VALIDATION.md).
+
+The small visible Electron native-glass fixture measured rAF intervals of
+**3.4 ms p95 / 3.5 ms p99**, an **8 ms maximum gap**, and **87–100 ms** from seek
+request to receipt of a matching native presentation capture. Capture was disabled
+during pacing measurement. These are browser observations, not physical-display
+latency measurements or proof of smoothness for a dense deck.
+
+Three exploratory runs of the existing dense headless audience workload measured
+median per-run p95 values of **435.3 ms first entry**, **410.8 ms revisit**, and
+**100 ms frame interval**. That workload remains slow; passing its correctness
+assertions is not a performance pass. Some other local verification overlapped
+these runs. They are retained in local benchmark history and are not comparable
+with the old clean-commit series below or the small native-glass fixture.
+
+Native presentation subscription observed 62 of 609 renderer marker states in a
+natural-rate two-second run and found no faults in those samples. It cannot prove
+the absence of a one-refresh flash. A separate presentation-acknowledged sequence
+observed every test state and detected all five deliberately injected faults.
+
 ## Glass/Motion follow-up — 2026-10-21
 
 The clean `f620e6a15c86e83b9b314e3e8ffa3f182b37e505` build still stutters on
