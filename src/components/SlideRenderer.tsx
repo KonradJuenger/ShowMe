@@ -789,6 +789,7 @@ const ElementView = memo(function ElementView({
     children?: ReactNode,
     opacity?: string,
     directShaderInput = false,
+    ownedMediaInput = false,
   ) => (
     <EffectSurface
       // A saved definition has a new immutable resource identity. Give it a
@@ -801,6 +802,7 @@ const ElementView = memo(function ElementView({
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
       nativeOpacity={opacity}
       directShaderInput={directShaderInput}
+      ownedMediaInput={ownedMediaInput}
       sceneTextureSource={
         resources[instance.resourceId].kind === "fragment-glsl"
           ? sceneTextureSource
@@ -856,6 +858,45 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
+  const ownedMediaOnly = (operation: Composition): boolean => {
+    if (
+      !element.content ||
+      !["image", "video"].includes(element.content.type) ||
+      element.children.length ||
+      element.geometry.type !== "rect" ||
+      appearance.radius !== 0 ||
+      appearance.fill ||
+      appearance.strokeWidth !== 0 ||
+      element.content.opacity !== 1
+    )
+      return false;
+    const media = resolveMediaFrame(element);
+    if (
+      !media ||
+      Math.abs(media.x) > 1e-6 ||
+      Math.abs(media.y) > 1e-6 ||
+      Math.abs(media.width - frame.width) > 1e-6 ||
+      Math.abs(media.height - frame.height) > 1e-6 ||
+      Math.abs(media.rotation) > 1e-6 ||
+      Math.abs(media.scaleX - 1) > 1e-6 ||
+      Math.abs(media.scaleY - 1) > 1e-6 ||
+      media.flipX ||
+      media.flipY
+    )
+      return false;
+    switch (operation.kind) {
+      case "source":
+        return true;
+      case "children":
+        return element.children.length === 0;
+      case "sequence":
+        return operation.items.every(ownedMediaOnly);
+      case "clip":
+        return element.clipChildren && ownedMediaOnly(operation.input);
+      default:
+        return false;
+    }
+  };
   const lower = (operation: Composition, opacity?: string): ReactNode => {
     switch (operation.kind) {
       case "source":
@@ -879,11 +920,19 @@ const ElementView = memo(function ElementView({
           operation.input?.kind === "effect" &&
           resources[operation.input.effect.resourceId]?.kind ===
             "fragment-glsl";
+        const ownedMediaInput =
+          !opacity &&
+          !scene?.current.deck.stylesheet?.trim() &&
+          definition?.kind === "fragment-glsl" &&
+          definition.input === "content" &&
+          !!operation.input &&
+          ownedMediaOnly(operation.input);
         return surface(
           operation.effect,
           operation.input ? lower(operation.input) : undefined,
           opacity,
           directShaderInput,
+          ownedMediaInput,
         );
       }
       case "sequence":
