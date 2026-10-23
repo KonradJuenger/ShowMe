@@ -16,6 +16,9 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: Verify test statistics are current
+        run: npm run test:stats && git diff --exit-code tests/stats.json
+      - run: npm run test:audit
       - run: npm run typecheck
       - name: Architecture and composition unit regressions
         run: npx vitest run

@@ -1669,6 +1669,12 @@ test("browser-native CSS glass bypasses compositor materialization during ordina
       .locator('[data-element-id="lower"] img')
       .evaluate(async (image: HTMLImageElement) => image.decode());
     const result = await page.evaluate(async () => {
+      const runtimePath = "/src/components/effectRuntime.ts";
+      const {
+        effectSourceTextureBytes,
+      }: typeof import("../../../src/components/effectRuntime") = await import(
+        /* @vite-ignore */ runtimePath
+      );
       const w = window as unknown as ProbeWindow;
       await w.native.setMotion({
         stageId: "stage",
@@ -1701,6 +1707,7 @@ test("browser-native CSS glass bypasses compositor materialization during ordina
             Node.DOCUMENT_POSITION_FOLLOWING,
         ),
         captures: w.native.inspect().diagnostics.captures,
+        sceneTextureBytes: effectSourceTextureBytes(),
       };
     });
     expect(result.backend).toBeNull();
@@ -1715,6 +1722,7 @@ test("browser-native CSS glass bypasses compositor materialization during ordina
     expect(result.text).toContain("Native CSS glass");
     expect(result.foregroundAfter).toBe(true);
     expect(result.captures).toBe(0);
+    expect(result.sceneTextureBytes).toBe(0);
   }
 });
 
@@ -2016,6 +2024,12 @@ test("later foreground content and group alpha keep Chromium CSS semantics", asy
 test("generated shader layers remain operational beside browser-native CSS", async () => {
   await mount(page, "native");
   const result = await page.evaluate(async () => {
+    const runtimePath = "/src/components/effectRuntime.ts";
+    const {
+      effectSourceTextureBytes,
+    }: typeof import("../../../src/components/effectRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
     const w = window as unknown as ProbeWindow;
     await w.native.advance(0.37);
     const root = w.native.host.querySelector<HTMLElement>(".slide-renderer")!;
@@ -2034,6 +2048,7 @@ test("generated shader layers remain operational beside browser-native CSS", asy
       backdrop: getComputedStyle(css).backdropFilter,
       restoration: root.querySelectorAll("[data-backdrop-restore]").length,
       replay: root.querySelectorAll("[data-css-backdrop]").length,
+      sceneTextureBytes: effectSourceTextureBytes(),
       errors: w.native.inspect().errors,
     };
   });
@@ -2044,6 +2059,7 @@ test("generated shader layers remain operational beside browser-native CSS", asy
   expect(result.backdrop).not.toBe("none");
   expect(result.restoration).toBe(0);
   expect(result.replay).toBe(0);
+  expect(result.sceneTextureBytes).toBe(0);
   expect(result.errors).toEqual([]);
 });
 

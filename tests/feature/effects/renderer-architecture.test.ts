@@ -1,11 +1,21 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 
+const components = new URL("../../../src/components/", import.meta.url);
 const component = (name: string) =>
-  readFileSync(
-    new URL("../../../src/components/" + name, import.meta.url),
-    "utf8",
-  );
+  readFileSync(new URL(name, components), "utf8");
+const productionSources = Object.fromEntries(
+  readdirSync(components)
+    .filter((name) => /\.(ts|tsx)$/.test(name))
+    .map((name) => [name, component(name)]),
+);
+const importers = (name: string) =>
+  Object.entries(productionSources)
+    .filter(([, source]) =>
+      new RegExp(`from\\s+["']\\./${name}["']`).test(source),
+    )
+    .map(([path]) => path)
+    .sort();
 
 it("keeps SlideRenderer on the browser-native rendering path", () => {
   const source = component("SlideRenderer.tsx");
@@ -37,7 +47,7 @@ it("makes CSS unconditional instead of selecting a rendering backend", () => {
   expect(runtime).not.toContain("compositionSurface");
 });
 
-it("uses SceneTexture as the sole shader doorway to legacy scene capture", () => {
+it("uses SceneTexture as the sole production doorway to legacy scene capture", () => {
   const runtime = component("effectRuntime.ts");
   const boundary = component("sceneTexture.ts");
   const adapter = component("sceneTextureLegacy.ts");
@@ -61,9 +71,38 @@ it("uses SceneTexture as the sole shader doorway to legacy scene capture", () =>
   expect(boundary).not.toContain("domRaster");
   expect(adapter).toContain('from "./elementRaster"');
   expect(adapter).toContain('from "./domRaster"');
+
+  const legacyCompositorIsland = new Set([
+    "backdropRestoration.ts",
+    "compositionRuntime.ts",
+    "compositionSurface.ts",
+    "cssBackdrop.ts",
+    "legacyCssBackdropValidation.ts",
+  ]);
+  for (const target of [
+    "backdropRestoration",
+    "compositionRuntime",
+    "compositionSurface",
+    "cssBackdrop",
+    "legacyCssBackdropValidation",
+    "compositionBackendPlan",
+  ])
+    expect(
+      importers(target).filter((path) => !legacyCompositorIsland.has(path)),
+    ).toEqual([]);
+
+  const legacyCaptureIsland = new Set([
+    ...legacyCompositorIsland,
+    "sceneTextureLegacy.ts",
+  ]);
+  for (const target of ["elementRaster", "domRaster"])
+    expect(
+      importers(target).filter((path) => !legacyCaptureIsland.has(path)),
+    ).toEqual([]);
+  expect(importers("sceneTextureLegacy")).toEqual(["sceneTexture.ts"]);
 });
 
-it("keeps observers inside the exceptional SceneTexture adapter", () => {
+it("keeps observers and frame-time traversal out of the normal hot path", () => {
   for (const normal of [
     "SlideRenderer.tsx",
     "EffectSurface.tsx",
@@ -73,17 +112,40 @@ it("keeps observers inside the exceptional SceneTexture adapter", () => {
     expect(component(normal)).not.toContain("MutationObserver");
 
   expect(component("sceneTextureLegacy.ts")).toContain("MutationObserver");
+
+  const hook = component("useMotionRuntime.ts");
+  expect(hook).not.toContain("useState");
+  const motion = component("motionRuntime.ts");
+  const start = motion.indexOf("const materialize =");
+  const end = motion.indexOf("finish();", start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const hotPath = motion.slice(start, end);
+  expect(hotPath).toContain("if (presenceOnly) return;");
+  for (const forbidden of [
+    "querySelector",
+    "walkElements",
+    "MutationObserver",
+    "createElement",
+    "resizeRasterCanvas",
+    "sceneTexture",
+  ])
+    expect(hotPath).not.toContain(forbidden);
 });
 
-it("keeps generated shaders independent of SceneTexture", () => {
+it("keeps generated and direct GPU shader inputs independent of SceneTexture", () => {
   const runtime = component("effectRuntime.ts");
   const condition = runtime.indexOf(
     'if (definition.input === "content" || definition.input === "backdrop")',
   );
-  const creation = runtime.indexOf("sceneTexture = createSceneTextureProvider(");
+  const factory = runtime.indexOf("sceneTextureFactory = () =>");
   expect(condition).toBeGreaterThan(-1);
-  expect(creation).toBeGreaterThan(condition);
-  expect(runtime.slice(condition, creation)).not.toContain(
+  expect(factory).toBeGreaterThan(condition);
+  expect(runtime.slice(condition, factory)).not.toContain(
     'definition.input === "none"',
   );
+  expect(runtime).toContain(
+    "const renderedInput = !gpuInput ? renderedSceneTexture() : null;",
+  );
+  expect(runtime).toContain("if (!sceneTexture && sceneTextureFactory)");
 });

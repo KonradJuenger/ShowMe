@@ -1009,6 +1009,6 @@
     "runtime": "unit",
     "created": "2026-10-23",
     "lastReviewed": "2026-10-23",
-    "reason": "Structural boundary regression: SlideRenderer and normal Effect surfaces cannot import legacy compositor/capture modules; CSS has no backend selection; only explicit content/backdrop shaders create SceneTexture; generated shaders remain capture-free; MutationObserver is confined to the temporary SceneTexture legacy adapter."
+    "reason": "Structural boundary regression: SlideRenderer and normal Effect surfaces cannot import legacy compositor/capture modules; the production import graph keeps the old CSS compositor isolated; elementRaster/domRaster are reachable only inside the legacy island plus sceneTextureLegacy; CSS has no backend selection; generated shaders and compatible direct GPU chaining bypass SceneTexture; MutationObserver and scene traversal remain outside the normal Motion hot path."
   }
 ]
