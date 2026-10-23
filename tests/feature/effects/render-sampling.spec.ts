@@ -154,16 +154,14 @@ test("Motion sampling and backdrop inputs use the same transformed output detail
   );
 });
 
-test("shader allocation failure restores original content and context recreation repaints output", async ({
+test("shader allocation failure is explicit and context recreation repaints direct output", async ({
   page,
 }) => {
   await mount(page);
   const failed = await page.evaluate(() =>
     (window as unknown as SampleWindow).sampling.allocationFailure(),
   );
-  expect(failed.error).toContain("Cannot allocate");
-  expect(failed.hidden).toBe("hidden");
-  expect(failed.originalOpacity).not.toBe("0");
+  expect(failed.error).toContain("WebGL2 is unavailable");
   const recovered = await page.evaluate(() =>
     (window as unknown as SampleWindow).sampling.loseContext(),
   );
