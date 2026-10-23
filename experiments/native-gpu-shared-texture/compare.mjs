@@ -42,10 +42,15 @@ run(electronBin, sharedArgs);
 const legacy = JSON.parse(await readFile(legacyOutput, "utf8"));
 const shared = JSON.parse(await readFile(sharedOutput, "utf8"));
 const close = (left, right, tolerance) => Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= tolerance;
+const expectedPhysical = { width: Math.round(width * dpr), height: Math.round(height * dpr) };
+const sharedShapes = (shared.source?.textureShapes ?? []).map(({ shape }) => shape);
+const expectedShape = `${expectedPhysical.width}x${expectedPhysical.height}`;
 const checks = {
   requestedLogicalSizeMatches: legacy.configuration.width === width && legacy.configuration.height === height && shared.configuration.width === width && shared.configuration.height === height,
   requestedDprMatchesConfiguration: close(legacy.configuration.dpr, dpr, .0001) && close(shared.configuration.dpr, dpr, .0001),
   legacyViewportMatchesRequested: legacy.viewport?.width === width && legacy.viewport?.height === height && close(legacy.viewport?.dpr, dpr, .01),
+  legacyPhysicalCanvasMatchesRequested: legacy.outputCanvas?.width === expectedPhysical.width && legacy.outputCanvas?.height === expectedPhysical.height,
+  sharedPhysicalTextureMatchesRequested: sharedShapes.includes(expectedShape),
   durationMatches: legacy.configuration.durationMs === durationMs && shared.configuration.durationMs === durationMs,
   sameFinalShader: legacy.claims?.finalShaderMatchesSharedTextureHarness === true,
   noLegacyRendererErrors: Array.isArray(legacy.errors) && legacy.errors.length === 0,
@@ -55,7 +60,8 @@ const report = {
   schemaVersion: 1,
   createdAt: new Date().toISOString(),
   comparisonKind: "controlled-approximate-scene",
-  controlledVariables: ["logical width", "logical height", "DPR", "duration", "final shader", "hardware Electron process"],
+  controlledVariables: ["logical width", "logical height", "DPR", "physical pixel dimensions", "duration", "final shader", "hardware Electron process"],
+  expectedPhysical,
   sceneEquivalence: "Both workloads are generated-GPU background -> native text/CSS -> cheap full-frame shader. They are intentionally approximate rather than pixel-identical so the legacy side can use the real ShowMe SlideRenderer/SceneTexture implementation without integrating the experimental transport into production.",
   checks,
   legacySceneTexture: legacy,
