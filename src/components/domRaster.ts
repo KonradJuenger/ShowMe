@@ -63,6 +63,7 @@ export function createDomRasterSource(
         objectPosition: string;
       };
       pseudos: string[];
+      transport: Record<string, string>;
     };
   }> = [];
   let dirty = true,
