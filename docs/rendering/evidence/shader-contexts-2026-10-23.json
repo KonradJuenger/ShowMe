@@ -28,11 +28,31 @@
           "max": 16.700000000000045
         }
       },
-      "activeContexts": [1, 1, 1],
-      "paintedOutputs": [16, 16, 16],
-      "contextsAfterDispose": [0, 0, 0],
-      "errors": [[], [], []],
-      "actualPreservation": [false, false, false]
+      "activeContexts": [
+        1,
+        1,
+        1
+      ],
+      "paintedOutputs": [
+        16,
+        16,
+        16
+      ],
+      "contextsAfterDispose": [
+        0,
+        0,
+        0
+      ],
+      "errors": [
+        [],
+        [],
+        []
+      ],
+      "actualPreservation": [
+        false,
+        false,
+        false
+      ]
     },
     {
       "count": 16,
@@ -52,11 +72,31 @@
           "max": 16.80000000000001
         }
       },
-      "activeContexts": [1, 1, 1],
-      "paintedOutputs": [16, 16, 16],
-      "contextsAfterDispose": [0, 0, 0],
-      "errors": [[], [], []],
-      "actualPreservation": [true, true, true]
+      "activeContexts": [
+        1,
+        1,
+        1
+      ],
+      "paintedOutputs": [
+        16,
+        16,
+        16
+      ],
+      "contextsAfterDispose": [
+        0,
+        0,
+        0
+      ],
+      "errors": [
+        [],
+        [],
+        []
+      ],
+      "actualPreservation": [
+        true,
+        true,
+        true
+      ]
     },
     {
       "count": 24,
@@ -76,11 +116,31 @@
           "max": 16.700000000000045
         }
       },
-      "activeContexts": [1, 1, 1],
-      "paintedOutputs": [24, 24, 24],
-      "contextsAfterDispose": [0, 0, 0],
-      "errors": [[], [], []],
-      "actualPreservation": [false, false, false]
+      "activeContexts": [
+        1,
+        1,
+        1
+      ],
+      "paintedOutputs": [
+        24,
+        24,
+        24
+      ],
+      "contextsAfterDispose": [
+        0,
+        0,
+        0
+      ],
+      "errors": [
+        [],
+        [],
+        []
+      ],
+      "actualPreservation": [
+        false,
+        false,
+        false
+      ]
     },
     {
       "count": 24,
@@ -100,11 +160,31 @@
           "max": 16.799999999999955
         }
       },
-      "activeContexts": [1, 1, 1],
-      "paintedOutputs": [24, 24, 24],
-      "contextsAfterDispose": [0, 0, 0],
-      "errors": [[], [], []],
-      "actualPreservation": [true, true, true]
+      "activeContexts": [
+        1,
+        1,
+        1
+      ],
+      "paintedOutputs": [
+        24,
+        24,
+        24
+      ],
+      "contextsAfterDispose": [
+        0,
+        0,
+        0
+      ],
+      "errors": [
+        [],
+        [],
+        []
+      ],
+      "actualPreservation": [
+        true,
+        true,
+        true
+      ]
     },
     {
       "count": 32,
@@ -124,11 +204,31 @@
           "max": 33.30000000000007
         }
       },
-      "activeContexts": [1, 1, 1],
-      "paintedOutputs": [32, 32, 32],
-      "contextsAfterDispose": [0, 0, 0],
-      "errors": [[], [], []],
-      "actualPreservation": [false, false, false]
+      "activeContexts": [
+        1,
+        1,
+        1
+      ],
+      "paintedOutputs": [
+        32,
+        32,
+        32
+      ],
+      "contextsAfterDispose": [
+        0,
+        0,
+        0
+      ],
+      "errors": [
+        [],
+        [],
+        []
+      ],
+      "actualPreservation": [
+        false,
+        false,
+        false
+      ]
     },
     {
       "count": 32,
@@ -148,106 +248,31 @@
           "max": 33.39999999999998
         }
       },
-      "activeContexts": [1, 1, 1],
-      "paintedOutputs": [32, 32, 32],
-      "contextsAfterDispose": [0, 0, 0],
-      "errors": [[], [], []],
-      "actualPreservation": [true, true, true]
+      "activeContexts": [
+        1,
+        1,
+        1
+      ],
+      "paintedOutputs": [
+        32,
+        32,
+        32
+      ],
+      "contextsAfterDispose": [
+        0,
+        0,
+        0
+      ],
+      "errors": [
+        [],
+        [],
+        []
+      ],
+      "actualPreservation": [
+        true,
+        true,
+        true
+      ]
     }
-  ],
-  "earlierDiagnostic": {
-    "dirty": true,
-    "runs": 1,
-    "note": "Rejected per-chain-context implementation; diagnostic only, not paired evidence",
-    "rows": [
-      {
-        "count": 16,
-        "preserve": false,
-        "active": 16,
-        "errors": []
-      },
-      {
-        "count": 24,
-        "preserve": false,
-        "active": 16,
-        "errors": [
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')"
-        ]
-      },
-      {
-        "count": 32,
-        "preserve": false,
-        "active": 16,
-        "errors": [
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')"
-        ]
-      },
-      {
-        "count": 16,
-        "preserve": true,
-        "active": 16,
-        "errors": []
-      },
-      {
-        "count": 24,
-        "preserve": true,
-        "active": 16,
-        "errors": [
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')"
-        ]
-      },
-      {
-        "count": 32,
-        "preserve": true,
-        "active": 16,
-        "errors": [
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')",
-          "Cannot read properties of null (reading '0')"
-        ]
-      }
-    ]
-  }
+  ]
 }

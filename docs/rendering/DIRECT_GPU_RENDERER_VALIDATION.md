@@ -193,3 +193,12 @@ Not run: full/release suites, installer packaging, cross-platform validation,
 physical 4K refresh capture, full manual deck walkthrough, export-specific
 continuity or a paired hardware-GPU performance benchmark. The previous visible
 Electron attribution data in the historical reports predates this architecture.
+
+## Final production build check — 2026-10-23
+
+`npm run build` and `npm run verify:build` passed again before handoff.
+This builds the production web assets and Electron entry point and checks build
+invariants; it does not run an installer or a visible hardware-GPU smoke test.
+Superseded plans, handoffs, diagnostic scripts and experimental evidence were
+removed from the working tree; their history remains in Git. The experiment-only
+workflow, including its continue-on-error legacy diagnostic, was also removed.
