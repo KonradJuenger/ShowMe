@@ -120,7 +120,7 @@ async function performanceMetrics(page: Page) {
 test("renderer workload: native DOM CSS Motion Presence", async ({
   page,
 }, testInfo) => {
-  test.skip(!enabled, "benchmark-only workload");
+  if (!enabled) return;
   const perf = await performanceMetrics(page);
   const before = await perf.read();
   const result = await run(page, "native");
@@ -139,7 +139,7 @@ test("renderer workload: native DOM CSS Motion Presence", async ({
 test("renderer workload: generated input-none shaders", async ({
   page,
 }, testInfo) => {
-  test.skip(!enabled, "benchmark-only workload");
+  if (!enabled) return;
   const perf = await performanceMetrics(page);
   const before = await perf.read();
   const result = await run(page, "generated");
@@ -158,7 +158,7 @@ test("renderer workload: generated input-none shaders", async ({
 test("renderer workload: retained SceneTexture revisit", async ({
   page,
 }, testInfo) => {
-  test.skip(!enabled, "benchmark-only workload");
+  if (!enabled) return;
   const perf = await performanceMetrics(page);
   const before = await perf.read();
   const result = await run(page, "scene-texture");
