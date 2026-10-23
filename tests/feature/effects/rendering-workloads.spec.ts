@@ -6,10 +6,13 @@ import {
 } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  RenderingWorkload,
-  runRenderingWorkload,
-} from "../../helpers/renderingWorkloadHarness";
+import type { RenderingWorkload } from "../../helpers/renderingWorkloadHarness";
+
+type WorkloadResult = Awaited<
+  ReturnType<
+    (typeof import("../../helpers/renderingWorkloadHarness"))["runRenderingWorkload"]
+  >
+>;
 
 test.use({ deviceScaleFactor: 1 });
 
@@ -41,7 +44,7 @@ async function run(page: Page, kind: RenderingWorkload) {
 
 async function report(
   kind: RenderingWorkload,
-  result: Awaited<ReturnType<typeof runRenderingWorkload>>,
+  result: WorkloadResult,
   performance: { before: Record<string, number>; after: Record<string, number> },
   page: Page,
   testInfo: TestInfo,
