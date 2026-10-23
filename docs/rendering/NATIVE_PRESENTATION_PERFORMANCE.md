@@ -204,8 +204,12 @@ extra). This excludes textures, FBOs, driver allocations and bitmap presentation
 actual VRAM and peak GPU memory were not measured. Contexts are bounded globally
 per renderer rather than per shader chain. No physical display FPS or 60 FPS
 claim: glass still publishes at approximately half the audience callback rate.
-The next work is qualifying GPU SceneTexture assembly for the reference workload,
-then removing that asynchronous capture cadence.
+
+This research branch stops the native optimization sequence here. Instead of
+adding qualified GPU reconstruction behind SceneTexture, it tests the alternative
+architecture explicitly: one general ShowMe GPU render graph, with Chromium used
+only for native raster sources where necessary. See
+[GENERAL_GPU_RENDERER_EXPERIMENT.md](GENERAL_GPU_RENDERER_EXPERIMENT.md).
 
 Verification: `npm run build` (including typecheck), `npm run verify:build`,
 `npx eslint src/components/effectRuntime.ts` and `git diff --check` passed.
