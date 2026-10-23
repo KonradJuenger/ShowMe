@@ -1214,6 +1214,13 @@ test("representative browser-native presentation crosses SceneTexture only for e
           height: 180,
           createdAt: "2026-10-23T00:00:00Z",
         };
+        const directImageShader = {
+          ...blankEffect("shader"),
+          input: "content" as const,
+          target: "content" as const,
+          source:
+            "#version 300 es\nprecision highp float; uniform sampler2D u_input; in vec2 v_uv; out vec4 outColor; void main(){ outColor=texture(u_input,v_uv); }",
+        };
         const background = createMediaElement(
           "background-image",
           imageAsset,
@@ -1235,13 +1242,6 @@ test("representative browser-native presentation crosses SceneTexture only for e
           target: "background" as const,
           source:
             "#version 300 es\nprecision highp float; uniform float u_t; in vec2 v_uv; out vec4 outColor; void main(){ outColor=vec4(v_uv.x,.25+.08*sin(u_t),1.-v_uv.x,.22); }",
-        };
-        const directImageShader = {
-          ...blankEffect("shader"),
-          input: "content" as const,
-          target: "content" as const,
-          source:
-            "#version 300 es\nprecision highp float; uniform sampler2D u_input; in vec2 v_uv; out vec4 outColor; void main(){ outColor=texture(u_input,v_uv); }",
         };
         const generatedLayer = createBasicShape(
           "generated-layer",
