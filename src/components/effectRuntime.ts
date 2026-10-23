@@ -165,6 +165,7 @@ type ShaderGpuState = {
 };
 
 export type ShaderChain = {
+  slot?: number;
   canvas: HTMLCanvasElement | null;
   state: ShaderGpuState | null;
   redraws: Set<() => void>;
@@ -183,8 +184,8 @@ const shaderMetrics = {
 };
 const activeShaderChains = new Set<ShaderChain>();
 let gpuGeneration = 0;
-let sharedShaderCanvas: OffscreenCanvas | null = null;
-let sharedShaderGpu: ShaderGpuState | null = null;
+const sharedShaderCanvases: Array<OffscreenCanvas | null> = [null, null];
+const sharedShaderGpus: Array<ShaderGpuState | null> = [null, null];
 let preserveShaderBufferForTests = false;
 export function setShaderBufferPreservationForTests(value: boolean) {
   preserveShaderBufferForTests = value;
@@ -206,38 +207,43 @@ export function shaderRuntimeDiagnostics() {
   return {
     ...shaderMetrics,
     activeChains: activeShaderChains.size,
-    activeContexts:
-      activeShaderChains.size &&
-      sharedShaderGpu &&
-      !sharedShaderGpu.gl.isContextLost()
-        ? 1
-        : 0,
-    residentContexts:
-      sharedShaderGpu && !sharedShaderGpu.gl.isContextLost() ? 1 : 0,
+    activeContexts: new Set(
+      [...activeShaderChains]
+        .filter((c) => c.state && !c.state.gl.isContextLost())
+        .map((c) => c.state!.gl),
+    ).size,
+    residentContexts: sharedShaderGpus.filter(
+      (state) => state && !state.gl.isContextLost(),
+    ).length,
   };
 }
 
-function shaderGpuCanvas() {
-  if (sharedShaderCanvas) return sharedShaderCanvas;
+function shaderGpuCanvas(slot: number) {
+  if (sharedShaderCanvases[slot]) return sharedShaderCanvases[slot]!;
   const canvas = new OffscreenCanvas(1, 1);
   canvas.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
-    sharedShaderGpu = null;
+    sharedShaderGpus[slot] = null;
     for (const chain of activeShaderChains) {
+      if ((chain.slot ?? 0) !== slot) continue;
       chain.lost = true;
       chain.state = null;
     }
-    if (validationChain) validationChain.state = null;
+    if (validationChain && (validationChain.slot ?? 0) === slot)
+      validationChain.state = null;
   });
   canvas.addEventListener("webglcontextrestored", () => {
-    sharedShaderGpu = null;
+    sharedShaderGpus[slot] = null;
     for (const chain of activeShaderChains) {
+      if ((chain.slot ?? 0) !== slot) continue;
       chain.lost = false;
       chain.state = null;
-      chain.redraws.forEach((redraw) => redraw());
     }
+    // Static consumers may sample output from the restored cohort.
+    for (const chain of activeShaderChains)
+      chain.redraws.forEach((redraw) => redraw());
   });
-  sharedShaderCanvas = canvas;
+  sharedShaderCanvases[slot] = canvas;
   return canvas;
 }
 
@@ -249,11 +255,13 @@ function shaderGpu(chain: ShaderChain) {
       "GPU bitmap presentation is unavailable; the original Element remains visible.",
     );
   if (!chain.validation) activeShaderChains.add(chain);
+  const slot = chain.slot ?? 0;
+  const sharedShaderGpu = sharedShaderGpus[slot];
   if (sharedShaderGpu && !sharedShaderGpu.gl.isContextLost()) {
     chain.state = sharedShaderGpu;
     return sharedShaderGpu;
   }
-  const canvas = shaderGpuCanvas();
+  const canvas = shaderGpuCanvas(slot);
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
@@ -291,11 +299,11 @@ function shaderGpu(chain: ShaderChain) {
     generation: ++gpuGeneration,
   };
   chain.state = state;
-  sharedShaderGpu = state;
+  sharedShaderGpus[slot] = state;
   shaderMetrics.contextsCreated++;
   shaderMetrics.maxActiveContexts = Math.max(
     shaderMetrics.maxActiveContexts,
-    1,
+    sharedShaderGpus.filter(Boolean).length,
   );
   return state;
 }
@@ -305,13 +313,18 @@ function disposeShaderChain(chain: ShaderChain) {
   activeShaderChains.delete(chain);
   if (state && !state.gl.isContextLost()) {
     for (const source of chain.sources) {
-      if ([...activeShaderChains].some((other) => other.sources.has(source)))
+      if (
+        [...activeShaderChains].some(
+          (other) => other.state === state && other.sources.has(source),
+        )
+      )
         continue;
       const program = state.programs.get(source);
       if (program) deleteProgram(state.gl, program);
       state.programs.delete(source);
     }
-    if (!activeShaderChains.size) state.canvas.width = state.canvas.height = 1;
+    if (![...activeShaderChains].some((other) => other.state === state))
+      state.canvas.width = state.canvas.height = 1;
   }
   chain.presenter?.transferFromImageBitmap(null);
   chain.state = null;
@@ -384,7 +397,9 @@ export function shaderProgram(source: string, chain = validationShaderChain()) {
     if (programs.size >= 32) {
       const unused = [...programs].find(
         ([key]) =>
-          ![...activeShaderChains].some((owner) => owner.sources.has(key)),
+          ![...activeShaderChains].some(
+            (owner) => owner.state?.gl === gl && owner.sources.has(key),
+          ),
       );
       if (unused) {
         deleteProgram(gl, unused[1]);
@@ -1289,6 +1304,8 @@ export function mountEffectSurface(
       );
       if (diagnostics.length) throw new Error(diagnostics.join("; "));
       if (!shaderChain) throw new Error("Shader surface has no GPU chain.");
+      // Two bounded cohorts: generated output and pixel-input output.
+      shaderChain.slot ??= definition.input === "none" ? 0 : 1;
       shaderProgram(definition.source, shaderChain);
       if (definition.input === "content" || definition.input === "backdrop") {
         if (!content)
