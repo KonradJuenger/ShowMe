@@ -45,6 +45,7 @@ const shaderRuntimeDiagnostics =
         canvas2dPresentationCopies: number;
         activeContexts: number;
         maxActiveContexts: number;
+        activeChains: number;
       };
     }
   ).shaderRuntimeDiagnostics ??
@@ -54,6 +55,7 @@ const shaderRuntimeDiagnostics =
     canvas2dPresentationCopies: 0,
     activeContexts: 0,
     maxActiveContexts: 0,
+    activeChains: 0,
   }));
 const shaderOutputDiagnostics =
   (
@@ -419,14 +421,46 @@ async function generatedWorkload(measure: Measure, count = 4) {
   const discovered = discovery.finish();
   await measure("end");
   const contextCount = after.shader.activeContexts;
+  // Verify every independently owned visible output after the timed region.
+  const probe = document.createElement("canvas");
+  probe.width = probe.height = 1;
+  const probeContext = probe.getContext("2d")!;
+  const paintedOutputs = [
+    ...harness.host.querySelectorAll<HTMLCanvasElement>(
+      "[data-effect-id] > canvas",
+    ),
+  ].filter((canvas) => {
+    probeContext.clearRect(0, 0, 1, 1);
+    probeContext.drawImage(
+      canvas,
+      Math.floor(canvas.width / 2),
+      Math.floor(canvas.height / 2),
+      1,
+      1,
+      0,
+      0,
+      1,
+      1,
+    );
+    return probeContext.getImageData(0, 0, 1, 1).data[3] > 0;
+  }).length;
   const errors = Array.from(
     harness.host.querySelectorAll<HTMLElement>("[data-effect-error]"),
   ).map((node) => node.dataset.effectError);
+  const firstEffect =
+    harness.host.querySelector<HTMLElement>("[data-effect-id]");
+  const preserveDrawingBuffer = firstEffect
+    ? effectSurface(firstEffect)?.gpuContext?.()?.getContextAttributes()
+        ?.preserveDrawingBuffer
+    : undefined;
   harness.dispose();
   return {
     frames,
     discovered,
     contextCount,
+    chainCount: after.shader.activeChains,
+    paintedOutputs,
+    preserveDrawingBuffer,
     errors,
     maxActiveContexts: after.shader.maxActiveContexts,
     contextsAfterDispose: shaderRuntimeDiagnostics().activeContexts,
@@ -434,8 +468,21 @@ async function generatedWorkload(measure: Measure, count = 4) {
   };
 }
 
-export async function runShaderContextStress() {
-  return generatedWorkload(async () => {}, 12);
+export async function runShaderContextStress(count = 16) {
+  return generatedWorkload(async () => {}, count);
+}
+
+export async function runShaderContextStudy(
+  count: number,
+  preserve: boolean,
+  measure: Measure = async () => {},
+) {
+  runtime.setShaderBufferPreservationForTests(preserve);
+  try {
+    return await generatedWorkload(measure, count);
+  } finally {
+    runtime.setShaderBufferPreservationForTests(false);
+  }
 }
 
 async function sceneTextureWorkload(measure: Measure) {

@@ -27,6 +27,26 @@ export function disposeShaderOutput(output: ShaderOutput) {
   if (output.gl.isTexture(output.texture))
     output.gl.deleteTexture(output.texture);
 }
+
+/** GPU-only presentation of an explicitly retained terminal output. */
+export function presentShaderOutput(output: ShaderOutput) {
+  const { gl, width, height } = output;
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, output.framebuffer);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.blitFramebuffer(
+    0,
+    0,
+    width,
+    height,
+    0,
+    0,
+    width,
+    height,
+    gl.COLOR_BUFFER_BIT,
+    gl.NEAREST,
+  );
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
 export function allocateShaderOutput(
   gl: WebGL2RenderingContext,
   width: number,

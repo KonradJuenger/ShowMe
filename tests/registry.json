@@ -953,8 +953,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-13",
-    "lastReviewed": "2026-10-13",
-    "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership"
+    "lastReviewed": "2026-10-23",
+    "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership; per-context texture ownership, alternating consumers without upload thrashing, restored context uploads and capture-to-immutable-pixel replacement"
   },
   {
     "id": "editor-agent-closing",
@@ -1009,7 +1009,7 @@
     "runtime": "browser",
     "created": "2026-10-23",
     "lastReviewed": "2026-10-23",
-    "reason": "Benchmark-only isolated renderer workloads, gated by SHOWME_RENDERER_BENCHMARK=1: native DOM/CSS/Motion/Presence proves zero SceneTexture/DOM discovery on normal frames; generated input:none GLSL proves direct visible WebGL with zero Canvas2D presentation copies, SceneTexture use, steady recompilation and intermediate GPU allocations; explicit flattened content verifies retained SceneTexture revisit reuse. The dense audience benchmark remains the mixed stress workload. Version 2 measures CPU/style/layout within explicit sample boundaries, instruments actual Canvas2D copies and WebGL compilation/allocation, verifies four generated chains plus twelve simultaneous contexts and released ownership, and labels main baseline counters that are unavailable."
+    "reason": "Benchmark-only native/generated/SceneTexture workloads with explicit timed boundaries, paired main harness, actual copy/allocation/discovery instrumentation and GPU provenance. Generated output uses one shared Offscreen WebGL context and GPU ImageBitmap presentation; 16/24/32 simultaneous chains verify painted output and released ownership. Static SceneTexture revisits reuse retained pixels."
   },
   {
     "id": "effects-renderer-architecture",
@@ -1020,7 +1020,7 @@
     "runtime": "unit",
     "created": "2026-10-23",
     "lastReviewed": "2026-10-23",
-    "reason": "Structural boundary regression: SlideRenderer and normal Effect surfaces cannot import legacy compositor/capture modules; the production import graph keeps the old CSS compositor isolated; elementRaster/domRaster are reachable only inside the legacy island plus sceneTextureLegacy; CSS has no backend selection; generated shaders and compatible direct GPU chaining bypass SceneTexture; MutationObserver and scene traversal remain outside the normal Motion hot path. Semantic sampling keeps arbitrary stylesheet dimensions behind a conservative discovery boundary; model-driven Motion binds Effect flush targets once."
+    "reason": "Production import boundaries exclude the removed CSS compositor and restrict DOM capture to explicit SceneTexture. Shared Offscreen WebGL and ImageBitmap presentation avoid Canvas2D terminal copies; generated/direct media inputs bypass SceneTexture. Motion binds Effect flush targets once; arbitrary stylesheet dimensions remain a conservative discovery boundary."
   },
   {
     "id": "effects-native-opacity",

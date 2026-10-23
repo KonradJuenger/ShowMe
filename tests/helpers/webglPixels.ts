@@ -1,12 +1,17 @@
+import { effectSurface } from "../../src/components/effectRuntime";
+
 export function readWebGlPixel(
   canvas: HTMLCanvasElement,
   x: number,
   y: number,
 ) {
-  const gl = canvas.getContext("webgl2");
-  if (!gl) throw new Error("Expected a WebGL shader canvas");
+  const surface = effectSurface(canvas.parentElement!);
+  surface?.materialize();
+  const output = surface?.gpuOutput();
+  if (!output) throw new Error("Expected a retained shader output");
+  const gl = output.gl;
   const pixel = new Uint8Array(4);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
   gl.readPixels(
     x,
     Math.max(0, canvas.height - 1 - y),
@@ -20,10 +25,13 @@ export function readWebGlPixel(
 }
 
 export function readWebGlPixels(canvas: HTMLCanvasElement) {
-  const gl = canvas.getContext("webgl2");
-  if (!gl) throw new Error("Expected a WebGL shader canvas");
+  const surface = effectSurface(canvas.parentElement!);
+  surface?.materialize();
+  const output = surface?.gpuOutput();
+  if (!output) throw new Error("Expected a retained shader output");
+  const gl = output.gl;
   const pixels = new Uint8Array(canvas.width * canvas.height * 4);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
   gl.readPixels(
     0,
     0,

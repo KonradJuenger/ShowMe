@@ -195,8 +195,14 @@ test("audience stress benchmark renders dense animated slides and reports compar
   // to be active. GC is outside the measured navigation/frame/CPU interval.
   await cdp.send("HeapProfiler.collectGarbage");
   const memory = await cdp.send("Performance.getMetrics");
-  const shaderPixels = await page.evaluate(() =>
-    [
+  const shaderPixels = await page.evaluate(async () => {
+    const runtimePath = "/src/components/effectRuntime.ts";
+    const {
+      effectSurface,
+    }: typeof import("../../../src/components/effectRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
+    return [
       ...document.querySelectorAll<HTMLCanvasElement>(
         '[data-active-slide] [data-effect-ready="true"] canvas',
       ),
@@ -206,7 +212,10 @@ test("audience stress benchmark renders dense animated slides and reports compar
       const context2d = canvas.dataset.shaderStage
         ? null
         : canvas.getContext("2d");
-      const gl = context2d ? null : canvas.getContext("webgl2")!;
+      const surface = context2d ? null : effectSurface(canvas.parentElement!);
+      surface?.materialize();
+      const output = surface?.gpuOutput();
+      const gl = output?.gl;
       const center = new Uint8Array(4);
       let pixels: Uint8Array | Uint8ClampedArray;
       if (context2d) {
@@ -220,7 +229,7 @@ test("audience stress benchmark renders dense animated slides and reports compar
         );
         pixels = context2d.getImageData(0, 0, canvas.width, canvas.height).data;
       } else if (gl) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, output!.framebuffer);
         gl.readPixels(
           Math.floor(canvas.width / 2),
           Math.floor(canvas.height / 2),
@@ -251,8 +260,8 @@ test("audience stress benchmark renders dense animated slides and reports compar
         )
           textPixels++;
       return { center: Array.from(center), textPixels };
-    }),
-  );
+    });
+  });
   const report = {
     schemaVersion: 2,
     workload: result.workload,

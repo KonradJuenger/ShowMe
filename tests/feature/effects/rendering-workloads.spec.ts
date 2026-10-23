@@ -80,12 +80,25 @@ async function report(
       performance.after[key] - (performance.before[key] ?? 0),
     ]),
   );
-  const environment = await page.evaluate(() => ({
-    userAgent: navigator.userAgent,
-    dpr: devicePixelRatio,
-    width: innerWidth,
-    height: innerHeight,
-  }));
+  const environment = await page.evaluate(() => {
+    const gl = new OffscreenCanvas(1, 1).getContext("webgl2")!;
+    const extension = gl.getExtension("WEBGL_debug_renderer_info");
+    const gpuRenderer = extension
+      ? (gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) as string)
+      : (gl.getParameter(gl.RENDERER) as string);
+    const gpuVendor = extension
+      ? (gl.getParameter(extension.UNMASKED_VENDOR_WEBGL) as string)
+      : (gl.getParameter(gl.VENDOR) as string);
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return {
+      userAgent: navigator.userAgent,
+      dpr: devicePixelRatio,
+      width: innerWidth,
+      height: innerHeight,
+      gpuRenderer,
+      gpuVendor,
+    };
+  });
   const body = JSON.stringify(
     {
       schemaVersion: 2,
@@ -174,6 +187,8 @@ test("renderer workload: generated input-none shaders", async ({
   if (
     !("diagnostics" in result) ||
     !("contextCount" in result) ||
+    !("chainCount" in result) ||
+    !("paintedOutputs" in result) ||
     !("errors" in result)
   )
     throw new Error("Unexpected generated workload result");
@@ -186,7 +201,9 @@ test("renderer workload: generated input-none shaders", async ({
     expect(result.discovered.canvas2dCopies).toBe(0);
     expect(result.diagnostics.shaderCompilations).toBe(0);
     expect(result.diagnostics.gpuOutputAllocations).toBe(0);
-    expect(result.contextCount).toBe(4);
+    expect(result.contextCount).toBe(1);
+    expect(result.chainCount).toBe(4);
+    expect(result.paintedOutputs).toBe(4);
   }
   await report("generated", result, performance, page, testInfo);
 });
@@ -208,7 +225,7 @@ test("renderer workload: retained SceneTexture revisit", async ({
   await report("scene-texture", result, performance, page, testInfo);
 });
 
-test("twelve simultaneous visible shader chains retain their contexts and release ownership", async ({
+test("sixteen simultaneous visible shader chains share one context and release ownership", async ({
   page,
 }) => {
   if (!enabled || baseline) return;
@@ -223,7 +240,50 @@ test("twelve simultaneous visible shader chains retain their contexts and releas
     return runShaderContextStress();
   });
   expect(result.errors).toEqual([]);
-  expect(result.contextCount).toBe(12);
+  expect(result.contextCount).toBe(1);
+  expect(result.chainCount).toBe(16);
+  expect(result.paintedOutputs).toBe(16);
+  expect(result.contextsAfterDispose).toBe(0);
+  expect(result.discovered.canvas2dCopies).toBe(0);
+  expect(result.discovered.shaderCompilations).toBe(0);
+});
+
+async function contextCapacity(page: Page, count: number) {
+  await page.goto("/tests/helpers/effects-harness.html");
+  return page.evaluate(async (count) => {
+    const modulePath = "/tests/helpers/renderingWorkloadHarness.tsx";
+    const {
+      runShaderContextStress,
+    }: typeof import("../../helpers/renderingWorkloadHarness") = await import(
+      /* @vite-ignore */ modulePath
+    );
+    return runShaderContextStress(count);
+  }, count);
+}
+
+test("twenty-four simultaneous visible shader chains share one context without loss", async ({
+  page,
+}) => {
+  if (!enabled || baseline) return;
+  const result = await contextCapacity(page, 24);
+  expect(result.errors).toEqual([]);
+  expect(result.chainCount).toBe(24);
+  expect(result.paintedOutputs).toBe(24);
+  expect(result.contextCount).toBe(1);
+  expect(result.contextsAfterDispose).toBe(0);
+  expect(result.discovered.canvas2dCopies).toBe(0);
+  expect(result.discovered.shaderCompilations).toBe(0);
+});
+
+test("thirty-two simultaneous visible shader chains share one context without loss", async ({
+  page,
+}) => {
+  if (!enabled || baseline) return;
+  const result = await contextCapacity(page, 32);
+  expect(result.errors).toEqual([]);
+  expect(result.chainCount).toBe(32);
+  expect(result.paintedOutputs).toBe(32);
+  expect(result.contextCount).toBe(1);
   expect(result.contextsAfterDispose).toBe(0);
   expect(result.discovered.canvas2dCopies).toBe(0);
   expect(result.discovered.shaderCompilations).toBe(0);

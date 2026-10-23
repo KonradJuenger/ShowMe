@@ -841,9 +841,12 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
       const canvas = harness.host.querySelector<HTMLCanvasElement>(
         '[data-effect-id] > canvas[data-shader-stage="terminal"]',
       )!;
-      const gl = canvas.getContext("webgl2")!;
+      const surface = runtime.effectSurface(canvas.parentElement!)!;
+      surface.materialize();
+      const output = surface.gpuOutput()!;
+      const gl = output.gl;
       const buffer = new Uint8Array(canvas.width * canvas.height * 4);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
       gl.readPixels(
         0,
         0,
@@ -974,9 +977,12 @@ test("mixed-size shader outputs preserve pixels and release their visible WebGL 
           width: canvas.width,
           height: canvas.height,
           pixels: (() => {
-            const gl = canvas.getContext("webgl2")!;
+            const surface = runtime.effectSurface(canvas.parentElement!)!;
+            surface.materialize();
+            const output = surface.gpuOutput()!;
+            const gl = output.gl;
             const pixels = new Uint8Array(canvas.width * canvas.height * 4);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
             gl.readPixels(
               0,
               0,
@@ -1023,6 +1029,9 @@ test("backdrop pixels retain the red element's world position at editor zoom and
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
   const rows = await page.evaluate(async () => {
+    const pixelPath = "/tests/helpers/webglPixels.ts";
+    const { readWebGlPixels }: typeof import("../../helpers/webglPixels") =
+      await import(/* @vite-ignore */ pixelPath);
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
       factoryPath = "/src/core/elementFactory.ts";
     const {
@@ -1059,18 +1068,7 @@ test("backdrop pixels retain the red element's world position at editor zoom and
       const canvas = harness.host.querySelector<HTMLCanvasElement>(
         '[data-effect-id] > canvas[data-shader-stage="terminal"]',
       )!;
-      const gl = canvas.getContext("webgl2")!;
-      const data = new Uint8Array(canvas.width * canvas.height * 4);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.readPixels(
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        data,
-      );
+      const data = readWebGlPixels(canvas);
       let x0 = Infinity,
         y0 = Infinity,
         x1 = -1,
@@ -1492,6 +1490,12 @@ test("neutral live video binds directly as shader input without SceneTexture", a
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
   const result = await page.evaluate(async () => {
+    const runtimePath = "/src/components/effectRuntime.ts";
+    const {
+      effectSurface,
+    }: typeof import("../../../src/components/effectRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
       mediaPath = "/src/core/media.ts",
       authoringPath = "/src/core/effectAuthoring.ts",
@@ -1578,14 +1582,14 @@ test("neutral live video binds directly as shader input without SceneTexture", a
       const canvas = harness.host.querySelector<HTMLCanvasElement>(
         "canvas[data-shader-stage='terminal']",
       )!;
-      const gl = canvas.getContext("webgl2")!;
+      const gl = effectSurface(canvas.parentElement!)!.gpuContext()!;
       const lost = new Promise<void>((resolve) =>
-        canvas.addEventListener("webglcontextlost", () => resolve(), {
+        gl.canvas.addEventListener("webglcontextlost", () => resolve(), {
           once: true,
         }),
       );
       const restored = new Promise<void>((resolve) =>
-        canvas.addEventListener("webglcontextrestored", () => resolve(), {
+        gl.canvas.addEventListener("webglcontextrestored", () => resolve(), {
           once: true,
         }),
       );
@@ -1652,11 +1656,20 @@ test("font completion invalidates a retained static SceneTexture between mounted
         const slide = model.slides[model.deck.slideIds[0]];
         const text = slide.nodes[0].children[0];
         text.effects = [text.effects![2]];
+        slide.effectResources!.shader.source = slide
+          .effectResources!.shader.source.replace(
+            "in vec2 v_uv",
+            "uniform float u_t; in vec2 v_uv",
+          )
+          .replace("vec4(c.b,c.r,c.g,c.a)", "vec4(c.b,c.r + .001*u_t,c.g,c.a)");
         slide.nodes[0].children = [text];
         delete slide.motion;
       },
     });
     const model = first.model;
+    const prepared = sceneTextureDiagnostics();
+    for (let tick = 1; tick <= 8; tick++) await first.advance(tick / 10);
+    const steady = sceneTextureDiagnostics();
     first.dispose();
     await new Promise<void>((resolve) =>
       requestAnimationFrame(() => resolve()),
@@ -1673,12 +1686,19 @@ test("font completion invalidates a retained static SceneTexture between mounted
     refreshed.dispose();
     return {
       warmCaptures: reused.captures - before.captures,
+      steadyCaptures: steady.captures - prepared.captures,
+      steadyQualifications:
+        steady.qualificationBuilds - prepared.qualificationBuilds,
+      activeCaptureMachinery: steady.domRaster.activeSources,
       refreshedCaptures: after.captures - reused.captures,
       errors: state.errors,
       opaque: state.surfaces[0].opaque,
     };
   });
   expect(result.warmCaptures).toBe(0);
+  expect(result.steadyCaptures).toBe(0);
+  expect(result.steadyQualifications).toBe(0);
+  expect(result.activeCaptureMachinery).toBe(0);
   expect(result.refreshedCaptures).toBeGreaterThan(0);
   expect(result.errors).toEqual([]);
   expect(result.opaque).toBeGreaterThan(0);

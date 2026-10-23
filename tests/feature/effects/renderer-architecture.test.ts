@@ -160,11 +160,14 @@ it("keeps observers and frame-time traversal out of the normal hot path", () => 
     expect(hotPath).not.toContain(forbidden);
 });
 
-it("renders terminal shaders directly on visible WebGL without Canvas2D presentation copies", () => {
+it("presents terminal shaders through one bounded GPU context without Canvas2D copies", () => {
   const runtime = component("effectRuntime.ts");
   const output = component("shaderOutput.ts");
   expect(runtime).toContain("gl.bindFramebuffer(gl.FRAMEBUFFER, null)");
   expect(runtime).toContain('canvas.getContext("webgl2"');
+  expect(runtime).toContain("new OffscreenCanvas(1, 1)");
+  expect(runtime).toContain("transferToImageBitmap()");
+  expect(runtime).toContain("transferFromImageBitmap(bitmap)");
   expect(runtime).not.toContain('canvas.getContext("2d")');
   expect(runtime).not.toContain(".drawImage(");
   expect(output).not.toContain("neutralShaderBridge");

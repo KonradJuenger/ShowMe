@@ -19,7 +19,29 @@ import type {
 
 type PrimitiveRaster = ReturnType<typeof createElementRasterSource>;
 type DomRaster = ReturnType<typeof createDomRasterSource>;
-type Raster = PrimitiveRaster | DomRaster;
+type Raster = (PrimitiveRaster | DomRaster) & { readonly immutable?: boolean };
+
+/** Own only the resulting bitmap: no source DOM, callbacks or capture observers. */
+function staticPixelSnapshot(raster: Raster): Raster {
+  const canvas = document.createElement("canvas");
+  canvas.width = raster.canvas.width;
+  canvas.height = raster.canvas.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Cannot retain SceneTexture pixels");
+  context.drawImage(raster.canvas, 0, 0);
+  return {
+    canvas,
+    backend: "native",
+    revision: raster.revision,
+    isDirty: false,
+    immutable: true,
+    update() {},
+    markDirty() {},
+    dispose() {
+      canvas.width = canvas.height = 1;
+    },
+  };
+}
 
 type SharedSources = {
   cache: EffectSources<Raster>;
@@ -28,6 +50,7 @@ type SharedSources = {
 const sharedSources = new WeakMap<HTMLElement, SharedSources>();
 const liveSources = new Set<SharedSources>();
 const retainedStaticSources = new EffectSources<Raster>(8);
+const countedRevisions = new WeakMap<Raster, number>();
 const fontRevisions = new WeakMap<Document, { value: number }>();
 function fontRevision(document: Document) {
   let revision = fontRevisions.get(document);
@@ -49,12 +72,15 @@ const metrics = {
   retainedReuses: 0,
   captures: 0,
   preparationMs: 0,
+  qualificationBuilds: 0,
+  retainedSnapshots: 0,
 };
 
 export function legacySceneTextureDiagnostics() {
   return {
     ...metrics,
     retainedTextureBytes: retainedStaticSources.textureBytes,
+    retainedPixelBytes: retainedStaticSources.pixelBytes,
     domRaster: domRasterDiagnostics(),
   };
 }
@@ -141,12 +167,14 @@ export function createLegacySceneTextureProvider(
   let pending: Promise<void> | null = null;
   let lease: ReturnType<EffectSources<Raster>["acquire"]> | null = null;
   let leaseKey = "";
+  let leaseRetained = false;
   let publicRevision = 0;
   let publishedLeaseKey = "";
   let publishedSourceRevision = -1;
   let allowed = new Set<string>();
   let partial = new Set<string>();
   const prefixElements = new Map<string, Element>();
+  let qualificationDirty = true;
 
   const invalidateProvider = () => {
     if (disposed) return;
@@ -156,7 +184,8 @@ export function createLegacySceneTextureProvider(
   };
 
   const sourceChanged = () => {
-    if (lease) lease.source.markDirty();
+    if (lease?.source.immutable) lease.invalidate();
+    else if (lease) lease.source.markDirty();
     else invalidateProvider();
   };
 
@@ -176,57 +205,75 @@ export function createLegacySceneTextureProvider(
     visit(prefix.elements);
   };
 
-  const inputElements = () => {
+  const resolveInputElements = () => {
     if (request.kind !== "backdrop" || !context.scene) return [context.element];
     const { slide, deck } = context.scene();
     return backdropPrefix(slide, deck, context.element.id).elements;
   };
 
-  const needsDomRaster = () => {
+  let qualified: {
+    slide: unknown;
+    textStyles: unknown;
+    stylesheet: string | undefined;
+    resources: EffectResources;
+    fonts: number;
+    dom: boolean;
+    retain: boolean;
+    semanticRevision: string;
+    stableStyleKey: unknown;
+  } | null = null;
+  const qualification = () => {
     const scene = context.scene?.();
     const resources = context.resources();
-    return (
-      !!scene?.deck.stylesheet ||
-      hasText(inputElements()) ||
-      hasDomEffects(inputElements(), resources)
-    );
-  };
-  const retainableStaticSource = () => {
-    const scene = context.scene?.();
-    const elements = inputElements();
-    return !!(
+    const fonts = fontRevision(context.inputRoot.ownerDocument);
+    if (
+      !qualificationDirty &&
+      qualified &&
+      qualified.slide === scene?.slide &&
+      qualified.textStyles === scene?.deck.textStyles &&
+      qualified.stylesheet === scene?.deck.stylesheet &&
+      qualified.resources === resources &&
+      qualified.fonts === fonts
+    )
+      return qualified;
+    qualificationDirty = false;
+    metrics.qualificationBuilds++;
+    const elements = resolveInputElements();
+    const effects = hasAnyEffects(elements, resources, request.effectId);
+    const retain = !!(
       context.refined &&
       scene &&
       !scene.deck.stylesheet &&
       !scene.slide.motion &&
       !hasVideo(elements) &&
-      !hasAnyEffects(elements, context.resources(), request.effectId)
+      !effects
     );
+    qualified = {
+      slide: scene?.slide,
+      textStyles: scene?.deck.textStyles,
+      stylesheet: scene?.deck.stylesheet,
+      resources,
+      fonts,
+      dom:
+        !!scene?.deck.stylesheet ||
+        hasText(elements) ||
+        hasDomEffects(elements, resources),
+      retain,
+      semanticRevision: retain
+        ? JSON.stringify([elements, scene!.deck.textStyles, fonts])
+        : "",
+      stableStyleKey:
+        context.refined && scene && !scene.deck.stylesheet && !effects
+          ? scene.slide
+          : undefined,
+    };
+    refreshPrefix();
+    return qualified;
   };
-  const semanticRevision = () => {
-    const scene = context.scene?.();
-    if (!scene) return "";
-    return JSON.stringify([
-      inputElements(),
-      scene.deck.textStyles,
-      scene.deck.stylesheet,
-      fontRevision(context.inputRoot.ownerDocument),
-    ]);
-  };
-  const stableStyleKey = () => {
-    const scene = context.scene?.();
-    if (
-      !context.refined ||
-      !scene ||
-      scene.deck.stylesheet ||
-      hasAnyEffects(inputElements(), context.resources(), request.effectId)
-    )
-      return undefined;
-    return scene.slide;
-  };
+  const stableStyleKey = () => qualification().stableStyleKey;
 
   const collectDependencies = () => {
-    refreshPrefix();
+    qualification();
     const candidates = Array.from(
       context.inputRoot.querySelectorAll<HTMLElement>("[data-effect-id]"),
     )
@@ -307,7 +354,7 @@ export function createLegacySceneTextureProvider(
   const createNativeRaster = (invalidate: () => void) =>
     createDomRasterSource(
       () => {
-        refreshPrefix();
+        qualification();
         return context.inputRoot;
       },
       (candidate) => {
@@ -380,8 +427,7 @@ export function createLegacySceneTextureProvider(
     );
 
   const ensureLease = (sampling: SceneTextureSampling) => {
-    const dom = needsDomRaster();
-    const retain = retainableStaticSource();
+    const { dom, retain, semanticRevision } = qualification();
     const key =
       request.kind +
       ":" +
@@ -397,8 +443,8 @@ export function createLegacySceneTextureProvider(
       sampling.logicalWidth +
       "x" +
       sampling.logicalHeight +
-      (retain ? "|semantic:" + semanticRevision() : "");
-    if (key === leaseKey && lease) return;
+      (retain ? "|semantic:" + semanticRevision : "");
+    if (key === leaseKey && lease?.isCurrent()) return;
     lease?.release();
     const cache = retain ? retainedStaticSources : shared.cache;
     lease = cache.acquire(
@@ -407,6 +453,7 @@ export function createLegacySceneTextureProvider(
       invalidateProvider,
     );
     leaseKey = key;
+    leaseRetained = retain;
     if (retain && lease.reused && lease.source.revision > 0) {
       dirty = false;
       preparedKey = JSON.stringify(sampling);
@@ -459,7 +506,26 @@ export function createLegacySceneTextureProvider(
       metrics.preparations++;
       const completed = () => {
         metrics.preparationMs += performance.now() - started;
-        if (raster.revision !== beforeRevision) metrics.captures++;
+        if (
+          raster.revision !== beforeRevision &&
+          raster.revision > (countedRevisions.get(raster) ?? 0)
+        ) {
+          metrics.captures +=
+            raster.revision - (countedRevisions.get(raster) ?? 0);
+          countedRevisions.set(raster, raster.revision);
+        }
+        if (
+          !disposed &&
+          lease === activeLease &&
+          activeLease.isCurrent() &&
+          activeLease.source === raster &&
+          leaseRetained &&
+          !raster.immutable &&
+          raster.revision > 0
+        ) {
+          activeLease.replaceSource(staticPixelSnapshot(raster));
+          metrics.retainedSnapshots++;
+        }
         finishPreparation(version, key, activeLease);
       };
       const result =
@@ -512,6 +578,12 @@ export function createLegacySceneTextureProvider(
   };
 
   const observer = new MutationObserver((records) => {
+    if (records.some((record) => record.type !== "attributes"))
+      qualificationDirty = true;
+    const normalizedStyle = (value: string | null) =>
+      (value ?? "")
+        .replace(/(?:^|;)\s*opacity\s*:[^;]*/g, "")
+        .replace(/\s/g, "");
     if (
       records.some(
         (record) =>
@@ -519,6 +591,13 @@ export function createLegacySceneTextureProvider(
           record.type === "characterData" ||
           ((record.target instanceof HTMLElement ||
             record.target instanceof SVGElement) &&
+            !(
+              record.target === context.inputRoot &&
+              record.target.hasAttribute("data-effect-source") &&
+              record.attributeName === "style" &&
+              normalizedStyle(record.oldValue) ===
+                normalizedStyle(record.target.getAttribute("style"))
+            ) &&
             (request.kind === "backdrop" || record.target !== context.owner) &&
             !record.target.dataset.effectId &&
             record.target.tagName !== "CANVAS" &&
@@ -531,6 +610,7 @@ export function createLegacySceneTextureProvider(
     subtree: true,
     childList: true,
     attributes: true,
+    attributeOldValue: true,
     characterData: true,
   });
   const outputChanged = (event: Event) => {
@@ -563,6 +643,7 @@ export function createLegacySceneTextureProvider(
         "showme-effect-output",
         outputChanged,
       );
+      if (leaseRetained && lease && !lease.source.immutable) lease.invalidate();
       lease?.release();
       lease = null;
       shared.users--;

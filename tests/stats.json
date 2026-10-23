@@ -1,10 +1,10 @@
 {
-  "activeTests": 662,
+  "activeTests": 666,
   "activeGroups": 95,
   "byTier": {
     "core": 15,
-    "feature": 617,
-    "extended": 27,
+    "feature": 619,
+    "extended": 29,
     "release": 3,
     "deprecated": 0
   },
@@ -12,15 +12,15 @@
     "desktop": 1,
     "document": 12,
     "editor": 232,
-    "effects": 185,
+    "effects": 189,
     "media": 82,
     "motion": 46,
     "persistence": 67,
     "presenter": 37
   },
   "byRuntime": {
-    "unit": 501,
-    "browser": 119,
+    "unit": 503,
+    "browser": 121,
     "electron": 41,
     "packaged": 1
   },

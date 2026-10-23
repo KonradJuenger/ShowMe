@@ -12,7 +12,7 @@ export function setDomRasterReadBatchingForTests(
 ) {
   refreshMode = mode;
 }
-const metrics = { captures: 0, clones: 0, styleReads: 0 };
+const metrics = { captures: 0, clones: 0, styleReads: 0, activeSources: 0 };
 export function domRasterDiagnostics() {
   return { ...metrics };
 }
@@ -499,6 +499,7 @@ export function createDomRasterSource(
     root!.style.setProperty("left", "0px", "important");
     root!.style.setProperty("top", "0px", "important");
   };
+  metrics.activeSources++;
   return {
     canvas,
     backend,
@@ -661,7 +662,9 @@ export function createDomRasterSource(
       return inFlight;
     },
     dispose() {
+      if (disposed) return;
       disposed = true;
+      metrics.activeSources--;
       cancelPaint?.();
       cancelAnimationFrame(animationFrame);
       observer.disconnect();

@@ -161,7 +161,7 @@ test("shader allocation failure is explicit and context recreation repaints dire
   const failed = await page.evaluate(() =>
     (window as unknown as SampleWindow).sampling.allocationFailure(),
   );
-  expect(failed.error).toContain("WebGL2 is unavailable");
+  expect(failed.error).toContain("GPU bitmap presentation is unavailable");
   const recovered = await page.evaluate(() =>
     (window as unknown as SampleWindow).sampling.loseContext(),
   );

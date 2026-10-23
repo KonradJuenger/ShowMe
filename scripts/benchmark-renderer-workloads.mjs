@@ -42,6 +42,7 @@ for (const file of [
   "tests/feature/presenter/audience-navigation.spec.ts",
   "tests/fixtures/media/renderer-pattern.png",
   "tests/helpers/webglPixels.ts",
+  "scripts/benchmark-renderer-workloads.mjs",
 ])
   harnessDigest.update(await readFile(file));
 const harnessSha256 = harnessDigest.digest("hex");

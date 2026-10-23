@@ -16,6 +16,7 @@ import { flushCompositionOutputs } from "./compositionReadiness";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
+  presentShaderOutput,
   type ShaderOutput,
 } from "./shaderOutput";
 import type { Deck, Slide } from "../core/document";
@@ -139,7 +140,7 @@ out vec2 v_uv;
 void main() { v_uv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }`;
 
 type ShaderGpuState = {
-  canvas: HTMLCanvasElement;
+  canvas: OffscreenCanvas;
   gl: WebGL2RenderingContext;
   programs: Map<string, WebGLProgram>;
   buffer: WebGLBuffer;
@@ -152,9 +153,9 @@ export type ShaderChain = {
   canvas: HTMLCanvasElement | null;
   state: ShaderGpuState | null;
   redraws: Set<() => void>;
-  boundCanvas: HTMLCanvasElement | null;
-  onLost: EventListener | null;
-  onRestored: EventListener | null;
+  presenter: ImageBitmapRenderingContext | null;
+  sources: Set<string>;
+  validation: boolean;
   lost: boolean;
 };
 
@@ -163,18 +164,25 @@ const shaderMetrics = {
   shaderCompilations: 0,
   maxActiveContexts: 0,
   canvas2dPresentationCopies: 0,
+  bitmapPresentations: 0,
 };
 const activeShaderChains = new Set<ShaderChain>();
 let gpuGeneration = 0;
+let sharedShaderCanvas: OffscreenCanvas | null = null;
+let sharedShaderGpu: ShaderGpuState | null = null;
+let preserveShaderBufferForTests = false;
+export function setShaderBufferPreservationForTests(value: boolean) {
+  preserveShaderBufferForTests = value;
+}
 
 export function createShaderChain(): ShaderChain {
   return {
     canvas: null,
     state: null,
     redraws: new Set(),
-    boundCanvas: null,
-    onLost: null,
-    onRestored: null,
+    presenter: null,
+    sources: new Set(),
+    validation: false,
     lost: false,
   };
 }
@@ -182,53 +190,60 @@ export function createShaderChain(): ShaderChain {
 export function shaderRuntimeDiagnostics() {
   return {
     ...shaderMetrics,
-    activeContexts: [...activeShaderChains].filter(
-      (chain) => !!chain.state && !chain.state.gl.isContextLost(),
-    ).length,
+    activeChains: activeShaderChains.size,
+    activeContexts:
+      activeShaderChains.size &&
+      sharedShaderGpu &&
+      !sharedShaderGpu.gl.isContextLost()
+        ? 1
+        : 0,
+    residentContexts:
+      sharedShaderGpu && !sharedShaderGpu.gl.isContextLost() ? 1 : 0,
   };
 }
 
-function bindShaderContextLifecycle(
-  chain: ShaderChain,
-  canvas: HTMLCanvasElement,
-) {
-  if (chain.boundCanvas === canvas) return;
-  if (chain.boundCanvas && chain.onLost && chain.onRestored) {
-    chain.boundCanvas.removeEventListener("webglcontextlost", chain.onLost);
-    chain.boundCanvas.removeEventListener(
-      "webglcontextrestored",
-      chain.onRestored,
-    );
-  }
-  const lost: EventListener = (event) => {
+function shaderGpuCanvas() {
+  if (sharedShaderCanvas) return sharedShaderCanvas;
+  const canvas = new OffscreenCanvas(1, 1);
+  canvas.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
-    chain.lost = true;
-    chain.state = null;
-  };
-  const restored: EventListener = () => {
-    chain.lost = false;
-    chain.state = null;
-    chain.redraws.forEach((redraw) => redraw());
-  };
-  canvas.addEventListener("webglcontextlost", lost);
-  canvas.addEventListener("webglcontextrestored", restored);
-  chain.boundCanvas = canvas;
-  chain.onLost = lost;
-  chain.onRestored = restored;
+    sharedShaderGpu = null;
+    for (const chain of activeShaderChains) {
+      chain.lost = true;
+      chain.state = null;
+    }
+    if (validationChain) validationChain.state = null;
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    sharedShaderGpu = null;
+    for (const chain of activeShaderChains) {
+      chain.lost = false;
+      chain.state = null;
+      chain.redraws.forEach((redraw) => redraw());
+    }
+  });
+  sharedShaderCanvas = canvas;
+  return canvas;
 }
 
 function shaderGpu(chain: ShaderChain) {
-  if (chain.state && !chain.state.gl.isContextLost()) return chain.state;
-  const canvas = chain.canvas;
-  if (!canvas) throw new Error("Shader output canvas is not mounted.");
-  bindShaderContextLifecycle(chain, canvas);
+  if (!chain.canvas) throw new Error("Shader output canvas is not mounted.");
+  chain.presenter ??= chain.canvas.getContext("bitmaprenderer");
+  if (!chain.presenter)
+    throw new Error(
+      "GPU bitmap presentation is unavailable; the original Element remains visible.",
+    );
+  if (!chain.validation) activeShaderChains.add(chain);
+  if (sharedShaderGpu && !sharedShaderGpu.gl.isContextLost()) {
+    chain.state = sharedShaderGpu;
+    return sharedShaderGpu;
+  }
+  const canvas = shaderGpuCanvas();
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
     antialias: false,
-    // Static shader layers can be sampled later by an explicit SceneTexture.
-    // Chromium may discard a non-preserved default framebuffer after presenting.
-    preserveDrawingBuffer: true,
+    preserveDrawingBuffer: preserveShaderBufferForTests,
   });
   if (!gl)
     throw new Error(
@@ -261,41 +276,40 @@ function shaderGpu(chain: ShaderChain) {
     generation: ++gpuGeneration,
   };
   chain.state = state;
-  activeShaderChains.add(chain);
+  sharedShaderGpu = state;
   shaderMetrics.contextsCreated++;
   shaderMetrics.maxActiveContexts = Math.max(
     shaderMetrics.maxActiveContexts,
-    activeShaderChains.size,
+    1,
   );
   return state;
 }
 
 function disposeShaderChain(chain: ShaderChain) {
   const state = chain.state;
+  activeShaderChains.delete(chain);
   if (state && !state.gl.isContextLost()) {
-    for (const program of state.programs.values())
-      state.gl.deleteProgram(program);
-    state.gl.deleteBuffer(state.buffer);
+    for (const source of chain.sources) {
+      if ([...activeShaderChains].some((other) => other.sources.has(source)))
+        continue;
+      const program = state.programs.get(source);
+      if (program) state.gl.deleteProgram(program);
+      state.programs.delete(source);
+    }
+    if (!activeShaderChains.size) state.canvas.width = state.canvas.height = 1;
   }
-  if (chain.boundCanvas && chain.onLost && chain.onRestored) {
-    chain.boundCanvas.removeEventListener("webglcontextlost", chain.onLost);
-    chain.boundCanvas.removeEventListener(
-      "webglcontextrestored",
-      chain.onRestored,
-    );
-  }
+  chain.presenter?.transferFromImageBitmap(null);
   chain.state = null;
   chain.redraws.clear();
-  chain.boundCanvas = null;
-  chain.onLost = null;
-  chain.onRestored = null;
-  activeShaderChains.delete(chain);
+  chain.sources.clear();
+  chain.presenter = null;
 }
 
 let validationChain: ShaderChain | null = null;
 function validationShaderChain() {
   if (!validationChain) {
     validationChain = createShaderChain();
+    validationChain.validation = true;
     validationChain.canvas = document.createElement("canvas");
     validationChain.canvas.width = validationChain.canvas.height = 1;
   }
@@ -306,7 +320,10 @@ export function shaderProgram(source: string, chain = validationShaderChain()) {
   const state = shaderGpu(chain),
     { gl, programs } = state;
   const cached = programs.get(source);
-  if (cached) return { ...state, program: cached };
+  if (cached) {
+    chain.sources.add(source);
+    return { ...state, program: cached };
+  }
   const shaders: WebGLShader[] = [];
   let program: WebGLProgram | null = null;
   try {
@@ -348,11 +365,17 @@ export function shaderProgram(source: string, chain = validationShaderChain()) {
         );
     }
     if (programs.size >= 32) {
-      const [key, old] = programs.entries().next().value!;
-      gl.deleteProgram(old);
-      programs.delete(key);
+      const unused = [...programs].find(
+        ([key]) =>
+          ![...activeShaderChains].some((owner) => owner.sources.has(key)),
+      );
+      if (unused) {
+        gl.deleteProgram(unused[1]);
+        programs.delete(unused[0]);
+      }
     }
     programs.set(source, program);
+    chain.sources.add(source);
     shaderMetrics.shaderCompilations++;
     return { ...state, program };
   } catch (error) {
@@ -571,6 +594,7 @@ export function mountEffectSurface(
   let sceneTexture: SceneTextureProvider | null = null;
   let sceneTextureFactory: (() => SceneTextureProvider) | null = null;
   let shaderOutput: ShaderOutput | null = null;
+  let sampleableOutput = shaderIntermediate;
   let sourceContent: HTMLElement | null = null;
   let ownedMediaSources: Array<HTMLImageElement | HTMLVideoElement> = [];
   let sourceOpacity = "";
@@ -695,6 +719,44 @@ export function mountEffectSurface(
       node.dataset.effectStarted === "false"
     )
       return;
+    if (shaderChain?.lost) return;
+    if (
+      !sampleableOutput ||
+      !shaderOutput ||
+      !shaderOutput.gl.isTexture(shaderOutput.texture)
+    ) {
+      try {
+        const { gl } = shaderGpu(shaderChain!);
+        shaderOutput = allocateShaderOutput(
+          gl,
+          canvas.width,
+          canvas.height,
+          shaderOutput,
+        );
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, shaderOutput.texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+        // The visible bitmap owns the last presented pixels. Promote them only
+        // on an explicit sampling request, without advancing/re-running Effects.
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          canvas,
+        );
+        if (gl.getError() !== gl.NO_ERROR)
+          throw new Error("Cannot retain shader bitmap input");
+        shaderOutput.revision++;
+        sampleableOutput = true;
+      } catch (error) {
+        diagnose(error);
+        return;
+      }
+    }
     canvas.style.visibility = "visible";
   };
   let style: HTMLStyleElement | null = null;
@@ -867,8 +929,15 @@ export function mountEffectSurface(
         node.style.setProperty("--duration", String(timing.duration));
       } else if (canvas) {
         if (!shaderChain) throw new Error("Shader surface has no GPU chain.");
-        const { gl, buffer, program, capabilities, textureSize, generation } =
-          shaderProgram(definition.source, shaderChain);
+        const {
+          gl,
+          canvas: gpuCanvas,
+          buffer,
+          program,
+          capabilities,
+          textureSize,
+          generation,
+        } = shaderProgram(definition.source, shaderChain);
         if (!preparedSampling) prepareSampling();
         preparedSampling = false;
         if (samplingDensity <= 0) {
@@ -982,12 +1051,11 @@ export function mountEffectSurface(
           node.dataset.effectReady = "true";
           return;
         }
-        if (shaderIntermediate) {
-          shaderOutput = allocateShaderOutput(gl, width, height, shaderOutput);
-          gl.bindFramebuffer(gl.FRAMEBUFFER, shaderOutput.framebuffer);
-        } else {
+        if (!shaderIntermediate) {
           if (canvas.width !== width) canvas.width = width;
           if (canvas.height !== height) canvas.height = height;
+          if (gpuCanvas.width !== width) gpuCanvas.width = width;
+          if (gpuCanvas.height !== height) gpuCanvas.height = height;
           if (
             gl.drawingBufferWidth !== width ||
             gl.drawingBufferHeight !== height ||
@@ -996,8 +1064,11 @@ export function mountEffectSurface(
             throw new Error(
               `Cannot allocate ${width} × ${height} visible shader drawing buffer`,
             );
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         }
+        if (sampleableOutput) {
+          shaderOutput = allocateShaderOutput(gl, width, height, shaderOutput);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, shaderOutput.framebuffer);
+        } else gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, width, height);
         gl.useProgram(program);
         if (resolvedInput.kind === "shaderTexture") {
@@ -1064,11 +1135,20 @@ export function mountEffectSurface(
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        if (shaderIntermediate && shaderOutput) {
-          shaderOutput.revision++;
+        if (shaderOutput) shaderOutput.revision++;
+        if (shaderIntermediate) {
           canvas.style.visibility = "hidden";
           canvas.width = canvas.height = 1;
         } else {
+          if (sampleableOutput && shaderOutput)
+            presentShaderOutput(shaderOutput);
+          const bitmap = gpuCanvas.transferToImageBitmap();
+          try {
+            shaderChain.presenter!.transferFromImageBitmap(bitmap);
+          } finally {
+            bitmap.close();
+          }
+          shaderMetrics.bitmapPresentations++;
           canvas.style.visibility = "visible";
         }
         if (sourceContent) sourceContent.style.opacity = "0";
