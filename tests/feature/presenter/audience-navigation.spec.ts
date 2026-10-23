@@ -198,26 +198,31 @@ test("audience stress benchmark renders dense animated slides and reports compar
   const shaderPixels = await page.evaluate(() =>
     [
       ...document.querySelectorAll<HTMLCanvasElement>(
-        '[data-active-slide] [data-effect-ready="true"] canvas',
+        '[data-active-slide] [data-effect-ready="true"] canvas[data-shader-stage="terminal"]',
       ),
     ].map((canvas) => {
-      const sample = document.createElement("canvas");
-      sample.width = sample.height = 1;
-      const context = sample.getContext("2d")!;
-      context.drawImage(
-        canvas,
+      const gl = canvas.getContext("webgl2")!;
+      const center = new Uint8Array(4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.readPixels(
         Math.floor(canvas.width / 2),
         Math.floor(canvas.height / 2),
         1,
         1,
-        0,
-        0,
-        1,
-        1,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        center,
       );
-      const pixels = canvas
-        .getContext("2d")!
-        .getImageData(0, 0, canvas.width, canvas.height).data;
+      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.readPixels(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        pixels,
+      );
       let textPixels = 0;
       for (let i = 0; i < pixels.length; i += 4)
         if (
@@ -227,7 +232,7 @@ test("audience stress benchmark renders dense animated slides and reports compar
           pixels[i + 2] < 160
         )
           textPixels++;
-      return { center: [...context.getImageData(0, 0, 1, 1).data], textPixels };
+      return { center: Array.from(center), textPixels };
     }),
   );
   const report = {
