@@ -8,7 +8,13 @@ import {
 } from "motion";
 import type { Slide } from "../core/document";
 import { presentationSpan } from "./presentationDiagnostics";
-import { walkElements } from "../core/element";
+import {
+  IDENTITY,
+  localMatrix,
+  multiply,
+  walkElements,
+  type Matrix,
+} from "../core/element";
 import {
   motionPropertyDescriptor,
   unavailable,
@@ -53,6 +59,34 @@ export function compileMotionStage(slide: Slide, stageIndex: number) {
   const elements = new Map(
     walkElements(slide.nodes.flatMap((r) => r.children)).map((e) => [e.id, e]),
   );
+  const parents = new Map<string, string | null>();
+  const indexParents = (
+    children: readonly import("../core/element").Element[],
+    parentId: string | null,
+  ) =>
+    children.forEach((child) => {
+      parents.set(child.id, parentId);
+      indexParents(child.children, child.id);
+    });
+  slide.nodes.forEach((root) => indexParents(root.children, null));
+  const semanticWorldTransform = (
+    id: string,
+    overlay: ReturnType<typeof resolveMotion>,
+  ) => {
+    const chain: string[] = [];
+    for (let current: string | null | undefined = id; current; )
+      chain.push(current), (current = parents.get(current));
+    let matrix: Matrix = IDENTITY;
+    for (const elementId of chain.reverse()) {
+      const element = elements.get(elementId);
+      if (!element) continue;
+      matrix = multiply(
+        matrix,
+        localMatrix(motionElement(element, overlay).frame),
+      );
+    }
+    return new DOMMatrix([...matrix]);
+  };
   return stage.tracks.flatMap((track) => {
     const element = elements.get(track.elementId);
     if (!element) return [];
@@ -332,7 +366,9 @@ export function createMotionRuntime(
   const clock = motionValue(0);
   // Effects-only stages still have the same presentation clock.
   const detachClock = clock.on("change", (time) => {
-    effectBindings.forEach(({ element, instance, surface }) =>
+    const overlay = resolveMotion(slide, stageIndex, time);
+    effectBindings.forEach(({ element, instance, surface }) => {
+      surface.setTransport(semanticWorldTransform(element.id, overlay));
       surface.setTiming(
         effectTiming(
           slide.motion,
@@ -343,8 +379,8 @@ export function createMotionRuntime(
           clocks?.(),
           slide.effectResources?.[instance.resourceId]?.timeControl,
         ),
-      ),
-    );
+      );
+    });
   });
   if (duration && (!controls.length || effectBindings.length))
     controls.push(
@@ -384,6 +420,9 @@ export function createMotionRuntime(
       if (binding.visual !== binding.node) styleEffect.flush(binding.visual);
     });
     renderer?.apply(samples);
+    effectBindings.forEach(({ element, surface }) =>
+      surface.setTransport(semanticWorldTransform(element.id, overlay)),
+    );
     if (presenceOnly) return;
     effectBindings.forEach(({ element, instance, surface, values }) => {
       if (
