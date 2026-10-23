@@ -8,8 +8,11 @@ const backend = params.get("backend") || "webgpu";
 const verbose = params.get("verbose") === "1";
 const canvas = document.getElementById("output");
 const hud = document.getElementById("hud");
-const initializedAt = performance.now();
+let measurementWindow = null;
+let measurementStarted = false;
+let measurementEnded = false;
 let measuredStartedAt = null;
+let measuredEndedAt = null;
 const arrivals = [];
 const publications = [];
 const rafs = [];
@@ -59,10 +62,10 @@ async function createWebGpuRenderer() {
     primitive: { topology: "triangle-list" },
   });
   const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
-  let submittedFrames = 0;
+  let measuredSubmittedFrames = 0;
   return {
     kind: "webgpu-external-texture",
-    draw(frame) {
+    draw(frame, measured) {
       if (canvas.width !== frame.codedWidth || canvas.height !== frame.codedHeight) {
         canvas.width = frame.codedWidth;
         canvas.height = frame.codedHeight;
@@ -90,9 +93,9 @@ async function createWebGpuRenderer() {
       pass.draw(3);
       pass.end();
       device.queue.submit([encoder.finish()]);
-      submitCosts.push(performance.now() - begin);
-      submittedFrames++;
-      if (submittedFrames % 60 === 0) {
+      if (measured) submitCosts.push(performance.now() - begin);
+      if (measured) measuredSubmittedFrames++;
+      if (measured && measuredSubmittedFrames % 60 === 0) {
         const submittedAt = performance.now();
         void device.queue.onSubmittedWorkDone().then(() => {
           gpuCompletionWaits.push(performance.now() - submittedAt);
@@ -136,7 +139,7 @@ function createWebGlRenderer() {
   gl.uniform1i(gl.getUniformLocation(program, "source"), 0);
   return {
     kind: "webgl-videoframe-upload",
-    draw(frame) {
+    draw(frame, measured) {
       if (canvas.width !== frame.codedWidth || canvas.height !== frame.codedHeight) {
         canvas.width = frame.codedWidth;
         canvas.height = frame.codedHeight;
@@ -148,7 +151,7 @@ function createWebGlRenderer() {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.flush();
-      submitCosts.push(performance.now() - begin);
+      if (measured) submitCosts.push(performance.now() - begin);
       return Promise.resolve();
     },
   };
@@ -160,11 +163,49 @@ function sampleMemory() {
     : Promise.resolve(null);
 }
 
-let initialMemory = null;
-void sampleMemory().then((value) => { initialMemory = value; });
+let initialMemoryPromise = Promise.resolve(null);
+let finalMemoryPromise = Promise.resolve(null);
+
+function beginMeasurement() {
+  if (measurementStarted || !measurementWindow) return;
+  measurementStarted = true;
+  measurementEnded = false;
+  measuredStartedAt = performance.now();
+  measuredEndedAt = null;
+  arrivals.length = 0;
+  publications.length = 0;
+  rafs.length = 0;
+  submitCosts.length = 0;
+  gpuCompletionWaits.length = 0;
+  received = 0;
+  rendered = 0;
+  renderErrors = 0;
+  initialMemoryPromise = sampleMemory();
+}
+
+function endMeasurement() {
+  if (measurementEnded || !measurementStarted) return;
+  measurementEnded = true;
+  measuredEndedAt = performance.now();
+  finalMemoryPromise = sampleMemory();
+}
+
+function inMeasurementWindow(epochMs = Date.now()) {
+  if (!measurementWindow) return false;
+  if (epochMs >= measurementWindow.startEpochMs && !measurementStarted)
+    beginMeasurement();
+  if (epochMs >= measurementWindow.endEpochMs && !measurementEnded)
+    endMeasurement();
+  return (
+    measurementStarted &&
+    !measurementEnded &&
+    epochMs >= measurementWindow.startEpochMs &&
+    epochMs < measurementWindow.endEpochMs
+  );
+}
 
 function raf(now) {
-  rafs.push(now);
+  if (inMeasurementWindow(Date.now())) rafs.push(now);
   if (!stopped) requestAnimationFrame(raf);
 }
 requestAnimationFrame(raf);
@@ -172,9 +213,14 @@ requestAnimationFrame(raf);
 async function finish(reason = "requested") {
   if (stopped) return;
   stopped = true;
-  const endedAt = performance.now();
-  const measuredFrom = measuredStartedAt ?? initializedAt;
-  const finalMemory = await sampleMemory();
+  endMeasurement();
+  const initialMemory = await initialMemoryPromise;
+  const finalMemory = await finalMemoryPromise;
+  const durationMs =
+    measurementWindow?.durationMs ??
+    Math.max(0, (measuredEndedAt ?? performance.now()) - (measuredStartedAt ?? performance.now()));
+  const rateStart = measurementWindow?.startEpochMs ?? 0;
+  const rateEnd = measurementWindow?.endEpochMs ?? Math.max(1, durationMs);
   ipcRenderer.send("shared-texture:finished", {
     reason,
     backend: renderer?.kind ?? backend,
@@ -182,12 +228,16 @@ async function finish(reason = "requested") {
     rendered,
     renderErrors,
     contextLosses,
-    durationMs: endedAt - measuredFrom,
-    initializationLeadMs: measuredStartedAt ? measuredStartedAt - initializedAt : null,
+    durationMs,
+    measurementWindow,
+    measuredRuntimeMs:
+      measuredStartedAt !== null && measuredEndedAt !== null
+        ? measuredEndedAt - measuredStartedAt
+        : null,
     rates: {
-      arrivalsPerSec: rate(received, measuredFrom, endedAt),
-      shaderPublicationsPerSec: rate(rendered, measuredFrom, endedAt),
-      rafPerSec: rate(rafs.length, measuredFrom, endedAt),
+      arrivalsPerSec: rate(received, rateStart, rateEnd),
+      shaderPublicationsPerSec: rate(rendered, rateStart, rateEnd),
+      rafPerSec: rate(rafs.length, rateStart, rateEnd),
     },
     intervals: {
       arrivals: intervalSummary(arrivals),
@@ -200,6 +250,17 @@ async function finish(reason = "requested") {
   });
 }
 
+ipcRenderer.on("shared-texture:benchmark-window", (_event, value) => {
+  measurementWindow = value;
+  setTimeout(
+    () => beginMeasurement(),
+    Math.max(0, value.startEpochMs - Date.now()),
+  );
+  setTimeout(
+    () => endMeasurement(),
+    Math.max(0, value.endEpochMs - Date.now()),
+  );
+});
 ipcRenderer.on("shared-texture:stop", () => void finish());
 
 (async () => {
@@ -210,22 +271,23 @@ ipcRenderer.on("shared-texture:stop", () => void finish());
       return;
     }
     const arrivedAt = performance.now();
-    if (measuredStartedAt === null) {
-      measuredStartedAt = arrivedAt;
-      rafs.length = 0;
+    const measured = inMeasurementWindow(Date.now());
+    if (measured) {
+      received++;
+      arrivals.push(arrivedAt);
     }
-    received++;
-    arrivals.push(arrivedAt);
     let frame;
     let importedReleased = false;
     try {
       frame = importedSharedTexture.getVideoFrame();
       importedSharedTexture.release();
       importedReleased = true;
-      await renderer.draw(frame);
-      rendered++;
-      publications.push(performance.now());
-      if (verbose && rendered % 60 === 0)
+      await renderer.draw(frame, measured);
+      if (inMeasurementWindow(Date.now())) {
+        rendered++;
+        publications.push(performance.now());
+      }
+      if (verbose && rendered > 0 && rendered % 60 === 0)
         hud.textContent = `${renderer.kind}\nreceived ${received}\nrendered ${rendered}\nsource frame ${metadata?.frameCount ?? "?"}`;
     } catch (error) {
       renderErrors++;
