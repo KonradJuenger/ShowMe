@@ -62,7 +62,7 @@ const report = {
   schemaVersion: 1,
   createdAt: new Date().toISOString(),
   comparisonKind: "cadence-reference-not-apples-to-apples",
-  controlledVariables: ["logical width", "logical height", "DPR", "physical pixel dimensions", "duration", "warmup", "final shader", "hardware Electron process"],
+  controlledVariables: ["logical width", "logical height", "DPR", "physical pixel dimensions", "duration", "warmup", "final shader", "Electron version and hardware"],
   expectedPhysical,
   sceneEquivalence: "Not equivalent. The shared-texture source intentionally includes additional animated native CSS and decoration. The legacy run is therefore a broad cadence reference for the current SceneTexture path, not an apples-to-apples CPU or transport speedup comparison.",
   claims: {
