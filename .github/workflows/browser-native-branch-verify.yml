@@ -19,7 +19,18 @@ jobs:
       - name: Verify test statistics are current
         run: npm run test:stats && git diff --exit-code tests/stats.json
       - run: npm run test:audit
-      - run: npm run typecheck
+      - name: Typecheck
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee typecheck.log
+      - name: Upload typecheck diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-log-${{ github.sha }}
+          path: typecheck.log
+          if-no-files-found: ignore
       - name: Architecture and composition unit regressions
         run: npx vitest run
         env:
