@@ -64,8 +64,18 @@ export function createSceneTextureProvider(
   context: SceneTextureContext,
 ): SceneTextureProvider {
   return (
-    createGpuSceneTextureProvider(request, context) ??
-    createLegacySceneTextureProvider(request, context)
+    createGpuSceneTextureProvider(
+      request,
+      context,
+      (excluded, transparent, coverage) =>
+        createLegacySceneTextureProvider(
+          request,
+          context,
+          excluded,
+          transparent,
+          coverage,
+        ),
+    ) ?? createLegacySceneTextureProvider(request, context)
   );
 }
 

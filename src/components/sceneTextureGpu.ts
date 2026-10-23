@@ -1,5 +1,4 @@
-import { backdropPrefix } from "./elementRaster";
-import { createLegacySceneTextureProvider } from "./sceneTextureLegacy";
+import { compositionPlanFor, prefixElements } from "./compositionPlan";
 import { gpuGeneration } from "./gpuGeneration";
 import {
   allocateShaderOutput,
@@ -36,6 +35,11 @@ function translated(element: Element) {
 export function createGpuSceneTextureProvider(
   request: SceneTextureRequest,
   context: SceneTextureContext,
+  capture: (
+    excluded?: ReadonlySet<string>,
+    transparent?: boolean,
+    coverage?: boolean,
+  ) => SceneTextureProvider,
 ): SceneTextureProvider | null {
   const scene = context.scene?.();
   if (
@@ -48,7 +52,10 @@ export function createGpuSceneTextureProvider(
     !translated(context.element)
   )
     return null;
-  const prefix = backdropPrefix(scene.slide, scene.deck, request.elementId);
+  const prefix = prefixElements(
+    compositionPlanFor(scene.slide, scene.deck),
+    request.elementId,
+  );
   const [background, ...staticElements] = prefix.elements;
   const effects = background?.effects?.filter((e) => e.enabled) ?? [];
   const definition =
@@ -98,18 +105,11 @@ export function createGpuSceneTextureProvider(
   color.fillStyle = scene.slide.background;
   color.fillRect(0, 0, 1, 1);
   const rgba = [...color.getImageData(0, 0, 1, 1).data].map((v) => v / 255);
-  const staticProvider = createLegacySceneTextureProvider(
-    request,
-    context,
-    new Set([background.id]),
-    true,
-  );
+  const staticProvider = capture(new Set([background.id]), true);
   // White background pixels over a black slide encode native background coverage
   // in RGB and slide-edge coverage in alpha. Capture once, including fractional
   // clipping and bitmap filtering, rather than approximating Chromium edges.
-  const maskProvider = createLegacySceneTextureProvider(
-    request,
-    context,
+  const maskProvider = capture(
     new Set(staticElements.map((e) => e.id)),
     true,
     true,
@@ -144,8 +144,7 @@ export function createGpuSceneTextureProvider(
       !stage.closest('[data-presentation-absent="true"]')
     );
   };
-  const legacy = () =>
-    (fallback ??= createLegacySceneTextureProvider(request, context));
+  const legacy = () => (fallback ??= capture());
   function release() {
     for (const [gl, r] of resources) {
       if (r.output) disposeShaderOutput(r.output);

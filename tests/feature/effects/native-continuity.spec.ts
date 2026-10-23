@@ -49,7 +49,32 @@ test.beforeEach(async () => {
   app = await electron.launch({ args: [main], env });
   page = await app.firstWindow();
 });
-test.afterEach(async () => {
+test.afterEach(async ({ browserName: _browserName }, info) => {
+  if (info.status !== info.expectedStatus && app) {
+    const captured = await app
+      .evaluate(() => {
+        const frames =
+          (globalThis as unknown as { continuityFrames?: { id: number }[] })
+            .continuityFrames ?? [];
+        return {
+          count: frames.length,
+          recentIds: frames.slice(-30).map((f) => f.id),
+        };
+      })
+      .catch((error) => ({ error: String(error) }));
+    const presented = await page
+      .evaluate(() => ({
+        requested: (window as unknown as { continuityRequested?: number })
+          .continuityRequested,
+        acknowledged: (window as unknown as { continuityPresented?: number })
+          .continuityPresented,
+      }))
+      .catch((error) => ({ error: String(error) }));
+    await info.attach("capture-acknowledgements", {
+      body: JSON.stringify({ captured, presented }, null, 2),
+      contentType: "application/json",
+    });
+  }
   await app?.close();
 });
 
@@ -380,6 +405,9 @@ test("presentation capture detects each injected faulty state without unobserved
           return;
         }
         frame++;
+        (
+          window as unknown as { continuityRequested: number }
+        ).continuityRequested = frame;
         card.style.visibility = frame === 20 ? "hidden" : "";
         effect.style.backdropFilter = frame === 40 ? "none" : "";
         shader.style.visibility = frame === 60 ? "hidden" : "";
