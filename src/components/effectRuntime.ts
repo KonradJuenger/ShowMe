@@ -458,9 +458,15 @@ export function mountEffectSurface(
   let lastCssOutput = "";
   let inputPending = false;
   let sceneTexture: SceneTextureProvider | null = null;
+  let sceneTextureFactory: (() => SceneTextureProvider) | null = null;
   let shaderOutput: ShaderOutput | null = null;
   let sourceContent: HTMLElement | null = null;
   let sourceOpacity = "";
+  const renderedSceneTexture = () => {
+    if (!sceneTexture && sceneTextureFactory)
+      sceneTexture = sceneTextureFactory();
+    return sceneTexture;
+  };
   const ownerAbsent = () => !!node.closest('[data-presentation-absent="true"]');
   const schedule = () => {
     if (live) {
@@ -795,7 +801,7 @@ export function mountEffectSurface(
           pending = Promise.resolve(previousSurface!.flush())
             .then(() => {
               inputPending = false;
-              if (live) void draw();
+              if (live) return draw();
             })
             .catch((error) => {
               inputPending = false;
@@ -807,8 +813,9 @@ export function mountEffectSurface(
           return pending;
         }
         let sceneInput: SceneTexture | null = null;
-        if (!gpuInput && sceneTexture && !inputPending) {
-          const acquired = sceneTexture.acquire({
+        const renderedInput = !gpuInput ? renderedSceneTexture() : null;
+        if (renderedInput && !inputPending) {
+          const acquired = renderedInput.acquire({
             width,
             height,
             logicalWidth: logicalSize.width,
@@ -820,7 +827,7 @@ export function mountEffectSurface(
             pending = acquired
               .then(() => {
                 inputPending = false;
-                if (live) void draw();
+                if (live) return draw();
               })
               .catch((error) => {
                 inputPending = false;
@@ -1041,29 +1048,30 @@ export function mountEffectSurface(
             ? owner.closest<HTMLElement>(".slide-renderer")
             : sourceContent;
         if (!inputRoot) throw new Error("SceneTexture source is not mounted yet.");
-        sceneTexture = createSceneTextureProvider(
-          {
-            kind: definition.input === "backdrop" ? "backdrop" : "element",
-            elementId: content.element.id,
-            effectId: instance.id,
-          },
-          {
-            effectNode: node,
-            owner,
-            inputRoot,
-            element: content.element,
-            resources: () =>
-              content.scene
-                ? (content.scene().slide.effectResources ?? {})
-                : content.resources,
-            scene: content.scene,
-            refined,
-            flushEffect: (dependency) => surfaces.get(dependency)?.flush(),
-            materializeEffect: (dependency) =>
-              surfaces.get(dependency)?.materialize(),
-            invalidate: schedule,
-          },
-        );
+        sceneTextureFactory = () =>
+          createSceneTextureProvider(
+            {
+              kind: definition.input === "backdrop" ? "backdrop" : "element",
+              elementId: content.element.id,
+              effectId: instance.id,
+            },
+            {
+              effectNode: node,
+              owner,
+              inputRoot,
+              element: content.element,
+              resources: () =>
+                content.scene
+                  ? (content.scene().slide.effectResources ?? {})
+                  : content.resources,
+              scene: content.scene,
+              refined,
+              flushEffect: (dependency) => surfaces.get(dependency)?.flush(),
+              materializeEffect: (dependency) =>
+                surfaces.get(dependency)?.materialize(),
+              invalidate: schedule,
+            },
+          );
       }
     }
   } catch (error) {
