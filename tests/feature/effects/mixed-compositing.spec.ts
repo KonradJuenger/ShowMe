@@ -1225,6 +1225,9 @@ test("representative browser-native presentation crosses SceneTexture only for e
           width: 640,
           height: 360,
         });
+        background.effects = [
+          newEffectInstance("direct-image", directImageShader, "content"),
+        ];
 
         const generated = {
           ...blankEffect("shader"),
@@ -1232,6 +1235,13 @@ test("representative browser-native presentation crosses SceneTexture only for e
           target: "background" as const,
           source:
             "#version 300 es\nprecision highp float; uniform float u_t; in vec2 v_uv; out vec4 outColor; void main(){ outColor=vec4(v_uv.x,.25+.08*sin(u_t),1.-v_uv.x,.22); }",
+        };
+        const directImageShader = {
+          ...blankEffect("shader"),
+          input: "content" as const,
+          target: "content" as const,
+          source:
+            "#version 300 es\nprecision highp float; uniform sampler2D u_input; in vec2 v_uv; out vec4 outColor; void main(){ outColor=texture(u_input,v_uv); }",
         };
         const generatedLayer = createBasicShape(
           "generated-layer",
@@ -1299,6 +1309,7 @@ test("representative browser-native presentation crosses SceneTexture only for e
         foreground.appearance.fill = "#11c9aacc";
 
         resources.generated = generated;
+        resources["direct-image"] = directImageShader;
         resources["native-css"] = nativeCss;
         sceneBackdrop.frame.width = 320;
         sceneBackdrop.frame.height = 180;
@@ -1373,6 +1384,15 @@ test("representative browser-native presentation crosses SceneTexture only for e
       )!;
       const nativeEffect =
         nativeGlass.querySelector<HTMLElement>("[data-effect-id]")!;
+      await Promise.all(
+        Array.from(root.querySelectorAll<HTMLImageElement>("img")).map(
+          (image) => image.decode().catch(() => undefined),
+        ),
+      );
+      await harness.advance(0.25);
+      const directImageEffect = root.querySelector<HTMLElement>(
+        '[data-element-id="background-image"] [data-effect-id]',
+      )!;
       const generatedEffect = root.querySelector<HTMLElement>(
         '[data-element-id="generated-layer"] [data-effect-id]',
       )!;
@@ -1401,6 +1421,8 @@ test("representative browser-native presentation crosses SceneTexture only for e
       return {
         errors: state.errors,
         text: state.text,
+        directImageBackend:
+          directImageEffect.dataset.effectSourceBackend ?? null,
         contentBackend: contentShader.dataset.effectSourceBackend ?? null,
         backdropBackend: backdropShader.dataset.effectSourceBackend ?? null,
         sceneTextureBytes: effectSourceTextureBytes(),
@@ -1430,10 +1452,11 @@ test("representative browser-native presentation crosses SceneTexture only for e
 
   expect(result.errors).toEqual([]);
   expect(result.text).toContain("FIRST");
+  expect(result.directImageBackend).toBe("image");
   expect(result.contentBackend).toBe("scene-texture");
   expect(result.backdropBackend).toBe("scene-texture");
   expect(result.generatedReady).toBe("true");
-  expect(result.generatedBackend).toBeNull();
+  expect(result.generatedBackend).toBe("none");
   expect(result.generatedCanvas).toBe(1);
   expect(result.sceneTextureBytes).toBeGreaterThan(0);
   expect(result.nativeCanvas).toBe(0);
