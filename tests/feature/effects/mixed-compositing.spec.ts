@@ -1339,11 +1339,18 @@ test("representative browser-native presentation crosses SceneTexture only for e
       const nativeGlass = root.querySelector<HTMLElement>(
         '[data-element-id="native-glass"]',
       )!;
-      const nativeEffect = nativeGlass.querySelector<HTMLElement>(
-        '[data-effect-id="native-css"]',
-      )!;
+      const nativeEffect =
+        nativeGlass.querySelector<HTMLElement>("[data-effect-id]")!;
       const generatedEffect = root.querySelector<HTMLElement>(
-        '[data-effect-id="generated"]',
+        '[data-element-id="generated-layer"] [data-effect-id]',
+      )!;
+      const contentShader = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          '[data-element-id="animated"] [data-effect-id]',
+        ),
+      ).find((node) => node.querySelector(":scope > canvas"))!;
+      const backdropShader = root.querySelector<HTMLElement>(
+        '[data-element-id="glass"] [data-effect-id]',
       )!;
       const beforeTransform = getComputedStyle(nativeGlass).transform;
       await harness.setMotion({
@@ -1359,13 +1366,11 @@ test("representative browser-native presentation crosses SceneTexture only for e
       const foreground = root.querySelector<HTMLElement>(
         '[data-element-id="foreground-overlap"]',
       )!;
-      const sceneBackends = Object.fromEntries(
-        state.surfaces.map((surface) => [surface.id, surface.backend ?? null]),
-      );
       return {
         errors: state.errors,
         text: state.text,
-        sceneBackends,
+        contentBackend: contentShader.dataset.effectSourceBackend ?? null,
+        backdropBackend: backdropShader.dataset.effectSourceBackend ?? null,
         sceneTextureBytes: effectSourceTextureBytes(),
         generatedReady: generatedEffect.dataset.effectReady,
         generatedBackend: generatedEffect.dataset.effectSourceBackend ?? null,
@@ -1393,8 +1398,8 @@ test("representative browser-native presentation crosses SceneTexture only for e
 
   expect(result.errors).toEqual([]);
   expect(result.text).toContain("FIRST");
-  expect(result.sceneBackends.shader).toBe("scene-texture");
-  expect(result.sceneBackends.backdrop).toBe("scene-texture");
+  expect(result.contentBackend).toBe("scene-texture");
+  expect(result.backdropBackend).toBe("scene-texture");
   expect(result.generatedReady).toBe("true");
   expect(result.generatedBackend).toBeNull();
   expect(result.generatedCanvas).toBe(1);
