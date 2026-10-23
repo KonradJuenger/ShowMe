@@ -180,7 +180,7 @@ export function mountAudienceNavigationHarness(stress = false) {
         height: requirement.height,
         sourceWidth: 4096,
         sourceHeight: 4096,
-        mime: "image/svg+xml",
+        mime: "image/png",
         recipe: IMAGE_RECIPE,
         url: fixtureUrls.get(requirement.assetId)!,
       };
