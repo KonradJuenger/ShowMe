@@ -417,6 +417,7 @@ export function mountEffectSurface(
   shaderIntermediate = false,
   directShaderInput = false,
   ownsShaderChain = false,
+  ownedMediaInput = false,
 ) {
   const refined = executionMode === "refined";
   const dependencies = effectDependencies(definition);
@@ -533,6 +534,92 @@ export function mountEffectSurface(
   let shaderOutput: ShaderOutput | null = null;
   let sourceContent: HTMLElement | null = null;
   let sourceOpacity = "";
+  let ownedMediaTexture: {
+    gl: WebGL2RenderingContext;
+    texture: WebGLTexture;
+    source: HTMLImageElement | HTMLVideoElement;
+    key: string;
+    revision: number;
+  } | null = null;
+  let videoFrameId: number | null = null;
+  let videoFrameNode: HTMLVideoElement | null = null;
+
+  const disposeOwnedMediaTexture = () => {
+    if (ownedMediaTexture)
+      ownedMediaTexture.gl.deleteTexture(ownedMediaTexture.texture);
+    ownedMediaTexture = null;
+  };
+
+  const currentOwnedMedia = () => {
+    if (!sourceContent) return null;
+    const video = sourceContent.querySelector<HTMLVideoElement>("video");
+    if (
+      video &&
+      video.style.visibility !== "hidden" &&
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      video.videoWidth &&
+      video.videoHeight
+    )
+      return video;
+    const images = Array.from(
+      sourceContent.querySelectorAll<HTMLImageElement>("img"),
+    );
+    return (
+      images.find(
+        (image) =>
+          image.complete &&
+          image.naturalWidth > 0 &&
+          image.naturalHeight > 0,
+      ) ?? null
+    );
+  };
+
+  const resolveOwnedMediaTexture = (gl: WebGL2RenderingContext) => {
+    const source = currentOwnedMedia();
+    if (!source) return null;
+    const key =
+      source instanceof HTMLVideoElement
+        ? `${source.currentSrc || source.src}:${source.currentTime}:${source.videoWidth}x${source.videoHeight}`
+        : `${source.currentSrc || source.src}:${source.naturalWidth}x${source.naturalHeight}`;
+    if (!ownedMediaTexture || ownedMediaTexture.gl !== gl) {
+      disposeOwnedMediaTexture();
+      const texture = gl.createTexture();
+      if (!texture) throw new Error("Cannot allocate owned media texture");
+      ownedMediaTexture = { gl, texture, source, key: "", revision: 0 };
+    }
+    const state = ownedMediaTexture;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, state.texture);
+    if (state.source !== source || state.key !== key) {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        source,
+      );
+      if (gl.getError() !== gl.NO_ERROR)
+        throw new Error("Cannot upload owned media shader input");
+      state.source = source;
+      state.key = key;
+      state.revision++;
+    }
+    return {
+      kind:
+        source instanceof HTMLVideoElement
+          ? ("videoTexture" as const)
+          : ("imageTexture" as const),
+      texture: state.texture,
+      revision: state.revision,
+    };
+  };
   const renderedSceneTexture = () => {
     if (!sceneTexture && sceneTextureFactory)
       sceneTexture = sceneTextureFactory();
@@ -789,7 +876,9 @@ export function mountEffectSurface(
         }
         let sceneInput: SceneTexture | null = null;
         const renderedInput =
-          !gpuInput && !directShaderInput ? renderedSceneTexture() : null;
+          !gpuInput && !directShaderInput && !ownedMediaInput
+            ? renderedSceneTexture()
+            : null;
         if (renderedInput && !inputPending) {
           const acquired = renderedInput.acquire({
             width,
@@ -814,13 +903,35 @@ export function mountEffectSurface(
           sceneInput = acquired;
         }
         if (inputPending) return pending;
+        const ownedMedia = ownedMediaInput
+          ? resolveOwnedMediaTexture(gl)
+          : null;
+        if (ownedMediaInput && !ownedMedia) {
+          node.dataset.effectReady = "false";
+          return;
+        }
+        const resolvedInput =
+          gpuInput
+            ? ({ kind: "shaderTexture" as const, output: gpuInput })
+            : ownedMedia
+              ? ownedMedia
+              : sceneInput
+                ? ({ kind: "sceneTexture" as const, texture: sceneInput })
+                : ({ kind: "none" as const });
         const signature = JSON.stringify([
           params,
           refined ? clockKey(timing) : timing,
           width,
           height,
-          sceneInput?.revision,
-          gpuInput?.revision,
+          resolvedInput.kind,
+          resolvedInput.kind === "shaderTexture"
+            ? resolvedInput.output.revision
+            : resolvedInput.kind === "sceneTexture"
+              ? resolvedInput.texture.revision
+              : resolvedInput.kind === "imageTexture" ||
+                  resolvedInput.kind === "videoTexture"
+                ? resolvedInput.revision
+                : 0,
           generation,
         ]);
         if (signature === lastShaderInput) {
@@ -845,17 +956,34 @@ export function mountEffectSurface(
         }
         gl.viewport(0, 0, width, height);
         gl.useProgram(program);
-        if (gpuInput) {
+        if (resolvedInput.kind === "shaderTexture") {
           gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, gpuInput.texture);
+          gl.bindTexture(gl.TEXTURE_2D, resolvedInput.output.texture);
           gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
           node.dataset.effectSourceBackend = "gpu";
-          node.dataset.effectSourceRevision = String(gpuInput.revision);
-        } else if (sceneInput) {
-          sceneInput.bind(gl);
-          node.dataset.effectSourceBackend = "scene-texture";
-          node.dataset.effectSourceRevision = String(sceneInput.revision);
+          node.dataset.effectSourceRevision = String(
+            resolvedInput.output.revision,
+          );
+        } else if (
+          resolvedInput.kind === "imageTexture" ||
+          resolvedInput.kind === "videoTexture"
+        ) {
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, resolvedInput.texture);
           gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
+          node.dataset.effectSourceBackend =
+            resolvedInput.kind === "videoTexture" ? "video" : "image";
+          node.dataset.effectSourceRevision = String(resolvedInput.revision);
+        } else if (resolvedInput.kind === "sceneTexture") {
+          resolvedInput.texture.bind(gl);
+          node.dataset.effectSourceBackend = "scene-texture";
+          node.dataset.effectSourceRevision = String(
+            resolvedInput.texture.revision,
+          );
+          gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
+        } else {
+          node.dataset.effectSourceBackend = "none";
+          delete node.dataset.effectSourceRevision;
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         const position = gl.getAttribLocation(program, "position");
@@ -917,6 +1045,11 @@ export function mountEffectSurface(
     cancelFrame(draw);
     scheduled.delete(node);
     sceneTexture?.dispose();
+    if (videoFrameNode && videoFrameId !== null)
+      videoFrameNode.cancelVideoFrameCallback?.(videoFrameId);
+    videoFrameNode = null;
+    videoFrameId = null;
+    disposeOwnedMediaTexture();
     if (shaderOutput) disposeShaderOutput(shaderOutput);
     if (shaderChain) shaderChain.redraws.delete(schedule);
     if (ownsShaderChain && shaderChain) disposeShaderChain(shaderChain);
@@ -988,7 +1121,26 @@ export function mountEffectSurface(
         if (!owner || (definition.input === "content" && !sourceContent))
           throw new Error("Content shader source is not mounted yet.");
         sourceOpacity = sourceContent?.style.opacity ?? "";
-        if (!directShaderInput || definition.input === "backdrop") {
+        if (ownedMediaInput && sourceContent) {
+          const mediaChanged = () => schedule();
+          sourceContent.addEventListener("load", mediaChanged, true);
+          sourceContent.addEventListener("loadeddata", mediaChanged, true);
+          const video = sourceContent.querySelector<HTMLVideoElement>("video");
+          if (video?.requestVideoFrameCallback) {
+            videoFrameNode = video;
+            const nextFrame = () => {
+              if (!live || !videoFrameNode) return;
+              schedule();
+              videoFrameId =
+                videoFrameNode.requestVideoFrameCallback(nextFrame);
+            };
+            videoFrameId = video.requestVideoFrameCallback(nextFrame);
+          } else sourceContent.addEventListener("timeupdate", mediaChanged, true);
+        }
+        if (
+          (!directShaderInput && !ownedMediaInput) ||
+          definition.input === "backdrop"
+        ) {
           const inputRoot =
             definition.input === "backdrop"
               ? owner.closest<HTMLElement>(".slide-renderer")
