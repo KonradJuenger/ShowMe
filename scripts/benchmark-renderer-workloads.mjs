@@ -209,6 +209,26 @@ console.log(JSON.stringify(aggregate, null, 2));
 
 if (baselinePath) {
   const baseline = JSON.parse(await readFile(path.resolve(baselinePath), "utf8"));
+  if (dirty || baseline.provenance?.dirty)
+    throw new Error("Paired renderer claims require clean commits.");
+  for (const key of ["platform", "arch", "cpu", "logicalCpus"])
+    if (baseline.provenance?.[key] !== aggregate.provenance[key])
+      throw new Error(`Paired renderer environment mismatch: ${key}`);
+  if (baseline.provenance?.runs !== aggregate.provenance.runs)
+    throw new Error("Paired renderer run counts must match.");
+  for (const kind of kinds)
+    if (
+      JSON.stringify(baseline.workloads?.[kind]?.environment) !==
+      JSON.stringify(aggregate.workloads[kind].environment)
+    )
+      throw new Error(`Paired renderer browser/viewport mismatch: ${kind}`);
+  if (
+    baseline.mixed &&
+    aggregate.mixed &&
+    JSON.stringify(baseline.mixed.environment) !==
+      JSON.stringify(aggregate.mixed.environment)
+  )
+    throw new Error("Paired mixed workload environment mismatch.");
   const comparisons = [];
   for (const kind of kinds)
     for (const [metric, value] of Object.entries(workloads[kind].metrics)) {
