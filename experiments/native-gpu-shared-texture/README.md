@@ -2,6 +2,10 @@
 
 This folder is an isolated architecture experiment. It does not participate in normal ShowMe rendering and must not be treated as a SceneTexture backend.
 
+Local audit 2026-10-24: near-60 Hz full-frame transport was measured on Radeon
+880M. This does not solve intermediate layered paint semantics, and an intermittent
+reload resource-drain failure remains. See the [verified audit](../../docs/rendering/NATIVE_GPU_BOUNDARY_SHARED_TEXTURE.md#local-codex-audit--2026-10-24).
+
 ## What it tests
 
 The source window is an Electron offscreen `BrowserWindow` configured with `offscreen.useSharedTexture = true`. It renders a representative layered Chromium scene: an animated WebGL background followed by native DOM text/CSS with rounded geometry, opacity and shadow.
@@ -36,13 +40,13 @@ npm run experiment:shared-texture -- --show --backend=webgpu --duration=15000 --
 Primary hardware benchmark at the Radeon reference workload:
 
 ```text
-npm run benchmark:shared-texture -- --backend=webgpu --width=1596 --height=998 --dpr=1.6042 --fps=60 --duration=30000 --output=.benchmark-data/shared-texture/webgpu.json --evidence=.benchmark-data/shared-texture/webgpu.png
+npm run benchmark:shared-texture -- --show --backend=webgpu --width=1596 --height=998 --dpr=1.6042 --fps=60 --duration=30000 --output=.benchmark-data/shared-texture/webgpu.json --evidence=.benchmark-data/shared-texture/webgpu.png
 ```
 
 WebGL comparison:
 
 ```text
-npm run benchmark:shared-texture -- --backend=webgl --width=1596 --height=998 --dpr=1.6042 --fps=60 --duration=30000 --output=.benchmark-data/shared-texture/webgl.json
+npm run benchmark:shared-texture -- --show --backend=webgl --width=1596 --height=998 --dpr=1.6042 --fps=60 --duration=30000 --output=.benchmark-data/shared-texture/webgl.json
 ```
 
 Broad cadence reference against the current `SceneTexture` implementation:
@@ -52,6 +56,13 @@ npm run benchmark:shared-texture:compare -- --width=1596 --height=998 --dpr=1.60
 ```
 
 The legacy side uses the real ShowMe `SlideRenderer`, effect runtime and current `SceneTexture` implementation through the existing Vite/Electron harness. Both runs hold logical dimensions, DPR, warmup, timed duration and the cheap final shader constant. The source scenes are **not equivalent**: the shared-texture source includes extra animated native CSS/decorative content that the legacy fixture does not reproduce. Therefore this command is only a broad cadence reference. Do not use its CPU/process deltas as an apples-to-apples transport speedup claim.
+
+The comparison opens visible windows; hidden consumer rAF can be throttled. Its
+legacy viewport/DPR are set explicitly through CDP and output canvases retain the
+full physical density. On a dual-GPU Radeon reference machine add
+`--force_low_power_gpu` to both benchmark commands (the comparison forwards it).
+Clear an inherited `ELECTRON_RUN_AS_NODE=1` before direct Electron/npm launches;
+the comparison clears it in its child environments.
 
 For historical reference-deck measurements, the existing production benchmark remains available separately:
 

@@ -24,6 +24,8 @@ let rendered = 0;
 let renderErrors = 0;
 let renderer;
 let stopped = false;
+let adapterInfo = null;
+let importedFrames = 0;
 
 function fullScreenWgsl() {
   return `
@@ -48,8 +50,20 @@ async function createWebGpuRenderer() {
   if (!navigator.gpu) throw new Error("WebGPU is unavailable in this Electron renderer");
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
   if (!adapter) throw new Error("No WebGPU adapter available");
+  adapterInfo = {
+    vendor: adapter.info.vendor,
+    architecture: adapter.info.architecture,
+    device: adapter.info.device,
+    description: adapter.info.description,
+  };
   const device = await adapter.requestDevice();
-  device.lost.then(() => { contextLosses++; });
+  device.addEventListener("uncapturederror", (event) => {
+    ipcRenderer.send("shared-texture:consumer-error", String(event.error));
+  });
+  device.lost.then(() => {
+    contextLosses++;
+    void finish("context-lost");
+  });
   const context = canvas.getContext("webgpu");
   if (!context) throw new Error("Cannot create WebGPU canvas context");
   const format = navigator.gpu.getPreferredCanvasFormat();
@@ -109,9 +123,12 @@ async function createWebGpuRenderer() {
 function createWebGlRenderer() {
   const gl = canvas.getContext("webgl2", { alpha: false, antialias: false });
   if (!gl) throw new Error("WebGL2 unavailable");
+  const debug = gl.getExtension("WEBGL_debug_renderer_info");
+  adapterInfo = debug ? { description: gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) } : null;
   canvas.addEventListener("webglcontextlost", (event) => {
     contextLosses++;
     event.preventDefault();
+    void finish("context-lost");
   });
   const compile = (type, source) => {
     const shader = gl.createShader(type);
@@ -178,6 +195,7 @@ function beginMeasurement() {
   submitCosts.length = 0;
   gpuCompletionWaits.length = 0;
   received = 0;
+  importedFrames = 0;
   rendered = 0;
   renderErrors = 0;
   initialMemoryPromise = sampleMemory();
@@ -225,6 +243,9 @@ async function finish(reason = "requested") {
     reason,
     backend: renderer?.kind ?? backend,
     received,
+    importedFrames,
+    adapterInfo,
+    outputCanvas: { width: canvas.width, height: canvas.height },
     rendered,
     droppedOrLateFrames: Math.max(0, received - rendered),
     renderErrors,
@@ -281,6 +302,7 @@ ipcRenderer.on("shared-texture:stop", () => void finish());
     let importedReleased = false;
     try {
       frame = importedSharedTexture.getVideoFrame();
+      if (measured) importedFrames++;
       importedSharedTexture.release();
       importedReleased = true;
       await renderer.draw(frame, measured);

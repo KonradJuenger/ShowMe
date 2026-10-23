@@ -28,11 +28,15 @@ const legacyOutput = path.resolve(".benchmark-data/shared-texture/legacy-scene-t
 const sharedOutput = path.resolve(".benchmark-data/shared-texture/webgpu.json");
 
 function run(command, commandArgs) {
-  const result = spawnSync(command, commandArgs, { stdio: "inherit", env: process.env, shell: false });
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const result = spawnSync(command, commandArgs, { stdio: "inherit", env, shell: false });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} exited ${result.status}`);
 }
 const common = [`--width=${width}`, `--height=${height}`, `--dpr=${dpr}`, `--duration=${durationMs}`, `--warmup=${warmupMs}`];
+common.push("--show");
+if (args.includes("--force_low_power_gpu")) common.push("--force_low_power_gpu");
 const legacyArgs = ["experiments/native-gpu-shared-texture/legacy-scene-texture.mjs", ...common, `--output=${legacyOutput}`];
 if (evidenceDir) legacyArgs.push(`--evidence=${path.resolve(evidenceDir, "legacy-scene-texture.png")}`);
 run(process.execPath, legacyArgs);
@@ -43,7 +47,7 @@ run(electronBin, sharedArgs);
 const legacy = JSON.parse(await readFile(legacyOutput, "utf8"));
 const shared = JSON.parse(await readFile(sharedOutput, "utf8"));
 const close = (left, right, tolerance) => Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= tolerance;
-const expectedPhysical = { width: Math.round(width * dpr), height: Math.round(height * dpr) };
+const expectedPhysical = { width: Math.ceil(width * dpr), height: Math.ceil(height * dpr) };
 const sharedShapes = (shared.source?.textureShapes ?? []).map(({ shape }) => shape);
 const expectedShape = `${expectedPhysical.width}x${expectedPhysical.height}`;
 const checks = {

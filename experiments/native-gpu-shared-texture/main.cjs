@@ -61,12 +61,16 @@ let consumerErrors = [];
 let finalTimer = null;
 let drainTimedOut = false;
 let gpuInfo = null;
+let sourceViewport = null;
 let finalizing = false;
 let initialAppMetrics = [];
 let finalAppMetrics = [];
 let timedOffered = 0;
 let timedConsumed = 0;
 let timedStaleReleased = 0;
+const lifetimeSamples = [];
+let lifetimeTimer = null;
+let stopReason = null;
 
 function handleKind(info) {
   const handle = info?.handle || {};
@@ -166,12 +170,17 @@ function beginMeasurement() {
   timedConsumed = 0;
   timedStaleReleased = 0;
   initialAppMetrics = appMetricsSnapshot();
+  lifetimeTimer = setInterval(() => {
+    lifetimeSamples.push({ epochMs: Date.now(), paintEvents, sourceReleased,
+      queue: queue.snapshot(), processes: appMetricsSnapshot() });
+  }, 10000);
   if (verbose) console.log("measurement started", measurementWindow);
 }
 
 function endMeasurement() {
   if (measurementEnded || !measurementStarted) return;
   measurementEnded = true;
+  clearInterval(lifetimeTimer);
   finalAppMetrics = appMetricsSnapshot();
   if (verbose) console.log("measurement ended", measurementWindow);
 }
@@ -217,7 +226,7 @@ function scheduleMeasurementWindow() {
 
 function finishIfReady() {
   if (!stopping || !consumerResult || finalizing) return;
-  if (queue.snapshot().active > 0) {
+  if (queue.snapshot().active > 0 && !drainTimedOut) {
     setTimeout(finishIfReady, 25);
     return;
   }
@@ -236,6 +245,8 @@ function finishIfReady() {
     arch: process.arch,
     configuration: { width, height, dpr, fps, durationMs, warmupMs, barrierLeadMs, backend, maxActive, drainTimeoutMs, show },
     measurementWindow,
+    stopReason,
+    consumerErrors,
     source: {
       paintEvents,
       missingTextures,
@@ -266,6 +277,7 @@ function finishIfReady() {
       transferErrors,
       releaseLatencyMs: valueSummary(releaseLatencies),
       drainTimedOut,
+      lifetimeSamples,
     },
     consumer: consumerResult,
     processMetrics: {
@@ -275,6 +287,7 @@ function finishIfReady() {
       cumulativeCpuDeltas: cpuDeltas(initialAppMetrics, finalAppMetrics),
     },
     gpu: gpuInfo,
+    sourceViewport,
     claims: {
       sourceIsChromiumCompositedFrame: true,
       cpuReadbackRequestedByHarness: false,
@@ -293,9 +306,11 @@ function finishIfReady() {
     }
     console.log(`SHARED_TEXTURE_BENCHMARK ${JSON.stringify(result)}`);
     if (verbose) console.log(serialized);
-    sourceWindow?.destroy();
-    consumerWindow?.destroy();
-    app.exit(consumerErrors.length || transferErrors || drainTimedOut || !consumerResult ? 1 : 0);
+    if (sourceWindow && !sourceWindow.isDestroyed()) sourceWindow.destroy();
+    if (consumerWindow && !consumerWindow.isDestroyed()) consumerWindow.destroy();
+    app.exit(consumerErrors.length || transferErrors || releaseErrors ||
+      consumerResult?.renderErrors || consumerResult?.contextLosses ||
+      drainTimedOut || !consumerResult || stopReason !== "duration-complete" ? 1 : 0);
   };
   if (evidence && consumerWindow && !consumerWindow.isDestroyed()) {
     const target = path.resolve(evidence);
@@ -311,9 +326,10 @@ function finishIfReady() {
 function stop(reason) {
   if (stopping) return;
   stopping = true;
+  stopReason = reason;
   if (finalTimer) clearTimeout(finalTimer);
   endMeasurement();
-  sourceWindow?.webContents.stopPainting();
+  if (sourceWindow && !sourceWindow.isDestroyed()) sourceWindow.webContents.stopPainting();
   queue.close();
   if (consumerWindow && !consumerWindow.isDestroyed())
     consumerWindow.webContents.send("shared-texture:stop", reason);
@@ -327,9 +343,8 @@ function stop(reason) {
     if (queue.snapshot().active > 0) {
       drainTimedOut = true;
       console.error("SHARED_TEXTURE_DRAIN_TIMEOUT", queue.snapshot());
-      sourceWindow?.destroy();
-      consumerWindow?.destroy();
-      app.exit(1);
+      consumerResult ??= { reason: "drain-timeout", renderErrors: 1 };
+      finishIfReady();
     }
   }, drainTimeoutMs).unref();
   finishIfReady();
@@ -348,7 +363,10 @@ ipcMain.on("shared-texture:finished", (_event, result) => {
 app.on("window-all-closed", () => {
   if (!stopping) stop("window-closed");
 });
-app.on("before-quit", () => queue.close());
+app.on("before-quit", (event) => {
+  event.preventDefault();
+  stop("application-quit");
+});
 
 app.whenReady().then(async () => {
   gpuInfo = {
@@ -373,6 +391,7 @@ app.whenReady().then(async () => {
       },
     });
     sourceWindow.webContents.setFrameRate(fps);
+    sourceWindow.on("closed", () => stop("source-closed"));
     sourceWindow.webContents.on("paint", (event) => {
       const now = performance.now();
       const measured = inMeasurementWindow(Date.now());
@@ -409,7 +428,30 @@ app.whenReady().then(async () => {
         },
       });
     });
-    sourceWindow.webContents.once("did-finish-load", () => {
+    sourceWindow.webContents.once("did-finish-load", async () => {
+      // Windows DIP rounding and initial work-area clamping can change OSR size.
+      // Correct against the actual CSS viewport before starting the warmup.
+      let windowWidth = width;
+      let windowHeight = height;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        sourceWindow.setContentSize(windowWidth, windowHeight);
+        sourceViewport = await sourceWindow.webContents.executeJavaScript(
+          'new Promise(resolve => setTimeout(() => resolve({width: innerWidth, height: innerHeight, dpr: devicePixelRatio}), 100))',
+        );
+        if (sourceViewport.width === width && sourceViewport.height === height) break;
+        windowWidth += width - sourceViewport.width;
+        windowHeight += height - sourceViewport.height;
+      }
+      if (sourceViewport.width !== width || sourceViewport.height !== height) {
+        consumerErrors.push(`Unexpected source viewport: ${JSON.stringify(sourceViewport)}`);
+        stop("invalid-source-size");
+        return;
+      }
+      gpuInfo = {
+        hardwareAccelerationEnabled: app.isHardwareAccelerationEnabled(),
+        featureStatus: app.getGPUFeatureStatus(),
+        completeInfo: await app.getGPUInfo("complete"),
+      };
       if (verbose)
         console.log("source ready", {
           requestedFrameRate: fps,
@@ -432,6 +474,13 @@ app.whenReady().then(async () => {
       nodeIntegration: true,
       contextIsolation: false,
     },
+  });
+  consumerWindow.setContentSize(width, height);
+  consumerWindow.on("closed", () => stop("consumer-closed"));
+  consumerWindow.webContents.once("did-finish-load", () => {
+    consumerWindow.webContents.on("did-start-navigation", (_event, _url, _inPlace, isMainFrame) => {
+      if (isMainFrame) stop("consumer-navigation");
+    });
   });
   consumerWindow.loadFile(path.join(__dirname, "consumer.html"), {
     query: { backend, verbose: verbose ? "1" : "0" },

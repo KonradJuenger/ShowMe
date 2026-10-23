@@ -1,5 +1,38 @@
 # Are we slow yet?
 
+## Shared Chromium GPU texture boundary audit — 2026-10-24
+
+Exploratory dirty research candidate `72719c6` plus local harness corrections;
+no main modification. Production Electron 44.4.1, Radeon 880M / ANGLE D3D11,
+Ryzen AI 9 365, 1596×998 CSS, DPR 1.6042, actual 2561×1601 input/output.
+Three serial ten-second runs per backend after warmup, identical synthetic
+Chromium DOM/CSS/WebGL scene and cheap final shader, no concurrent verification.
+
+| Transport | Source/sec range | Shader submissions/sec range | p95 ms range | Largest interval ms |
+| --- | ---: | ---: | ---: | ---: |
+| Shared texture → VideoFrame → WebGPU external texture | 60.0–60.1 | 60.0–60.1 | 18.3–20.7 | 26.1 |
+| Shared texture → VideoFrame → WebGL texImage2D | 59.9–60.0 | 59.9–60.0 | 20.5–20.9 | 47.9 |
+
+Two-minute WebGPU run: 59.90 source/sec, 59.74 imports/submissions/sec,
+p95 21.9 ms, max 71.0 ms, 35 intervals above 33.34 ms; 19 stale pending frames
+replaced. All 7306 offered textures released; peak retained three, final zero.
+Process memory did not grow monotonically. This is near-60 throughput, not a
+stall-free, zero-copy, physical-display or general-effect performance claim.
+
+The supplied production `shader-text-shader.sme`, separately measured at the
+original viewport and real DPR, still shows approximately 2:1 audience/glass:
+43.8–52.4 audience callbacks/sec versus 21.8–26.2 glass publications/sec.
+Its workload differs from the transport fixture; no direct speedup is inferred.
+The corrected synthetic SceneTexture reference is likewise not apples-to-apples.
+
+Verdict: transport works, but one exported webContents frame does not expose
+arbitrary intermediate paint prefixes. Shared textures are a final-postprocess
+primitive, not a demonstrated general SceneTexture solution. One reload diagnostic
+also timed out retaining a managed texture; a subsequent drain does not resolve it.
+
+[Audit, exact commands and limitations](docs/rendering/NATIVE_GPU_BOUNDARY_SHARED_TEXTURE.md#local-codex-audit--2026-10-24),
+[raw measurements](docs/rendering/evidence/native-gpu-shared-texture-audit-2026-10-24.json).
+
 ## Paired renderer follow-up — 2026-10-23
 
 Three clean serial alternating main/candidate pairs now replace the earlier dirty

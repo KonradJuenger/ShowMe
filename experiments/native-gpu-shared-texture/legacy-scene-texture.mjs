@@ -56,20 +56,21 @@ try {
   server = await createServer({ server: { host: "127.0.0.1", port, strictPort: true } });
   await server.listen();
   const main = path.join(root, "main.cjs");
-  await writeFile(main, `const {app,BrowserWindow}=require('electron');app.commandLine.appendSwitch('enable-blink-features','CanvasDrawElement');app.commandLine.appendSwitch('force-device-scale-factor','${dpr}');app.whenReady().then(()=>{const w=new BrowserWindow({width:${width},height:${height},useContentSize:true,show:${show},webPreferences:{backgroundThrottling:false}});w.loadURL('http://127.0.0.1:${port}/tests/helpers/effects-harness.html');});`);
+  await writeFile(main, `const {app,BrowserWindow}=require('electron');app.commandLine.appendSwitch('enable-blink-features','CanvasDrawElement');app.commandLine.appendSwitch('force-device-scale-factor','${dpr}');app.whenReady().then(()=>{const w=new BrowserWindow({width:${width},height:${height},useContentSize:true,show:${show},webPreferences:{backgroundThrottling:false}});w.setContentSize(${width},${height});w.loadURL('http://127.0.0.1:${port}/tests/helpers/effects-harness.html');});`);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  app = await electron.launch({ args: [main], env });
+  app = await electron.launch({ args: [main, ...args.filter(value => value === "--force_low_power_gpu")], env });
   const page = await app.firstWindow();
   await page.waitForLoadState();
-  const gpu = await app.evaluate(async ({ app }) => ({
-    hardwareAccelerationEnabled: app.isHardwareAccelerationEnabled(),
-    featureStatus: app.getGPUFeatureStatus(),
-    basicInfo: await app.getGPUInfo("basic").catch((error) => ({ error: String(error) })),
-  }));
+  // Explicit metrics avoid native Windows frame/DIP rounding. The production
+  // renderer below still draws at the full requested physical pixel density.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width, height, deviceScaleFactor: dpr, mobile: false,
+  });
   const beforeMetrics = await app.evaluate(({ app }) => app.getAppMetrics());
 
-  const result = await page.evaluate(async ({ width, height, durationMs }) => {
+  const result = await page.evaluate(async ({ width, height, dpr, durationMs, warmupMs }) => {
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
     const factoryPath = "/src/core/elementFactory.ts";
     const textPath = "/src/core/text.ts";
@@ -85,10 +86,10 @@ try {
     const { effectSurface, flushEffectSurfaces, shaderRuntimeDiagnostics } = await import(/* @vite-ignore */ runtimePath);
     const { sceneTextureDiagnostics } = await import(/* @vite-ignore */ scenePath);
 
-    const cheapFinalShader = "#version 300 es\\nprecision highp float;uniform sampler2D u_input;in vec2 v_uv;out vec4 outColor;void main(){vec4 c=texture(u_input,v_uv);outColor=vec4(1.0-c.r,0.18+0.78*c.b,1.0-c.g,c.a);}";
-    const generatedShader = "#version 300 es\\nprecision highp float;uniform float u_t;uniform vec2 u_size;in vec2 v_uv;out vec4 outColor;void main(){float a=.5+.5*sin(u_t*.9+v_uv.x*9.+v_uv.y*4.);float b=.5+.5*sin(-u_t*.55+v_uv.y*11.);vec3 c=mix(vec3(.05,.12,.42),vec3(.95,.28,.08),a);c=mix(c,vec3(1.,.68,.08),b*.45);outColor=vec4(c,1.);}";
+    const cheapFinalShader = "#version 300 es\nprecision highp float;uniform sampler2D u_input;in vec2 v_uv;out vec4 outColor;void main(){vec4 c=texture(u_input,v_uv);outColor=vec4(1.0-c.r,0.18+0.78*c.b,1.0-c.g,c.a);}";
+    const generatedShader = "#version 300 es\nprecision highp float;uniform float u_t;uniform vec2 u_size;in vec2 v_uv;out vec4 outColor;void main(){float a=.5+.5*sin(u_t*.9+v_uv.x*9.+v_uv.y*4.);float b=.5+.5*sin(-u_t*.55+v_uv.y*11.);vec3 c=mix(vec3(.05,.12,.42),vec3(.95,.28,.08),a);c=mix(c,vec3(1.,.68,.08),b*.45);outColor=vec4(c,1.);}";
     const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
-      profileWidth: width,
+      profileWidth: Math.round(width * dpr),
       configure(model) {
         model.deck.width = width;
         model.deck.height = height;
@@ -107,7 +108,7 @@ try {
         text.appearance.fill = "#11182794";
         text.appearance.radius = 42;
         if (text.content?.type === "text") {
-          text.content.text = "Chromium native scene\\nGenerated GPU background + native text/CSS";
+          text.content.text = "Chromium native scene\nGenerated GPU background + native text/CSS";
           text.content.autoSize = "none";
           if (text.content.format.kind === "local") Object.assign(text.content.format.typography, { fontSize: 72, fontWeight: 700, bold: true, color: "#ffffff", lineHeight: 1.05 });
         }
@@ -168,7 +169,12 @@ try {
     const canvas = finalCanvas ? { width: finalCanvas.width, height: finalCanvas.height } : null;
     window.__showMeSharedTextureLegacyHarness = harness;
     return { startedAt, endedAt, observedStopAt, durationMs, frameTicks, rafTimes, publications, viewport, canvas, errors, before, after };
-  }, { width, height, durationMs, warmupMs });
+  }, { width, height, dpr, durationMs, warmupMs });
+  const gpu = await app.evaluate(async ({ app }) => ({
+    hardwareAccelerationEnabled: app.isHardwareAccelerationEnabled(),
+    featureStatus: app.getGPUFeatureStatus(),
+    completeInfo: await app.getGPUInfo("complete"),
+  }));
 
   if (evidence) {
     const target = path.resolve(evidence);

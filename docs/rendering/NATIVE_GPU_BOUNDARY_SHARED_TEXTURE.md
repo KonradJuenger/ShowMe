@@ -2,6 +2,9 @@
 
 Status: architecture research branch based on Phase 3 of PR #19.
 
+Local audit completed 2026-10-24: **TRANSPORT SUCCESS / GENERAL LAYERED ARCHITECTURE FAILURE**.
+The [local audit below](#local-codex-audit--2026-10-24) supersedes the earlier unmeasured status notes.
+
 Base commit: `22836e64b0b2ff2a2a0d42cac742baf81646af47` (`Record paired bounded-context performance results`).
 
 This branch intentionally stops before PR #19 Phase 4 (`qualified GPU SceneTexture assembly`). It keeps the Phase 1–3 performance work only:
@@ -588,3 +591,297 @@ The transport experiment should be considered negative if it needs lower resolut
 - Electron shared-texture design notes: https://github.com/electron/electron/blob/v44.4.1/shell/common/api/shared_texture/README.md
 - Electron `OffscreenSharedTexture` structure: https://github.com/electron/electron/blob/v44.4.1/docs/api/structures/offscreen-shared-texture.md
 - Electron `SharedTextureImported` structure: https://github.com/electron/electron/blob/v44.4.1/docs/api/structures/shared-texture-imported.md
+
+## Local Codex audit — 2026-10-24
+
+### Implementation audited
+
+Audited all 32 commits and all 14 changed files after Phase 3
+`22836e64b0b2ff2a2a0d42cac742baf81646af47`, through research branch HEAD
+`72719c6ae0eb807ddc2def99cfc8f6f9c410d25f`. The initial checkout was clean on
+`performance/native-presentation-workload` at `78971ae`; the requested research
+branch was fetched and checked out. No merge, push, remote CI or main modification.
+Main remained `a699fbdd3af0e3ff8ab940db53379a8e4aeb1dfc`.
+
+Changes are isolated to the experiment directory, package scripts and these two
+research documents. No production SlideRenderer, SceneTexture, effect semantics,
+document authority, persistence or editor code changed. There is no Phase 4 GPU
+scene reconstruction, DOM interpretation, manual text/group/clip composition or
+scene-qualification backend. The generated background is ordinary authored canvas
+content; Chromium composes it with native text, CSS animation, transforms, rounded
+corners, translucent layers and shadows.
+
+Installed and runtime Electron are **44.4.1**, Chromium **152.0.7977.78**;
+host Node **26.3.0**, npm **11.16.0**. Local `electron.d.ts`, actual successful
+runtime calls, and Electron's exact-version managed API and C++ implementation
+agree on this pipeline:
+
+```text
+source renderer DOM/CSS/WebGL
+→ Chromium GPU compositor / offscreen capture surface
+→ main-process paint event: OffscreenSharedTexture, BGRA Windows NT handle
+→ main sharedTexture.importSharedTexture(textureInfo)
+→ main sharedTexture.sendSharedTexture(consumer mainFrame)
+→ consumer SharedTextureImported.getVideoFrame()
+→ WebGPU importExternalTexture → WGSL draw → consumer canvas
+```
+
+The alternate consumer is `VideoFrame → WebGL2 texImage2D → GLSL draw → canvas`.
+The source and final shader are identical between these two transport runs.
+
+| Boundary | Ownership/release | Copy evidence |
+| --- | --- | --- |
+| Chromium GPU output → main OSR event | Main retains OSR lease until consumers finish; stale pending leases release immediately | Shared GPU handle; OSR compositor/export may copy GPU pixels internally; no CPU bitmap requested |
+| Main import | Electron duplicates the Windows NT handle and creates a SharedImage; main wrapper released after transfer acknowledgment | Handle/metadata duplication is not a pixel-buffer copy |
+| Main → consumer renderer | Managed SharedImage export/import and sync tokens; consumer wrapper explicitly released | IPC serializes resource metadata, not an RGBA bitmap |
+| Imported wrapper → VideoFrame | Frame retains the SharedImage after wrapper release; frame closed after submit | Exact-version C++ uses `VideoFrame::WrapSharedImage`, not CPU frame allocation |
+| VideoFrame → WebGPU → output | External texture sampled; Electron/Chromium sync-token machinery retains GPU dependencies until completion | GPU-backed input established; internal Dawn/driver conversion/copy not excluded; shader writes a separate output |
+| VideoFrame → WebGL → output | Separate WebGL texture populated, frame closed after submit | Texture materialization/upload API is explicit; GPU copy/conversion implementation not measured |
+
+Reference inspection: [native import/frame implementation](https://github.com/electron/electron/blob/v44.4.1/shell/common/api/electron_api_shared_texture.cc),
+[main managed lifetime](https://github.com/electron/electron/blob/v44.4.1/lib/browser/api/shared-texture.ts),
+[renderer managed lifetime](https://github.com/electron/electron/blob/v44.4.1/lib/renderer/api/shared-texture.ts).
+The harness has no per-frame `readPixels`, ImageData, bitmap conversion, pixel
+buffer serialization, PNG/JPEG encoding or Canvas2D rasterization on either shared
+transport path. Evidence PNG capture happens after measurement. No GPU trace was
+collected, so **end-to-end zero-copy and absence of all implicit driver copies are
+not proven**.
+
+### Corrections made by Codex
+
+- Bound `warmupMs` in the legacy page-evaluation argument; passing it without
+  destructuring caused a runtime ReferenceError.
+- Replaced literal backslash-n sequences in legacy GLSL with actual newlines.
+  The original programs failed with `unexpected token` compiler errors. Fixed the
+  text fixture's newline too.
+- Corrected legacy renderProfile density. It originally rendered a 1596×998
+  shader canvas instead of the required approximately 2561×1601 output.
+- Corrected initial Windows window/work-area clamping and OSR DIP rounding by
+  checking the real source CSS viewport before warmup. Original source was only
+  2564×1526 pixels. Final source is exactly 1596×998 CSS, DPR 1.6042000055,
+  coded size 2561×1601. Normal-window legacy fixture uses explicit CDP viewport/DPR
+  metrics; comparison checks require these values and full physical output.
+- Changed the comparison's expected physical dimensions from round to ceil,
+  matching actual OSR and ShowMe allocation. Both measured outputs are checked.
+- Sampled complete GPU identity after initialization. Original early basic GPU
+  snapshot incorrectly showed all adapters inactive and software/disabled status.
+  Added consumer adapter identity, successful VideoFrame import counts, output
+  canvas dimensions and uncaptured WebGPU error reporting.
+- Comparison children clear inherited `ELECTRON_RUN_AS_NODE`; local direct npm
+  Electron launches also cleared it. Its inherited value `1` caused the first
+  launch to execute as Node with undefined `ipcMain`. No dependency upgrade.
+- Added ten-second process/lifetime samples and failure exits for release errors,
+  consumer errors, context loss and incomplete runs. Hidden consumer rAF can be
+  throttled to 1 Hz, so final measured transport and comparison runs use `--show`.
+- Source destruction originally hung without a report. Close/quit/navigation now
+  stop painting, close the pending queue and attempt bounded drain; destroyed
+  windows are guarded. Context loss stops the experiment instead of continuing
+  to count invalid draws. Drain timeouts now preserve failing diagnostics before
+  process exit. No automatic device/reload recovery was added.
+
+Measurements were taken with local uncommitted research changes. Performance results are dirty
+exploratory runs at the audited HEAD plus corrections, not clean-commit speedup
+claims. Close/navigation/context-loss refinements followed the main measurements;
+they do not change steady-state shader or transfer work. Evidence records final
+file hashes separately rather than attributing dirty results to the parent SHA.
+
+### Proven
+
+Visible screenshots were inspected for both backends: native Chromium glyphs,
+translucent CSS card, rounded corners, shadow, rotated geometry and animated native
+decoration are visibly transformed by the shader (white glyphs become green).
+This is Chromium DOM/CSS → shared GPU resource → shader → visible output, not a
+canvas-only input. Local PNGs are under `.benchmark-data/shared-texture/`.
+
+Both managed transports work on the actual Radeon 880M. The initialized GPU report
+identifies AMD Radeon 880M, ANGLE D3D11, enabled GPU composition and D3D shared-image
+support. WebGPU reports AMD / RDNA-3. `--force_low_power_gpu` prevents this dual-GPU
+machine from selecting its NVIDIA RTX 5060 Laptop GPU. No resolution reduction.
+
+### Performance measurements
+
+Windows x64, Ryzen AI 9 365, Radeon 880M driver 32.0.13062.24001, production Electron
+44.4.1 executable. Three serial ten-second runs per shared backend, each after
+1500 ms warmup and a 250 ms timing barrier. Source CSS 1596×998, DPR 1.6042,
+requested 60 Hz; actual source and consumer canvas 2561×1601. No builds or tests
+ran during measurements. These are source/arrival/import/submission counters,
+not physical-display measurements or rAF-only FPS claims.
+
+| Path/run | OSR/sec | Arrivals = imports/sec | Shader submits/sec | rAF/sec | Shader p50 / p95 / max ms | >33.34 ms |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| WebGPU 1 | 60.0 | 60.0 | 60.0 | 60.0 | 16.7 / 19.4 / 22.1 | 0 |
+| WebGPU 2 | 60.0 | 60.0 | 60.0 | 60.0 | 16.7 / 18.3 / 23.2 | 0 |
+| WebGPU 3 | 60.1 | 60.1 | 60.1 | 60.0 | 16.6 / 20.7 / 26.1 | 0 |
+| WebGL 1 | 60.0 | 60.0 | 60.0 | 60.0 | 16.7 / 20.6 / 29.1 | 0 |
+| WebGL 2 | 60.0 | 60.0 | 60.0 | 59.9 | 16.6 / 20.9 / 47.9 | 1 |
+| WebGL 3 | 59.9 | 59.9 | 59.9 | 60.0 | 16.6 / 20.5 / 25.0 | 0 |
+| WebGPU 120 seconds | 59.90 | 59.74 | 59.74 | 59.98 | 16.7 / 21.9 / 71.0 | 35 |
+
+All six short runs have zero timed stale replacements, metadata frame gaps,
+consumer drops, render/transfer/release errors or context losses. WebGPU aggregate
+CPU use was 6.19–9.47 process CPU seconds per ten seconds (0.62–0.95 core-equivalent);
+WebGL 7.04–7.90 seconds (0.70–0.79 core-equivalent), including browser, GPU, utility
+and both renderer processes. These are not GPU execution times.
+
+The corrected synthetic SceneTexture cadence reference passed all 11 checks at
+the same dimensions/DPR/cheap final shader: **19.3 shader publications/sec**,
+p95 61.4 ms over three seconds. Its renderer sources are served through the Vite
+fixture, not the bundled production application. Different native scenes and a
+fixture loop that awaits `flushEffectSurfaces` prevent a transport-speedup or
+half-rate inference from this synthetic comparison.
+
+The supplied `shader-text-shader.sme` was separately measured through the bundled
+production application, using an identical isolated copy and fresh user profiles.
+Original SHA-256: `5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c`.
+Audience 1596×998 CSS, real DPR 1.6041666269, same AMD D3D11, presenter enabled:
+
+| Production deck run | Audience rAF/sec | Generated shader/sec | Glass/sec | Audience p95 / max ms |
+| --- | ---: | ---: | ---: | --- |
+| 1 | 43.78 | 43.78 | 21.84 | 33.7 / 50.4 |
+| 2 | 48.19 | 48.19 | 24.05 | 33.5 / 51.4 |
+| 3 | 52.38 | 52.38 | 26.19 | 33.5 / 66.7 |
+
+The original **approximately 2:1 audience/glass cadence persists** in the real
+SceneTexture workload. Shared transport does not impose that cadence in its own
+fixture. This does not prove the supplied deck would reach 60 Hz after integration:
+the scene and shader workloads differ. No presenter-off repeat or old-renderer
+comparison was needed for this transport audit.
+
+### Resource lifetime
+
+The main OSR lease is released only by `allReferencesReleased` for imported frames;
+unimported stale/pending frames release directly. Main imports release after send
+acknowledgment, consumer imports after obtaining the VideoFrame, frames after GPU
+submission. Electron's source implements shared-image sync-token destruction,
+so closing the JS frame does not itself mean the GPU has finished.
+
+Two active transfers plus one latest pending frame remain the hard queue bound.
+All six short runs offered/released respectively 718/718, 718/718, 718/718,
+716/716, 707/707 and 713/713. Every final retained count is zero, peak three.
+Each run is a fresh open/run/close/reopen cycle; no orphan Electron processes
+remained after the diagnostics.
+
+The two-minute run published 7188 source textures and imported/submitted 7169.
+Its 19 timed stale replacements explain that difference; there were zero
+consumer-side drops/errors/context losses. Including warmup, all **7306/7306**
+offered textures released and final retention was zero. Source release latency
+p50/p95/max was 4.17/11.66/95.57 ms. Sampled retained counts were zero or one,
+global peak three. The 35 output intervals above 33.34 ms mean this is near-60 Hz
+throughput, **not a stall-free guarantee**.
+
+Consumer working set rose 81.1 → 90.7 MiB and private memory 31.6 → 35.6 MiB.
+Aggregate process working set fell 1088.1 → 984.6 MiB; ten-second samples ranged
+938.3–978.6 MiB, without monotonic growth. GPU-process working set fell
+765.1 → 625.3 MiB. These are process memory counters, not dedicated VRAM.
+Total CPU over 120 seconds was 101.04 CPU seconds. Two minutes and bounded
+ownership do not establish absence of all driver/GPU leaks.
+
+Fault diagnostics, excluded from performance results:
+
+- 700 ms blocked consumer: 415/415 textures released, 42 stale replacements
+  including warmup, peak retained three, final zero; latest-frame backpressure works.
+- Source destruction, consumer close and application quit: bounded shutdown and
+  complete release after the fixes. Consumer close uses the three-second missing
+  consumer-result timeout and exits unsuccessfully rather than claiming a benchmark.
+- Forced WebGL context loss: one detected loss, all 115/115 textures released,
+  final zero, explicit failed/aborted run. Recovery is not implemented.
+- Reload: first diagnostic retained one active managed texture beyond five seconds
+  and required process exit. A subsequent diagnostic drained all 121/121. This is
+  an **unresolved intermittent lifetime failure**, not a passing result obtained
+  by retrying. The experiment aborts on navigation; it does not support reload as
+  a seamless recovery operation. Do not integrate before investigating this.
+
+### Semantic findings
+
+| Case | Finding | Chromium surface/window count |
+| --- | --- | --- |
+| Complete native slide → final shader | Demonstrated visually and measured | Current harness: 2 BrowserWindows / 2 webContents, 1 OSR source, 1 visible shader consumer |
+| Generated background → native text → one glass boundary | Source already demonstrates Chromium's combined background/text prefix. A glass shader could sample this **if that prefix is the entire OSR document**. The actual ShowMe glass shader was not ported into this experiment. | Same 1 OSR source plus consumer for an isolated final boundary. Integrating into a slide requires arranging the prefix separately from later painted content. |
+| Native A → shader 1 → native B → shader 2 | Requires two different scene states. One final OSR frame exposes neither arbitrary prefix selection nor insertion points. | A separate-surface implementation needs at least 2 OSR sources/webContents plus 1 output consumer: at least 3 windows/webContents in this harness topology, and 2 Chromium composition passes. First shader output must feed the second native surface. Not implemented or benchmarked. |
+| Video, Motion, nested groups, arbitrary CSS, clipping, transforms, group opacity | Chromium can render these inside an exported document; the API still exports only its whole compositor result. It exposes no authored intermediate group/paint-point selection. | Additional distinct prefixes require more explicitly arranged surfaces or serial Chromium passes; some prefixes may share a surface, but overhead is not constant for general layering. |
+
+Native transforms, opacity and CSS effects were exercised. Video, authored Motion,
+general nested groups and two-boundary surface feedback were considered against
+the API, not claimed as completed experiment runs. Production regression tests
+cover existing video/context handoff independently of the new transport.
+
+One could serially change/render prefixes in a single webContents instead of
+allocating a renderer for each boundary, but that replaces extra renderers with
+extra Chromium passes, state/synchronization work and feedback transport. It is
+not an exposed intermediate surface, and this experiment supplies no evidence
+that such a scheme meets the required general layered cadence. No custom GPU
+reconstruction was added to make these semantics appear solved.
+
+### Architecture verdict
+
+**TRANSPORT SUCCESS / GENERAL LAYERED ARCHITECTURE FAILURE.** More precisely:
+**PARTIALLY** for the overall direction. The full-frame transport works near 60 Hz
+at full size on Radeon 880M. It is a useful final post-processing primitive.
+
+**Can this deliver general layered ShowMe effect pixels while retaining one
+Chromium-native rendering architecture, without another compositor or duplicated
+Chromium rendering per distinct boundary? No.** The installed Electron shared
+texture API exposes complete webContents output, not arbitrary intermediate paint
+surfaces. Transport speed does not change that semantic limit. It also remains
+short of a production stability claim because of the reload drain failure.
+
+Recommendation: retain this experiment as evidence that shared GPU transport is
+viable for final post-processing. Do not integrate it as a general SceneTexture
+backend. ShowMe still needs an explicit choice between browser-native rendering
+with limits on arbitrary scene-sampling GLSL, and a deliberately defined general
+GPU composition model. Neither Phase 4 qualification patches nor one Chromium
+renderer per distinct effect prefix should be adopted implicitly. No recommendation
+was implemented during this audit.
+
+### Remaining unknowns
+
+- Exact OSR/Dawn/ANGLE/driver copy and conversion behavior; no end-to-end zero-copy
+  proof, GPU trace, GPU timing or physical-display cadence measurement.
+- Cause of occasional long-run stalls and intermittent reload release timeout;
+  forced WebGPU device loss, whole GPU-process loss and context restoration untested.
+- Dedicated/shared GPU memory trend, multi-hour endurance and cross-platform behavior.
+- General multi-prefix composition, video/Motion/group boundaries, real glass on
+  the shared input and production security isolation have not been implemented.
+- Synthetic SceneTexture and shared scenes are intentionally not equivalent; the
+  supplied production deck is a separate cadence reference, not a speedup baseline.
+
+### Verification and reproducibility
+
+- `npm run typecheck`: passed, repeated after final code corrections.
+- `npm run build`: passed (TypeScript, Vite production and Electron build).
+- `npm run verify:build`: passed. No additional experiment compilation is needed:
+  it is plain CJS/JS/MJS. `node --check` on all eight JS/CJS/MJS experiment files
+  and `npm run test:shared-texture-policy` passed.
+- `SHOWME_TEST_FILES='["tests/feature/effects/execution-graph.test.ts","tests/feature/effects/renderer-architecture.test.ts"]' npx vitest run`:
+  **18 passed**.
+- `npx playwright install chromium`, then with SHOWME_TEST_FILES selecting
+  `tests/feature/effects/mixed-compositing.spec.ts`:
+  `npx playwright test --config playwright.config.ts --grep 'GPU shader handoff|continuous invalidation|neutral live video|mixed-size shader' --output test-results-shared-texture-audit`:
+  **4 passed**, including pixels/alpha, context loss, video, bounded output context
+  release and continuously invalidated SceneTexture capture.
+- With `SHOWME_TESTING=1`, isolated `SHOWME_TEST_ROOT_SELECTION` and SHOWME_TEST_FILES
+  selecting `tests/feature/presenter/displays-electron.spec.ts`:
+  `npx playwright test --config playwright.electron.config.ts --output test-results-shared-texture-electron`:
+  **1 passed**.
+- `git diff --check`: passed. Full/release suites, installer packaging and main's
+  audience-navigation commit gate were not run; there is no main commit/integration
+  and no production rendering change in this audit.
+
+Measurement commands (clear ELECTRON_RUN_AS_NODE for direct Electron launches):
+
+```text
+npm run benchmark:shared-texture -- --backend=webgpu --force_low_power_gpu --show --duration=10000 --width=1596 --height=998 --dpr=1.6042 --fps=60 --output=.benchmark-data/shared-texture/audit-webgpu-N.json --evidence=.benchmark-data/shared-texture/audit-webgpu-N.png
+npm run benchmark:shared-texture -- --backend=webgl --force_low_power_gpu --show --duration=10000 --width=1596 --height=998 --dpr=1.6042 --fps=60 --output=.benchmark-data/shared-texture/audit-webgl-N.json --evidence=.benchmark-data/shared-texture/audit-webgl-N.png
+npm run benchmark:shared-texture -- --backend=webgpu --force_low_power_gpu --show --duration=120000 --width=1596 --height=998 --dpr=1.6042 --fps=60 --output=.benchmark-data/shared-texture/audit-webgpu-stability.json --evidence=.benchmark-data/shared-texture/audit-webgpu-stability.png
+npm run benchmark:shared-texture:compare -- --force_low_power_gpu --duration=3000 --output=.benchmark-data/shared-texture/audit-comparison.json --evidence-dir=.benchmark-data/shared-texture/audit-comparison-evidence
+node .agenttmp/shared-texture-reference.mjs
+node .agenttmp/shared-texture-faults.mjs <source-close|consumer-close|reload|context-loss|stall|quit>
+```
+
+For N = 1, 2, 3, these are separate sequential measured runs. Every shared run
+includes its own warmup. Deck runs use FPS_RUN=`shared-texture-audit-1` through `-3`.
+Original deck and user settings were not edited. Local harnesses/logs/screenshots
+remain under `.agenttmp`, `.git` and `.benchmark-data`.
+Persistent [raw audit evidence](evidence/native-gpu-shared-texture-audit-2026-10-24.json)
+contains all six transport runs, stability samples, comparison, production deck
+runs, fault outcomes, commit/file inventory and final source hashes.
