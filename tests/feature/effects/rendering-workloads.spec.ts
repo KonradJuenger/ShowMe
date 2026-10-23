@@ -43,6 +43,7 @@ async function report(
   kind: RenderingWorkload,
   result: Awaited<ReturnType<typeof runRenderingWorkload>>,
   performance: { before: Record<string, number>; after: Record<string, number> },
+  page: Page,
   testInfo: TestInfo,
 ) {
   const frames =
@@ -55,10 +56,17 @@ async function report(
       performance.after[key] - (performance.before[key] ?? 0),
     ]),
   );
+  const environment = await page.evaluate(() => ({
+    userAgent: navigator.userAgent,
+    dpr: devicePixelRatio,
+    width: innerWidth,
+    height: innerHeight,
+  }));
   const body = JSON.stringify(
     {
       schemaVersion: 1,
       workload: kind,
+      environment,
       frames,
       metrics,
       result,
@@ -122,7 +130,7 @@ test("renderer workload: native DOM CSS Motion Presence", async ({
   expect(result.discovered.styleReads).toBe(0);
   expect(result.discovered.queries).toBe(0);
   expect(result.discovered.canvasAllocations).toBe(0);
-  await report("native", result, { before, after }, testInfo);
+  await report("native", result, { before, after }, page, testInfo);
 });
 
 test("renderer workload: generated input-none shaders", async ({
@@ -141,7 +149,7 @@ test("renderer workload: generated input-none shaders", async ({
   expect(result.diagnostics.shaderCompilations).toBe(0);
   expect(result.diagnostics.gpuOutputAllocations).toBe(0);
   expect(result.contextCount).toBe(4);
-  await report("generated", result, { before, after }, testInfo);
+  await report("generated", result, { before, after }, page, testInfo);
 });
 
 test("renderer workload: retained SceneTexture revisit", async ({
@@ -158,5 +166,5 @@ test("renderer workload: retained SceneTexture revisit", async ({
   expect(result.revisit.sceneCaptures).toBe(0);
   expect(result.revisit.domCaptures).toBe(0);
   expect(result.revisit.sceneRetainedReuses).toBeGreaterThan(0);
-  await report("scene-texture", result, { before, after }, testInfo);
+  await report("scene-texture", result, { before, after }, page, testInfo);
 });
