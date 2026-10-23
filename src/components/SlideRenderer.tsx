@@ -859,15 +859,16 @@ const ElementView = memo(function ElementView({
   };
 
   const ownedMediaOnly = (operation: Composition): boolean => {
+    const mediaContent = element.content;
     if (
-      !element.content ||
-      !["image", "video"].includes(element.content.type) ||
+      !mediaContent ||
+      (mediaContent.type !== "image" && mediaContent.type !== "video") ||
       element.children.length ||
       element.geometry.type !== "rect" ||
       appearance.radius !== 0 ||
       appearance.fill ||
       appearance.strokeWidth !== 0 ||
-      element.content.opacity !== 1
+      mediaContent.opacity !== 1
     )
       return false;
     const media = resolveMediaFrame(element);
