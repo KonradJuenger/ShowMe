@@ -154,6 +154,35 @@ it("keeps observers and frame-time traversal out of the normal hot path", () => 
     expect(hotPath).not.toContain(forbidden);
 });
 
+it("renders terminal shaders directly on visible WebGL without Canvas2D presentation copies", () => {
+  const runtime = component("effectRuntime.ts");
+  const output = component("shaderOutput.ts");
+  expect(runtime).toContain("gl.bindFramebuffer(gl.FRAMEBUFFER, null)");
+  expect(runtime).toContain('canvas.getContext("webgl2"');
+  expect(runtime).not.toContain('canvas.getContext("2d")');
+  expect(runtime).not.toContain(".drawImage(");
+  expect(output).not.toContain("neutralShaderBridge");
+});
+
+it("feeds shader sampling from semantic Motion transforms instead of CSS discovery", () => {
+  const runtime = component("effectRuntime.ts");
+  const motion = component("motionRuntime.ts");
+  expect(runtime).toContain("setTransport(matrix)");
+  expect(runtime).not.toContain("getComputedStyle");
+  expect(runtime).not.toContain("elementWorldTransform");
+  expect(motion).toContain("semanticWorldTransform");
+  const start = motion.indexOf('const detachClock = clock.on("change"');
+  const end = motion.indexOf("if (duration &&", start);
+  const clockHotPath = motion.slice(start, end);
+  for (const forbidden of [
+    "getComputedStyle",
+    "querySelector",
+    "walkElements",
+    "createElement",
+  ])
+    expect(clockHotPath).not.toContain(forbidden);
+});
+
 it("keeps generated and direct GPU shader inputs independent of SceneTexture", () => {
   const runtime = component("effectRuntime.ts");
   const condition = runtime.indexOf(
