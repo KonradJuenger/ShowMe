@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -20,7 +21,8 @@ const dpr = numberOption("--dpr", 1.6042);
 const durationMs = numberOption("--duration", 20000);
 const output = path.resolve(option("--output", ".benchmark-data/shared-texture/comparison.json"));
 const evidenceDir = option("--evidence-dir", "");
-const electronBin = path.resolve("node_modules", ".bin", process.platform === "win32" ? "electron.cmd" : "electron");
+const require = createRequire(import.meta.url);
+const electronBin = require("electron");
 const legacyOutput = path.resolve(".benchmark-data/shared-texture/legacy-scene-texture.json");
 const sharedOutput = path.resolve(".benchmark-data/shared-texture/webgpu.json");
 
