@@ -340,6 +340,7 @@ async function generatedWorkload() {
 }
 
 async function sceneTextureWorkload() {
+  const before = diagnostics();
   const first = await mountMixedEffectsHarness(undefined, 0, undefined, {
     configure(model) {
       model.deck.stylesheet = "";
@@ -361,7 +362,6 @@ async function sceneTextureWorkload() {
       delete slide.motion;
     },
   });
-  const before = diagnostics();
   await first.advance(0);
   const prepared = diagnostics();
   const model = first.model;
