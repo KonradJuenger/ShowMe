@@ -1,0 +1,435 @@
+{
+  "date": "2026-10-23",
+  "parentRevision": "5bd33a96814d3f46f39f7d0a9c00c670674db43b",
+  "dirty": true,
+  "note": "Exploratory production-build hardware measurement with local capture-starvation fix, not attributable to parent commit. Original app remained running. No concurrent verification. Three serial alternating normal/disabled pairs, 10 seconds each. Presenter renderer replaced by about:blank before loading, not merely minimized. Editor and audience lifecycle retained. No document edits.",
+  "workload": "shader-text-shader.sme",
+  "rows": [
+    {
+      "run": 0,
+      "durationMs": 10032.000000047683,
+      "frames": 224,
+      "fps": 22.32854864423199,
+      "p50Ms": 49.79999999999973,
+      "p95Ms": 83.60000000000036,
+      "maxMs": 116.80000000000018,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "244",
+          "updatesPerSecond": 22.32854864423199
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "123",
+          "updatesPerSecond": 11.064593301382816
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 10247.611,
+          "ScriptDuration": 4568.347,
+          "LayoutDuration": 13.501000000000001,
+          "RecalcStyleDuration": 54.797,
+          "LayoutCount": 270,
+          "RecalcStyleCount": 326
+        },
+        "thumbnail": {
+          "TaskDuration": 1.057,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 10063.724,
+          "ScriptDuration": 2264.425,
+          "LayoutDuration": 10.674,
+          "RecalcStyleDuration": 63.19,
+          "LayoutCount": 226,
+          "RecalcStyleCount": 340
+        },
+        "presenter": {
+          "TaskDuration": 10143.938,
+          "ScriptDuration": 3120.7119999999995,
+          "LayoutDuration": 17.316000000000003,
+          "RecalcStyleDuration": 71.63,
+          "LayoutCount": 254,
+          "RecalcStyleCount": 365
+        }
+      }
+    },
+    {
+      "run": 0,
+      "durationMs": 10012.39999998808,
+      "frames": 288,
+      "fps": 28.764332228071478,
+      "p50Ms": 33.29999999999927,
+      "p95Ms": 66.69999999999982,
+      "maxMs": 83.5,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "315",
+          "updatesPerSecond": 28.764332228071478
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "159",
+          "updatesPerSecond": 14.382166114035739
+        }
+      ],
+      "mode": "no-presenter",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 10147.89,
+          "ScriptDuration": 4023.883,
+          "LayoutDuration": 22.528,
+          "RecalcStyleDuration": 86.25099999999999,
+          "LayoutCount": 363,
+          "RecalcStyleCount": 440
+        },
+        "thumbnail": {
+          "TaskDuration": 1.274,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9951.341999999999,
+          "ScriptDuration": 1858.2099999999998,
+          "LayoutDuration": 13.764999999999999,
+          "RecalcStyleDuration": 83.975,
+          "LayoutCount": 290,
+          "RecalcStyleCount": 435
+        },
+        "disabled-presenter": {
+          "TaskDuration": 0.83,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        }
+      }
+    },
+    {
+      "run": 1,
+      "durationMs": 10065.900000047684,
+      "frames": 210,
+      "fps": 20.862516019333114,
+      "p50Ms": 50,
+      "p95Ms": 100,
+      "maxMs": 150.10000000000036,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "230",
+          "updatesPerSecond": 20.862516019333114
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "116",
+          "updatesPerSecond": 10.33191269528878
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 10258.543,
+          "ScriptDuration": 2161.677,
+          "LayoutDuration": 13.194,
+          "RecalcStyleDuration": 41.791000000000004,
+          "LayoutCount": 227,
+          "RecalcStyleCount": 216
+        },
+        "thumbnail": {
+          "TaskDuration": 0.553,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 10142.543000000001,
+          "ScriptDuration": 1583.049,
+          "LayoutDuration": 6.9430000000000005,
+          "RecalcStyleDuration": 49.479,
+          "LayoutCount": 212,
+          "RecalcStyleCount": 319
+        },
+        "presenter": {
+          "TaskDuration": 10205.720000000001,
+          "ScriptDuration": 2615.665,
+          "LayoutDuration": 15.126000000000001,
+          "RecalcStyleDuration": 56.737,
+          "LayoutCount": 226,
+          "RecalcStyleCount": 323
+        }
+      }
+    },
+    {
+      "run": 1,
+      "durationMs": 10010.999999952317,
+      "frames": 309,
+      "fps": 30.866047348064306,
+      "p50Ms": 33.20000000000073,
+      "p95Ms": 51.5,
+      "maxMs": 67.5,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "339",
+          "updatesPerSecond": 30.866047348064306
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "171",
+          "updatesPerSecond": 15.383078613598393
+        }
+      ],
+      "mode": "no-presenter",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 10208.67,
+          "ScriptDuration": 3833.214,
+          "LayoutDuration": 22.786,
+          "RecalcStyleDuration": 95.29899999999999,
+          "LayoutCount": 398,
+          "RecalcStyleCount": 485
+        },
+        "thumbnail": {
+          "TaskDuration": 0.8310000000000001,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9937.476,
+          "ScriptDuration": 1960.831,
+          "LayoutDuration": 14.591,
+          "RecalcStyleDuration": 87.357,
+          "LayoutCount": 312,
+          "RecalcStyleCount": 469
+        },
+        "disabled-presenter": {
+          "TaskDuration": 0.762,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        }
+      }
+    },
+    {
+      "run": 2,
+      "durationMs": 10056.300000023843,
+      "frames": 218,
+      "fps": 21.677953123860977,
+      "p50Ms": 49.899999999999636,
+      "p95Ms": 83.5,
+      "maxMs": 116.5,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "242",
+          "updatesPerSecond": 21.677953123860977
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "122",
+          "updatesPerSecond": 10.739536409986172
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 10293.266,
+          "ScriptDuration": 4953.522,
+          "LayoutDuration": 14.254,
+          "RecalcStyleDuration": 49.325,
+          "LayoutCount": 243,
+          "RecalcStyleCount": 291
+        },
+        "thumbnail": {
+          "TaskDuration": 1.6829999999999998,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 10170.856,
+          "ScriptDuration": 1953.937,
+          "LayoutDuration": 9.395999999999999,
+          "RecalcStyleDuration": 57.315,
+          "LayoutCount": 220,
+          "RecalcStyleCount": 331
+        },
+        "presenter": {
+          "TaskDuration": 10172.927,
+          "ScriptDuration": 2789.249,
+          "LayoutDuration": 14.219000000000001,
+          "RecalcStyleDuration": 63.172000000000004,
+          "LayoutCount": 242,
+          "RecalcStyleCount": 347
+        }
+      }
+    },
+    {
+      "run": 2,
+      "durationMs": 10000.799999976158,
+      "frames": 266,
+      "fps": 26.597872170289794,
+      "p50Ms": 33.30000000000018,
+      "p95Ms": 66.89999999999964,
+      "maxMs": 100,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "292",
+          "updatesPerSecond": 26.597872170289794
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "147",
+          "updatesPerSecond": 13.198944084504708
+        }
+      ],
+      "mode": "no-presenter",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 10146.412,
+          "ScriptDuration": 3985.955,
+          "LayoutDuration": 23.637999999999998,
+          "RecalcStyleDuration": 91.27000000000001,
+          "LayoutCount": 327,
+          "RecalcStyleCount": 396
+        },
+        "thumbnail": {
+          "TaskDuration": 1.84,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 10007.329,
+          "ScriptDuration": 2069.765,
+          "LayoutDuration": 14.059000000000001,
+          "RecalcStyleDuration": 95.44,
+          "LayoutCount": 268,
+          "RecalcStyleCount": 403
+        },
+        "disabled-presenter": {
+          "TaskDuration": 0.43,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        }
+      }
+    }
+  ],
+  "profile": {
+    "audience": {
+      "note": "CPU sample shares; (program) is unattributed native work, not an exact GPU cost. Profiling run separate from FPS comparison.",
+      "samples": 6639,
+      "shares": {
+        "(program)": 57.47853592408495,
+        "be": 14.655821659888538,
+        "getError": 6.386503991564995,
+        "isTexture": 6.100316312697696,
+        "getPropertyValue": 2.9221268263292663,
+        "": 2.7413767133604456,
+        "(idle)": 1.807501129688206,
+        "texImage2D": 1.4008133755083596,
+        "isFramebuffer": 0.8435005271878295,
+        "ta": 0.7983129989456244,
+        "Or": 0.7380629612893508,
+        "ae": 0.6326253953908721,
+        "a": 0.3464377165235728,
+        "v": 0.33137520710950447,
+        "closest": 0.2711251694532309,
+        "setProperty": 0.24100015062509414,
+        "(garbage collector)": 0.1807501129688206,
+        "H": 0.15062509414068384,
+        "transferToImageBitmap": 0.10543756589847869,
+        "r": 0.10543756589847869
+      }
+    },
+    "editor": {
+      "note": "CPU sample shares; (program) is unattributed native work, not an exact GPU cost. Profiling run separate from FPS comparison.",
+      "samples": 6647,
+      "shares": {
+        "(program)": 36.2419136452535,
+        "be": 31.03655784564465,
+        "getError": 8.785918459455393,
+        "isTexture": 7.251391605235445,
+        "getPropertyValue": 4.1522491349480966,
+        "": 3.580562659846547,
+        "isFramebuffer": 2.0460358056265986,
+        "a": 0.7823078080336994,
+        "ta": 0.6017752369489996,
+        "Or": 0.5867308560252745,
+        "ae": 0.49646457048292464,
+        "texImage2D": 0.4663758086354747,
+        "r": 0.4663758086354747,
+        "closest": 0.33097638032194976,
+        "setProperty": 0.2858432375507748,
+        "(garbage collector)": 0.2707988566270498,
+        "H": 0.22566571385587483,
+        "getUniformLocation": 0.1353994283135249,
+        "_e": 0.12035504738979991,
+        "transferToImageBitmap": 0.12035504738979991
+      }
+    }
+  }
+}

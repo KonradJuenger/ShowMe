@@ -35,3 +35,30 @@ Exact commands, workload contract, ranges, limits and verification:
 [current validation](docs/rendering/DIRECT_GPU_RENDERER_VALIDATION.md).
 Persistent data: [paired](docs/rendering/evidence/renderer-paired-2026-10-23.json),
 [context study](docs/rendering/evidence/shader-contexts-2026-10-23.json).
+
+## Audience console ablation — 2026-10-23
+
+Exploratory dirty production build including the capture-progress fix; hardware
+Electron / Radeon 880M D3D11. Three serial alternating 10-second runs per mode,
+1596×998 CSS viewport, DPR 1.6042. The original app remained running; no other
+verification jobs ran. Presenter-disabled replaces its renderer with about:blank
+before console load, retaining the audience session and editor.
+
+| Metric | Normal median [min, max] | Presenter disabled median [min, max] |
+| --- | --- | --- |
+| Audience rAF FPS | 21.7 [20.9, 22.3] | 28.8 [26.6, 30.9] |
+| Glass updates/sec | 10.7 [10.3, 11.1] | 14.4 [13.2, 15.4] |
+| Frame interval p95, ms | 83.6 [83.5, 100.0] | 66.7 [51.5, 66.9] |
+
+Disabling the presenter improved median audience FPS by 33%; still well below
+60 FPS. Layout/style-recalculation duration was below 1% of elapsed window time.
+Separate CPU profiling with presenter off attributed about 13.3% of audience and
+18.1% of editor samples to WebGL error/object-validity probes. The shader draw
+function accounted for 14.7% and 31.0% respectively. Unattributed native/program
+samples were 57.5% and 36.2%; they cannot be labeled as precise GPU time.
+Editor animation/capture continues during presentation. The glass publishes at
+about half the audience frame cadence, consistent with its asynchronous capture
+pipeline. These are diagnostic observations, not a shipped console-disable feature
+or physical-display FPS. No current document or user preferences were changed.
+
+[Raw comparison and profile shares](docs/rendering/evidence/audience-console-ablation-2026-10-23.json).

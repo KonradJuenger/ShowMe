@@ -789,7 +789,7 @@ export function mountEffectSurface(
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     lastShaderInput = "";
   };
-  const draw = () => {
+  const draw = (_frame?: unknown, preparedSceneInput?: SceneTexture) => {
     // Element lifecycle gates visual work, independently of this Effect's clock.
     if (ownerAbsent()) return;
     if (!live) return;
@@ -988,12 +988,12 @@ export function mountEffectSurface(
         if (inputPending) {
           return pending;
         }
-        let sceneInput: SceneTexture | null = null;
+        let sceneInput: SceneTexture | null = preparedSceneInput ?? null;
         const renderedInput =
           !gpuInput && !directShaderInput && !ownedMediaInput
             ? renderedSceneTexture()
             : null;
-        if (renderedInput && !inputPending) {
+        if (renderedInput && !inputPending && !sceneInput) {
           const acquired = renderedInput.acquire({
             width,
             height,
@@ -1004,9 +1004,11 @@ export function mountEffectSurface(
             inputPending = true;
             node.dataset.effectReady = "false";
             pending = acquired
-              .then(() => {
+              .then((texture) => {
                 inputPending = false;
-                if (live) return draw();
+                // Present the completed capture even if an animated dependency
+                // invalidated the next generation while capture was pending.
+                if (live) return draw(undefined, texture);
               })
               .catch((error) => {
                 inputPending = false;

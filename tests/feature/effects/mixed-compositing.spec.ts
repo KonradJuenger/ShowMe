@@ -1703,3 +1703,81 @@ test("font completion invalidates a retained static SceneTexture between mounted
   expect(result.errors).toEqual([]);
   expect(result.opaque).toBeGreaterThan(0);
 });
+
+test("animated shader and text backdrop publishes completed captures during continuous invalidation", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const { mountMixedEffectsHarness } = (await import(
+      /* @vite-ignore */ String("/tests/helpers/mixedEffectsHarness.tsx")
+    )) as typeof import("../../helpers/mixedEffectsHarness");
+    const { createBasicShape } = (await import(
+      /* @vite-ignore */ String("/src/core/elementFactory.ts")
+    )) as typeof import("../../../src/core/elementFactory");
+    const { newEffectInstance } = (await import(
+      /* @vite-ignore */ String("/src/core/effects.ts")
+    )) as typeof import("../../../src/core/effects");
+    const { effectSurface } = (await import(
+      /* @vite-ignore */ String("/src/components/effectRuntime.ts")
+    )) as typeof import("../../../src/components/effectRuntime");
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(model) {
+        model.deck.stylesheet = "";
+        const slide = model.slides[model.deck.slideIds[0]];
+        const resources = slide.effectResources!;
+        const background = createBasicShape(
+          "animated background",
+          "rectangle",
+          { x: 0, y: 0 },
+        );
+        Object.assign(background.frame, { width: 640, height: 360 });
+        const shader = {
+          ...resources.backdrop,
+          input: "none" as const,
+          source:
+            "#version 300 es\nprecision highp float; uniform float u_t; out vec4 outColor; void main(){outColor=vec4(fract(u_t),0.2,0.4,1.0);}",
+        };
+        resources.generated = shader;
+        background.effects = [
+          newEffectInstance("generated", shader, "background"),
+        ];
+        const [text, glass] = slide.nodes[0].children;
+        text.effects = [];
+        slide.nodes[0].children = [background, text, glass];
+      },
+    });
+    const nodes = [
+      ...harness.host.querySelectorAll<HTMLElement>("[data-effect-id]"),
+    ];
+    const background = nodes[0],
+      glass = nodes.at(-1)!;
+    const before = Number(glass.dataset.effectRevision);
+    await new Promise<void>((resolve) => {
+      let frame = 0;
+      const tick = () => {
+        effectSurface(background)!.setTiming({
+          time: ++frame / 60,
+          duration: 1,
+          running: false,
+        });
+        void effectSurface(background)!.flush();
+        void effectSurface(glass)!.flush();
+        if (frame < 45) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+    const result = {
+      before,
+      after: Number(glass.dataset.effectRevision),
+      visibility: glass.querySelector("canvas")!.style.visibility,
+      error: glass.dataset.effectError,
+    };
+    harness.dispose();
+    return result;
+  });
+  expect(result.error).toBeUndefined();
+  expect(result.after).toBeGreaterThan(result.before + 2);
+  expect(result.visibility).toBe("visible");
+});
