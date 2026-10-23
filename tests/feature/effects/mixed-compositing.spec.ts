@@ -1176,7 +1176,7 @@ test("representative browser-native presentation crosses SceneTexture only for e
           names: ["renderer-boundary.png"],
           type: "image" as const,
           mediaType: "image" as const,
-          mime: "image/png",
+          mime: "image/png" as const,
           bytes: 1,
           width: 320,
           height: 180,
