@@ -1628,3 +1628,58 @@ test("neutral live video binds directly as shader input without SceneTexture", a
   expect(result.errors).toEqual([]);
   expect(result.redPixels).toBeGreaterThan(1000);
 });
+
+test("font completion invalidates a retained static SceneTexture between mounted consumers", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
+    const scenePath = "/src/components/sceneTexture.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      sceneTextureDiagnostics,
+    }: typeof import("../../../src/components/sceneTexture") = await import(
+      /* @vite-ignore */ scenePath
+    );
+    const first = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(model) {
+        model.deck.stylesheet = "";
+        const slide = model.slides[model.deck.slideIds[0]];
+        const text = slide.nodes[0].children[0];
+        text.effects = [text.effects![2]];
+        slide.nodes[0].children = [text];
+        delete slide.motion;
+      },
+    });
+    const model = first.model;
+    first.dispose();
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    const before = sceneTextureDiagnostics();
+    const warm = await mountMixedEffectsHarness(model);
+    warm.dispose();
+    const reused = sceneTextureDiagnostics();
+    // A FontFaceSet completion signal can arrive while the slide is unmounted.
+    document.fonts.dispatchEvent(new Event("loadingdone"));
+    const refreshed = await mountMixedEffectsHarness(model);
+    const state = await refreshed.stage(0);
+    const after = sceneTextureDiagnostics();
+    refreshed.dispose();
+    return {
+      warmCaptures: reused.captures - before.captures,
+      refreshedCaptures: after.captures - reused.captures,
+      errors: state.errors,
+      opaque: state.surfaces[0].opaque,
+    };
+  });
+  expect(result.warmCaptures).toBe(0);
+  expect(result.refreshedCaptures).toBeGreaterThan(0);
+  expect(result.errors).toEqual([]);
+  expect(result.opaque).toBeGreaterThan(0);
+});

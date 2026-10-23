@@ -976,7 +976,7 @@
     "runtime": "unit",
     "created": "2026-10-21",
     "lastReviewed": "2026-10-23",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points; browser-native CSS now has an explicit backend boundary that disables native-group/restoration planning while explicit scene-input shaders remain on the advanced path; the retained legacy planner remains testable only when explicitly selected"
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points; browser-native CSS now has an explicit backend boundary that disables native-group/restoration planning while explicit scene-input shaders remain on the advanced path; the retained legacy planner remains testable only when explicitly selected Removed the obsolete selectable CSS backend contract together with the unused compositor implementation; semantic composition, paint prefixes, effect ordering and native runtime boundaries retain their coverage."
   },
   {
     "id": "effects-native-composition",
@@ -987,7 +987,7 @@
     "runtime": "electron",
     "created": "2026-10-21",
     "lastReviewed": "2026-10-23",
-    "reason": "The production renderer contract now keeps ordinary CSS glass on Chromium in both preview and presentation modes: no restoration canvas, CSS backdrop replay, split alpha wrapper, scene materializer activation or CSS effect canvas during Move/Scale/Rotate/Fade and Presence enter/exit; the representative fixture combines image, translucent geometry, text, rounded/clipped glass and later foreground overlap while retaining the same mounted DOM subtree. Generated GLSL still renders through its GPU canvas. Earlier tests in this file continue to exercise the retained SceneSurface/backdrop-restoration implementation explicitly, including materializer reuse, invalidation, publication coherence and failure isolation."
+    "reason": "Production Electron browser-native contracts: ordinary Motion bypasses compositor materialization, move/scale/rotate/fade preserve mounted DOM, Presence retains the CSS subtree, foreground/group alpha follow Chromium semantics, and generated shader layers remain operational. Obsolete tests of removed CSS restoration/materializer backends were deleted with their unused production modules; current SceneTexture pixel/capture tests remain in mixed-compositing and rendering-workloads."
   },
   {
     "id": "effects-css-backdrop-opacity",

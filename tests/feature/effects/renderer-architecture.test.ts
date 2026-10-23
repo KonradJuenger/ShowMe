@@ -99,6 +99,11 @@ it("uses SceneTexture as the sole production doorway to legacy scene capture", (
     "components/cssBackdrop.ts",
     "components/legacyCssBackdropValidation.ts",
   ]);
+  for (const removed of [
+    ...legacyCompositorIsland,
+    "components/cssBackdropOutput.ts",
+  ])
+    expect(productionSources[removed]).toBeUndefined();
   for (const target of [
     "backdropRestoration",
     "compositionRuntime",

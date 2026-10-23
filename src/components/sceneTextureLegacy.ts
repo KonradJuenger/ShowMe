@@ -28,6 +28,20 @@ type SharedSources = {
 const sharedSources = new WeakMap<HTMLElement, SharedSources>();
 const liveSources = new Set<SharedSources>();
 const retainedStaticSources = new EffectSources<Raster>(8);
+const fontRevisions = new WeakMap<Document, { value: number }>();
+function fontRevision(document: Document) {
+  let revision = fontRevisions.get(document);
+  if (!revision) {
+    revision = { value: 0 };
+    fontRevisions.set(document, revision);
+    const state = revision;
+    // Retained pixels can outlive every mounted consumer. Font completion must
+    // invalidate their semantic key even while no provider is subscribed.
+    document.fonts.addEventListener("loadingdone", () => state.value++);
+    document.fonts.addEventListener("loadingerror", () => state.value++);
+  }
+  return revision.value;
+}
 const metrics = {
   activeProviders: 0,
   preparations: 0,
@@ -59,17 +73,13 @@ function sourcesFor(root: HTMLElement) {
 export function legacySceneTextureTextureBytes() {
   return (
     retainedStaticSources.textureBytes +
-    [...liveSources].reduce(
-      (sum, shared) => sum + shared.cache.textureBytes,
-      0,
-    )
+    [...liveSources].reduce((sum, shared) => sum + shared.cache.textureBytes, 0)
   );
 }
 
 function hasText(elements: readonly Element[]): boolean {
   return elements.some(
-    (element) =>
-      element.content?.type === "text" || hasText(element.children),
+    (element) => element.content?.type === "text" || hasText(element.children),
   );
 }
 
@@ -93,8 +103,7 @@ function hasDomEffects(
           effect.enabled &&
           resources[effect.resourceId] &&
           resources[effect.resourceId].kind !== "fragment-glsl",
-      ) ||
-      hasDomEffects(element.children, resources, ignoredEffectId),
+      ) || hasDomEffects(element.children, resources, ignoredEffectId),
   );
 }
 
@@ -110,8 +119,7 @@ function hasAnyEffects(
           effect.id !== ignoredEffectId &&
           effect.enabled &&
           resources[effect.resourceId],
-      ) ||
-      hasAnyEffects(element.children, resources, ignoredEffectId),
+      ) || hasAnyEffects(element.children, resources, ignoredEffectId),
   );
 }
 
@@ -169,8 +177,7 @@ export function createLegacySceneTextureProvider(
   };
 
   const inputElements = () => {
-    if (request.kind !== "backdrop" || !context.scene)
-      return [context.element];
+    if (request.kind !== "backdrop" || !context.scene) return [context.element];
     const { slide, deck } = context.scene();
     return backdropPrefix(slide, deck, context.element.id).elements;
   };
@@ -203,6 +210,7 @@ export function createLegacySceneTextureProvider(
       inputElements(),
       scene.deck.textStyles,
       scene.deck.stylesheet,
+      fontRevision(context.inputRoot.ownerDocument),
     ]);
   };
   const stableStyleKey = () => {
@@ -274,9 +282,7 @@ export function createLegacySceneTextureProvider(
       return context.resources();
     },
     beforeEffect: request.effectId,
-    typographySource: context.scene
-      ? () => context.scene!().deck
-      : undefined,
+    typographySource: context.scene ? () => context.scene!().deck : undefined,
     flush: (dependency: HTMLElement) => context.materializeEffect(dependency),
   };
 
@@ -318,7 +324,8 @@ export function createLegacySceneTextureProvider(
           !candidate.parentElement.dataset.effectError
         )
           return false;
-        if (candidate.closest('[data-presentation-absent="true"]')) return false;
+        if (candidate.closest('[data-presentation-absent="true"]'))
+          return false;
         const owner = candidate.closest<HTMLElement>("[data-element-id]");
         if (
           request.kind === "backdrop" &&
@@ -329,7 +336,8 @@ export function createLegacySceneTextureProvider(
         if (owner && partial.has(owner.dataset.elementId!)) {
           if (candidate.hasAttribute("data-element-stroke")) return false;
           const effectId =
-            candidate.closest<HTMLElement>("[data-effect-id]")?.dataset.effectId;
+            candidate.closest<HTMLElement>("[data-effect-id]")?.dataset
+              .effectId;
           const instance = prefixElements
             .get(owner.dataset.elementId!)
             ?.effects?.find((effect) => effect.id === effectId);
@@ -356,10 +364,7 @@ export function createLegacySceneTextureProvider(
             ))
         )
           clone.style.setProperty("opacity", "1", "important");
-        if (
-          original === context.inputRoot &&
-          request.kind === "backdrop"
-        ) {
+        if (original === context.inputRoot && request.kind === "backdrop") {
           clone.style.setProperty("transform", "none", "important");
           clone.style.setProperty("transform-origin", "0 0", "important");
         }
@@ -431,9 +436,7 @@ export function createLegacySceneTextureProvider(
     if (dirtyVersion === version) dirty = false;
   };
 
-  const prepare = (
-    sampling: SceneTextureSampling,
-  ): void | Promise<void> => {
+  const prepare = (sampling: SceneTextureSampling): void | Promise<void> => {
     if (disposed) return;
     ensureLease(sampling);
     if (!lease) throw new Error("SceneTexture source is unavailable.");
@@ -516,8 +519,7 @@ export function createLegacySceneTextureProvider(
           record.type === "characterData" ||
           ((record.target instanceof HTMLElement ||
             record.target instanceof SVGElement) &&
-            (request.kind === "backdrop" ||
-              record.target !== context.owner) &&
+            (request.kind === "backdrop" || record.target !== context.owner) &&
             !record.target.dataset.effectId &&
             record.target.tagName !== "CANVAS" &&
             !record.attributeName?.startsWith("data-effect")),

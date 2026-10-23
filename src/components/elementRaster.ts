@@ -1,6 +1,5 @@
 import { nodeTransform, elementWorldTransform } from "./elementDomTransform";
 import { resizeRasterCanvas } from "./canvasAllocation";
-import { cssBackdropOutputs } from "./cssBackdropOutput";
 import { compositionPlanFor, prefixElements } from "./compositionPlan";
 import type { Element, MediaContent } from "../core/element";
 import type { Deck, Slide } from "../core/document";
@@ -58,15 +57,6 @@ function sourceEffect(
       : -1;
   const earlier = stop < 0 ? effects : effects.slice(0, stop);
   if (context.partial?.has(element.id)) return null;
-  for (const effect of earlier.slice().reverse()) {
-    const surface = owned(node, "[data-effect-id]").find(
-      (n) => n.dataset.effectId === effect.id,
-    );
-    if (surface && cssBackdropOutputs.has(surface)) {
-      context.flush(surface);
-      return surface;
-    }
-  }
   for (const effect of effects) {
     const surface = owned(node, "[data-effect-id]").find(
       (n) => n.dataset.effectId === effect.id,
@@ -302,21 +292,6 @@ function render(
       : Number(getComputedStyle(node).opacity);
   const previous = sourceEffect(element, node, context);
   if (previous && !previous.dataset.effectError) {
-    const material = cssBackdropOutputs.get(previous);
-    if (material) {
-      path(ctx, element);
-      ctx.clip();
-      ctx.globalAlpha *= opacity;
-      ctx.drawImage(
-        material.canvas,
-        -material.padding,
-        -material.padding,
-        material.width,
-        material.height,
-      );
-      ctx.restore();
-      return;
-    }
     const output = previous.querySelector("canvas");
     if (output) {
       ctx.globalAlpha *= opacity;

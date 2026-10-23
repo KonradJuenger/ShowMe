@@ -15,7 +15,6 @@ import {
 } from "../../../src/core/effects";
 import type { Element } from "../../../src/core/element";
 import { EffectGraph } from "../../../src/components/effectGraph";
-import { planCompositionBackends } from "../../../src/components/legacyCssBackdropValidation";
 
 const shape = (id: string) => createBasicShape(id, "rectangle", { x: 0, y: 0 });
 function fixture(children: Element[]) {
@@ -364,41 +363,4 @@ it("group alpha and media transforms remain distinct from effect scope and are n
   expect(group.children[0].opacity).toBe(0.6);
   expect(group.transport).toBe(parent.frame);
   expect(group.children[0].element).toBe(child);
-});
-
-
-it("browser-native CSS is an explicit boundary while scene-input shaders stay advanced", () => {
-  const lower = shape("lower");
-  const card = shape("card");
-  const lens = shape("lens");
-  const f = fixture([lower, card, lens]);
-  f.slide.effectResources!.css.source =
-    ":scope { background: rgba(255,255,255,.2); backdrop-filter: blur(12px); }";
-  card.appearance.fill = "#ffffff22";
-  card.appearance.radius = 18;
-  card.clipChildren = true;
-  f.add(card, "glass", "css");
-  f.add(lens, "scene", "backdrop", "background");
-
-  const plan = f.compile();
-  const native = planCompositionBackends(plan, f.slide, f.deck, {
-    restoration: true,
-    padding: 2,
-  });
-  expect([...native.browserNativeCss]).toEqual(["card"]);
-  expect(native.native.size).toBe(0);
-  expect(native.restoration).toBeNull();
-  expect(native.routes.get("card")).toBe("browser-native");
-  expect(native.routes.get("lens")).toBe("fallback");
-
-  // The old restoration backend remains available only when explicitly selected.
-  const legacy = planCompositionBackends(plan, f.slide, f.deck, {
-    restoration: true,
-    padding: 2,
-    legacyCssBackdrop: true,
-  });
-  expect(legacy.browserNativeCss.size).toBe(0);
-  expect(["native-group", "backdrop-restoration", "fallback"]).toContain(
-    legacy.routes.get("card"),
-  );
 });

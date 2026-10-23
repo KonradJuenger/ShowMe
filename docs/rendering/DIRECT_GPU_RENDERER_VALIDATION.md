@@ -70,6 +70,14 @@ upcoming slides; there is no new arbitrary-scene pre-rendering subsystem.
 
 ## Measurement contract
 
+The unused general CSS compositor was deleted: `compositionSurface.ts`,
+`compositionRuntime.ts`, `backdropRestoration.ts`, `cssBackdrop.ts`,
+`cssBackdropOutput.ts` and `legacyCssBackdropValidation.ts`, together with tests
+that explicitly selected those abandoned backends. Production import checks prove
+their absence; current native composition/continuity and SceneTexture pixel tests
+remain. `compositionPlan.ts` still owns semantic paint order. `elementRaster.ts`
+and `domRaster.ts` remain only behind explicit SceneTexture capture.
+
 `npm run benchmark:renderer -- --runs 3 --output <directory>` runs native,
 generated, explicit SceneTexture and the unchanged dense mixed workload. Native
 and generated CPU/style/layout measurements start after fixture construction and
