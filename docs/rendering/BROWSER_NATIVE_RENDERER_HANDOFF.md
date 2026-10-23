@@ -2,6 +2,11 @@
 
 Branch: `experimental/browser-native-renderer`
 
+Current direct-GPU follow-up: [architecture and validation](DIRECT_GPU_RENDERER_VALIDATION.md).
+Terminal shaders now draw directly into visible WebGL canvases; qualified owned
+media and compatible chains bypass capture, and Motion binds its Effect flush
+targets once. The older shader-copy and follow-up descriptions below are history.
+
 Handoff baseline before this document: `7c8c8f37bb4683abd529593acd037f91605377d9`
 
 Do not merge this branch into `main` without separate integration authorization.

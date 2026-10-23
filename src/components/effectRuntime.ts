@@ -122,6 +122,17 @@ export async function flushEffectSurfaces(root: ParentNode) {
   );
 }
 
+/** Bind a mounted semantic tree once; Motion must not rediscover it per sample. */
+export function bindEffectSurfaceFlusher(root: HTMLElement) {
+  const nodes = Array.from(
+    root.querySelectorAll<HTMLElement>("[data-effect-id]"),
+  ).sort(dependencyOrder);
+  return async () => {
+    nodes.forEach((node) => surfaces.get(node)?.prepareSampling());
+    for (const node of nodes) await surfaces.get(node)?.flush();
+  };
+}
+
 const vertex = `#version 300 es
 in vec2 position;
 out vec2 v_uv;
@@ -144,6 +155,7 @@ export type ShaderChain = {
   boundCanvas: HTMLCanvasElement | null;
   onLost: EventListener | null;
   onRestored: EventListener | null;
+  lost: boolean;
 };
 
 const shaderMetrics = {
@@ -163,6 +175,7 @@ export function createShaderChain(): ShaderChain {
     boundCanvas: null,
     onLost: null,
     onRestored: null,
+    lost: false,
   };
 }
 
@@ -175,18 +188,25 @@ export function shaderRuntimeDiagnostics() {
   };
 }
 
-function bindShaderContextLifecycle(chain: ShaderChain, canvas: HTMLCanvasElement) {
+function bindShaderContextLifecycle(
+  chain: ShaderChain,
+  canvas: HTMLCanvasElement,
+) {
   if (chain.boundCanvas === canvas) return;
   if (chain.boundCanvas && chain.onLost && chain.onRestored) {
     chain.boundCanvas.removeEventListener("webglcontextlost", chain.onLost);
-    chain.boundCanvas.removeEventListener("webglcontextrestored", chain.onRestored);
+    chain.boundCanvas.removeEventListener(
+      "webglcontextrestored",
+      chain.onRestored,
+    );
   }
   const lost: EventListener = (event) => {
     event.preventDefault();
+    chain.lost = true;
     chain.state = null;
-    chain.redraws.forEach((redraw) => redraw());
   };
   const restored: EventListener = () => {
+    chain.lost = false;
     chain.state = null;
     chain.redraws.forEach((redraw) => redraw());
   };
@@ -206,6 +226,9 @@ function shaderGpu(chain: ShaderChain) {
     alpha: true,
     premultipliedAlpha: true,
     antialias: false,
+    // Static shader layers can be sampled later by an explicit SceneTexture.
+    // Chromium may discard a non-preserved default framebuffer after presenting.
+    preserveDrawingBuffer: true,
   });
   if (!gl)
     throw new Error(
@@ -250,12 +273,16 @@ function shaderGpu(chain: ShaderChain) {
 function disposeShaderChain(chain: ShaderChain) {
   const state = chain.state;
   if (state && !state.gl.isContextLost()) {
-    for (const program of state.programs.values()) state.gl.deleteProgram(program);
+    for (const program of state.programs.values())
+      state.gl.deleteProgram(program);
     state.gl.deleteBuffer(state.buffer);
   }
   if (chain.boundCanvas && chain.onLost && chain.onRestored) {
     chain.boundCanvas.removeEventListener("webglcontextlost", chain.onLost);
-    chain.boundCanvas.removeEventListener("webglcontextrestored", chain.onRestored);
+    chain.boundCanvas.removeEventListener(
+      "webglcontextrestored",
+      chain.onRestored,
+    );
   }
   chain.state = null;
   chain.redraws.clear();
@@ -485,6 +512,18 @@ export function mountEffectSurface(
     if (!live || definition.kind !== "fragment-glsl") return;
     try {
       logicalSize = size;
+      // Arbitrary document CSS may author dimensions outside the semantic frame.
+      // Keep this discovery behind that explicit exceptional boundary.
+      if (content?.scene?.().deck.stylesheet?.trim()) {
+        const owner = node.closest<HTMLElement>("[data-element-id]");
+        if (owner) {
+          const style = getComputedStyle(owner);
+          logicalSize = {
+            width: parseFloat(style.width) || size.width,
+            height: parseFloat(style.height) || size.height,
+          };
+        }
+      }
       const next = Math.max(
         affineSamplingDensity(sampling, semanticTransform),
         sampling.envelope ?? 0,
@@ -533,6 +572,7 @@ export function mountEffectSurface(
   let sceneTextureFactory: (() => SceneTextureProvider) | null = null;
   let shaderOutput: ShaderOutput | null = null;
   let sourceContent: HTMLElement | null = null;
+  let ownedMediaSources: Array<HTMLImageElement | HTMLVideoElement> = [];
   let sourceOpacity = "";
   let ownedMediaTexture: {
     gl: WebGL2RenderingContext;
@@ -543,17 +583,20 @@ export function mountEffectSurface(
   } | null = null;
   let videoFrameId: number | null = null;
   let videoFrameNode: HTMLVideoElement | null = null;
-  let ownedMediaChanged: (() => void) | null = null;
+  let ownedMediaChanged: ((event: Event) => void) | null = null;
 
   const disposeOwnedMediaTexture = () => {
-    if (ownedMediaTexture)
+    if (ownedMediaTexture?.gl.isTexture(ownedMediaTexture.texture))
       ownedMediaTexture.gl.deleteTexture(ownedMediaTexture.texture);
     ownedMediaTexture = null;
   };
 
   const currentOwnedMedia = () => {
     if (!sourceContent) return null;
-    const video = sourceContent.querySelector<HTMLVideoElement>("video");
+    const video = ownedMediaSources.find(
+      (source): source is HTMLVideoElement =>
+        source instanceof HTMLVideoElement,
+    );
     if (
       video &&
       video.style.visibility !== "hidden" &&
@@ -562,12 +605,10 @@ export function mountEffectSurface(
       video.videoHeight
     )
       return video;
-    const images = Array.from(
-      sourceContent.querySelectorAll<HTMLImageElement>("img"),
-    );
     return (
-      images.find(
-        (image) =>
+      ownedMediaSources.find(
+        (image): image is HTMLImageElement =>
+          image instanceof HTMLImageElement &&
           image.complete &&
           image.naturalWidth > 0 &&
           image.naturalHeight > 0,
@@ -582,7 +623,11 @@ export function mountEffectSurface(
       source instanceof HTMLVideoElement
         ? `${source.currentSrc || source.src}:${source.currentTime}:${source.videoWidth}x${source.videoHeight}`
         : `${source.currentSrc || source.src}:${source.naturalWidth}x${source.naturalHeight}`;
-    if (!ownedMediaTexture || ownedMediaTexture.gl !== gl) {
+    if (
+      !ownedMediaTexture ||
+      ownedMediaTexture.gl !== gl ||
+      !gl.isTexture(ownedMediaTexture.texture)
+    ) {
       disposeOwnedMediaTexture();
       const texture = gl.createTexture();
       if (!texture) throw new Error("Cannot allocate owned media texture");
@@ -686,6 +731,10 @@ export function mountEffectSurface(
     // Element lifecycle gates visual work, independently of this Effect's clock.
     if (ownerAbsent()) return;
     if (!live) return;
+    if (shaderChain?.lost) {
+      node.dataset.effectReady = "false";
+      return;
+    }
     if (!timing.started) {
       bypass();
       return;
@@ -817,16 +866,9 @@ export function mountEffectSurface(
           node.style.setProperty(`--${key}`, String(value));
         node.style.setProperty("--duration", String(timing.duration));
       } else if (canvas) {
-        if (!shaderChain)
-          throw new Error("Shader surface has no GPU chain.");
-        const {
-          gl,
-          buffer,
-          program,
-          capabilities,
-          textureSize,
-          generation,
-        } = shaderProgram(definition.source, shaderChain);
+        if (!shaderChain) throw new Error("Shader surface has no GPU chain.");
+        const { gl, buffer, program, capabilities, textureSize, generation } =
+          shaderProgram(definition.source, shaderChain);
         if (!preparedSampling) prepareSampling();
         preparedSampling = false;
         if (samplingDensity <= 0) {
@@ -864,6 +906,8 @@ export function mountEffectSurface(
           pending = Promise.resolve(previousSurface!.flush())
             .then(() => {
               inputPending = false;
+              if (!previousSurface!.gpuOutput())
+                throw new Error("Previous shader output is unavailable.");
               if (live) return draw();
             })
             .catch((error) => {
@@ -911,14 +955,13 @@ export function mountEffectSurface(
           node.dataset.effectReady = "false";
           return;
         }
-        const resolvedInput =
-          gpuInput
-            ? ({ kind: "shaderTexture" as const, output: gpuInput })
-            : ownedMedia
-              ? ownedMedia
-              : sceneInput
-                ? ({ kind: "sceneTexture" as const, texture: sceneInput })
-                : ({ kind: "none" as const });
+        const resolvedInput = gpuInput
+          ? { kind: "shaderTexture" as const, output: gpuInput }
+          : ownedMedia
+            ? ownedMedia
+            : sceneInput
+              ? { kind: "sceneTexture" as const, texture: sceneInput }
+              : { kind: "none" as const };
         const signature = JSON.stringify([
           params,
           refined ? clockKey(timing) : timing,
@@ -1129,7 +1172,21 @@ export function mountEffectSurface(
           throw new Error("Content shader source is not mounted yet.");
         sourceOpacity = sourceContent?.style.opacity ?? "";
         if (ownedMediaInput && sourceContent) {
-          ownedMediaChanged = () => schedule();
+          ownedMediaSources = Array.from(
+            sourceContent.querySelectorAll<HTMLImageElement | HTMLVideoElement>(
+              "video, img",
+            ),
+          );
+          ownedMediaChanged = (event) => {
+            const media = event.target;
+            if (
+              (media instanceof HTMLImageElement ||
+                media instanceof HTMLVideoElement) &&
+              !ownedMediaSources.includes(media)
+            )
+              ownedMediaSources.push(media);
+            schedule();
+          };
           sourceContent.addEventListener("load", ownedMediaChanged, true);
           sourceContent.addEventListener("loadeddata", ownedMediaChanged, true);
           const video = sourceContent.querySelector<HTMLVideoElement>("video");
@@ -1162,8 +1219,7 @@ export function mountEffectSurface(
           sceneTextureFactory = () =>
             createSceneTextureProvider(
               {
-                kind:
-                  definition.input === "backdrop" ? "backdrop" : "element",
+                kind: definition.input === "backdrop" ? "backdrop" : "element",
                 elementId: content.element.id,
                 effectId: instance.id,
               },

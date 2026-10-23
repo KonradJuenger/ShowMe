@@ -31,8 +31,7 @@ const importers = (name: string) =>
     .filter(([, source]) =>
       importedModules(source).some(
         (specifier) =>
-          specifier === `./${name}` ||
-          specifier.endsWith(`/${name}`),
+          specifier === `./${name}` || specifier.endsWith(`/${name}`),
       ),
     )
     .map(([path]) => path)
@@ -120,7 +119,9 @@ it("uses SceneTexture as the sole production doorway to legacy scene capture", (
     expect(
       importers(target).filter((path) => !legacyCaptureIsland.has(path)),
     ).toEqual([]);
-  expect(importers("sceneTextureLegacy")).toEqual(["components/sceneTexture.ts"]);
+  expect(importers("sceneTextureLegacy")).toEqual([
+    "components/sceneTexture.ts",
+  ]);
 });
 
 it("keeps observers and frame-time traversal out of the normal hot path", () => {
@@ -168,7 +169,7 @@ it("feeds shader sampling from semantic Motion transforms instead of CSS discove
   const runtime = component("effectRuntime.ts");
   const motion = component("motionRuntime.ts");
   expect(runtime).toContain("setTransport(matrix)");
-  expect(runtime).not.toContain("getComputedStyle");
+  expect(runtime).toContain("if (content?.scene?.().deck.stylesheet?.trim())");
   expect(runtime).not.toContain("elementWorldTransform");
   expect(motion).toContain("semanticWorldTransform");
   const start = motion.indexOf('const detachClock = clock.on("change"');
@@ -194,8 +195,8 @@ it("keeps generated and direct GPU shader inputs independent of SceneTexture", (
   expect(runtime.slice(condition, factory)).not.toContain(
     'definition.input === "none"',
   );
-  expect(runtime).toContain(
-    "const renderedInput = !gpuInput ? renderedSceneTexture() : null;",
+  expect(runtime).toMatch(
+    /const renderedInput =\s*!gpuInput && !directShaderInput && !ownedMediaInput\s*\? renderedSceneTexture\(\)\s*: null;/,
   );
   expect(runtime).toContain("if (!sceneTexture && sceneTextureFactory)");
 });

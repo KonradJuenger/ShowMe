@@ -196,13 +196,10 @@ test("unused, disabled and unrelated CSS effects preserve primitive content and 
     }
     return rows;
   });
-  for (const { placement, state } of rows) {
+  for (const { state } of rows) {
     expect(state.errors).toEqual([]);
     expect(
-      state.surfaces.every(
-        (surface) =>
-          surface.backend === "scene-texture",
-      ),
+      state.surfaces.every((surface) => surface.backend === "scene-texture"),
     ).toBe(true);
     expect(state.surfaces.every((surface) => surface.green > 1000)).toBe(true);
   }
@@ -810,8 +807,11 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
           const slide = model.slides[model.deck.slideIds[0]],
             text = slide.nodes[0].children[0];
           slide.nodes[0].children = [text];
-          model.deck.stylesheet +=
-            " [data-effect-text-output] { opacity: 0.5 !important; }";
+          // Scope text paint to its owned JS output. A document stylesheet is
+          // intentionally a conservative SceneTexture boundary for chaining.
+          model.deck.stylesheet = "";
+          slide.effectResources!.js.styleSource =
+            ":scope { color: rgb(255,0,0); text-shadow: 3px 2px 1px rgb(0,0,255); opacity: .5; }";
           if (gap)
             text.effects!.push(
               newEffectInstance("css", slide.effectResources!.css, "content"),
@@ -824,6 +824,16 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
             ),
           };
           slide.effectResources!.second = second;
+          if (!gpu) {
+            const identity = {
+              ...slide.effectResources!.css,
+              source: ":scope { opacity: 1; }",
+            };
+            slide.effectResources!.identity = identity;
+            text.effects!.push(
+              newEffectInstance("identity", identity, "content"),
+            );
+          }
           text.effects!.push(newEffectInstance("second", second, "content"));
         },
       });
@@ -846,6 +856,12 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
       const pixels = Array.from(buffer);
       let recovered = null;
       if (lose) {
+        // Inject loss after the submitted frame reaches the browser render
+        // phase; synchronous loss inside native capture's paint task crashes
+        // Chromium before the WebGL context-loss event can be delivered.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
         const surface = runtime.effectSurface(canvas.parentElement!)!;
         const active = surface.gpuContext()!;
         const extension = active.getExtension("WEBGL_lose_context")!;
@@ -1200,6 +1216,9 @@ test("representative browser-native presentation crosses SceneTexture only for e
         const resources = slide.effectResources!;
         const originalText = slide.nodes[0].children[0];
         const sceneBackdrop = slide.nodes[0].children[1];
+        model.deck.stylesheet = "";
+        resources.js.styleSource =
+          ":scope { color: rgb(255,0,0); text-shadow: 3px 2px 1px rgb(0,0,255); }";
 
         const imageAsset = {
           version: 1 as const,
@@ -1221,11 +1240,10 @@ test("representative browser-native presentation crosses SceneTexture only for e
           source:
             "#version 300 es\nprecision highp float; uniform sampler2D u_input; in vec2 v_uv; out vec4 outColor; void main(){ outColor=texture(u_input,v_uv); }",
         };
-        const background = createMediaElement(
-          "background-image",
-          imageAsset,
-          { x: 0, y: 0 },
-        );
+        const background = createMediaElement("background-image", imageAsset, {
+          x: 0,
+          y: 0,
+        });
         Object.assign(background.frame, {
           x: 0,
           y: 0,
@@ -1262,11 +1280,10 @@ test("representative browser-native presentation crosses SceneTexture only for e
         nestedFrame.appearance.fill = "#00000000";
         nestedFrame.appearance.radius = 14;
         nestedFrame.clipChildren = true;
-        const nestedImage = createMediaElement(
-          "nested-image",
-          imageAsset,
-          { x: -18, y: -8 },
-        );
+        const nestedImage = createMediaElement("nested-image", imageAsset, {
+          x: -18,
+          y: -8,
+        });
         Object.assign(nestedImage.frame, {
           x: -18,
           y: -8,
@@ -1442,7 +1459,7 @@ test("representative browser-native presentation crosses SceneTexture only for e
         present: nativeGlass.dataset.presentationAbsent,
         foregroundAfter: Boolean(
           nativeGlass.compareDocumentPosition(foreground) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
+          Node.DOCUMENT_POSITION_FOLLOWING,
         ),
       };
     } finally {
@@ -1469,8 +1486,6 @@ test("representative browser-native presentation crosses SceneTexture only for e
   expect(result.present).toBe("false");
   expect(result.foregroundAfter).toBe(true);
 });
-
-
 
 test("neutral live video binds directly as shader input without SceneTexture", async ({
   page,
@@ -1557,6 +1572,29 @@ test("neutral live video binds directly as shader input without SceneTexture", a
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );
       await harness.advance(0.1);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const canvas = harness.host.querySelector<HTMLCanvasElement>(
+        "canvas[data-shader-stage='terminal']",
+      )!;
+      const gl = canvas.getContext("webgl2")!;
+      const lost = new Promise<void>((resolve) =>
+        canvas.addEventListener("webglcontextlost", () => resolve(), {
+          once: true,
+        }),
+      );
+      const restored = new Promise<void>((resolve) =>
+        canvas.addEventListener("webglcontextrestored", () => resolve(), {
+          once: true,
+        }),
+      );
+      const extension = gl.getExtension("WEBGL_lose_context")!;
+      extension.loseContext();
+      await lost;
+      extension.restoreContext();
+      await restored;
+      await harness.advance(0.2);
       const effect =
         harness.host.querySelector<HTMLElement>("[data-effect-id]")!;
       const after = sceneTextureDiagnostics();
@@ -1566,6 +1604,7 @@ test("neutral live video binds directly as shader input without SceneTexture", a
         captures: after.captures - before.captures,
         domCaptures: after.domRaster.captures - before.domRaster.captures,
         errors: harness.inspect().errors,
+        redPixels: harness.inspect().surfaces[0].red,
       };
     } finally {
       harness.dispose();
@@ -1576,4 +1615,5 @@ test("neutral live video binds directly as shader input without SceneTexture", a
   expect(result.captures).toBe(0);
   expect(result.domCaptures).toBe(0);
   expect(result.errors).toEqual([]);
+  expect(result.redPixels).toBeGreaterThan(1000);
 });

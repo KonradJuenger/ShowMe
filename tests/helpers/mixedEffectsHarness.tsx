@@ -162,9 +162,7 @@ export async function mountMixedEffectsHarness(
     ).map((node) => node.textContent),
     surfaces: Array.from(host.querySelectorAll<HTMLElement>("[data-effect-id]"))
       .filter((node) =>
-        node.querySelector(
-          ':scope > canvas[data-shader-stage="terminal"]',
-        ),
+        node.querySelector(':scope > canvas[data-shader-stage="terminal"]'),
       )
       .map((node) => {
         const canvas = node.querySelector<HTMLCanvasElement>(
@@ -215,7 +213,7 @@ export async function mountMixedEffectsHarness(
   await new Promise<void>((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
   );
-  await stage(0);
+  await advance(0);
   return {
     model,
     slide,

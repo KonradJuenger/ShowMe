@@ -22,8 +22,10 @@ export function shaderOutputTextureBytes() {
 }
 export function disposeShaderOutput(output: ShaderOutput) {
   outputs.delete(output);
-  output.gl.deleteFramebuffer(output.framebuffer);
-  output.gl.deleteTexture(output.texture);
+  if (output.gl.isFramebuffer(output.framebuffer))
+    output.gl.deleteFramebuffer(output.framebuffer);
+  if (output.gl.isTexture(output.texture))
+    output.gl.deleteTexture(output.texture);
 }
 export function allocateShaderOutput(
   gl: WebGL2RenderingContext,
@@ -33,6 +35,8 @@ export function allocateShaderOutput(
 ) {
   if (
     previous?.gl === gl &&
+    gl.isTexture(previous.texture) &&
+    gl.isFramebuffer(previous.framebuffer) &&
     previous.width === width &&
     previous.height === height
   )
@@ -98,4 +102,3 @@ export function allocateShaderOutput(
     gl.activeTexture(gl.TEXTURE0);
   }
 }
-

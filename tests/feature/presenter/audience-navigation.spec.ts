@@ -198,31 +198,49 @@ test("audience stress benchmark renders dense animated slides and reports compar
   const shaderPixels = await page.evaluate(() =>
     [
       ...document.querySelectorAll<HTMLCanvasElement>(
-        '[data-active-slide] [data-effect-ready="true"] canvas[data-shader-stage="terminal"]',
+        '[data-active-slide] [data-effect-ready="true"] canvas',
       ),
     ].map((canvas) => {
-      const gl = canvas.getContext("webgl2")!;
+      // Paired main measurements have Canvas2D outputs. Readback is outside
+      // every timed region on both revisions.
+      const context2d = canvas.dataset.shaderStage
+        ? null
+        : canvas.getContext("2d");
+      const gl = context2d ? null : canvas.getContext("webgl2")!;
       const center = new Uint8Array(4);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.readPixels(
-        Math.floor(canvas.width / 2),
-        Math.floor(canvas.height / 2),
-        1,
-        1,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        center,
-      );
-      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
-      gl.readPixels(
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        pixels,
-      );
+      let pixels: Uint8Array | Uint8ClampedArray;
+      if (context2d) {
+        center.set(
+          context2d.getImageData(
+            Math.floor(canvas.width / 2),
+            Math.floor(canvas.height / 2),
+            1,
+            1,
+          ).data,
+        );
+        pixels = context2d.getImageData(0, 0, canvas.width, canvas.height).data;
+      } else if (gl) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.readPixels(
+          Math.floor(canvas.width / 2),
+          Math.floor(canvas.height / 2),
+          1,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          center,
+        );
+        pixels = new Uint8Array(canvas.width * canvas.height * 4);
+        gl.readPixels(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          pixels,
+        );
+      } else throw new Error("Shader output has no readable context");
       let textPixels = 0;
       for (let i = 0; i < pixels.length; i += 4)
         if (

@@ -6,7 +6,7 @@ import { blankEffect } from "../../src/core/effectAuthoring";
 import { newEffectInstance } from "../../src/core/effects";
 
 export const AUDIENCE_STRESS_WORKLOAD = {
-  version: 2,
+  version: 3,
   slides: 30,
   imagesPerSlide: 12,
   textsPerSlide: 39,

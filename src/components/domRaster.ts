@@ -97,9 +97,9 @@ export function createDomRasterSource(
     }
     return false;
   };
-  const semanticStyles = stableStyles !== undefined;
+  const semanticStyles = () => stableStyles?.() != null;
   const hasRunningAnimations = () =>
-    !semanticStyles &&
+    !semanticStyles() &&
     originalRoot.getAnimations({ subtree: true }).some((animation) => {
       if (animation.playState !== "running") return false;
       if (!refined || !(animation.effect instanceof KeyframeEffect))
@@ -113,7 +113,7 @@ export function createDomRasterSource(
     if (disposed) return;
     const animated = hasRunningAnimations();
     const playing =
-      !semanticStyles &&
+      !semanticStyles() &&
       Array.from(originalRoot.querySelectorAll("video")).some(
         (video) => (!refined || included(video)) && !video.paused,
       );
@@ -128,9 +128,8 @@ export function createDomRasterSource(
     if (disposed) return;
     dirty = true;
     invalidate();
-    if (!semanticStyles && !animationFrame && !disposed)
-      if (!semanticStyles)
-    animationFrame = requestAnimationFrame(pollAnimations);
+    if (!semanticStyles() && !animationFrame)
+      animationFrame = requestAnimationFrame(pollAnimations);
   };
   const observer = new MutationObserver((records) => {
     const relevant = records.filter((record) => {
@@ -193,7 +192,7 @@ export function createDomRasterSource(
       characterData: true,
       attributes: true,
     });
-    if (!semanticStyles)
+    if (!semanticStyles())
       for (
         let ancestor = source().parentElement;
         ancestor;
@@ -375,6 +374,7 @@ export function createDomRasterSource(
       const pseudos: string[] = [];
       for (const pseudo of ["::before", "::after"]) {
         const style = getComputedStyle(original, pseudo);
+        metrics.styleReads++;
         if (style.content !== "none" && style.content !== "normal")
           pseudos.push(
             `[data-dom-raster-node="${key}"]${pseudo}{${declarations(style)}animation:none!important;transition:none!important;}`,
@@ -520,7 +520,7 @@ export function createDomRasterSource(
       const requestedTransform = sourceTransform().toString();
       const animated = hasRunningAnimations();
       const video =
-        !semanticStyles &&
+        !semanticStyles() &&
         Array.from(originalRoot.querySelectorAll("video")).some(
           (node) => (!refined || included(node)) && !node.paused,
         );

@@ -26,7 +26,7 @@ import {
   motionElement,
 } from "../core/motion";
 import { stageDuration } from "../core/motionModel";
-import { effectSurface, flushEffectSurfaces } from "./effectRuntime";
+import { bindEffectSurfaceFlusher, effectSurface } from "./effectRuntime";
 import {
   numericEffectParameters,
   effectTiming,
@@ -125,8 +125,10 @@ export function createMotionRuntime(
     overlay: ReturnType<typeof resolveMotion>,
   ) => {
     const chain: string[] = [];
-    for (let current: string | null | undefined = id; current; )
-      chain.push(current), (current = parents.get(current));
+    for (let current: string | null | undefined = id; current;) {
+      chain.push(current);
+      current = parents.get(current);
+    }
     let matrix: Matrix = IDENTITY;
     for (const elementId of chain.reverse()) {
       const element = elements.get(elementId);
@@ -363,6 +365,7 @@ export function createMotionRuntime(
     });
     return [{ element, instance, surface, values }];
   });
+  const flushBoundEffects = bindEffectSurfaceFlusher(root);
   const clock = motionValue(0);
   // Effects-only stages still have the same presentation clock.
   const detachClock = clock.on("change", (time) => {
@@ -457,7 +460,7 @@ export function createMotionRuntime(
         ),
       );
     });
-    void flushEffectSurfaces(root);
+    void flushBoundEffects();
   };
   finish();
   return {

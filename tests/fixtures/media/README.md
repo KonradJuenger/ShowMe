@@ -18,3 +18,7 @@ ffmpeg -f lavfi -i "color=c=red:s=80x40:d=1:r=30" -f lavfi -i "color=c=white:s=4
 ```
 
 FFmpeg is not required to run this test.
+
+`renderer-pattern.png` is a prepared 640×360 opaque gradient/checker pattern
+generated from integer pixel arithmetic and encoded with Sharp. It is shared by
+paired native renderer measurements; no PNG generation runs in their timed frames.

@@ -2,11 +2,10 @@ import { mountMixedEffectsHarness } from "./mixedEffectsHarness";
 import { createMotionRuntime } from "../../src/components/motionRuntime";
 import {
   effectSurface,
-  shaderRuntimeDiagnostics,
   flushEffectSurfaces,
 } from "../../src/components/effectRuntime";
-import { shaderOutputDiagnostics } from "../../src/components/shaderOutput";
-import { sceneTextureDiagnostics } from "../../src/components/sceneTexture";
+import * as runtime from "../../src/components/effectRuntime";
+import * as output from "../../src/components/shaderOutput";
 import { domRasterDiagnostics } from "../../src/components/domRaster";
 import { blankEffect } from "../../src/core/effectAuthoring";
 import { newEffectInstance } from "../../src/core/effects";
@@ -16,9 +15,57 @@ import { createTextElement } from "../../src/core/text";
 import { platform } from "../../src/platform";
 
 export type RenderingWorkload = "native" | "generated" | "scene-texture";
+type Measure = (phase: "start" | "end") => Promise<void>;
 
-const fixturePng =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9WlYQAAAAASUVORK5CYII=";
+// The same measurement fixture runs against main, which predates SceneTexture
+// diagnostics. Missing counters are recorded separately from measured zeros.
+const baseline = (window as unknown as { rendererBaseline?: boolean })
+  .rendererBaseline;
+const sceneModulePath = "/src/components/sceneTexture.ts";
+const sceneTextureDiagnostics = baseline
+  ? () => ({
+      preparations: 0,
+      cacheHits: 0,
+      retainedReuses: 0,
+      captures: domRasterDiagnostics().captures,
+      preparationMs: 0,
+      retainedTextureBytes: 0,
+    })
+  : (
+      (await import(
+        /* @vite-ignore */ sceneModulePath
+      )) as typeof import("../../src/components/sceneTexture")
+    ).sceneTextureDiagnostics;
+const shaderRuntimeDiagnostics =
+  (
+    runtime as unknown as {
+      shaderRuntimeDiagnostics?: () => {
+        shaderCompilations: number;
+        contextsCreated: number;
+        canvas2dPresentationCopies: number;
+        activeContexts: number;
+        maxActiveContexts: number;
+      };
+    }
+  ).shaderRuntimeDiagnostics ??
+  (() => ({
+    shaderCompilations: 0,
+    contextsCreated: 0,
+    canvas2dPresentationCopies: 0,
+    activeContexts: 0,
+    maxActiveContexts: 0,
+  }));
+const shaderOutputDiagnostics =
+  (
+    output as unknown as {
+      shaderOutputDiagnostics?: () => { allocations: number };
+    }
+  ).shaderOutputDiagnostics ?? (() => ({ allocations: 0 }));
+
+const fixturePng = new URL(
+  "../fixtures/media/renderer-pattern.png",
+  import.meta.url,
+).href;
 
 function diagnostics() {
   return {
@@ -29,7 +76,10 @@ function diagnostics() {
   };
 }
 
-function delta(before: ReturnType<typeof diagnostics>, after: ReturnType<typeof diagnostics>) {
+function delta(
+  before: ReturnType<typeof diagnostics>,
+  after: ReturnType<typeof diagnostics>,
+) {
   return {
     domCaptures: after.dom.captures - before.dom.captures,
     domClones: after.dom.clones - before.dom.clones,
@@ -47,8 +97,7 @@ function delta(before: ReturnType<typeof diagnostics>, after: ReturnType<typeof 
     canvas2dPresentationCopies:
       after.shader.canvas2dPresentationCopies -
       before.shader.canvas2dPresentationCopies,
-    gpuOutputAllocations:
-      after.output.allocations - before.output.allocations,
+    gpuOutputAllocations: after.output.allocations - before.output.allocations,
   };
 }
 
@@ -61,9 +110,9 @@ function asset() {
     type: "image" as const,
     mediaType: "image" as const,
     mime: "image/png" as const,
-    bytes: 1,
-    width: 1,
-    height: 1,
+    bytes: 47184,
+    width: 640,
+    height: 360,
     createdAt: "2026-10-23T00:00:00Z",
   };
 }
@@ -96,36 +145,71 @@ function instrumentDiscovery() {
   const nativeStyle = window.getComputedStyle.bind(window);
   const nativeQuery = Element.prototype.querySelectorAll;
   const nativeCreate = document.createElement.bind(document);
+  const nativeDrawImage = CanvasRenderingContext2D.prototype.drawImage;
+  const nativeCompileShader = WebGL2RenderingContext.prototype.compileShader;
+  const nativeCreateTexture = WebGL2RenderingContext.prototype.createTexture;
   let styleReads = 0;
   let queries = 0;
   let canvasAllocations = 0;
+  let canvas2dCopies = 0;
+  let shaderCompilations = 0;
+  let gpuTextureAllocations = 0;
+  WebGL2RenderingContext.prototype.compileShader = function (shader) {
+    shaderCompilations++;
+    return nativeCompileShader.call(this, shader);
+  };
+  WebGL2RenderingContext.prototype.createTexture = function () {
+    gpuTextureAllocations++;
+    return nativeCreateTexture.call(this);
+  };
+  CanvasRenderingContext2D.prototype.drawImage = function (
+    this: CanvasRenderingContext2D,
+    ...args: unknown[]
+  ) {
+    canvas2dCopies++;
+    return Reflect.apply(nativeDrawImage, this, args);
+  } as typeof nativeDrawImage;
   window.getComputedStyle = ((...args: unknown[]) => {
     styleReads++;
     return nativeStyle(...(args as Parameters<typeof getComputedStyle>));
   }) as typeof getComputedStyle;
-  (Element.prototype as unknown as { querySelectorAll: typeof nativeQuery })
-    .querySelectorAll = function (selectors: string) {
+  (
+    Element.prototype as unknown as { querySelectorAll: typeof nativeQuery }
+  ).querySelectorAll = function (selectors: string) {
     queries++;
     return nativeQuery.call(this, selectors);
   };
-  (document as unknown as { createElement: typeof document.createElement })
-    .createElement = ((tagName: string, options?: ElementCreationOptions) => {
+  (
+    document as unknown as { createElement: typeof document.createElement }
+  ).createElement = ((tagName: string, options?: ElementCreationOptions) => {
     if (tagName.toLowerCase() === "canvas") canvasAllocations++;
     return nativeCreate(tagName, options);
   }) as typeof document.createElement;
   return {
     finish() {
       window.getComputedStyle = nativeStyle;
-      (Element.prototype as unknown as { querySelectorAll: typeof nativeQuery })
-        .querySelectorAll = nativeQuery;
-      (document as unknown as { createElement: typeof document.createElement })
-        .createElement = nativeCreate;
-      return { styleReads, queries, canvasAllocations };
+      (
+        Element.prototype as unknown as { querySelectorAll: typeof nativeQuery }
+      ).querySelectorAll = nativeQuery;
+      (
+        document as unknown as { createElement: typeof document.createElement }
+      ).createElement = nativeCreate;
+      CanvasRenderingContext2D.prototype.drawImage = nativeDrawImage;
+      WebGL2RenderingContext.prototype.compileShader = nativeCompileShader;
+      WebGL2RenderingContext.prototype.createTexture = nativeCreateTexture;
+      return {
+        styleReads,
+        queries,
+        canvasAllocations,
+        canvas2dCopies,
+        shaderCompilations,
+        gpuTextureAllocations,
+      };
     },
   };
 }
 
-async function nativeWorkload() {
+async function nativeWorkload(measure: Measure) {
   platform.assetUrl = async () => fixturePng;
   const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
     configure(model) {
@@ -151,7 +235,8 @@ async function nativeWorkload() {
           y: 150 + Math.floor(index / 4) * 54,
         });
         Object.assign(text.frame, { width: 135, height: 44 });
-        if (text.content?.type === "text") text.content.text = `Native ${index}`;
+        if (text.content?.type === "text")
+          text.content.text = `Native ${index}`;
         return text;
       });
       const glass = createBasicShape("glass", "rectangle", { x: 280, y: 32 });
@@ -265,6 +350,7 @@ async function nativeWorkload() {
     startedAt: 0,
   });
   const before = diagnostics();
+  await measure("start");
   const discovery = instrumentDiscovery();
   const frames = await frameLoop(60, (time) =>
     runtime.sync({
@@ -276,6 +362,7 @@ async function nativeWorkload() {
     }),
   );
   const discovered = discovery.finish();
+  await measure("end");
   const after = diagnostics();
   runtime.cancel();
   harness.dispose();
@@ -286,7 +373,7 @@ async function nativeWorkload() {
   };
 }
 
-async function generatedWorkload() {
+async function generatedWorkload(measure: Measure, count = 4) {
   const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
     configure(model) {
       model.deck.stylesheet = "";
@@ -299,22 +386,22 @@ async function generatedWorkload() {
           "#version 300 es\nprecision highp float;uniform float u_t;in vec2 v_uv;out vec4 outColor;void main(){float p=.5+.5*sin(u_t+v_uv.x*12.);outColor=vec4(v_uv.x,p,v_uv.y,.9);}",
       };
       slide.effectResources = { shader };
-      slide.nodes[0].children = Array.from({ length: 4 }, (_, index) => {
+      slide.nodes[0].children = Array.from({ length: count }, (_, index) => {
         const shape = createBasicShape(`shader-${index}`, "rectangle", {
           x: (index % 2) * 320,
-          y: Math.floor(index / 2) * 180,
+          y: (Math.floor(index / 2) % 2) * 180,
         });
         Object.assign(shape.frame, { width: 320, height: 180 });
         shape.appearance.fill = "";
-        shape.effects = [
-          newEffectInstance(`shader-${index}`, shader, "background"),
-        ];
+        shape.effects = [newEffectInstance("shader", shader, "background")];
         return shape;
       });
     },
   });
   await harness.advance(0);
   const before = diagnostics();
+  await measure("start");
+  const discovery = instrumentDiscovery();
   const frames = await frameLoop(60, async (time) => {
     for (const node of harness.host.querySelectorAll<HTMLElement>(
       "[data-effect-id]",
@@ -329,17 +416,30 @@ async function generatedWorkload() {
     await flushEffectSurfaces(harness.host);
   });
   const after = diagnostics();
+  const discovered = discovery.finish();
+  await measure("end");
   const contextCount = after.shader.activeContexts;
+  const errors = Array.from(
+    harness.host.querySelectorAll<HTMLElement>("[data-effect-error]"),
+  ).map((node) => node.dataset.effectError);
   harness.dispose();
   return {
     frames,
+    discovered,
     contextCount,
+    errors,
     maxActiveContexts: after.shader.maxActiveContexts,
+    contextsAfterDispose: shaderRuntimeDiagnostics().activeContexts,
     diagnostics: delta(before, after),
   };
 }
 
-async function sceneTextureWorkload() {
+export async function runShaderContextStress() {
+  return generatedWorkload(async () => {}, 12);
+}
+
+async function sceneTextureWorkload(measure: Measure) {
+  await measure("start");
   const before = diagnostics();
   const first = await mountMixedEffectsHarness(undefined, 0, undefined, {
     configure(model) {
@@ -372,6 +472,7 @@ async function sceneTextureWorkload() {
   await second.advance(0);
   const revisitReadyMs = performance.now() - revisitStart;
   const revisited = diagnostics();
+  await measure("end");
   second.dispose();
   return {
     firstPreparation: delta(before, prepared),
@@ -381,8 +482,11 @@ async function sceneTextureWorkload() {
   };
 }
 
-export async function runRenderingWorkload(kind: RenderingWorkload) {
-  if (kind === "native") return nativeWorkload();
-  if (kind === "generated") return generatedWorkload();
-  return sceneTextureWorkload();
+export async function runRenderingWorkload(
+  kind: RenderingWorkload,
+  measure: Measure = async () => {},
+) {
+  if (kind === "native") return nativeWorkload(measure);
+  if (kind === "generated") return generatedWorkload(measure);
+  return sceneTextureWorkload(measure);
 }

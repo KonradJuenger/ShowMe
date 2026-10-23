@@ -67,8 +67,12 @@ export class EffectSources<Source extends PixelSource> {
       source: owned.source,
       reused,
       upload(gl: WebGL2RenderingContext) {
-        if (!owned.texture || owned.texture.gl !== gl) {
-          if (owned.texture)
+        if (
+          !owned.texture ||
+          owned.texture.gl !== gl ||
+          !gl.isTexture(owned.texture.value)
+        ) {
+          if (owned.texture?.gl.isTexture(owned.texture.value))
             owned.texture.gl.deleteTexture(owned.texture.value);
           const value = gl.createTexture();
           if (!value) throw new Error("Cannot allocate shader input texture");

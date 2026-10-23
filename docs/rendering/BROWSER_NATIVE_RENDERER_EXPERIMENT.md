@@ -4,7 +4,9 @@ Branch: `experimental/browser-native-renderer`
 
 Base: `chatgpt/general-compositor-fix` at `8ff4fb95ef73e9244ff04781f16bfbaafd593424`
 
-Status: experimental architecture direction. No production cutover is implied by this document.
+Status: experimental branch with browser-native normal rendering and direct GPU
+shader presentation. See [current architecture and validation](DIRECT_GPU_RENDERER_VALIDATION.md).
+The exploration and migration plan below describe the earlier design process.
 
 ## Why this experiment exists
 

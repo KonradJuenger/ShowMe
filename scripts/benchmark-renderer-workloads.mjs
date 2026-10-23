@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -17,16 +18,33 @@ const allowed = new Set([
   "--baseline",
   "--max-regression-percent",
   "--skip-mixed",
+  "--measure-baseline",
 ]);
 for (let i = 0; i < args.length; i++)
   if (args[i].startsWith("--") && !allowed.has(args[i]))
     throw new Error(`Unknown option ${args[i]}`);
 
-const output = path.resolve(option("--output", "test-results-renderer-workloads"));
+const output = path.resolve(
+  option("--output", "test-results-renderer-workloads"),
+);
 const runs = Number(option("--runs", "3"));
 const baselinePath = option("--baseline", null);
 const limit = Number(option("--max-regression-percent", "20"));
 const skipMixed = args.includes("--skip-mixed");
+const measureBaseline = args.includes("--measure-baseline");
+const harnessDigest = createHash("sha256");
+for (const file of [
+  "tests/helpers/renderingWorkloadHarness.tsx",
+  "tests/helpers/mixedEffectsHarness.tsx",
+  "tests/helpers/audienceNavigationHarness.tsx",
+  "tests/helpers/audienceStressScene.ts",
+  "tests/feature/effects/rendering-workloads.spec.ts",
+  "tests/feature/presenter/audience-navigation.spec.ts",
+  "tests/fixtures/media/renderer-pattern.png",
+  "tests/helpers/webglPixels.ts",
+])
+  harnessDigest.update(await readFile(file));
+const harnessSha256 = harnessDigest.digest("hex");
 if (!Number.isInteger(runs) || runs < 1 || runs > 20)
   throw new Error("--runs must be between 1 and 20");
 if (!Number.isFinite(limit) || limit < 0)
@@ -61,6 +79,7 @@ const isolated = spawnSync(
         "tests/feature/effects/rendering-workloads.spec.ts",
       ]),
       SHOWME_RENDERER_BENCHMARK: "1",
+      SHOWME_RENDERER_BASELINE: measureBaseline ? "1" : "0",
       SHOWME_RENDERER_BENCHMARK_OUTPUT: output,
     },
   },
@@ -128,7 +147,10 @@ const median = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 };
-const range = (values) => ({ min: Math.min(...values), max: Math.max(...values) });
+const range = (values) => ({
+  min: Math.min(...values),
+  max: Math.max(...values),
+});
 const select = {
   native: {
     frameP95Ms: (r) => r.frames.p95,
@@ -144,20 +166,22 @@ const select = {
   generated: {
     frameP95Ms: (r) => r.frames.p95,
     taskCpuMs: (r) => r.metrics.TaskDuration,
-    canvas2dCopies: (r) => r.result.diagnostics.canvas2dPresentationCopies,
+    canvas2dCopies: (r) => r.result.discovered.canvas2dCopies,
     sceneCaptures: (r) => r.result.diagnostics.sceneCaptures,
-    shaderCompilations: (r) => r.result.diagnostics.shaderCompilations,
-    gpuOutputAllocations: (r) => r.result.diagnostics.gpuOutputAllocations,
-    activeContexts: (r) => r.result.contextCount,
-    maxActiveContexts: (r) => r.result.maxActiveContexts,
+    shaderCompilations: (r) => r.result.discovered.shaderCompilations,
+    gpuTextureAllocations: (r) => r.result.discovered.gpuTextureAllocations,
+    activeContexts: (r) => (r.baseline ? null : r.result.contextCount),
+    maxActiveContexts: (r) => (r.baseline ? null : r.result.maxActiveContexts),
   },
   "scene-texture": {
     taskCpuMs: (r) => r.metrics.TaskDuration,
     firstCaptures: (r) => r.result.firstPreparation.sceneCaptures,
     firstStyleReads: (r) => r.result.firstPreparation.domStyleReads,
-    firstPreparationMs: (r) => r.result.firstPreparation.scenePreparationMs,
+    firstPreparationMs: (r) =>
+      r.baseline ? null : r.result.firstPreparation.scenePreparationMs,
     revisitCaptures: (r) => r.result.revisit.sceneCaptures,
-    retainedReuses: (r) => r.result.revisit.sceneRetainedReuses,
+    retainedReuses: (r) =>
+      r.baseline ? null : r.result.revisit.sceneRetainedReuses,
     revisitReadyMs: (r) => r.result.revisitReadyMs,
   },
 };
@@ -168,6 +192,8 @@ const workloads = Object.fromEntries(
     const metrics = Object.fromEntries(
       Object.entries(select[kind]).map(([name, read]) => {
         const samples = rows.map(read);
+        if (samples.some((value) => !Number.isFinite(value)))
+          return [name, null];
         return [name, { median: median(samples), range: range(samples) }];
       }),
     );
@@ -176,13 +202,14 @@ const workloads = Object.fromEntries(
 );
 
 const aggregate = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   createdAt: new Date().toISOString(),
   provenance: {
     mode: "headless Chromium",
-    note:
-      "Keep this dataset separate from visible Electron/hardware-GPU measurements.",
+    note: "Keep this dataset separate from visible Electron/hardware-GPU measurements.",
     revision,
+    measureBaseline,
+    harnessSha256,
     branch,
     dirty,
     runs,
@@ -208,9 +235,16 @@ await writeFile(
 console.log(JSON.stringify(aggregate, null, 2));
 
 if (baselinePath) {
-  const baseline = JSON.parse(await readFile(path.resolve(baselinePath), "utf8"));
+  const baseline = JSON.parse(
+    await readFile(path.resolve(baselinePath), "utf8"),
+  );
   if (dirty || baseline.provenance?.dirty)
     throw new Error("Paired renderer claims require clean commits.");
+  if (
+    baseline.schemaVersion !== aggregate.schemaVersion ||
+    baseline.provenance?.harnessSha256 !== harnessSha256
+  )
+    throw new Error("Paired renderer harness/schema mismatch.");
   for (const key of ["platform", "arch", "cpu", "logicalCpus"])
     if (baseline.provenance?.[key] !== aggregate.provenance[key])
       throw new Error(`Paired renderer environment mismatch: ${key}`);
@@ -233,7 +267,8 @@ if (baselinePath) {
   for (const kind of kinds)
     for (const [metric, value] of Object.entries(workloads[kind].metrics)) {
       const previous = baseline.workloads?.[kind]?.metrics?.[metric]?.median;
-      if (!Number.isFinite(previous) || !Number.isFinite(value.median)) continue;
+      if (!Number.isFinite(previous) || !Number.isFinite(value?.median))
+        continue;
       const changePercent = previous
         ? (100 * (value.median - previous)) / previous
         : null;
