@@ -20,6 +20,7 @@ import {
 } from "./shaderOutput";
 import type { Deck, Slide } from "../core/document";
 import type { Element } from "../core/element";
+import { getWorldMatrix } from "../core/scene";
 import type { EffectResources } from "../core/effects";
 import {
   consumedParameter,
@@ -67,7 +68,6 @@ type Surface = {
 };
 const surfaces = new WeakMap<HTMLElement, Surface>();
 const scheduled = new Map<HTMLElement, { prepare(): void; draw(): unknown }>();
-const shaderRedraws = new Set<() => void>();
 export type EffectExecutionMode = "naive" | "refined";
 let executionMode: EffectExecutionMode = "refined";
 /** Regression reference control. Production uses the refined renderer. */
@@ -474,7 +474,12 @@ export function mountEffectSurface(
   let heldDensity = 0;
   let preparedSampling = false;
   let logicalSize = size;
-  let semanticTransform = new DOMMatrix();
+  let semanticTransform = (() => {
+    if (!content?.scene) return new DOMMatrix();
+    const matrix = getWorldMatrix(content.scene().slide, content.element.id);
+    return new DOMMatrix([...matrix]);
+  })();
+  let semanticTransformKey = semanticTransform.toString();
   const prepareSampling = () => {
     if (!live || definition.kind !== "fragment-glsl") return;
     try {
@@ -1041,8 +1046,13 @@ export function mountEffectSurface(
     },
     prepareSampling,
     setTransport(matrix) {
-      semanticTransform = new DOMMatrix(matrix);
+      const next = new DOMMatrix(matrix);
+      const key = next.toString();
+      if (key === semanticTransformKey) return;
+      semanticTransform = next;
+      semanticTransformKey = key;
       preparedSampling = false;
+      if (definition.input === "backdrop") sceneTexture?.invalidate();
       schedule();
     },
     set(key, value) {
