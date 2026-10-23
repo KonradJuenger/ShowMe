@@ -62,3 +62,23 @@ pipeline. These are diagnostic observations, not a shipped console-disable featu
 or physical-display FPS. No current document or user preferences were changed.
 
 [Raw comparison and profile shares](docs/rendering/evidence/audience-console-ablation-2026-10-23.json).
+
+## Native presentation phases 1–3 — 2026-10-23
+
+On the performance branch, native DOM/CSS rendering is retained. Freezing redundant
+editor/presenter visuals gave 22.6 → 29.1 median audience rAF FPS in the Phase 1
+comparison. Phase 2 GPU ownership/binding caches gave a small inconsistent gain.
+The latest paired Phase 3 experiment separates generated and pixel-input shader
+chains into two shared contexts: **34.2 → 49.7 median rAF FPS**, glass publications
+**17.0 → 24.8/sec**, p95 **66.2 → 33.5 ms**. Three serial alternating clean
+production pairs on Radeon 880M, same reference deck/1596×998 CSS/DPR 1.6042.
+
+These are separate within-phase comparisons, not one continuous main-to-candidate
+measurement. The original app remained running. Two contexts add about 7.8 MiB
+of logical color-buffer storage; actual GPU memory was not measured. Glass remains
+half-rate and the result is below 60 FPS. Context topology and resize contention
+changed together; this does not isolate resize timing or physical display FPS.
+No merge/push to main.
+
+[Investigation and verification](docs/rendering/NATIVE_PRESENTATION_PERFORMANCE.md),
+[Phase 3 paired evidence and harness](docs/rendering/evidence/native-presentation-phase3-2026-10-23.json).

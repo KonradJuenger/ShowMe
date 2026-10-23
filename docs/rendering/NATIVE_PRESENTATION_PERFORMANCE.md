@@ -168,3 +168,54 @@ live video' --output test-results-phase2`; `npm run build`;
 harness in alternating Phase 1/Phase 2 worktrees.
 
 [Raw Phase 2 evidence](evidence/native-presentation-phase2-2026-10-23.json).
+
+## Phase 3 — bounded drawing-buffer cohorts
+
+Clean production baseline `3432fa4` versus candidate `555add0`, three serial
+alternating ten-second pairs on the same reference deck, hardware, viewport and
+DPR as above. The original user app remained running; no tests/builds ran during
+measurement. The raw evidence includes the exact harness and environment hashes.
+
+Use at most two shared shader contexts per renderer: one for generated-input
+chains, one for pixel-input chains. Directly connected shader stages retain their
+chain's context. This keeps the reference deck's background and glass buffers at
+their native dimensions without alternating one drawing buffer between sizes.
+Many dimensions within one cohort can still resize; this is a small bounded
+experiment, not a general size pool. Output resolution, native DOM/CSS composition
+and SceneTexture capture semantics are unchanged. Program lifetime/cache eviction
+now respects the owning context. Recovery refreshes static consumers across
+cohorts, because they may sample the restored background.
+
+| Version | Audience rAF FPS median [min, max] | Glass publications/sec | Frame p95 ms median [min, max] |
+| --- | --- | --- | --- |
+| One shared context | 34.2 [31.9, 38.0] | 17.0 [15.9, 19.0] | 66.2 [50.0, 66.6] |
+| Two bounded contexts | 49.7 [47.7, 54.6] | 24.8 [23.8, 27.3] | 33.5 [33.3, 33.6] |
+
+Median audience rate increased about 45%; each pair improved. Keep this candidate
+on the performance branch. This changes context topology and resize contention
+together, so the gain cannot be attributed solely to resize cost. The single
+context already stays stable for equal-size outputs; a third max-size/cropped
+variant was not implemented, since it changes output materialization/UV handling.
+
+The audience instrumentation observed exactly one versus two shader WebGL
+contexts before its separate GPU-identity probe. Logical RGBA drawing-buffer
+storage at sample end increased from 14,761,604 to 22,923,212 bytes (about 7.8 MiB
+extra). This excludes textures, FBOs, driver allocations and bitmap presentation;
+actual VRAM and peak GPU memory were not measured. Contexts are bounded globally
+per renderer rather than per shader chain. No physical display FPS or 60 FPS
+claim: glass still publishes at approximately half the audience callback rate.
+The next work is qualifying GPU SceneTexture assembly for the reference workload,
+then removing that asynchronous capture cadence.
+
+Verification: `npm run build` (including typecheck), `npm run verify:build`,
+`npx eslint src/components/effectRuntime.ts` and `git diff --check` passed.
+With SHOWME_TEST_FILES set to the mixed-compositing spec,
+`npx playwright test --grep 'GPU shader handoff|continuous invalidation|neutral live video|mixed-size shader' --output test-results-phase3`
+passed **4 tests**, covering pixels/alpha, mixed-size output, video and context
+recovery. The first run exposed a static consumer recovery failure; the production
+fix refreshes dependent cohorts, and all four passed on the corrected candidate.
+The production audience screenshot was inspected. Full/release suites,
+installer/cross-platform checks and the main-commit audience-navigation gate were
+not rerun; this remains local branch work with no main integration or push.
+
+[Raw Phase 3 evidence](evidence/native-presentation-phase3-2026-10-23.json).
