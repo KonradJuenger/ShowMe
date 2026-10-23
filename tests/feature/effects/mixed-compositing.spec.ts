@@ -1592,8 +1592,19 @@ test("neutral live video binds directly as shader input without SceneTexture", a
       const extension = gl.getExtension("WEBGL_lose_context")!;
       extension.loseContext();
       await lost;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
       extension.restoreContext();
-      await restored;
+      await Promise.race([
+        restored,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Video shader context did not restore")),
+            3000,
+          ),
+        ),
+      ]);
       await harness.advance(0.2);
       const effect =
         harness.host.querySelector<HTMLElement>("[data-effect-id]")!;
