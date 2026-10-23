@@ -7,7 +7,7 @@ import {
   createBackdropRasterSource,
   createElementRasterSource,
 } from "./elementRaster";
-import { createDomRasterSource } from "./domRaster";
+import { createDomRasterSource, domRasterDiagnostics } from "./domRaster";
 import { EffectSources } from "./effectSources";
 import type {
   SceneTexture,
@@ -27,6 +27,23 @@ type SharedSources = {
 };
 const sharedSources = new WeakMap<HTMLElement, SharedSources>();
 const liveSources = new Set<SharedSources>();
+const retainedStaticSources = new EffectSources<Raster>(8);
+const metrics = {
+  activeProviders: 0,
+  preparations: 0,
+  cacheHits: 0,
+  retainedReuses: 0,
+  captures: 0,
+  preparationMs: 0,
+};
+
+export function legacySceneTextureDiagnostics() {
+  return {
+    ...metrics,
+    retainedTextureBytes: retainedStaticSources.textureBytes,
+    domRaster: domRasterDiagnostics(),
+  };
+}
 
 function sourcesFor(root: HTMLElement) {
   let shared = sharedSources.get(root);
@@ -40,9 +57,12 @@ function sourcesFor(root: HTMLElement) {
 }
 
 export function legacySceneTextureTextureBytes() {
-  return [...liveSources].reduce(
-    (sum, shared) => sum + shared.cache.textureBytes,
-    0,
+  return (
+    retainedStaticSources.textureBytes +
+    [...liveSources].reduce(
+      (sum, shared) => sum + shared.cache.textureBytes,
+      0,
+    )
   );
 }
 
@@ -53,18 +73,27 @@ function hasText(elements: readonly Element[]): boolean {
   );
 }
 
+function hasVideo(elements: readonly Element[]): boolean {
+  return elements.some(
+    (element) =>
+      element.content?.type === "video" || hasVideo(element.children),
+  );
+}
+
 function hasDomEffects(
   elements: readonly Element[],
   resources: EffectResources,
+  ignoredEffectId?: string,
 ): boolean {
   return elements.some(
     (element) =>
       element.effects?.some(
         (effect) =>
+          effect.id !== ignoredEffectId &&
           effect.enabled &&
-          resources[effect.resourceId] &&
-          resources[effect.resourceId].kind !== "fragment-glsl",
-      ) || hasDomEffects(element.children, resources),
+          resources[effect.resourceId],
+      ) ||
+      hasDomEffects(element.children, resources, ignoredEffectId),
   );
 }
 
@@ -78,6 +107,7 @@ export function createLegacySceneTextureProvider(
   const observationRoot =
     request.kind === "backdrop" ? context.inputRoot : context.owner;
   const shared = sourcesFor(observationRoot);
+  metrics.activeProviders++;
   let disposed = false;
   let dirty = true;
   let dirtyVersion = 0;
@@ -135,6 +165,38 @@ export function createLegacySceneTextureProvider(
       hasText(inputElements()) ||
       hasDomEffects(inputElements(), resources)
     );
+  };
+  const retainableStaticSource = () => {
+    const scene = context.scene?.();
+    const elements = inputElements();
+    return !!(
+      context.refined &&
+      scene &&
+      !scene.deck.stylesheet &&
+      !scene.slide.motion &&
+      !hasVideo(elements) &&
+      !hasDomEffects(elements, context.resources(), request.effectId)
+    );
+  };
+  const semanticRevision = () => {
+    const scene = context.scene?.();
+    if (!scene) return "";
+    return JSON.stringify([
+      inputElements(),
+      scene.deck.textStyles,
+      scene.deck.stylesheet,
+    ]);
+  };
+  const stableStyleKey = () => {
+    const scene = context.scene?.();
+    if (
+      !context.refined ||
+      !scene ||
+      scene.deck.stylesheet ||
+      hasDomEffects(inputElements(), context.resources(), request.effectId)
+    )
+      return undefined;
+    return scene.slide;
   };
 
   const collectDependencies = () => {
@@ -291,15 +353,17 @@ export function createLegacySceneTextureProvider(
           ? elementWorldTransform(context.owner, context.inputRoot).inverse()
           : new DOMMatrix(),
       context.refined,
+      stableStyleKey,
     );
 
   const ensureLease = (sampling: SceneTextureSampling) => {
     const dom = needsDomRaster();
+    const retain = retainableStaticSource();
     const key =
       request.kind +
       ":" +
       context.element.id +
-      (request.kind === "element" ? ":" + request.effectId : "") +
+      (request.kind === "element" && !retain ? ":" + request.effectId : "") +
       "|" +
       (dom ? "dom" : "primitive") +
       "|" +
@@ -309,17 +373,25 @@ export function createLegacySceneTextureProvider(
       "|" +
       sampling.logicalWidth +
       "x" +
-      sampling.logicalHeight;
+      sampling.logicalHeight +
+      (retain ? "|semantic:" + semanticRevision() : "");
     if (key === leaseKey && lease) return;
     lease?.release();
-    lease = shared.cache.acquire(
+    const cache = retain ? retainedStaticSources : shared.cache;
+    lease = cache.acquire(
       key,
       dom ? createNativeRaster : createPrimitiveRaster,
       invalidateProvider,
     );
     leaseKey = key;
-    dirty = true;
-    preparedKey = "";
+    if (retain && lease.reused && lease.source.revision > 0) {
+      dirty = false;
+      preparedKey = JSON.stringify(sampling);
+      metrics.retainedReuses++;
+    } else {
+      dirty = true;
+      preparedKey = "";
+    }
   };
 
   const finishPreparation = (
@@ -348,7 +420,10 @@ export function createLegacySceneTextureProvider(
     ensureLease(sampling);
     if (!lease) throw new Error("SceneTexture source is unavailable.");
     const key = JSON.stringify(sampling);
-    if (!dirty && preparedKey === key) return;
+    if (!dirty && preparedKey === key) {
+      metrics.cacheHits++;
+      return;
+    }
     if (pending)
       return pending.then(() => {
         const next = prepare(sampling);
@@ -358,6 +433,14 @@ export function createLegacySceneTextureProvider(
     const activeLease = lease;
     const update = () => {
       const raster = activeLease.source;
+      const beforeRevision = raster.revision;
+      const started = performance.now();
+      metrics.preparations++;
+      const completed = () => {
+        metrics.preparationMs += performance.now() - started;
+        if (raster.revision !== beforeRevision) metrics.captures++;
+        finishPreparation(version, key, activeLease);
+      };
       const result =
         "backend" in raster
           ? raster.update(
@@ -367,11 +450,8 @@ export function createLegacySceneTextureProvider(
               sampling.logicalHeight,
             )
           : raster.update(sampling.width, sampling.height);
-      if (result instanceof Promise)
-        return result.then(() =>
-          finishPreparation(version, key, activeLease),
-        );
-      finishPreparation(version, key, activeLease);
+      if (result instanceof Promise) return result.then(completed);
+      completed();
     };
     const dependencies = collectDependencies();
     if (dependencies.length) {
@@ -466,6 +546,7 @@ export function createLegacySceneTextureProvider(
       lease?.release();
       lease = null;
       shared.users--;
+      metrics.activeProviders--;
       if (!shared.users) {
         liveSources.delete(shared);
         sharedSources.delete(observationRoot);
