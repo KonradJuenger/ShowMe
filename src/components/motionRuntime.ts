@@ -59,34 +59,6 @@ export function compileMotionStage(slide: Slide, stageIndex: number) {
   const elements = new Map(
     walkElements(slide.nodes.flatMap((r) => r.children)).map((e) => [e.id, e]),
   );
-  const parents = new Map<string, string | null>();
-  const indexParents = (
-    children: readonly import("../core/element").Element[],
-    parentId: string | null,
-  ) =>
-    children.forEach((child) => {
-      parents.set(child.id, parentId);
-      indexParents(child.children, child.id);
-    });
-  slide.nodes.forEach((root) => indexParents(root.children, null));
-  const semanticWorldTransform = (
-    id: string,
-    overlay: ReturnType<typeof resolveMotion>,
-  ) => {
-    const chain: string[] = [];
-    for (let current: string | null | undefined = id; current; )
-      chain.push(current), (current = parents.get(current));
-    let matrix: Matrix = IDENTITY;
-    for (const elementId of chain.reverse()) {
-      const element = elements.get(elementId);
-      if (!element) continue;
-      matrix = multiply(
-        matrix,
-        localMatrix(motionElement(element, overlay).frame),
-      );
-    }
-    return new DOMMatrix([...matrix]);
-  };
   return stage.tracks.flatMap((track) => {
     const element = elements.get(track.elementId);
     if (!element) return [];
@@ -138,6 +110,34 @@ export function createMotionRuntime(
   const elements = new Map(
     walkElements(slide.nodes.flatMap((r) => r.children)).map((e) => [e.id, e]),
   );
+  const parents = new Map<string, string | null>();
+  const indexParents = (
+    children: readonly import("../core/element").Element[],
+    parentId: string | null,
+  ) =>
+    children.forEach((child) => {
+      parents.set(child.id, parentId);
+      indexParents(child.children, child.id);
+    });
+  slide.nodes.forEach((root) => indexParents(root.children, null));
+  const semanticWorldTransform = (
+    id: string,
+    overlay: ReturnType<typeof resolveMotion>,
+  ) => {
+    const chain: string[] = [];
+    for (let current: string | null | undefined = id; current; )
+      chain.push(current), (current = parents.get(current));
+    let matrix: Matrix = IDENTITY;
+    for (const elementId of chain.reverse()) {
+      const element = elements.get(elementId);
+      if (!element) continue;
+      matrix = multiply(
+        matrix,
+        localMatrix(motionElement(element, overlay).frame),
+      );
+    }
+    return new DOMMatrix([...matrix]);
+  };
   const nodes = new Map(
     Array.from(root.querySelectorAll<HTMLElement>("[data-element-id]")).map(
       (n) => [n.dataset.elementId!, n],
