@@ -33,7 +33,12 @@
     "test:deprecated": "node scripts/test-suite.mjs deprecated",
     "test:stats": "node scripts/test-suite.mjs stats",
     "test:audit": "node scripts/test-suite.mjs audit",
-    "benchmark:renderer": "node scripts/benchmark-renderer-workloads.mjs"
+    "benchmark:renderer": "node scripts/benchmark-renderer-workloads.mjs",
+    "experiment:shared-texture": "electron experiments/native-gpu-shared-texture/main.cjs",
+    "benchmark:shared-texture": "electron experiments/native-gpu-shared-texture/main.cjs --benchmark",
+    "benchmark:shared-texture:legacy": "node experiments/native-gpu-shared-texture/legacy-scene-texture.mjs",
+    "benchmark:shared-texture:compare": "node experiments/native-gpu-shared-texture/compare.mjs",
+    "test:shared-texture-policy": "node experiments/native-gpu-shared-texture/framePolicy.selftest.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
