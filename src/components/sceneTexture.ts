@@ -3,6 +3,7 @@ import type { Element } from "../core/element";
 import type { EffectResources } from "../core/effects";
 import {
   createLegacySceneTextureProvider,
+  legacySceneTextureDiagnostics,
   legacySceneTextureTextureBytes,
 } from "./sceneTextureLegacy";
 
@@ -64,4 +65,8 @@ export function createSceneTextureProvider(
 
 export function sceneTextureTextureBytes() {
   return legacySceneTextureTextureBytes();
+}
+
+export function sceneTextureDiagnostics() {
+  return legacySceneTextureDiagnostics();
 }
