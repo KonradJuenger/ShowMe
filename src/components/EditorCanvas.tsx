@@ -127,6 +127,7 @@ export interface EditorCanvasSurfaceProps {
   motionSourceSlide?: import("../core/document").Slide;
   motionState?: import("../core/motionPlayback").MotionPreviewState | null;
   previewMedia?: boolean;
+  visualPlayback?: "live" | "static";
   showFrameBorders?: boolean;
   trimMedia?: boolean;
   cropFrameId?: string | null;
@@ -266,6 +267,7 @@ export function EditorCanvasSurface({
   motionState,
   motionSourceSlide,
   previewMedia = false,
+  visualPlayback = "live",
   showFrameBorders = false,
   trimMedia = false,
   cropFrameId = null,
@@ -1807,6 +1809,8 @@ export function EditorCanvasSurface({
         }}
       >
         <SlideRenderer
+          visualPlayback={visualPlayback}
+          staticVideo={visualPlayback === "static"}
           slide={motionSourceSlide ?? slide}
           templates={renderedSnapshot.templates}
           deck={deck}

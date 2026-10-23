@@ -41,6 +41,8 @@ export interface EffectSampling extends RenderDensity {
 }
 type Surface = {
   materialize(): void;
+  setVisualSuspended(value: boolean): void;
+  refreshVisual(): void;
   gpuOutput(): ShaderOutput | null;
   setSampling(value: EffectSampling): void;
   prepareSampling(): void;
@@ -703,6 +705,8 @@ export function mountEffectSurface(
       frame.postRender(flushScheduled);
     }
   };
+  let visualSuspended = false;
+  let staticRefresh = true;
   const publish = () => {
     node.dataset.effectRevision = String(
       Number(node.dataset.effectRevision ?? 0) + 1,
@@ -790,6 +794,7 @@ export function mountEffectSurface(
     lastShaderInput = "";
   };
   const draw = (_frame?: unknown, preparedSceneInput?: SceneTexture) => {
+    if (visualSuspended && !staticRefresh) return;
     // Element lifecycle gates visual work, independently of this Effect's clock.
     if (ownerAbsent()) return;
     if (!live) return;
@@ -1156,6 +1161,11 @@ export function mountEffectSurface(
         if (sourceContent) sourceContent.style.opacity = "0";
         lastShaderInput = signature;
         publish();
+        if (visualSuspended) {
+          staticRefresh = false;
+          sceneTexture?.dispose();
+          sceneTexture = null;
+        }
       }
       if (node.dataset.effectError !== undefined) {
         delete node.dataset.effectError;
@@ -1331,6 +1341,18 @@ export function mountEffectSurface(
   }
   const surface: Surface = {
     materialize,
+    refreshVisual() {
+      staticRefresh = true;
+      lastShaderInput = "";
+      sceneTexture?.invalidate();
+      schedule();
+    },
+    setVisualSuspended(value) {
+      if (visualSuspended === value) return;
+      visualSuspended = value;
+      staticRefresh = true;
+      schedule();
+    },
     gpuOutput() {
       return live &&
         node.dataset.effectStarted !== "false" &&
@@ -1340,6 +1362,8 @@ export function mountEffectSurface(
         : null;
     },
     setSampling(value) {
+      if (visualSuspended) lastShaderInput = "";
+      staticRefresh = true;
       sampling = value;
       heldDensity = 0;
       preparedSampling = false;
@@ -1421,6 +1445,7 @@ export function mountEffectSurface(
         previous === JSON.stringify(clockKey(timing))
       )
         return;
+      staticRefresh = true;
       schedule();
     },
     async flush() {

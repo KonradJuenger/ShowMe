@@ -89,11 +89,13 @@ export async function mountMixedEffectsHarness(
   document.body.append(host);
   const root = createRoot(host);
   let zoom = 1;
+  let visualPlayback: "live" | "static" = "live";
   let motionState: MotionPreviewState | null = null;
   const render = () =>
     flushSync(() =>
       root.render(
         <SlideRenderer
+          visualPlayback={visualPlayback}
           deck={model.deck}
           slide={slide}
           staticVideo={!options.liveMedia}
@@ -223,6 +225,11 @@ export async function mountMixedEffectsHarness(
     host,
     async setMotion(value: MotionPreviewState | null) {
       motionState = value;
+      render();
+      await flushEffectSurfaces(host);
+    },
+    async setVisualPlayback(value: "live" | "static") {
+      visualPlayback = value;
       render();
       await flushEffectSurfaces(host);
     },

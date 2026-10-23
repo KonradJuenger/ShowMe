@@ -1774,10 +1774,33 @@ test("animated shader and text backdrop publishes completed captures during cont
       visibility: glass.querySelector("canvas")!.style.visibility,
       error: glass.dataset.effectError,
     };
+    await harness.setVisualPlayback("static");
+    const frozen = Number(glass.dataset.effectRevision);
+    await new Promise<void>((resolve) => {
+      let frames = 0;
+      const tick = () => {
+        if (++frames < 30) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+    const afterStatic = Number(glass.dataset.effectRevision);
+    await harness.setVisualPlayback("live");
+    await new Promise<void>((resolve) => {
+      let frames = 0;
+      const tick = () => {
+        if (++frames < 30) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+    const resumed = Number(glass.dataset.effectRevision);
     harness.dispose();
-    return result;
+    return { ...result, frozen, afterStatic, resumed };
   });
   expect(result.error).toBeUndefined();
   expect(result.after).toBeGreaterThan(result.before + 2);
   expect(result.visibility).toBe("visible");
+  expect(result.afterStatic).toBe(result.frozen);
+  expect(result.resumed).toBeGreaterThan(result.afterStatic);
 });

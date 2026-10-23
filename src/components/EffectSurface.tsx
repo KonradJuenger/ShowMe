@@ -182,6 +182,19 @@ export function EffectSurface({
   ]);
   useLayoutEffect(() => {
     if (root.current)
+      effectSurface(root.current)?.setVisualSuspended(
+        render?.staticFrame ?? false,
+      );
+  }, [
+    render?.staticFrame,
+    mountedDefinition,
+    mountedInstance,
+    width,
+    height,
+    mountedContent,
+  ]);
+  useLayoutEffect(() => {
+    if (root.current)
       effectSurface(root.current)?.setSampling({
         x: densityX,
         y: densityY,
@@ -191,6 +204,8 @@ export function EffectSurface({
         envelope,
       });
   }, [
+    render?.sceneRevision,
+    render?.deckRevision,
     densityX,
     densityY,
     mode,
@@ -210,6 +225,12 @@ export function EffectSurface({
     surface?.setTiming(previewTiming);
     void surface?.flush();
   }, [definition, instance, previewTiming]);
+  useLayoutEffect(() => {
+    if (!render?.staticFrame) return;
+    const refresh = () => { if (root.current) effectSurface(root.current)?.refreshVisual(); };
+    document.fonts.addEventListener("loadingdone", refresh);
+    return () => document.fonts.removeEventListener("loadingdone", refresh);
+  }, [render?.staticFrame]);
   const effectChildren = directShaderInput && shaderChain ? (
     <ShaderChainContext.Provider value={shaderChain}>
       {children}
