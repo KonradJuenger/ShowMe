@@ -83,6 +83,25 @@ export function mountAudienceNavigationHarness(stress = false) {
     model.deck.slideMeta[id] = { ...firstMeta, name: `Slide ${index + 1}` };
     if (index !== 0) model.deck.slideIds.push(id);
   }
+  const fixtureAssetIds = new Set<string>([sharedAsset, lateAsset]);
+  if (stress)
+    for (const slide of Object.values(model.slides))
+      for (const node of slide.nodes)
+        for (const element of node.children)
+          if (element.content?.type === "image")
+            fixtureAssetIds.add(element.content.assetId);
+  const fixtureUrls = new Map(
+    [...fixtureAssetIds].map((assetId) => {
+      const hue = Number.parseInt(assetId.slice(-2), 16) * 3;
+      const accent = assetId === lateAsset ? "#c94b32" : "#2165ba";
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${accent}"/><stop offset="1" stop-color="hsl(${hue} 60% 75%)"/></linearGradient><pattern id="p" width="32" height="32" patternUnits="userSpaceOnUse"><rect width="32" height="32" fill="url(#g)"/><rect width="8" height="8" fill="rgba(255,255,255,.4)"/></pattern></defs><rect width="256" height="256" fill="url(#p)"/></svg>`;
+      return [
+        assetId,
+        `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+      ] as const;
+    }),
+  );
+
   const runtime = new DocumentRuntime(model, {
     actorId: "audience-navigation-test",
     durableCommit: async () => {},
@@ -153,41 +172,17 @@ export function mountAudienceNavigationHarness(stress = false) {
     );
     let variant = variants.get(hash);
     if (!variant) {
-      const canvas = document.createElement("canvas");
-      canvas.width = requirement.width;
-      canvas.height = requirement.height;
-      const context = canvas.getContext("2d")!;
-      context.fillStyle =
-        requirement.assetId === lateAsset ? "#c94b32" : "#2165ba";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      if (stress) {
-        const tint = Number.parseInt(requirement.assetId.slice(-2), 16);
-        const gradient = context.createLinearGradient(
-          0,
-          0,
-          canvas.width,
-          canvas.height,
-        );
-        gradient.addColorStop(0, `hsl(${tint * 3} 70% 40%)`);
-        gradient.addColorStop(1, `hsl(${tint * 3 + 90} 60% 75%)`);
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = "#ffffff66";
-        for (let y = 0; y < canvas.height; y += 16)
-          for (let x = 0; x < canvas.width; x += 16)
-            if ((x + y) % 32 === 0) context.fillRect(x, y, 8, 8);
-      }
       const image: PreparedImage = {
         assetId: requirement.assetId,
         hash,
         size: requirement.size,
-        width: canvas.width,
-        height: canvas.height,
+        width: requirement.width,
+        height: requirement.height,
         sourceWidth: 4096,
         sourceHeight: 4096,
-        mime: "image/png",
+        mime: "image/svg+xml",
         recipe: IMAGE_RECIPE,
-        url: canvas.toDataURL(),
+        url: fixtureUrls.get(requirement.assetId)!,
       };
       if (requirement.assetId === lateAsset && !stress) {
         lateUrls.add(image.url);
