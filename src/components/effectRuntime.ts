@@ -707,6 +707,11 @@ export function mountEffectSurface(
   };
   let visualSuspended = false;
   let staticRefresh = true;
+  const restored = () => {
+    staticRefresh = true;
+    lastShaderInput = "";
+    schedule();
+  };
   const publish = () => {
     node.dataset.effectRevision = String(
       Number(node.dataset.effectRevision ?? 0) + 1,
@@ -1193,7 +1198,7 @@ export function mountEffectSurface(
     ownedMediaChanged = null;
     disposeOwnedMediaTexture();
     if (shaderOutput) disposeShaderOutput(shaderOutput);
-    if (shaderChain) shaderChain.redraws.delete(schedule);
+    if (shaderChain) shaderChain.redraws.delete(restored);
     if (ownsShaderChain && shaderChain) disposeShaderChain(shaderChain);
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     surfaces.delete(node);
@@ -1486,7 +1491,7 @@ export function mountEffectSurface(
   };
   surfaces.set(node, surface);
   if (definition.kind === "fragment-glsl" && shaderChain)
-    shaderChain.redraws.add(schedule);
+    shaderChain.redraws.add(restored);
   bypass();
   schedule();
   return dispose;

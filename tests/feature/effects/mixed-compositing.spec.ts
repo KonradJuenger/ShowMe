@@ -1718,7 +1718,7 @@ test("animated shader and text backdrop publishes completed captures during cont
     const { newEffectInstance } = (await import(
       /* @vite-ignore */ String("/src/core/effects.ts")
     )) as typeof import("../../../src/core/effects");
-    const { effectSurface } = (await import(
+    const { effectSurface, flushEffectSurfaces } = (await import(
       /* @vite-ignore */ String("/src/components/effectRuntime.ts")
     )) as typeof import("../../../src/components/effectRuntime");
     const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
@@ -1785,6 +1785,26 @@ test("animated shader and text backdrop publishes completed captures during cont
       requestAnimationFrame(tick);
     });
     const afterStatic = Number(glass.dataset.effectRevision);
+    const gl = effectSurface(background)!.gpuContext()!;
+    const loss = gl.getExtension("WEBGL_lose_context")!;
+    await new Promise<void>((resolve) => {
+      gl.canvas.addEventListener("webglcontextlost", () => resolve(), {
+        once: true,
+      });
+      loss.loseContext();
+    });
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    await new Promise<void>((resolve) => {
+      gl.canvas.addEventListener("webglcontextrestored", () => resolve(), {
+        once: true,
+      });
+      loss.restoreContext();
+    });
+    await flushEffectSurfaces(harness.host);
+    const recovered = Number(glass.dataset.effectRevision);
+    const recoveryError = glass.dataset.effectError;
     await harness.setVisualPlayback("live");
     await new Promise<void>((resolve) => {
       let frames = 0;
@@ -1796,11 +1816,20 @@ test("animated shader and text backdrop publishes completed captures during cont
     });
     const resumed = Number(glass.dataset.effectRevision);
     harness.dispose();
-    return { ...result, frozen, afterStatic, resumed };
+    return {
+      ...result,
+      frozen,
+      afterStatic,
+      resumed,
+      recovered,
+      recoveryError,
+    };
   });
   expect(result.error).toBeUndefined();
   expect(result.after).toBeGreaterThan(result.before + 2);
   expect(result.visibility).toBe("visible");
   expect(result.afterStatic).toBe(result.frozen);
   expect(result.resumed).toBeGreaterThan(result.afterStatic);
+  expect(result.recovered).toBeGreaterThan(result.afterStatic);
+  expect(result.recoveryError).toBeUndefined();
 });
