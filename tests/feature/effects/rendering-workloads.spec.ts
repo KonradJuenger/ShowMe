@@ -1,4 +1,9 @@
-import { expect, test } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -21,10 +26,7 @@ function distribution(values: number[]) {
   };
 }
 
-async function run(
-  page: Parameters<typeof test>[0] extends never ? never : any,
-  kind: RenderingWorkload,
-) {
+async function run(page: Page, kind: RenderingWorkload) {
   await page.goto("/tests/helpers/effects-harness.html");
   return page.evaluate(async (workload: RenderingWorkload) => {
     const modulePath = "/tests/helpers/renderingWorkloadHarness.tsx";
@@ -41,7 +43,7 @@ async function report(
   kind: RenderingWorkload,
   result: Awaited<ReturnType<typeof runRenderingWorkload>>,
   performance: { before: Record<string, number>; after: Record<string, number> },
-  testInfo: Parameters<Parameters<typeof test>[1]>[1],
+  testInfo: TestInfo,
 ) {
   const frames =
     "frames" in result && Array.isArray(result.frames)
@@ -57,9 +59,6 @@ async function report(
     {
       schemaVersion: 1,
       workload: kind,
-      environment: {
-        userAgent: await testInfo.attach ? undefined : undefined,
-      },
       frames,
       metrics,
       result,
@@ -81,7 +80,7 @@ async function report(
   }
 }
 
-async function performanceMetrics(page: any) {
+async function performanceMetrics(page: Page) {
   const session = await page.context().newCDPSession(page);
   await session.send("Performance.enable");
   const read = async () => {
