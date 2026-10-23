@@ -54,6 +54,10 @@ const checks = {
   sharedPhysicalTextureMatchesRequested: sharedShapes.includes(expectedShape),
   durationMatches: legacy.configuration.durationMs === durationMs && shared.configuration.durationMs === durationMs,
   warmupMatches: legacy.configuration.warmupMs === warmupMs && shared.configuration.warmupMs === warmupMs,
+  sharedMeasurementWindowMatches:
+    shared.measurementWindow?.durationMs === durationMs &&
+    shared.consumer?.measurementWindow?.startEpochMs === shared.measurementWindow?.startEpochMs &&
+    shared.consumer?.measurementWindow?.endEpochMs === shared.measurementWindow?.endEpochMs,
   sameFinalShader: legacy.claims?.finalShaderMatchesSharedTextureHarness === true,
   noLegacyRendererErrors: Array.isArray(legacy.errors) && legacy.errors.length === 0,
   boundedSharedLifetime: (shared.transport?.queue?.maxRetained ?? Infinity) <= (shared.configuration.maxActive + 1) && shared.transport?.queue?.retained === 0,
