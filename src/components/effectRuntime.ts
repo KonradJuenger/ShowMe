@@ -6,8 +6,6 @@ import {
   type RenderDensity,
   type ShaderCapabilities,
 } from "../core/renderProfile";
-import { elementWorldTransform } from "./elementDomTransform";
-import { resizeRasterCanvas } from "./canvasAllocation";
 import {
   createSceneTextureProvider,
   sceneTextureTextureBytes,
@@ -18,8 +16,6 @@ import { flushCompositionOutputs } from "./compositionReadiness";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
-  shaderOutputTextureBytes,
-  neutralShaderBridge,
   type ShaderOutput,
 } from "./shaderOutput";
 import type { Deck, Slide } from "../core/document";
@@ -46,6 +42,7 @@ type Surface = {
   gpuOutput(): ShaderOutput | null;
   setSampling(value: EffectSampling): void;
   prepareSampling(): void;
+  setTransport(matrix: DOMMatrixReadOnly): void;
   set(key: string, value: EffectParameterValue): void;
   setTiming(value: {
     time: number;
@@ -65,6 +62,7 @@ type Surface = {
     progress?: number;
   }): void;
   flush(): void | Promise<void>;
+  gpuContext(): WebGL2RenderingContext | null;
   reset(): void;
 };
 const surfaces = new WeakMap<HTMLElement, Surface>();
@@ -128,7 +126,8 @@ const vertex = `#version 300 es
 in vec2 position;
 out vec2 v_uv;
 void main() { v_uv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }`;
-let gpu: {
+
+type ShaderGpuState = {
   canvas: HTMLCanvasElement;
   gl: WebGL2RenderingContext;
   programs: Map<string, WebGLProgram>;
@@ -136,11 +135,73 @@ let gpu: {
   capabilities: ShaderCapabilities;
   textureSize: number;
   generation: number;
-} | null = null;
+};
+
+export type ShaderChain = {
+  canvas: HTMLCanvasElement | null;
+  state: ShaderGpuState | null;
+  redraws: Set<() => void>;
+  boundCanvas: HTMLCanvasElement | null;
+  onLost: ((event: WebGLContextEvent) => void) | null;
+  onRestored: (() => void) | null;
+};
+
+const shaderMetrics = {
+  contextsCreated: 0,
+  shaderCompilations: 0,
+  maxActiveContexts: 0,
+  canvas2dPresentationCopies: 0,
+};
+const activeShaderChains = new Set<ShaderChain>();
 let gpuGeneration = 0;
-function sharedGpu() {
-  if (gpu && !gpu.gl.isContextLost()) return gpu;
-  const canvas = document.createElement("canvas");
+
+export function createShaderChain(): ShaderChain {
+  return {
+    canvas: null,
+    state: null,
+    redraws: new Set(),
+    boundCanvas: null,
+    onLost: null,
+    onRestored: null,
+  };
+}
+
+export function shaderRuntimeDiagnostics() {
+  return {
+    ...shaderMetrics,
+    activeContexts: [...activeShaderChains].filter(
+      (chain) => !!chain.state && !chain.state.gl.isContextLost(),
+    ).length,
+  };
+}
+
+function bindShaderContextLifecycle(chain: ShaderChain, canvas: HTMLCanvasElement) {
+  if (chain.boundCanvas === canvas) return;
+  if (chain.boundCanvas && chain.onLost && chain.onRestored) {
+    chain.boundCanvas.removeEventListener("webglcontextlost", chain.onLost);
+    chain.boundCanvas.removeEventListener("webglcontextrestored", chain.onRestored);
+  }
+  const lost = (event: WebGLContextEvent) => {
+    event.preventDefault();
+    chain.state = null;
+    chain.redraws.forEach((redraw) => redraw());
+  };
+  const restored = () => {
+    chain.state = null;
+    chain.redraws.forEach((redraw) => redraw());
+  };
+  canvas.addEventListener("webglcontextlost", lost);
+  canvas.addEventListener("webglcontextrestored", restored);
+  chain.boundCanvas = canvas;
+  chain.onLost = lost;
+  chain.onRestored = restored;
+}
+
+function shaderGpu(chain: ShaderChain) {
+  if (chain.state && !chain.state.gl.isContextLost()) return chain.state;
+  const canvas = chain.canvas;
+  if (!canvas) throw new Error("Shader output canvas is not mounted.");
+  bindShaderContextLifecycle(chain, canvas);
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
@@ -158,7 +219,7 @@ function sharedGpu() {
     new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
     gl.STATIC_DRAW,
   );
-  const state = {
+  const state: ShaderGpuState = {
     canvas,
     gl,
     buffer,
@@ -176,17 +237,46 @@ function sharedGpu() {
     textureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
     generation: ++gpuGeneration,
   };
-  canvas.addEventListener("webglcontextlost", (event) => {
-    event.preventDefault();
-    state.programs.clear();
-    if (gpu === state) gpu = null;
-    shaderRedraws.forEach((redraw) => redraw());
-  });
-  gpu = state;
+  chain.state = state;
+  activeShaderChains.add(chain);
+  shaderMetrics.contextsCreated++;
+  shaderMetrics.maxActiveContexts = Math.max(
+    shaderMetrics.maxActiveContexts,
+    activeShaderChains.size,
+  );
   return state;
 }
-export function shaderProgram(source: string) {
-  const state = sharedGpu(),
+
+function disposeShaderChain(chain: ShaderChain) {
+  const state = chain.state;
+  if (state && !state.gl.isContextLost()) {
+    for (const program of state.programs.values()) state.gl.deleteProgram(program);
+    state.gl.deleteBuffer(state.buffer);
+  }
+  if (chain.boundCanvas && chain.onLost && chain.onRestored) {
+    chain.boundCanvas.removeEventListener("webglcontextlost", chain.onLost);
+    chain.boundCanvas.removeEventListener("webglcontextrestored", chain.onRestored);
+  }
+  chain.state = null;
+  chain.redraws.clear();
+  chain.boundCanvas = null;
+  chain.onLost = null;
+  chain.onRestored = null;
+  activeShaderChains.delete(chain);
+}
+
+let validationChain: ShaderChain | null = null;
+function validationShaderChain() {
+  if (!validationChain) {
+    validationChain = createShaderChain();
+    validationChain.canvas = document.createElement("canvas");
+    validationChain.canvas.width = validationChain.canvas.height = 1;
+  }
+  return validationChain;
+}
+
+export function shaderProgram(source: string, chain = validationShaderChain()) {
+  const state = shaderGpu(chain),
     { gl, programs } = state;
   const cached = programs.get(source);
   if (cached) return { ...state, program: cached };
@@ -236,6 +326,7 @@ export function shaderProgram(source: string) {
       programs.delete(key);
     }
     programs.set(source, program);
+    shaderMetrics.shaderCompilations++;
     return { ...state, program };
   } catch (error) {
     if (program) gl.deleteProgram(program);
@@ -322,9 +413,12 @@ export function mountEffectSurface(
     y: devicePixelRatio || 1,
     mode: "live",
   },
+  shaderChain?: ShaderChain,
+  shaderIntermediate = false,
+  directShaderInput = false,
+  ownsShaderChain = false,
 ) {
   const refined = executionMode === "refined";
-  const useGpu = refined;
   const dependencies = effectDependencies(definition);
   const cssSource = () =>
     (definition.kind === "css"
@@ -380,45 +474,17 @@ export function mountEffectSurface(
   let heldDensity = 0;
   let preparedSampling = false;
   let logicalSize = size;
-  let samplingGeometry = "";
+  let semanticTransform = new DOMMatrix();
   const prepareSampling = () => {
-    if (!live) return;
-    if (definition.kind === "css") return;
-    if (definition.kind !== "fragment-glsl") return;
+    if (!live || definition.kind !== "fragment-glsl") return;
     try {
-      const owner = node.closest<HTMLElement>("[data-element-id]");
-      if (owner) {
-        const style = getComputedStyle(owner),
-          width = parseFloat(style.width),
-          height = parseFloat(style.height);
-        logicalSize =
-          Number.isFinite(width) &&
-          width > 0 &&
-          Number.isFinite(height) &&
-          height > 0
-            ? { width, height }
-            : size;
-      }
-      const root =
-        sampling.root ?? node.closest<HTMLElement>(".slide-renderer");
-      const matrix =
-        owner && root ? elementWorldTransform(owner, root) : new DOMMatrix();
+      logicalSize = size;
       const next = Math.max(
-        affineSamplingDensity(sampling, matrix),
+        affineSamplingDensity(sampling, semanticTransform),
         sampling.envelope ?? 0,
       );
       if (!Number.isFinite(next))
         throw new Error("Invalid shader transform sampling");
-      const geometry = JSON.stringify([
-        logicalSize.width,
-        logicalSize.height,
-        next,
-        ...Array.from(matrix.toFloat64Array()),
-      ]);
-      if (refined && samplingGeometry !== geometry) {
-        samplingGeometry = geometry;
-        sceneTexture?.invalidate();
-      }
       samplingDensity = next;
       if (sampling.retain) heldDensity = Math.max(heldDensity, next);
       else heldDensity = next;
@@ -483,86 +549,15 @@ export function mountEffectSurface(
       new CustomEvent("showme-effect-output", { bubbles: true }),
     );
   };
-  let domRevision = -1;
   const materialize = () => {
     if (
       !canvas ||
-      !shaderOutput ||
+      shaderIntermediate ||
       node.dataset.effectError ||
-      node.dataset.effectStarted === "false" ||
-      domRevision === shaderOutput.revision
+      node.dataset.effectStarted === "false"
     )
       return;
-    const state = sharedGpu();
-    if (state.gl !== shaderOutput.gl || state.gl.isContextLost()) return;
-    const { gl, canvas: source } = state;
-    const { width, height } = shaderOutput;
-    // FBO outputs have independent sizes. Reuse the shared presentation bridge
-    // for smaller outputs instead of reallocating its default drawing buffer
-    // for every thumbnail/main-view alternation. On growth use the requested
-    // dimensions, not a cross-aspect maximum with unbounded retained area.
-    if (source.width < width || source.height < height) {
-      source.width = width;
-      source.height = height;
-      if (
-        gl.drawingBufferWidth < width ||
-        gl.drawingBufferHeight < height ||
-        gl.getError() !== gl.NO_ERROR
-      )
-        throw new Error(
-          `Cannot allocate ${width} × ${height} shader drawing buffer`,
-        );
-    }
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.blitFramebuffer(
-      0,
-      0,
-      width,
-      height,
-      0,
-      0,
-      width,
-      height,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const context = resizeRasterCanvas(canvas, width, height);
-    context.clearRect(0, 0, width, height);
-    // WebGL's lower-left active rectangle maps to the canvas's lower rows.
-    context.drawImage(
-      source,
-      0,
-      source.height - height,
-      width,
-      height,
-      0,
-      0,
-      width,
-      height,
-    );
-    domRevision = shaderOutput.revision;
     canvas.style.visibility = "visible";
-  };
-  const needsDomOutput = () => {
-    if (!refined) return true;
-    const source = node.parentElement;
-    const consumer = source?.parentElement;
-    if (
-      !source?.hasAttribute("data-effect-source") ||
-      !consumer?.dataset.effectId
-    )
-      return true;
-    const consumerSurface = surfaces.get(consumer);
-    return !(
-      consumerSurface &&
-      canvas &&
-      consumer.dataset.effectStarted !== "false" &&
-      !consumer.dataset.effectError &&
-      source.children.length === 1 &&
-      neutralShaderBridge(source, node, canvas, logicalSize)
-    );
   };
   let style: HTMLStyleElement | null = null;
   // Identity belongs to this stage, never to its Element or earlier stages.
@@ -571,10 +566,7 @@ export function mountEffectSurface(
       ++sequence; // A pending worker must not repaint a backward seek.
       lastTextInput = "";
       lastShaderInput = "";
-      if (canvas) {
-        canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-        canvas.style.visibility = "hidden";
-      }
+      if (canvas) canvas.style.visibility = "hidden";
       if (output) output.style.visibility = "hidden";
       if (original && textInputHidden) original.style.opacity = originalOpacity;
       textInputHidden = false;
@@ -732,15 +724,16 @@ export function mountEffectSurface(
           node.style.setProperty(`--${key}`, String(value));
         node.style.setProperty("--duration", String(timing.duration));
       } else if (canvas) {
+        if (!shaderChain)
+          throw new Error("Shader surface has no GPU chain.");
         const {
           gl,
-          canvas: source,
           buffer,
           program,
           capabilities,
           textureSize,
           generation,
-        } = shaderProgram(definition.source);
+        } = shaderProgram(definition.source, shaderChain);
         if (!preparedSampling) prepareSampling();
         preparedSampling = false;
         if (samplingDensity <= 0) {
@@ -764,36 +757,13 @@ export function mountEffectSurface(
           node.dataset.effectSamplingWarning = `Shader requested ${allocation.requestedWidth} × ${allocation.requestedHeight}; GPU texture/viewport/renderbuffer limits reduced it to ${width} × ${height}.`;
         else delete node.dataset.effectSamplingWarning;
         const previousStage =
-          useGpu &&
-          definition.input === "content" &&
-          sourceContent?.children.length === 1
+          directShaderInput && sourceContent?.children.length === 1
             ? (sourceContent.firstElementChild as HTMLElement)
             : null;
-        const previousCanvas =
-          previousStage?.querySelector<HTMLCanvasElement>(":scope > canvas");
-        const previousInstance = content?.element.effects?.find(
-          (effect) => effect.id === previousStage?.dataset.effectId,
-        );
         const previousSurface = previousStage
           ? surfaces.get(previousStage)
           : undefined;
-        const canChain = !!(
-          previousStage &&
-          previousCanvas &&
-          sourceContent &&
-          previousSurface &&
-          previousInstance &&
-          content?.resources[previousInstance.resourceId]?.input ===
-            "content" &&
-          previousStage.dataset.effectStarted !== "false" &&
-          !previousStage.dataset.effectError &&
-          neutralShaderBridge(
-            sourceContent,
-            previousStage,
-            previousCanvas,
-            logicalSize,
-          )
-        );
+        const canChain = !!(directShaderInput && previousSurface);
         const gpuInput = canChain ? previousSurface!.gpuOutput() : null;
         if (canChain && (!gpuInput || gpuInput.gl !== gl) && !inputPending) {
           inputPending = true;
@@ -813,7 +783,8 @@ export function mountEffectSurface(
           return pending;
         }
         let sceneInput: SceneTexture | null = null;
-        const renderedInput = !gpuInput ? renderedSceneTexture() : null;
+        const renderedInput =
+          !gpuInput && !directShaderInput ? renderedSceneTexture() : null;
         if (renderedInput && !inputPending) {
           const acquired = renderedInput.acquire({
             width,
@@ -851,27 +822,22 @@ export function mountEffectSurface(
           node.dataset.effectReady = "true";
           return;
         }
-        if (!refined && (source.width !== width || source.height !== height)) {
-          source.width = width;
-          source.height = height;
+        if (shaderIntermediate) {
+          shaderOutput = allocateShaderOutput(gl, width, height, shaderOutput);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, shaderOutput.framebuffer);
+        } else {
+          if (canvas.width !== width) canvas.width = width;
+          if (canvas.height !== height) canvas.height = height;
           if (
             gl.drawingBufferWidth !== width ||
             gl.drawingBufferHeight !== height ||
             gl.getError() !== gl.NO_ERROR
           )
             throw new Error(
-              `Cannot allocate ${width} × ${height} shader drawing buffer`,
+              `Cannot allocate ${width} × ${height} visible shader drawing buffer`,
             );
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         }
-        const context = !refined
-          ? resizeRasterCanvas(canvas, width, height)
-          : null;
-        if (useGpu)
-          shaderOutput = allocateShaderOutput(gl, width, height, shaderOutput);
-        gl.bindFramebuffer(
-          gl.FRAMEBUFFER,
-          useGpu ? shaderOutput!.framebuffer : null,
-        );
         gl.viewport(0, 0, width, height);
         gl.useProgram(program);
         if (gpuInput) {
@@ -921,37 +887,13 @@ export function mountEffectSurface(
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        if (useGpu && shaderOutput) {
+        if (shaderIntermediate && shaderOutput) {
           shaderOutput.revision++;
-          if (!refined) {
-            gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
-            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-            gl.blitFramebuffer(
-              0,
-              0,
-              width,
-              height,
-              0,
-              0,
-              width,
-              height,
-              gl.COLOR_BUFFER_BIT,
-              gl.NEAREST,
-            );
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          }
-        }
-        if (refined) {
-          if (needsDomOutput()) materialize();
-          else {
-            canvas.width = canvas.height = 1;
-            domRevision = -1;
-          }
+          canvas.style.visibility = "hidden";
+          canvas.width = canvas.height = 1;
         } else {
-          context!.clearRect(0, 0, width, height);
-          context!.drawImage(source, 0, 0);
+          canvas.style.visibility = "visible";
         }
-        canvas.style.visibility = "visible";
         if (sourceContent) sourceContent.style.opacity = "0";
         lastShaderInput = signature;
         publish();
@@ -969,13 +911,10 @@ export function mountEffectSurface(
     live = false;
     cancelFrame(draw);
     scheduled.delete(node);
-    shaderRedraws.delete(schedule);
     sceneTexture?.dispose();
-    if (shaderOutput) {
-      disposeShaderOutput(shaderOutput);
-      if (gpu && shaderOutputTextureBytes() === 0)
-        gpu.canvas.width = gpu.canvas.height = 1;
-    }
+    if (shaderOutput) disposeShaderOutput(shaderOutput);
+    if (shaderChain) shaderChain.redraws.delete(schedule);
+    if (ownsShaderChain && shaderChain) disposeShaderChain(shaderChain);
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     surfaces.delete(node);
     runner?.dispose();
@@ -1027,8 +966,12 @@ export function mountEffectSurface(
         (message) => !message.includes("unused by GLSL"),
       );
       if (diagnostics.length) throw new Error(diagnostics.join("; "));
-      shaderProgram(definition.source);
-      if (definition.input === "content" || definition.input === "backdrop") {
+      if (!shaderChain) throw new Error("Shader surface has no GPU chain.");
+      shaderProgram(definition.source, shaderChain);
+      if (
+        (definition.input === "content" && !directShaderInput) ||
+        definition.input === "backdrop"
+      ) {
         if (!content)
           throw new Error(
             "Pixel-input shaders require a SceneTexture source.",
@@ -1097,6 +1040,11 @@ export function mountEffectSurface(
       schedule();
     },
     prepareSampling,
+    setTransport(matrix) {
+      semanticTransform = new DOMMatrix(matrix);
+      preparedSampling = false;
+      schedule();
+    },
     set(key, value) {
       if (values[key] === value) return;
       values[key] = value;
@@ -1164,6 +1112,9 @@ export function mountEffectSurface(
       // another frame while it paints; chasing every replacement never settles.
       await pending;
     },
+    gpuContext() {
+      return shaderChain?.state?.gl ?? null;
+    },
     reset() {
       Object.assign(values, base);
       timing = {
@@ -1189,7 +1140,8 @@ export function mountEffectSurface(
     },
   };
   surfaces.set(node, surface);
-  if (definition.kind === "fragment-glsl") shaderRedraws.add(schedule);
+  if (definition.kind === "fragment-glsl" && shaderChain)
+    shaderChain.redraws.add(schedule);
   bypass();
   schedule();
   return dispose;
