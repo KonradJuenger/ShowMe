@@ -1470,3 +1470,110 @@ test("representative browser-native presentation crosses SceneTexture only for e
   expect(result.foregroundAfter).toBe(true);
 });
 
+
+
+test("neutral live video binds directly as shader input without SceneTexture", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
+      mediaPath = "/src/core/media.ts",
+      authoringPath = "/src/core/effectAuthoring.ts",
+      effectsPath = "/src/core/effects.ts",
+      platformPath = "/src/platform/index.ts",
+      scenePath = "/src/components/sceneTexture.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const { createMediaElement }: typeof import("../../../src/core/media") =
+      await import(/* @vite-ignore */ mediaPath);
+    const { blankEffect }: typeof import("../../../src/core/effectAuthoring") =
+      await import(/* @vite-ignore */ authoringPath);
+    const { newEffectInstance }: typeof import("../../../src/core/effects") =
+      await import(/* @vite-ignore */ effectsPath);
+    const { platform }: typeof import("../../../src/platform") = await import(
+      /* @vite-ignore */ platformPath
+    );
+    const {
+      sceneTextureDiagnostics,
+    }: typeof import("../../../src/components/sceneTexture") = await import(
+      /* @vite-ignore */ scenePath
+    );
+
+    platform.assetUrl = async (_id, preview) =>
+      preview ? null : "/tests/fixtures/media/prepared-red.webm";
+    platform.releaseUrl = () => {};
+    const before = sceneTextureDiagnostics();
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      liveMedia: true,
+      configure(model) {
+        model.deck.stylesheet = "";
+        const slide = model.slides[model.deck.slideIds[0]];
+        const shader = {
+          ...blankEffect("shader"),
+          input: "content" as const,
+          target: "content" as const,
+          source:
+            "#version 300 es\nprecision highp float;uniform sampler2D u_input;in vec2 v_uv;out vec4 outColor;void main(){outColor=texture(u_input,v_uv);}",
+        };
+        const video = createMediaElement("video", {
+          version: 1,
+          id: "e".repeat(64),
+          filename: "prepared-red.webm",
+          names: ["prepared-red.webm"],
+          type: "video",
+          mediaType: "video",
+          mime: "video/webm",
+          bytes: 1,
+          width: 160,
+          height: 90,
+          duration: 0.5,
+          createdAt: "2026-10-23T00:00:00Z",
+        });
+        if (video.content?.type !== "video")
+          throw new Error("Video fixture required");
+        video.content.autoplay = true;
+        video.content.loop = true;
+        video.content.mute = true;
+        video.effects = [newEffectInstance("video-shader", shader, "content")];
+        slide.effectResources = { "video-shader": shader };
+        slide.nodes[0].children = [video];
+        delete slide.motion;
+      },
+    });
+    try {
+      const video = harness.host.querySelector<HTMLVideoElement>("video")!;
+      const deadline = performance.now() + 3000;
+      while (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        if (performance.now() > deadline)
+          throw new Error("Video shader fixture did not become ready");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await video.play().catch(() => undefined);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      await harness.advance(0.1);
+      const effect =
+        harness.host.querySelector<HTMLElement>("[data-effect-id]")!;
+      const after = sceneTextureDiagnostics();
+      return {
+        backend: effect.dataset.effectSourceBackend,
+        ready: effect.dataset.effectReady,
+        captures: after.captures - before.captures,
+        domCaptures: after.domRaster.captures - before.domRaster.captures,
+        errors: harness.inspect().errors,
+      };
+    } finally {
+      harness.dispose();
+    }
+  });
+  expect(result.backend).toBe("video");
+  expect(result.ready).toBe("true");
+  expect(result.captures).toBe(0);
+  expect(result.domCaptures).toBe(0);
+  expect(result.errors).toEqual([]);
+});
