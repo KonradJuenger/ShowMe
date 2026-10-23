@@ -12,13 +12,18 @@ function collectSources(directory: URL, prefix = ""): [string, string][] {
     if (entry.isDirectory())
       return collectSources(new URL(entry.name + "/", directory), path + "/");
     return /\.(ts|tsx)$/.test(entry.name)
-      ? [[path, readFileSync(new URL(entry.name, directory), "utf8")] as [string, string]]
+      ? [
+          [path, readFileSync(new URL(entry.name, directory), "utf8")] as [
+            string,
+            string,
+          ],
+        ]
       : [];
   });
 }
 const productionSources = Object.fromEntries(collectSources(sourceRoot));
 const importedModules = (source: string) =>
-  [...source.matchAll(/(?:from\\s+|import\\s*\\()\\s*["']([^"']+)["']/g)].map(
+  [...source.matchAll(/(?:from\s+|import\s*\()\s*["']([^"']+)["']/g)].map(
     (match) => match[1],
   );
 const importers = (name: string) =>
