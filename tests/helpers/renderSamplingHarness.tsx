@@ -123,9 +123,18 @@ void main() {
     },
     inspect,
     async transform(value: string) {
-      host.querySelector<HTMLElement>(
-        '[data-element-id="parent"]',
-      )!.style.transform = value;
+      const transformed = structuredClone(slide);
+      const parent = transformed.nodes[0].children.find(
+        (element) => element.id === "parent",
+      )!;
+      Object.assign(
+        parent.frame,
+        value.includes("scale(2, 1)")
+          ? { x: 0, y: 0, rotation: 45, scaleX: 2, scaleY: 1 }
+          : { x: 123, y: 45, rotation: 45, scaleX: 1, scaleY: 1 },
+      );
+      sampledSlide = transformed;
+      render(1);
       return inspect();
     },
     async motion(time: number) {
