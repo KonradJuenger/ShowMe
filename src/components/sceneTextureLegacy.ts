@@ -91,9 +91,27 @@ function hasDomEffects(
         (effect) =>
           effect.id !== ignoredEffectId &&
           effect.enabled &&
-          resources[effect.resourceId],
+          resources[effect.resourceId] &&
+          resources[effect.resourceId].kind !== "fragment-glsl",
       ) ||
       hasDomEffects(element.children, resources, ignoredEffectId),
+  );
+}
+
+function hasAnyEffects(
+  elements: readonly Element[],
+  resources: EffectResources,
+  ignoredEffectId?: string,
+): boolean {
+  return elements.some(
+    (element) =>
+      element.effects?.some(
+        (effect) =>
+          effect.id !== ignoredEffectId &&
+          effect.enabled &&
+          resources[effect.resourceId],
+      ) ||
+      hasAnyEffects(element.children, resources, ignoredEffectId),
   );
 }
 
@@ -175,7 +193,7 @@ export function createLegacySceneTextureProvider(
       !scene.deck.stylesheet &&
       !scene.slide.motion &&
       !hasVideo(elements) &&
-      !hasDomEffects(elements, context.resources(), request.effectId)
+      !hasAnyEffects(elements, context.resources(), request.effectId)
     );
   };
   const semanticRevision = () => {
@@ -193,7 +211,7 @@ export function createLegacySceneTextureProvider(
       !context.refined ||
       !scene ||
       scene.deck.stylesheet ||
-      hasDomEffects(inputElements(), context.resources(), request.effectId)
+      hasAnyEffects(inputElements(), context.resources(), request.effectId)
     )
       return undefined;
     return scene.slide;
