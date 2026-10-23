@@ -27,6 +27,8 @@ const height = Math.round(numberOption("--height", 998));
 const dpr = numberOption("--dpr", 1.6042);
 const fps = Math.round(numberOption("--fps", 60));
 const durationMs = numberOption("--duration", process.argv.includes("--benchmark") ? 20000 : 15000);
+const warmupMs = numberOption("--warmup", 1500);
+const barrierLeadMs = 250;
 const backend = option("--backend", "webgpu");
 const maxActive = Math.round(numberOption("--max-active", 2));
 const drainTimeoutMs = numberOption("--drain-timeout", 5000);
@@ -40,8 +42,9 @@ let sourceWindow = null;
 let consumerWindow = null;
 let stopping = false;
 let consumerResult = null;
-let sourceReadyAt = null;
-const startedAt = performance.now();
+let measurementWindow = null;
+let measurementStarted = false;
+let measurementEnded = false;
 const paintTimes = [];
 const releaseLatencies = [];
 const sourceFrameCounts = [];
@@ -51,6 +54,7 @@ const handleKinds = new Set();
 let paintEvents = 0;
 let missingTextures = 0;
 let sourceReleased = 0;
+let timedSourceReleased = 0;
 let releaseErrors = 0;
 let transferErrors = 0;
 let consumerErrors = [];
@@ -58,6 +62,10 @@ let finalTimer = null;
 let drainTimedOut = false;
 let gpuInfo = null;
 let finalizing = false;
+let initialAppMetrics = [];
+let finalAppMetrics = [];
+let timedQueueStart = null;
+let timedQueueEnd = null;
 
 function handleKind(info) {
   const handle = info?.handle || {};
@@ -66,10 +74,11 @@ function handleKind(info) {
   if (handle.nativePixmap) return "linux-native-pixmap";
   return "unknown";
 }
-function safeRelease(texture) {
+function safeRelease(texture, measured = false) {
   try {
     texture.release();
     sourceReleased++;
+    if (measured) timedSourceReleased++;
   } catch (error) {
     releaseErrors++;
     if (verbose) console.error("source texture release failed", error);
@@ -78,7 +87,7 @@ function safeRelease(texture) {
 
 const queue = new BoundedLatestFrameQueue({
   maxActive,
-  release: (frame) => safeRelease(frame.texture),
+  release: (frame) => safeRelease(frame.texture, frame.measured),
   consume: async (frame, done) => {
     const receivedAt = frame.receivedAt;
     let imported;
@@ -86,8 +95,9 @@ const queue = new BoundedLatestFrameQueue({
       imported = sharedTexture.importSharedTexture({
         textureInfo: frame.texture.textureInfo,
         allReferencesReleased: () => {
-          releaseLatencies.push(performance.now() - receivedAt);
-          safeRelease(frame.texture);
+          if (frame.measured)
+            releaseLatencies.push(performance.now() - receivedAt);
+          safeRelease(frame.texture, frame.measured);
           done();
         },
       });
@@ -104,7 +114,7 @@ const queue = new BoundedLatestFrameQueue({
       if (verbose) console.error("shared texture transfer failed", error);
       if (imported) imported.release();
       else {
-        safeRelease(frame.texture);
+        safeRelease(frame.texture, frame.measured);
         done();
       }
     }
@@ -135,7 +145,83 @@ function cpuDeltas(initial, final) {
     };
   });
 }
-let initialAppMetrics = [];
+function queueDelta(before, after) {
+  if (!before || !after) return null;
+  const cumulative = [
+    "offered",
+    "consumed",
+    "staleReleased",
+    "rejectedAfterClose",
+    "consumerErrors",
+  ];
+  return Object.fromEntries(
+    cumulative.map((key) => [key, (after[key] ?? 0) - (before[key] ?? 0)]),
+  );
+}
+
+function beginMeasurement() {
+  if (measurementStarted || !measurementWindow) return;
+  measurementStarted = true;
+  paintTimes.length = 0;
+  releaseLatencies.length = 0;
+  sourceFrameCounts.length = 0;
+  textureShapes.clear();
+  textureFormats.clear();
+  handleKinds.clear();
+  paintEvents = 0;
+  missingTextures = 0;
+  timedSourceReleased = 0;
+  timedQueueStart = queue.snapshot();
+  initialAppMetrics = appMetricsSnapshot();
+  if (verbose) console.log("measurement started", measurementWindow);
+}
+
+function endMeasurement() {
+  if (measurementEnded || !measurementStarted) return;
+  measurementEnded = true;
+  timedQueueEnd = queue.snapshot();
+  finalAppMetrics = appMetricsSnapshot();
+  if (verbose) console.log("measurement ended", measurementWindow);
+}
+
+function inMeasurementWindow(epochMs = Date.now()) {
+  if (!measurementWindow) return false;
+  if (epochMs >= measurementWindow.startEpochMs && !measurementStarted)
+    beginMeasurement();
+  if (epochMs >= measurementWindow.endEpochMs && !measurementEnded)
+    endMeasurement();
+  return (
+    measurementStarted &&
+    !measurementEnded &&
+    epochMs >= measurementWindow.startEpochMs &&
+    epochMs < measurementWindow.endEpochMs
+  );
+}
+
+function scheduleMeasurementWindow() {
+  if (measurementWindow || stopping) return;
+  const startEpochMs = Date.now() + barrierLeadMs;
+  const endEpochMs = startEpochMs + durationMs;
+  measurementWindow = {
+    startEpochMs,
+    endEpochMs,
+    durationMs,
+    warmupMs,
+    barrierLeadMs,
+  };
+  consumerWindow.webContents.send(
+    "shared-texture:benchmark-window",
+    measurementWindow,
+  );
+  setTimeout(
+    () => beginMeasurement(),
+    Math.max(0, startEpochMs - Date.now()),
+  ).unref();
+  finalTimer = setTimeout(() => {
+    endMeasurement();
+    stop("duration-complete");
+  }, Math.max(0, endEpochMs - Date.now()));
+}
 
 function finishIfReady() {
   if (!stopping || !consumerResult || finalizing) return;
@@ -144,10 +230,11 @@ function finishIfReady() {
     return;
   }
   finalizing = true;
-  const endedAt = performance.now();
+  endMeasurement();
   const counts = sourceFrameCounts.filter((value) => Number.isFinite(value));
   const sourceFrameGaps = counts.slice(1).map((value, index) => value - counts[index] - 1).filter((value) => value > 0);
-  const finalAppMetrics = appMetricsSnapshot();
+  if (!finalAppMetrics.length) finalAppMetrics = appMetricsSnapshot();
+  const finalQueue = queue.snapshot();
   const result = {
     schemaVersion: 1,
     experiment: "native-gpu-shared-texture-boundary",
@@ -155,11 +242,18 @@ function finishIfReady() {
     chrome: process.versions.chrome,
     platform: process.platform,
     arch: process.arch,
-    configuration: { width, height, dpr, fps, durationMs, backend, maxActive, drainTimeoutMs, show },
+    configuration: { width, height, dpr, fps, durationMs, warmupMs, barrierLeadMs, backend, maxActive, drainTimeoutMs, show },
+    measurementWindow,
     source: {
       paintEvents,
       missingTextures,
-      paintEventsPerSec: rate(paintEvents, sourceReadyAt || startedAt, endedAt),
+      paintEventsPerSec: measurementWindow
+        ? rate(
+            paintEvents,
+            measurementWindow.startEpochMs,
+            measurementWindow.endEpochMs,
+          )
+        : null,
       paintIntervals: intervalSummary(paintTimes),
       frameCountGapEvents: sourceFrameGaps.length,
       skippedByFrameCount: sourceFrameGaps.reduce((sum, value) => sum + value, 0),
@@ -168,15 +262,22 @@ function finishIfReady() {
       handleKinds: [...handleKinds],
     },
     transport: {
-      queue: queue.snapshot(),
+      queue: finalQueue,
+      timedQueue: queueDelta(timedQueueStart, timedQueueEnd),
       sourceReleased,
+      timedSourceReleased,
       releaseErrors,
       transferErrors,
       releaseLatencyMs: valueSummary(releaseLatencies),
       drainTimedOut,
     },
     consumer: consumerResult,
-    processMetrics: { initial: initialAppMetrics, final: finalAppMetrics, cumulativeCpuDeltas: cpuDeltas(initialAppMetrics, finalAppMetrics) },
+    processMetrics: {
+      scope: "timed measurement window before resource drain",
+      initial: initialAppMetrics,
+      final: finalAppMetrics,
+      cumulativeCpuDeltas: cpuDeltas(initialAppMetrics, finalAppMetrics),
+    },
     gpu: gpuInfo,
     claims: {
       sourceIsChromiumCompositedFrame: true,
@@ -215,6 +316,7 @@ function stop(reason) {
   if (stopping) return;
   stopping = true;
   if (finalTimer) clearTimeout(finalTimer);
+  endMeasurement();
   sourceWindow?.webContents.stopPainting();
   queue.close();
   if (consumerWindow && !consumerWindow.isDestroyed())
@@ -253,7 +355,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => queue.close());
 
 app.whenReady().then(async () => {
-  initialAppMetrics = appMetricsSnapshot();
   gpuInfo = {
     hardwareAccelerationEnabled: app.isHardwareAccelerationEnabled(),
     featureStatus: app.getGPUFeatureStatus(),
@@ -277,24 +378,30 @@ app.whenReady().then(async () => {
     });
     sourceWindow.webContents.setFrameRate(fps);
     sourceWindow.webContents.on("paint", (event) => {
-      paintEvents++;
       const now = performance.now();
-      paintTimes.push(now);
+      const measured = inMeasurementWindow(Date.now());
+      if (measured) {
+        paintEvents++;
+        paintTimes.push(now);
+      }
       const texture = event.texture;
       if (!texture) {
-        missingTextures++;
+        if (measured) missingTextures++;
         return;
       }
       const info = texture.textureInfo;
       const frameCount = info.metadata?.frameCount;
-      if (Number.isFinite(frameCount)) sourceFrameCounts.push(frameCount);
-      textureFormats.add(info.pixelFormat);
-      const shape = `${info.codedSize.width}x${info.codedSize.height}`;
-      textureShapes.set(shape, (textureShapes.get(shape) || 0) + 1);
-      handleKinds.add(handleKind(info));
+      if (measured) {
+        if (Number.isFinite(frameCount)) sourceFrameCounts.push(frameCount);
+        textureFormats.add(info.pixelFormat);
+        const shape = `${info.codedSize.width}x${info.codedSize.height}`;
+        textureShapes.set(shape, (textureShapes.get(shape) || 0) + 1);
+        handleKinds.add(handleKind(info));
+      }
       queue.offer({
         texture,
         receivedAt: now,
+        measured,
         metadata: {
           frameCount: Number.isFinite(frameCount) ? frameCount : null,
           timestamp: info.timestamp ?? null,
@@ -306,10 +413,13 @@ app.whenReady().then(async () => {
       });
     });
     sourceWindow.webContents.once("did-finish-load", () => {
-      sourceReadyAt = performance.now();
       if (verbose)
-        console.log("source ready", { requestedFrameRate: fps, actualFrameRate: sourceWindow.webContents.getFrameRate() });
-      finalTimer = setTimeout(() => stop("duration-complete"), durationMs);
+        console.log("source ready", {
+          requestedFrameRate: fps,
+          actualFrameRate: sourceWindow.webContents.getFrameRate(),
+          warmupMs,
+        });
+      setTimeout(() => scheduleMeasurementWindow(), warmupMs).unref();
     });
     sourceWindow.loadFile(path.join(__dirname, "scene.html"));
   });
