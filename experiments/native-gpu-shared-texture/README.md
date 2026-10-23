@@ -15,6 +15,8 @@ The WebGPU path is the primary experiment. The WebGL path is only a comparison a
 
 The source-frame queue is bounded: at most two transferred frames are active by default and at most one pending frame is retained. If a newer frame arrives while the pending slot is occupied, the older pending texture is released immediately. The pending frame is therefore "latest frame wins" and retained shared textures cannot grow without bound.
 
+Benchmark cadence uses one explicit timed window shared between main and consumer. The transport first warms up after the source `did-finish-load`, then main publishes an epoch-based start/end window to the consumer. Source paint, consumer arrivals, shader publications, rAF samples and per-frame submit costs are counted only inside that exact window. Painting stops at the end boundary; shared-texture references are drained afterward and drain time is not included in the cadence denominator. The default warmup is 1500 ms and can be changed with `--warmup`.
+
 ## Commands
 
 No ShowMe production-path change is required to launch the transport harness because it is plain Electron/JavaScript code.
@@ -43,13 +45,13 @@ WebGL comparison:
 npm run benchmark:shared-texture -- --backend=webgl --width=1596 --height=998 --dpr=1.6042 --fps=60 --duration=30000 --output=.benchmark-data/shared-texture/webgl.json
 ```
 
-Controlled approximate-scene comparison against the current `SceneTexture` implementation:
+Broad cadence reference against the current `SceneTexture` implementation:
 
 ```text
-npm run benchmark:shared-texture:compare -- --width=1596 --height=998 --dpr=1.6042 --duration=30000 --output=.benchmark-data/shared-texture/comparison.json --evidence-dir=.benchmark-data/shared-texture/evidence
+npm run benchmark:shared-texture:compare -- --width=1596 --height=998 --dpr=1.6042 --duration=30000 --warmup=1500 --output=.benchmark-data/shared-texture/comparison.json --evidence-dir=.benchmark-data/shared-texture/evidence
 ```
 
-The legacy side uses the real ShowMe `SlideRenderer`, effect runtime and current `SceneTexture` implementation through the existing Vite/Electron harness. Both sides use the same logical dimensions, DPR, duration and the same cheap invert/channel final shader. Both scenes are structurally equivalent (`generated GPU background -> native text/CSS -> final shader`) but intentionally not pixel-identical. The comparison report says this explicitly.
+The legacy side uses the real ShowMe `SlideRenderer`, effect runtime and current `SceneTexture` implementation through the existing Vite/Electron harness. Both runs hold logical dimensions, DPR, warmup, timed duration and the cheap final shader constant. The source scenes are **not equivalent**: the shared-texture source includes extra animated native CSS/decorative content that the legacy fixture does not reproduce. Therefore this command is only a broad cadence reference. Do not use its CPU/process deltas as an apples-to-apples transport speedup claim.
 
 For historical reference-deck measurements, the existing production benchmark remains available separately:
 
@@ -58,7 +60,7 @@ npm run build
 npm run benchmark:animation -- <path-to-shader-text-shader.sme>
 ```
 
-Do not mix historical deck results into the controlled experiment report as if they were the same fixture.
+Do not mix historical deck results into the cadence-reference report as if they were the same fixture.
 
 ## Output
 
@@ -72,6 +74,8 @@ Important fields:
 - platform handle kind seen by Electron;
 - bounded queue counts and maximum retained textures;
 - source texture release latency and drain timeout status;
+- the exact shared measurement window and warmup;
+- timed queue deltas separated from post-window resource drain;
 - consumer arrivals/sec, shader publications/sec and rAF callbacks/sec;
 - consumer interval p50/p95/max;
 - WebGPU/WebGL submit-call duration and WebGPU completion wait;
