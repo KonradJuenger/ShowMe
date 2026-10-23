@@ -20,6 +20,7 @@ const width = Math.round(numberOption("--width", 1596));
 const height = Math.round(numberOption("--height", 998));
 const dpr = numberOption("--dpr", 1.6042);
 const durationMs = numberOption("--duration", 20000);
+const warmupMs = numberOption("--warmup", 1500);
 const output = path.resolve(option("--output", ".benchmark-data/shared-texture/legacy-scene-texture.json"));
 const evidence = option("--evidence", "");
 const show = args.includes("--show");
@@ -85,7 +86,7 @@ try {
     const { sceneTextureDiagnostics } = await import(/* @vite-ignore */ scenePath);
 
     const cheapFinalShader = "#version 300 es\\nprecision highp float;uniform sampler2D u_input;in vec2 v_uv;out vec4 outColor;void main(){vec4 c=texture(u_input,v_uv);outColor=vec4(1.0-c.r,0.18+0.78*c.b,1.0-c.g,c.a);}";
-    const generatedShader = "#version 300 es\\nprecision highp float;uniform float u_t;uniform vec2 u_size;in vec2 v_uv;out vec4 outColor;void main(){float a=.5+.5*sin(u_t*.9+v_uv.x*9.+v_uv.y*4.);float b=.5+.5*sin(-u_t*.55+v_uv.y*11.);vec3 c=mixhvec3(.05,.12,.42),vec3(.95,.28,.08),a);c=mix(c,vec3(1.,.68,.08),b*.45);outColor=vec4(c,1.);}";
+    const generatedShader = "#version 300 es\\nprecision highp float;uniform float u_t;uniform vec2 u_size;in vec2 v_uv;out vec4 outColor;void main(){float a=.5+.5*sin(u_t*.9+v_uv.x*9.+v_uv.y*4.);float b=.5+.5*sin(-u_t*.55+v_uv.y*11.);vec3 c=mix(vec3(.05,.12,.42),vec3(.95,.28,.08),a);c=mix(c,vec3(1.,.68,.08),b*.45);outColor=vec4(c,1.);}";
     const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
       profileWidth: width,
       configure(model) {
@@ -119,19 +120,34 @@ try {
       },
     });
     await harness.advance(0);
+    await new Promise((resolve) => setTimeout(resolve, warmupMs));
     const host = harness.host;
     const before = { scene: sceneTextureDiagnostics(), shader: shaderRuntimeDiagnostics() };
     const rafTimes = [];
     const publications = [];
     let frameTicks = 0;
+    let startedAt = 0;
+    let endedAt = 0;
     host.addEventListener("showme-effect-output", (event) => {
       const node = event.target;
-      if (node instanceof HTMLElement && node.dataset.effectId === "final-instance") publications.push(performance.now());
+      const now = performance.now();
+      if (
+        node instanceof HTMLElement &&
+        node.dataset.effectId === "final-instance" &&
+        now >= startedAt &&
+        now < endedAt
+      )
+        publications.push(now);
     });
-    const startedAt = performance.now();
+    startedAt = performance.now();
+    endedAt = startedAt + durationMs;
     await new Promise((resolve, reject) => {
       const tick = async (now) => {
         try {
+          if (now >= endedAt) {
+            resolve();
+            return;
+          }
           rafTimes.push(now);
           frameTicks++;
           const elapsed = now - startedAt;
@@ -139,20 +155,19 @@ try {
             effectSurface(node)?.setTiming({ time: elapsed / 1000, duration: durationMs / 1000, progress: Math.min(1, elapsed / durationMs), running: true });
           }
           await flushEffectSurfaces(host);
-          if (elapsed >= durationMs) resolve();
-          else requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
         } catch (error) { reject(error); }
       };
       requestAnimationFrame(tick);
     });
-    const endedAt = performance.now();
+    const observedStopAt = performance.now();
     const after = { scene: sceneTextureDiagnostics(), shader: shaderRuntimeDiagnostics() };
     const viewport = { width: innerWidth, height: innerHeight, dpr: devicePixelRatio };
     const errors = [...host.querySelectorAll("[data-effect-error]")].map((node) => node.dataset.effectError);
     const finalCanvas = host.querySelector('[data-effect-id="final-instance"] canvas[data-shader-stage="terminal"]');
     const canvas = finalCanvas ? { width: finalCanvas.width, height: finalCanvas.height } : null;
     window.__showMeSharedTextureLegacyHarness = harness;
-    return { startedAt, endedAt, durationMs: endedAt - startedAt, frameTicks, rafTimes, publications, viewport, canvas, errors, before, after };
+    return { startedAt, endedAt, observedStopAt, durationMs, frameTicks, rafTimes, publications, viewport, canvas, errors, before, after };
   }, { width, height, durationMs });
 
   if (evidence) {
@@ -167,15 +182,15 @@ try {
   const afterMetrics = await app.evaluate(({ app }) => app.getAppMetrics());
   const report = {
     schemaVersion: 1,
-    experiment: "current-scene-texture-controlled-comparison",
+    experiment: "current-scene-texture-cadence-reference",
     electron: await app.evaluate(() => process.versions.electron),
     chrome: await app.evaluate(() => process.versions.chrome),
-    configuration: { width, height, dpr, durationMs, show },
+    configuration: { width, height, dpr, durationMs, warmupMs, show },
     viewport: result.viewport,
     outputCanvas: result.canvas,
     rates: {
-      rafPerSec: result.frameTicks / Math.max(.001, result.durationMs / 1000),
-      shaderPublicationsPerSec: result.publications.length / Math.max(.001, result.durationMs / 1000),
+      rafPerSec: result.frameTicks / Math.max(.001, durationMs / 1000),
+      shaderPublicationsPerSec: result.publications.length / Math.max(.001, durationMs / 1000),
     },
     intervals: { raf: intervals(result.rafTimes), shaderPublications: intervals(result.publications) },
     diagnostics: deltaDiagnostics(result.before, result.after),
@@ -186,7 +201,9 @@ try {
       usesCurrentSceneTextureImplementation: true,
       usesProductionSlideRendererAndEffectRuntime: true,
       finalShaderMatchesSharedTextureHarness: true,
-      sceneIsApproximateEquivalentNotPixelIdentical: true,
+      sceneEquivalentToSharedHarness: false,
+      cadenceReferenceOnly: true,
+      cpuCostDirectlyComparable: false,
       physicalDisplayFpsMeasured: false,
     },
   };
