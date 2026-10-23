@@ -8,7 +8,8 @@ const backend = params.get("backend") || "webgpu";
 const verbose = params.get("verbose") === "1";
 const canvas = document.getElementById("output");
 const hud = document.getElementById("hud");
-const startedAt = performance.now();
+const initializedAt = performance.now();
+let measuredStartedAt = null;
 const arrivals = [];
 const publications = [];
 const rafs = [];
@@ -58,6 +59,7 @@ async function createWebGpuRenderer() {
     primitive: { topology: "triangle-list" },
   });
   const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+  let submittedFrames = 0;
   return {
     kind: "webgpu-external-texture",
     draw(frame) {
@@ -89,10 +91,14 @@ async function createWebGpuRenderer() {
       pass.end();
       device.queue.submit([encoder.finish()]);
       submitCosts.push(performance.now() - begin);
-      const submittedAt = performance.now();
-      return device.queue.onSubmittedWorkDone().then(() => {
-        gpuCompletionWaits.push(performance.now() - submittedAt);
-      });
+      submittedFrames++;
+      if (submittedFrames % 60 === 0) {
+        const submittedAt = performance.now();
+        void device.queue.onSubmittedWorkDone().then(() => {
+          gpuCompletionWaits.push(performance.now() - submittedAt);
+        });
+      }
+      return Promise.resolve();
     },
   };
 }
@@ -167,6 +173,7 @@ async function finish(reason = "requested") {
   if (stopped) return;
   stopped = true;
   const endedAt = performance.now();
+  const measuredFrom = measuredStartedAt ?? initializedAt;
   const finalMemory = await sampleMemory();
   ipcRenderer.send("shared-texture:finished", {
     reason,
@@ -175,11 +182,12 @@ async function finish(reason = "requested") {
     rendered,
     renderErrors,
     contextLosses,
-    durationMs: endedAt - startedAt,
+    durationMs: endedAt - measuredFrom,
+    initializationLeadMs: measuredStartedAt ? measuredStartedAt - initializedAt : null,
     rates: {
-      arrivalsPerSec: rate(received, startedAt, endedAt),
-      shaderPublicationsPerSec: rate(rendered, startedAt, endedAt),
-      rafPerSec: rate(rafs.length, startedAt, endedAt),
+      arrivalsPerSec: rate(received, measuredFrom, endedAt),
+      shaderPublicationsPerSec: rate(rendered, measuredFrom, endedAt),
+      rafPerSec: rate(rafs.length, measuredFrom, endedAt),
     },
     intervals: {
       arrivals: intervalSummary(arrivals),
@@ -201,8 +209,13 @@ ipcRenderer.on("shared-texture:stop", () => void finish());
       importedSharedTexture.release();
       return;
     }
+    const arrivedAt = performance.now();
+    if (measuredStartedAt === null) {
+      measuredStartedAt = arrivedAt;
+      rafs.length = 0;
+    }
     received++;
-    arrivals.push(performance.now());
+    arrivals.push(arrivedAt);
     let frame;
     let importedReleased = false;
     try {
