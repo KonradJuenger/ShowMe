@@ -1109,3 +1109,304 @@ test("custom pseudo-element rules remain independent across duplicated shader in
   );
   expect(state.surfaces[1].red).toBeGreaterThan(state.surfaces[0].red + 1000);
 });
+
+test("representative browser-native presentation crosses SceneTexture only for explicit scene-pixel shaders", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
+      factoryPath = "/src/core/elementFactory.ts",
+      authoringPath = "/src/core/effectAuthoring.ts",
+      effectsPath = "/src/core/effects.ts",
+      mediaPath = "/src/core/media.ts",
+      textPath = "/src/core/text.ts",
+      platformPath = "/src/platform/index.ts",
+      runtimePath = "/src/components/effectRuntime.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const { blankEffect }: typeof import("../../../src/core/effectAuthoring") =
+      await import(/* @vite-ignore */ authoringPath);
+    const { newEffectInstance }: typeof import("../../../src/core/effects") =
+      await import(/* @vite-ignore */ effectsPath);
+    const { createMediaElement }: typeof import("../../../src/core/media") =
+      await import(/* @vite-ignore */ mediaPath);
+    const { createTextElement }: typeof import("../../../src/core/text") =
+      await import(/* @vite-ignore */ textPath);
+    const { platform }: typeof import("../../../src/platform") = await import(
+      /* @vite-ignore */ platformPath
+    );
+    const {
+      effectSourceTextureBytes,
+    }: typeof import("../../../src/components/effectRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
+
+    const source = document.createElement("canvas");
+    source.width = 320;
+    source.height = 180;
+    const context = source.getContext("2d")!;
+    const gradient = context.createLinearGradient(0, 0, 320, 180);
+    gradient.addColorStop(0, "#113c8d");
+    gradient.addColorStop(1, "#e56b35");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 320, 180);
+    const imageUrl = source.toDataURL("image/png");
+    platform.assetUrl = async () => imageUrl;
+
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(model) {
+        const slide = model.slides[model.deck.slideIds[0]];
+        const resources = slide.effectResources!;
+        const originalText = slide.nodes[0].children[0];
+        const sceneBackdrop = slide.nodes[0].children[1];
+
+        const imageAsset = {
+          version: 1 as const,
+          id: "c".repeat(64),
+          filename: "renderer-boundary.png",
+          names: ["renderer-boundary.png"],
+          type: "image" as const,
+          mediaType: "image" as const,
+          mime: "image/png",
+          bytes: 1,
+          width: 320,
+          height: 180,
+          createdAt: "2026-10-23T00:00:00Z",
+        };
+        const background = createMediaElement(
+          "background-image",
+          imageAsset,
+          { x: 0, y: 0 },
+        );
+        Object.assign(background.frame, {
+          x: 0,
+          y: 0,
+          width: 640,
+          height: 360,
+        });
+
+        const generated = {
+          ...blankEffect("shader"),
+          input: "none" as const,
+          target: "background" as const,
+          source:
+            "#version 300 es\\nprecision highp float; uniform float u_t; in vec2 v_uv; out vec4 outColor; void main(){ outColor=vec4(v_uv.x,.25+.08*sin(u_t),1.-v_uv.x,.22); }",
+        };
+        const generatedLayer = createBasicShape(
+          "generated-layer",
+          "rectangle",
+          { x: 0, y: 0 },
+        );
+        Object.assign(generatedLayer.frame, { width: 640, height: 360 });
+        generatedLayer.appearance.fill = "";
+        generatedLayer.effects = [
+          newEffectInstance("generated", generated, "background"),
+        ];
+
+        const nestedFrame = createBasicShape("nested-frame", "rectangle", {
+          x: 365,
+          y: 22,
+        });
+        Object.assign(nestedFrame.frame, { width: 220, height: 125 });
+        nestedFrame.appearance.fill = "#00000000";
+        nestedFrame.appearance.radius = 14;
+        nestedFrame.clipChildren = true;
+        const nestedImage = createMediaElement(
+          "nested-image",
+          imageAsset,
+          { x: -18, y: -8 },
+        );
+        Object.assign(nestedImage.frame, {
+          x: -18,
+          y: -8,
+          width: 270,
+          height: 152,
+          rotation: -4,
+        });
+        nestedFrame.children = [nestedImage];
+
+        const nativeCss = {
+          ...blankEffect("css-js"),
+          source:
+            ":scope { backdrop-filter: blur(14px) saturate(120%); background: rgba(255,255,255,.24); border: 1px solid rgba(255,255,255,.7); border-radius: 18px; overflow: hidden; }",
+        };
+        const nativeGlass = createBasicShape("native-glass", "rectangle", {
+          x: 345,
+          y: 178,
+        });
+        Object.assign(nativeGlass.frame, { width: 245, height: 130 });
+        nativeGlass.appearance.fill = "#ffffff18";
+        nativeGlass.appearance.radius = 18;
+        nativeGlass.clipChildren = true;
+        nativeGlass.effects = [
+          newEffectInstance("native-css", nativeCss, "content"),
+        ];
+        const label = createTextElement("native-label", { x: 18, y: 38 });
+        Object.assign(label.frame, { width: 205, height: 55 });
+        if (label.content?.type === "text") {
+          label.content.text = "Chromium glass";
+          if (label.content.format.kind === "local")
+            label.content.format.typography.fontSize = 24;
+        }
+        nativeGlass.children = [label];
+
+        const foreground = createBasicShape("foreground-overlap", "ellipse", {
+          x: 535,
+          y: 250,
+        });
+        Object.assign(foreground.frame, { width: 90, height: 90 });
+        foreground.appearance.fill = "#11c9aacc";
+
+        resources.generated = generated;
+        resources["native-css"] = nativeCss;
+        sceneBackdrop.frame.width = 320;
+        sceneBackdrop.frame.height = 180;
+        sceneBackdrop.frame.x = 0;
+        sceneBackdrop.frame.y = 180;
+        slide.nodes[0].children = [
+          background,
+          generatedLayer,
+          originalText,
+          sceneBackdrop,
+          nestedFrame,
+          nativeGlass,
+          foreground,
+        ];
+        slide.motion = {
+          stages: [
+            {
+              id: "representative-stage",
+              tracks: [
+                {
+                  id: "native-glass-move",
+                  elementId: "native-glass",
+                  property: "transform.x",
+                  keyframes: [
+                    {
+                      id: "native-glass-move-a",
+                      at: 0,
+                      value: { type: "absolute", value: 345 },
+                      easeToNext: "linear",
+                    },
+                    {
+                      id: "native-glass-move-b",
+                      at: 1000,
+                      value: { type: "absolute", value: 380 },
+                    },
+                  ],
+                },
+              ],
+              blocks: [
+                {
+                  id: "native-glass-presence",
+                  label: "Presence",
+                  members: [],
+                  binding: { kind: "presence", elementId: "native-glass" },
+                  presenceSchedule: {
+                    version: 1,
+                    startOffsetMs: 0,
+                    end: { mode: "after", durationMs: 1000 },
+                    enterTransition: {
+                      kind: "fade",
+                      durationMs: 150,
+                      easing: [0, 0, 1, 1],
+                    },
+                    exitTransition: {
+                      kind: "fade",
+                      durationMs: 150,
+                      easing: [0, 0, 1, 1],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      const root = harness.host.querySelector<HTMLElement>(".slide-renderer")!;
+      const nativeGlass = root.querySelector<HTMLElement>(
+        '[data-element-id="native-glass"]',
+      )!;
+      const nativeEffect = nativeGlass.querySelector<HTMLElement>(
+        '[data-effect-id="native-css"]',
+      )!;
+      const generatedEffect = root.querySelector<HTMLElement>(
+        '[data-effect-id="generated"]',
+      )!;
+      const beforeTransform = getComputedStyle(nativeGlass).transform;
+      await harness.setMotion({
+        stageId: "representative-stage",
+        stageIndex: 0,
+        time: 500,
+        running: false,
+        startedAt: 1000,
+      });
+      await harness.advance(0.5, 0, 0.5);
+      const state = harness.inspect();
+      const afterTransform = getComputedStyle(nativeGlass).transform;
+      const foreground = root.querySelector<HTMLElement>(
+        '[data-element-id="foreground-overlap"]',
+      )!;
+      const sceneBackends = Object.fromEntries(
+        state.surfaces.map((surface) => [surface.id, surface.backend ?? null]),
+      );
+      return {
+        errors: state.errors,
+        text: state.text,
+        sceneBackends,
+        sceneTextureBytes: effectSourceTextureBytes(),
+        generatedReady: generatedEffect.dataset.effectReady,
+        generatedBackend: generatedEffect.dataset.effectSourceBackend ?? null,
+        generatedCanvas:
+          generatedEffect.querySelectorAll(":scope > canvas").length,
+        nativeCanvas: nativeEffect.querySelectorAll(":scope > canvas").length,
+        nativeBackdrop: getComputedStyle(nativeEffect).backdropFilter,
+        restoration: root.querySelectorAll("[data-backdrop-restore]").length,
+        cssReplay: root.querySelectorAll("[data-css-backdrop]").length,
+        compositionBackend: root.dataset.compositionBackend ?? null,
+        nestedImage: root.querySelectorAll(
+          '[data-element-id="nested-frame"] [data-element-id="nested-image"] img',
+        ).length,
+        motionChanged: beforeTransform !== afterTransform,
+        present: nativeGlass.dataset.presentationAbsent,
+        foregroundAfter: Boolean(
+          nativeGlass.compareDocumentPosition(foreground) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      };
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  expect(result.errors).toEqual([]);
+  expect(result.text).toContain("FIRST");
+  expect(result.sceneBackends.shader).toBe("scene-texture");
+  expect(result.sceneBackends.backdrop).toBe("scene-texture");
+  expect(result.generatedReady).toBe("true");
+  expect(result.generatedBackend).toBeNull();
+  expect(result.generatedCanvas).toBe(1);
+  expect(result.sceneTextureBytes).toBeGreaterThan(0);
+  expect(result.nativeCanvas).toBe(0);
+  expect(result.nativeBackdrop).not.toBe("none");
+  expect(result.restoration).toBe(0);
+  expect(result.cssReplay).toBe(0);
+  expect(result.compositionBackend).toBeNull();
+  expect(result.nestedImage).toBe(1);
+  expect(result.motionChanged).toBe(true);
+  expect(result.present).toBe("false");
+  expect(result.foregroundAfter).toBe(true);
+});
+
