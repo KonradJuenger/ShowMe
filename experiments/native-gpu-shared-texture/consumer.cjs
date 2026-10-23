@@ -290,7 +290,7 @@ ipcRenderer.on("shared-texture:stop", () => void finish());
       if (verbose && rendered > 0 && rendered % 60 === 0)
         hud.textContent = `${renderer.kind}\nreceived ${received}\nrendered ${rendered}\nsource frame ${metadata?.frameCount ?? "?"}`;
     } catch (error) {
-      renderErrors++;
+      if (measured) renderErrors++;
       if (!importedReleased) {
         try { importedSharedTexture.release(); } catch {}
       }
