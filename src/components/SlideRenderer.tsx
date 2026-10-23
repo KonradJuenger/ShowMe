@@ -788,6 +788,7 @@ const ElementView = memo(function ElementView({
     instance: NonNullable<Element["effects"]>[number],
     children?: ReactNode,
     opacity?: string,
+    directShaderInput = false,
   ) => (
     <EffectSurface
       // A saved definition has a new immutable resource identity. Give it a
@@ -799,11 +800,9 @@ const ElementView = memo(function ElementView({
       height={frame.height}
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
       nativeOpacity={opacity}
+      directShaderInput={directShaderInput}
       sceneTextureSource={
-        resources[instance.resourceId].kind === "fragment-glsl" &&
-        ["content", "backdrop"].includes(
-          resources[instance.resourceId].input ?? "none",
-        )
+        resources[instance.resourceId].kind === "fragment-glsl"
           ? sceneTextureSource
           : undefined
       }
@@ -870,12 +869,23 @@ const ElementView = memo(function ElementView({
         );
       case "children":
         return children;
-      case "effect":
+      case "effect": {
+        const definition = resources[operation.effect.resourceId];
+        const directShaderInput =
+          !opacity &&
+          !scene?.current.deck.stylesheet?.trim() &&
+          definition?.kind === "fragment-glsl" &&
+          definition.input === "content" &&
+          operation.input?.kind === "effect" &&
+          resources[operation.input.effect.resourceId]?.kind ===
+            "fragment-glsl";
         return surface(
           operation.effect,
           operation.input ? lower(operation.input) : undefined,
           opacity,
+          directShaderInput,
         );
+      }
       case "sequence":
         return operation.items.map((item, index) => (
           <Fragment key={index}>{lower(item, opacity)}</Fragment>
