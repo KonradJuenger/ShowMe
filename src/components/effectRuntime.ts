@@ -543,6 +543,7 @@ export function mountEffectSurface(
   } | null = null;
   let videoFrameId: number | null = null;
   let videoFrameNode: HTMLVideoElement | null = null;
+  let ownedMediaChanged: (() => void) | null = null;
 
   const disposeOwnedMediaTexture = () => {
     if (ownedMediaTexture)
@@ -1049,6 +1050,12 @@ export function mountEffectSurface(
       videoFrameNode.cancelVideoFrameCallback?.(videoFrameId);
     videoFrameNode = null;
     videoFrameId = null;
+    if (sourceContent && ownedMediaChanged) {
+      sourceContent.removeEventListener("load", ownedMediaChanged, true);
+      sourceContent.removeEventListener("loadeddata", ownedMediaChanged, true);
+      sourceContent.removeEventListener("timeupdate", ownedMediaChanged, true);
+    }
+    ownedMediaChanged = null;
     disposeOwnedMediaTexture();
     if (shaderOutput) disposeShaderOutput(shaderOutput);
     if (shaderChain) shaderChain.redraws.delete(schedule);
@@ -1122,9 +1129,9 @@ export function mountEffectSurface(
           throw new Error("Content shader source is not mounted yet.");
         sourceOpacity = sourceContent?.style.opacity ?? "";
         if (ownedMediaInput && sourceContent) {
-          const mediaChanged = () => schedule();
-          sourceContent.addEventListener("load", mediaChanged, true);
-          sourceContent.addEventListener("loadeddata", mediaChanged, true);
+          ownedMediaChanged = () => schedule();
+          sourceContent.addEventListener("load", ownedMediaChanged, true);
+          sourceContent.addEventListener("loadeddata", ownedMediaChanged, true);
           const video = sourceContent.querySelector<HTMLVideoElement>("video");
           if (video?.requestVideoFrameCallback) {
             videoFrameNode = video;
@@ -1135,7 +1142,12 @@ export function mountEffectSurface(
                 videoFrameNode.requestVideoFrameCallback(nextFrame);
             };
             videoFrameId = video.requestVideoFrameCallback(nextFrame);
-          } else sourceContent.addEventListener("timeupdate", mediaChanged, true);
+          } else
+            sourceContent.addEventListener(
+              "timeupdate",
+              ownedMediaChanged,
+              true,
+            );
         }
         if (
           (!directShaderInput && !ownedMediaInput) ||
