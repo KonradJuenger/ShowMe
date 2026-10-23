@@ -1001,6 +1001,17 @@
     "reason": "CSS backdrop-filter now follows Chromium composition semantics directly. The suite verifies native backdrop-filter over generated shader content, parent and nested group opacity, Presence Move In, external stylesheet changes, source transforms/opacity and overlapping glass consumers without CSS backdrop replay, restoration canvases, split visual wrappers or CSS Effect canvases. Production Move In now keeps transform transport opaque and binds the supported scoped material alpha; authored direct CSS group-opacity semantics remain native."
   },
   {
+    "id": "effects-rendering-workloads",
+    "path": "tests/feature/effects/rendering-workloads.spec.ts",
+    "area": "effects",
+    "tier": "extended",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-23",
+    "lastReviewed": "2026-10-23",
+    "reason": "Benchmark-only isolated renderer workloads, gated by SHOWME_RENDERER_BENCHMARK=1: native DOM/CSS/Motion/Presence proves zero SceneTexture/DOM discovery on normal frames; generated input:none GLSL proves direct visible WebGL with zero Canvas2D presentation copies, SceneTexture use, steady recompilation and intermediate GPU allocations; explicit flattened content verifies retained SceneTexture revisit reuse. The dense audience benchmark remains the mixed stress workload."
+  },
+  {
     "id": "effects-renderer-architecture",
     "path": "tests/feature/effects/renderer-architecture.test.ts",
     "area": "effects",
