@@ -64,8 +64,9 @@ let gpuInfo = null;
 let finalizing = false;
 let initialAppMetrics = [];
 let finalAppMetrics = [];
-let timedQueueStart = null;
-let timedQueueEnd = null;
+let timedOffered = 0;
+let timedConsumed = 0;
+let timedStaleReleased = 0;
 
 function handleKind(info) {
   const handle = info?.handle || {};
@@ -87,8 +88,12 @@ function safeRelease(texture, measured = false) {
 
 const queue = new BoundedLatestFrameQueue({
   maxActive,
-  release: (frame) => safeRelease(frame.texture, frame.measured),
+  release: (frame, reason) => {
+    if (frame.measured && reason === "stale") timedStaleReleased++;
+    safeRelease(frame.texture, frame.measured);
+  },
   consume: async (frame, done) => {
+    if (frame.measured) timedConsumed++;
     const receivedAt = frame.receivedAt;
     let imported;
     try {
@@ -145,20 +150,6 @@ function cpuDeltas(initial, final) {
     };
   });
 }
-function queueDelta(before, after) {
-  if (!before || !after) return null;
-  const cumulative = [
-    "offered",
-    "consumed",
-    "staleReleased",
-    "rejectedAfterClose",
-    "consumerErrors",
-  ];
-  return Object.fromEntries(
-    cumulative.map((key) => [key, (after[key] ?? 0) - (before[key] ?? 0)]),
-  );
-}
-
 function beginMeasurement() {
   if (measurementStarted || !measurementWindow) return;
   measurementStarted = true;
@@ -171,7 +162,9 @@ function beginMeasurement() {
   paintEvents = 0;
   missingTextures = 0;
   timedSourceReleased = 0;
-  timedQueueStart = queue.snapshot();
+  timedOffered = 0;
+  timedConsumed = 0;
+  timedStaleReleased = 0;
   initialAppMetrics = appMetricsSnapshot();
   if (verbose) console.log("measurement started", measurementWindow);
 }
@@ -179,7 +172,6 @@ function beginMeasurement() {
 function endMeasurement() {
   if (measurementEnded || !measurementStarted) return;
   measurementEnded = true;
-  timedQueueEnd = queue.snapshot();
   finalAppMetrics = appMetricsSnapshot();
   if (verbose) console.log("measurement ended", measurementWindow);
 }
@@ -263,7 +255,11 @@ function finishIfReady() {
     },
     transport: {
       queue: finalQueue,
-      timedQueue: queueDelta(timedQueueStart, timedQueueEnd),
+      timedQueue: {
+        offered: timedOffered,
+        consumed: timedConsumed,
+        staleReleased: timedStaleReleased,
+      },
       sourceReleased,
       timedSourceReleased,
       releaseErrors,
@@ -398,6 +394,7 @@ app.whenReady().then(async () => {
         textureShapes.set(shape, (textureShapes.get(shape) || 0) + 1);
         handleKinds.add(handleKind(info));
       }
+      if (measured) timedOffered++;
       queue.offer({
         texture,
         receivedAt: now,
