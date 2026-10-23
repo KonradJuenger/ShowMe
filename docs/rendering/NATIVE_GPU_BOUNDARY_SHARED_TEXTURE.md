@@ -186,7 +186,7 @@ The experiment must measure whether the actual consumer path remains GPU-residen
 
 ### Experiment B — compare against current SceneTexture capture
 
-Use the same native scene and shader, same resolution/DPR and same production Electron environment.
+The ideal controlled comparison uses the same native scene and shader, same resolution/DPR and same production Electron environment. The current branch does **not** yet have pixel/workload-equivalent scenes on both sides, so its legacy runner is only a broad cadence reference. CPU/process cost from the two current fixtures must not be presented as an apples-to-apples transport speedup until the scenes are made materially equivalent.
 
 Measure at minimum:
 
@@ -388,6 +388,8 @@ The queue policy has a standalone self-test. It verifies latest-frame replacemen
 
 ### Instrumentation
 
+Cadence measurement now uses one explicit epoch-based window shared between the main process and consumer renderer. After source load, the pipeline warms up for 1500 ms by default. Main then publishes a future start/end epoch to the consumer. Source paint events, consumer arrivals, shader publications, rAF samples and per-frame submit costs are reset/countable only inside that window. At the end epoch, timed process metrics are sampled and painting is stopped; shared-texture references drain afterward. Drain time is therefore excluded from the cadence denominator. The warmup is configurable with `--warmup`.
+
 The shared-texture harness records:
 
 - OSR paint events/sec;
@@ -416,9 +418,9 @@ Optional evidence capture saves the final transformed consumer image after the t
 
 The experiment deliberately does not claim physical-display 60 FPS from application callbacks.
 
-### Controlled comparison with current SceneTexture
+### Cadence reference with current SceneTexture
 
-`legacy-scene-texture.mjs` builds an approximate controlled counterpart through the **current production ShowMe renderer**:
+`legacy-scene-texture.mjs` builds a broad reference through the **current production ShowMe renderer**:
 
 ```text
 generated ShowMe GPU shader
@@ -432,16 +434,17 @@ same cheap final color shader
 
 It imports the existing `mountMixedEffectsHarness`, `SlideRenderer` path, `effectRuntime`, `sceneTextureDiagnostics` and shader diagnostics. The experiment does not modify the current SceneTexture implementation.
 
-The comparison runner holds constant:
+The runner holds constant:
 
 - logical width;
 - logical height;
 - requested DPR;
-- duration;
+- warmup;
+- timed duration;
 - the final shader transform;
 - the same Electron installation/hardware used for the two sequential runs.
 
-The two source scenes are intentionally approximate rather than pixel-identical. This preserves the key physical workload while allowing the baseline to use the real ShowMe renderer instead of inserting experimental transport hooks into production code.
+The source scenes are **not equivalent**. The shared-texture scene contains extra animated native CSS/decorative content that the legacy fixture does not reproduce. That makes the current shared source at least more demanding in some respects, but it also means CPU/process deltas are not a valid transport-speedup comparison. The report labels itself `cadence-reference-not-apples-to-apples` and explicitly marks CPU cost as not directly comparable.
 
 The comparison report fails its validation checks if the requested size/DPR are not actually realized, if the legacy renderer reports effect errors, or if the shared-texture lifetime is not fully drained and bounded.
 
@@ -480,12 +483,12 @@ npm run benchmark:shared-texture -- \
   --output=.benchmark-data/shared-texture/webgl.json
 ```
 
-Controlled current-SceneTexture vs shared-texture run:
+Current-SceneTexture cadence reference vs shared-texture run:
 
 ```bash
 npm run benchmark:shared-texture:compare -- \
   --width=1596 --height=998 --dpr=1.6042 \
-  --duration=30000 \
+  --duration=30000 --warmup=1500 \
   --output=.benchmark-data/shared-texture/comparison.json \
   --evidence-dir=.benchmark-data/shared-texture/evidence
 ```
@@ -572,7 +575,7 @@ On the Radeon 880M / D3D11 machine, local Codex should verify in this order:
 5. Inspect p95/max intervals and metadata frame-count gaps.
 6. Confirm `maxRetained <= maxActive + 1`, final retained count is zero, no release/transfer/render errors occur and teardown drains before timeout.
 7. Repeat with the WebGL backend to expose any meaningful difference between external-texture sampling and `texImage2D(VideoFrame)`.
-8. Run the controlled SceneTexture comparison and compare publication cadence and CPU/process cost.
+8. Run the SceneTexture cadence reference and compare publication cadence only. Do not interpret current CPU/process deltas as an apples-to-apples speedup unless the fixtures are first made materially equivalent.
 9. Run a multi-minute WebGPU test and inspect memory and retained-texture stability.
 10. Only if transport succeeds, prototype the smallest possible single intermediate-prefix case. Count Chromium surfaces explicitly. Stop if the model requires one duplicated webContents per effect boundary.
 
