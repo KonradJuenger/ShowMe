@@ -204,8 +204,13 @@ extra). This excludes textures, FBOs, driver allocations and bitmap presentation
 actual VRAM and peak GPU memory were not measured. Contexts are bounded globally
 per renderer rather than per shader chain. No physical display FPS or 60 FPS
 claim: glass still publishes at approximately half the audience callback rate.
-The next work is qualifying GPU SceneTexture assembly for the reference workload,
-then removing that asynchronous capture cadence.
+
+This research branch stops here architecturally. PR #19 Phase 4 GPU SceneTexture
+reconstruction is intentionally excluded. The next experiment is to test whether
+Electron offscreen rendering with GPU shared textures can bridge Chromium's native
+compositor output into the shader pipeline without CPU capture/upload and without
+building a second compositor. See
+[NATIVE_GPU_BOUNDARY_SHARED_TEXTURE.md](NATIVE_GPU_BOUNDARY_SHARED_TEXTURE.md).
 
 Verification: `npm run build` (including typecheck), `npm run verify:build`,
 `npx eslint src/components/effectRuntime.ts` and `git diff --check` passed.
