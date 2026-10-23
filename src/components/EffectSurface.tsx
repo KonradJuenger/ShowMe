@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useCallback,
   useContext,
   useLayoutEffect,
   useRef,
@@ -14,10 +16,16 @@ import type { TextContent } from "../core/text";
 import type { EffectDefinition, ElementEffect } from "../core/effects";
 import type { EffectResources } from "../core/effects";
 import type { Element } from "../core/element";
-import { effectSurface, mountEffectSurface } from "./effectRuntime";
+import {
+  createShaderChain,
+  effectSurface,
+  mountEffectSurface,
+  type ShaderChain,
+} from "./effectRuntime";
 import { EffectRenderContext } from "./EffectRenderContext";
 import { useDisplayDensity } from "./useDisplayDensity";
-import type { EffectRef } from "./compositionPlan";
+
+const ShaderChainContext = createContext<ShaderChain | null>(null);
 
 export function EffectSurface({
   definition,
@@ -27,21 +35,23 @@ export function EffectSurface({
   children,
   previewTiming,
   textContent,
-  rasterContent,
+  sceneTextureSource,
   samplingEnvelope,
-  compositionDependencies,
-  backdropMode = "fallback",
+  nativeOpacity,
+  directShaderInput = false,
+  ownedMediaInput = false,
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
   width: number;
   height: number;
   samplingEnvelope?: number;
-  compositionDependencies?: EffectRef[];
-  backdropMode?: "fallback" | "hoisted" | "restoration";
+  nativeOpacity?: string;
+  directShaderInput?: boolean;
+  ownedMediaInput?: boolean;
   children?: ReactNode;
   textContent?: TextContent;
-  rasterContent?: {
+  sceneTextureSource?: {
     element: Element;
     resources: EffectResources;
     scene?: () => { slide: Slide; deck: Deck };
@@ -65,9 +75,22 @@ export function EffectSurface({
 }) {
   const root = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null);
-  const dependencies = useRef(compositionDependencies);
-  dependencies.current = compositionDependencies;
-  const dependencyKey = JSON.stringify(compositionDependencies);
+  const inheritedShaderChain = useContext(ShaderChainContext);
+  const ownedShaderChain = useRef<ShaderChain | null>(null);
+  if (!ownedShaderChain.current) ownedShaderChain.current = createShaderChain();
+  const shaderChain =
+    definition.kind === "fragment-glsl"
+      ? (inheritedShaderChain ?? ownedShaderChain.current)
+      : null;
+  const ownsShaderChain =
+    definition.kind === "fragment-glsl" && inheritedShaderChain === null;
+  const setCanvas = useCallback(
+    (value: HTMLCanvasElement | null) => {
+      canvas.current = value;
+      if (ownsShaderChain && shaderChain) shaderChain.canvas = value;
+    },
+    [ownsShaderChain, shaderChain],
+  );
   const [error, setError] = useState("");
   const copyErrors = useContext(EffectErrorCopyContext);
   const render = useContext(EffectRenderContext);
@@ -99,7 +122,12 @@ export function EffectSurface({
   // Authority updates may clone unchanged definitions/instances. A backdrop's
   // mounted source depends on the frame and effect, not its own children or
   // higher scene objects. The scene getter continues to read accepted updates.
-  const mountInput = useRef({ key: "", definition, instance, rasterContent });
+  const mountInput = useRef({
+    key: "",
+    definition,
+    instance,
+    sceneTextureSource,
+  });
   const backdropKey =
     definition.input === "backdrop"
       ? JSON.stringify([
@@ -107,7 +135,7 @@ export function EffectSurface({
           instance,
           width,
           height,
-          rasterContent?.element.id,
+          sceneTextureSource?.element.id,
         ])
       : "";
   if (!backdropKey || mountInput.current.key !== backdropKey)
@@ -115,12 +143,12 @@ export function EffectSurface({
       key: backdropKey,
       definition,
       instance,
-      rasterContent,
+      sceneTextureSource,
     };
   const {
     definition: mountedDefinition,
     instance: mountedInstance,
-    rasterContent: mountedContent,
+    sceneTextureSource: mountedContent,
   } = mountInput.current;
   useLayoutEffect(() => {
     if (!root.current) return;
@@ -133,8 +161,11 @@ export function EffectSurface({
       setError,
       mountedContent,
       undefined,
-      () => dependencies.current,
-      backdropMode,
+      shaderChain ?? undefined,
+      !!inheritedShaderChain,
+      directShaderInput,
+      ownsShaderChain,
+      ownedMediaInput,
     );
   }, [
     mountedDefinition,
@@ -143,11 +174,12 @@ export function EffectSurface({
     height,
     textContent,
     mountedContent,
-    backdropMode,
+    shaderChain,
+    inheritedShaderChain,
+    directShaderInput,
+    ownsShaderChain,
+    ownedMediaInput,
   ]);
-  useLayoutEffect(() => {
-    if (root.current) effectSurface(root.current)?.replan();
-  }, [dependencyKey]);
   useLayoutEffect(() => {
     if (root.current)
       effectSurface(root.current)?.setSampling({
@@ -178,6 +210,13 @@ export function EffectSurface({
     surface?.setTiming(previewTiming);
     void surface?.flush();
   }, [definition, instance, previewTiming]);
+  const effectChildren = directShaderInput && shaderChain ? (
+    <ShaderChainContext.Provider value={shaderChain}>
+      {children}
+    </ShaderChainContext.Provider>
+  ) : (
+    children
+  );
   return (
     <div
       ref={root}
@@ -186,14 +225,15 @@ export function EffectSurface({
       style={{
         position: "absolute",
         inset: 0,
+        opacity: nativeOpacity,
         pointerEvents: instance.placement === "content" ? undefined : "none",
-        backdropFilter: backdropMode === "hoisted" ? "none" : undefined,
       }}
     >
       {definition.kind === "fragment-glsl" && (
         <canvas
-          ref={canvas}
+          ref={setCanvas}
           aria-hidden="true"
+          data-shader-stage={inheritedShaderChain ? "intermediate" : "terminal"}
           style={{ width: "100%", height: "100%", display: "block" }}
         />
       )}
@@ -202,10 +242,10 @@ export function EffectSurface({
           data-effect-source="true"
           style={{ position: "absolute", inset: 0 }}
         >
-          {children}
+          {effectChildren}
         </div>
       ) : (
-        children
+        effectChildren
       )}
       {error && (
         <span

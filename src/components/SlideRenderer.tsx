@@ -8,15 +8,7 @@ import { type ImageOutputProfile } from "../core/presentationImages";
 import type { MotionPreviewState } from "../core/motionPlayback";
 import { useMotionRuntime } from "./useMotionRuntime";
 import { EffectSurface } from "./EffectSurface";
-import {
-  planCompositionBackends,
-  type CompositionBackends,
-} from "./compositionBackendPlan";
-import {
-  mountCompositionRuntime,
-  type CompositionRuntime,
-} from "./compositionRuntime";
-import type { MotionRenderSink } from "./motionRuntime";
+import { nativeOpacityPlan, type NativeOpacity } from "./nativeOpacity";
 import type { EffectResources } from "../core/effects";
 import {
   compileCompositionPlan,
@@ -59,18 +51,13 @@ import {
   type SlideRenderProfile,
 } from "../core/renderProfile";
 
-const RasterSceneContext = createContext<{
+const SceneTextureSceneContext = createContext<{
   current: { slide: Slide; deck: Deck };
 } | null>(null);
 const VideoPreparationContext = createContext(false);
 const TextStylesContext = createContext<Deck | undefined>(undefined);
 const EffectResourcesContext = createContext<EffectResources>({});
 const emptyEffectResources: EffectResources = {};
-const CompositionContext = createContext<{
-  plan: CompositionPlan;
-  backends: CompositionBackends;
-} | null>(null);
-
 const ImageDocumentContext = createContext<{
   documentId: string;
   slideId: string;
@@ -116,7 +103,10 @@ function VideoView({
     const player = acquireVideoPlayer(playerKey, content.assetId);
     video.current = player.node;
     videoHost.current.append(player.node);
-    return () => { video.current = null; player.release(); };
+    return () => {
+      video.current = null;
+      player.release();
+    };
   }, [playerKey, content.assetId, loadVideo]);
   const editorInactive = editorPlayback === "inactive";
   const posterKey = `${content.assetId}:${content.startTime}`;
@@ -224,9 +214,17 @@ function VideoView({
     if ("requestVideoFrameCallback" in node)
       videoFrame = node.requestVideoFrameCallback(framePresented);
     if (node.src && node.readyState >= 1) {
-      metadata(); decoded();
-      paintFrame = requestAnimationFrame(() => { paintFrame = requestAnimationFrame(() => { if (live && atStart()) setPresented(true); }); });
-    } else { node.src = url; node.load(); }
+      metadata();
+      decoded();
+      paintFrame = requestAnimationFrame(() => {
+        paintFrame = requestAnimationFrame(() => {
+          if (live && atStart()) setPresented(true);
+        });
+      });
+    } else {
+      node.src = url;
+      node.load();
+    }
     return () => {
       live = false;
       if (videoFrame) node.cancelVideoFrameCallback(videoFrame);
@@ -326,15 +324,49 @@ function VideoView({
     const node = video.current;
     if (!node) return;
     node.dataset.assetId = content.assetId;
-    node.muted = content.mute; node.volume = content.volume;
-    node.controls = editorPreview || (!presentation && editorPlayback === undefined && !content.autoplay);
-    Object.assign(node.style, { display: "block", width: "100%", height: "100%", objectFit: "fill", visibility: activePlayback ? "visible" : "hidden" });
-    const play = () => setIsPlaying(true), pause = () => setIsPlaying(false);
+    node.muted = content.mute;
+    node.volume = content.volume;
+    node.controls =
+      editorPreview ||
+      (!presentation && editorPlayback === undefined && !content.autoplay);
+    Object.assign(node.style, {
+      display: "block",
+      width: "100%",
+      height: "100%",
+      objectFit: "fill",
+      visibility: activePlayback ? "visible" : "hidden",
+    });
+    const play = () => setIsPlaying(true),
+      pause = () => setIsPlaying(false);
     const update = () => enforceEnd(node);
-    const ended = () => { if (content.loop) { node.currentTime = videoBounds(content, node.duration).start; void node.play().catch(() => {}); } };
-    node.addEventListener("play", play); node.addEventListener("pause", pause); node.addEventListener("timeupdate", update); node.addEventListener("ended", ended); node.addEventListener("error", onError);
-    return () => { node.removeEventListener("play", play); node.removeEventListener("pause", pause); node.removeEventListener("timeupdate", update); node.removeEventListener("ended", ended); node.removeEventListener("error", onError); };
-  }, [content, activePlayback, editorPreview, presentation, editorPlayback, enforceEnd, onError, loadVideo]);
+    const ended = () => {
+      if (content.loop) {
+        node.currentTime = videoBounds(content, node.duration).start;
+        void node.play().catch(() => {});
+      }
+    };
+    node.addEventListener("play", play);
+    node.addEventListener("pause", pause);
+    node.addEventListener("timeupdate", update);
+    node.addEventListener("ended", ended);
+    node.addEventListener("error", onError);
+    return () => {
+      node.removeEventListener("play", play);
+      node.removeEventListener("pause", pause);
+      node.removeEventListener("timeupdate", update);
+      node.removeEventListener("ended", ended);
+      node.removeEventListener("error", onError);
+    };
+  }, [
+    content,
+    activePlayback,
+    editorPreview,
+    presentation,
+    editorPlayback,
+    enforceEnd,
+    onError,
+    loadVideo,
+  ]);
 
   const posterUrl =
     (poster?.key === posterKey ? poster.url : null) ||
@@ -366,7 +398,9 @@ function VideoView({
           }}
         />
       )}
-      {loadVideo && <div ref={videoHost} style={{ width: "100%", height: "100%" }} />}
+      {loadVideo && (
+        <div ref={videoHost} style={{ width: "100%", height: "100%" }} />
+      )}
       {presentation && !staticVideo && !content.autoplay && ready && (
         <button
           className="movie-click-to-play"
@@ -724,6 +758,8 @@ const ElementView = memo(function ElementView({
   editorPlayback,
   editingTextId,
   inherited = false,
+  composition,
+  opacityPlan,
 }: {
   element: Element;
   staticVideo: boolean;
@@ -731,16 +767,16 @@ const ElementView = memo(function ElementView({
   editorPlayback?: EditorPlayback;
   editingTextId?: string | null;
   inherited?: boolean;
+  composition: CompositionPlan;
+  opacityPlan: ReadonlyMap<string, NativeOpacity>;
 }) {
   const { frame, appearance } = element;
   const resources = useContext(EffectResourcesContext);
   const effectRender = useContext(EffectRenderContext);
-  const scene = useContext(RasterSceneContext);
-  const { plan, backends } = useContext(CompositionContext)!;
-  const nativeBackdrop = backends.native.get(element.id);
-  const restoreBackdrop = backends.restoration?.glass.has(element.id) ?? false;
-  const group = plan.groups.get(element.id)!;
-  const rasterContent = useMemo(
+  const scene = useContext(SceneTextureSceneContext);
+  const group = composition.groups.get(element.id)!;
+  const alpha = opacityPlan.get(element.id);
+  const sceneTextureSource = useMemo(
     () => ({
       element,
       resources: scene?.current.slide.effectResources ?? emptyEffectResources,
@@ -751,6 +787,9 @@ const ElementView = memo(function ElementView({
   const surface = (
     instance: NonNullable<Element["effects"]>[number],
     children?: ReactNode,
+    opacity?: string,
+    directShaderInput = false,
+    ownedMediaInput = false,
   ) => (
     <EffectSurface
       // A saved definition has a new immutable resource identity. Give it a
@@ -761,23 +800,12 @@ const ElementView = memo(function ElementView({
       width={frame.width}
       height={frame.height}
       samplingEnvelope={effectRender?.envelopes?.get(element.id)}
-      backdropMode={
-        nativeBackdrop?.effectId === instance.id
-          ? "hoisted"
-          : restoreBackdrop
-            ? "restoration"
-            : "fallback"
-      }
-      compositionDependencies={plan.dependencies({
-        elementId: element.id,
-        effectId: instance.id,
-      })}
-      rasterContent={
-        resources[instance.resourceId].kind === "css" ||
-        ["content", "backdrop"].includes(
-          resources[instance.resourceId].input ?? "none",
-        )
-          ? rasterContent
+      nativeOpacity={opacity}
+      directShaderInput={directShaderInput}
+      ownedMediaInput={ownedMediaInput}
+      sceneTextureSource={
+        resources[instance.resourceId].kind === "fragment-glsl"
+          ? sceneTextureSource
           : undefined
       }
       textContent={
@@ -813,6 +841,8 @@ const ElementView = memo(function ElementView({
       presentation={presentation}
       editorPlayback={editorPlayback}
       editingTextId={editingTextId}
+      composition={composition}
+      opacityPlan={opacityPlan}
     />
   ));
   const shape = element.geometry.type === "ellipse" ? "50%" : appearance.radius;
@@ -828,20 +858,87 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
-  const lower = (operation: Composition): ReactNode => {
+  const ownedMediaOnly = (operation: Composition): boolean => {
+    const mediaContent = element.content;
+    if (
+      !mediaContent ||
+      (mediaContent.type !== "image" && mediaContent.type !== "video") ||
+      element.children.length ||
+      element.geometry.type !== "rect" ||
+      appearance.radius !== 0 ||
+      appearance.fill ||
+      appearance.strokeWidth !== 0 ||
+      mediaContent.opacity !== 1
+    )
+      return false;
+    const media = resolveMediaFrame(element);
+    if (
+      !media ||
+      Math.abs(media.x) > 1e-6 ||
+      Math.abs(media.y) > 1e-6 ||
+      Math.abs(media.width - frame.width) > 1e-6 ||
+      Math.abs(media.height - frame.height) > 1e-6 ||
+      Math.abs(media.rotation) > 1e-6 ||
+      Math.abs(media.scaleX - 1) > 1e-6 ||
+      Math.abs(media.scaleY - 1) > 1e-6 ||
+      media.flipX ||
+      media.flipY
+    )
+      return false;
     switch (operation.kind) {
       case "source":
-        return source;
+        return true;
+      case "children":
+        return element.children.length === 0;
+      case "sequence":
+        return operation.items.every(ownedMediaOnly);
+      case "clip":
+        return element.clipChildren && ownedMediaOnly(operation.input);
+      default:
+        return false;
+    }
+  };
+  const lower = (operation: Composition, opacity?: string): ReactNode => {
+    switch (operation.kind) {
+      case "source":
+        if (!element.content) return null;
+        return opacity ? (
+          <div style={{ position: "absolute", inset: 0, opacity }}>
+            {source}
+          </div>
+        ) : (
+          source
+        );
       case "children":
         return children;
-      case "effect":
+      case "effect": {
+        const definition = resources[operation.effect.resourceId];
+        const directShaderInput =
+          !opacity &&
+          !scene?.current.deck.stylesheet?.trim() &&
+          definition?.kind === "fragment-glsl" &&
+          definition.input === "content" &&
+          operation.input?.kind === "effect" &&
+          resources[operation.input.effect.resourceId]?.kind ===
+            "fragment-glsl";
+        const ownedMediaInput =
+          !opacity &&
+          !scene?.current.deck.stylesheet?.trim() &&
+          definition?.kind === "fragment-glsl" &&
+          definition.input === "content" &&
+          !!operation.input &&
+          ownedMediaOnly(operation.input);
         return surface(
           operation.effect,
           operation.input ? lower(operation.input) : undefined,
+          opacity,
+          directShaderInput,
+          ownedMediaInput,
         );
+      }
       case "sequence":
         return operation.items.map((item, index) => (
-          <Fragment key={index}>{lower(item)}</Fragment>
+          <Fragment key={index}>{lower(item, opacity)}</Fragment>
         ));
       case "clip":
         return (
@@ -854,7 +951,7 @@ const ElementView = memo(function ElementView({
               overflow: element.clipChildren ? "hidden" : "visible",
             }}
           >
-            {lower(operation.input)}
+            {lower(operation.input, opacity)}
           </div>
         );
       case "fill":
@@ -865,26 +962,32 @@ const ElementView = memo(function ElementView({
               position: "absolute",
               inset: 0,
               backgroundColor: appearance.fill ?? undefined,
+              opacity,
               borderRadius: shape,
             }}
           />
         );
       case "stroke":
         return (
-          <div data-element-stroke="true" aria-hidden="true" style={outline} />
+          <div
+            data-element-stroke="true"
+            aria-hidden="true"
+            style={{ ...outline, opacity }}
+          />
         );
     }
   };
 
   return (
-    <>
-      <div
-        data-element-id={element.id}
-        data-template-content={inherited ? "true" : undefined}
-        data-showme-id={`showme-${element.id}`}
-        data-showme-part="self"
-        className={element.cssClasses?.join(" ")}
-        style={{
+    <div
+      data-element-id={element.id}
+      data-native-opacity={alpha?.property}
+      data-template-content={inherited ? "true" : undefined}
+      data-showme-id={`showme-${element.id}`}
+      data-showme-part="self"
+      className={element.cssClasses?.join(" ")}
+      style={
+        {
           position: "absolute",
           left: frame.x,
           top: frame.y,
@@ -892,58 +995,17 @@ const ElementView = memo(function ElementView({
           height: frame.height,
           transform: frameCssTransform(frame),
           transformOrigin: frameCssOrigin(frame),
-          opacity: nativeBackdrop || restoreBackdrop ? 1 : appearance.opacity,
-        }}
-      >
-        {nativeBackdrop ? (
-          <div
-            data-composition-visual="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              opacity: appearance.opacity,
-              backdropFilter: nativeBackdrop.filter,
-            }}
-          >
-            {lower(group.visual)}
-          </div>
-        ) : restoreBackdrop ? (
-          <div
-            data-composition-paint="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              contentVisibility: "hidden",
-            }}
-          >
-            {lower(group.visual)}
-          </div>
-        ) : (
-          lower(group.visual)
-        )}
-      </div>
-      {restoreBackdrop && (
-        <div
-          data-backdrop-restore={element.id}
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: 0,
-            height: 0,
-            pointerEvents: "none",
-            opacity: 0,
-          }}
-        >
-          <canvas
-            width={1}
-            height={1}
-            style={{ width: "100%", height: "100%", display: "block" }}
-          />
-        </div>
-      )}
-    </>
+          ...(alpha ? { [alpha.property]: appearance.opacity } : {}),
+          opacity: alpha
+            ? alpha.distribute
+              ? 1
+              : alpha.value
+            : appearance.opacity,
+        } as CSSProperties
+      }
+    >
+      {lower(group.visual, alpha?.distribute ? alpha.value : undefined)}
+    </div>
   );
 });
 
@@ -1000,11 +1062,15 @@ export const SlideRenderer = memo(function SlideRenderer({
     [slide, deck, compositionResources, editingTextId],
   );
   const root = useRef<HTMLDivElement>(null);
-  const runtime = useRef<CompositionRuntime | null>(null);
-  const [failedBackdrop, setFailedBackdrop] = useState<{
-    plan: CompositionPlan;
-    ids: Set<string>;
-  } | null>(null);
+  const opacityPlan = useMemo(
+    () =>
+      nativeOpacityPlan(
+        slide.nodes.flatMap((node) => node.children),
+        compositionResources ?? {},
+        deck.stylesheet,
+      ),
+    [slide, compositionResources, deck.stylesheet],
+  );
   const pixelRatio = useDisplayDensity();
   const width = deck.width,
     height = deck.height;
@@ -1037,96 +1103,12 @@ export const SlideRenderer = memo(function SlideRenderer({
     }),
     [width, height, output, deferImageUpdates, playing, envelopes],
   );
-  const backdropDensity = Math.max(
-    effectRender.density.x,
-    effectRender.density.y,
-  );
-  const hasMotionPreview = !!motionState;
-  const backends = useMemo(
-    () =>
-      planCompositionBackends(composition, slide, deck, {
-        restoration:
-          (presentation || hasMotionPreview) &&
-          !editingTextId &&
-          !editingMediaId &&
-          !editorOverflow,
-        padding: Math.max(2, 2 / backdropDensity),
-        exclude:
-          failedBackdrop?.plan === composition ? failedBackdrop.ids : undefined,
-      }),
-    [
-      composition,
-      slide,
-      deck,
-      presentation,
-      hasMotionPreview,
-      editingTextId,
-      editingMediaId,
-      editorOverflow,
-      failedBackdrop,
-      backdropDensity,
-    ],
-  );
-  const sceneBackdrop = backends.restoration;
-  const compositionView = useMemo(
-    () => ({ plan: composition, backends }),
-    [composition, backends],
-  );
-  useLayoutEffect(() => {
-    if (!root.current || !sceneBackdrop) return;
-    const failed = (ids: readonly string[], error: unknown) => {
-      console.error("Composition preparation failed", error);
-      setFailedBackdrop((previous) => ({
-        plan: composition,
-        ids: new Set([
-          ...(previous?.plan === composition ? previous.ids : []),
-          ...ids,
-        ]),
-      }));
-    };
-    try {
-      const mounted = mountCompositionRuntime(
-        root.current,
-        sceneBackdrop,
-        deck,
-        failed,
-        effectRender.density,
-      );
-      runtime.current = mounted;
-      return () => {
-        runtime.current = null;
-        mounted.dispose();
-      };
-    } catch (error) {
-      failed([...sceneBackdrop.glass], error);
-    }
-  }, [sceneBackdrop, deck, composition, effectRender.density]);
-  const hasRestoration = !!sceneBackdrop;
-  const renderSink = useMemo<MotionRenderSink | undefined>(
-    () =>
-      hasRestoration
-        ? {
-            ownsOpacity(id) {
-              return runtime.current?.ownsOpacity?.(id) ?? false;
-            },
-            apply(samples) {
-              runtime.current?.apply(samples);
-            },
-            reset() {
-              runtime.current?.reset();
-            },
-          }
-        : undefined,
-    [hasRestoration],
-  );
   useMotionRuntime(
     root,
     slide,
     motionState,
     !!effectClock || !staticVideo,
     effectClock,
-    backends,
-    renderSink,
   );
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
@@ -1165,83 +1147,83 @@ export const SlideRenderer = memo(function SlideRenderer({
       <EffectResourcesContext.Provider
         value={slide.effectResources ?? emptyEffectResources}
       >
-        <CompositionContext.Provider value={compositionView}>
-          <RasterSceneContext.Provider value={rasterScene}>
-            <TextStylesContext.Provider value={deck}>
-              <VideoPreparationContext.Provider value={prepareVideo}>
-                <ImageDocumentContext.Provider value={imageContext}>
-                  <div
-                    ref={root}
-                    className="slide-renderer"
-                    data-slide-id={slide.id}
-                    style={{
-                      position: "relative",
-                      width: deck.width,
-                      height: deck.height,
-                      background: slide.background,
-                      overflow: editorOverflow ? "visible" : "hidden",
-                    }}
-                  >
-                    {deck.stylesheet && (
-                      <style>{`@scope (.slide-renderer) { ${deck.stylesheet} }`}</style>
-                    )}
-                    {layerRoots(slide).map((root) => {
-                      const layer = layers.get(root.id);
-                      if (!layer || layer.hidden) return null;
-                      return (
-                        <div
-                          key={root.id}
-                          data-layer-id={root.id}
-                          data-layer-locked={layer.locked ? "true" : undefined}
-                          style={{ position: "absolute", inset: 0 }}
-                        >
-                          {root.children.map((element) => (
-                            <ElementView
-                              key={element.id}
-                              element={element}
-                              staticVideo={staticVideo}
-                              presentation={presentation}
-                              editorPlayback={editorPlayback}
-                              editingTextId={editingTextId}
-                              inherited={
-                                resolved?.sources.get(element.id) === "template"
-                              }
-                            />
-                          ))}
-                        </div>
-                      );
-                    })}
-                    {editorOverflow &&
-                      editingMedia?.element.content?.type === "image" && (
-                        <div
-                          data-media-edit-reveal={editingMedia.element.id}
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            top: 0,
-                            width: editingMedia.element.frame.width,
-                            height: editingMedia.element.frame.height,
-                            transform: `matrix(${editingMedia.world.join(",")})`,
-                            transformOrigin: "0 0",
-                            opacity: 0.4,
-                            pointerEvents: "none",
-                            clipPath: `polygon(evenodd, -100000px -100000px, 100000px -100000px, 100000px 100000px, -100000px 100000px, -100000px -100000px, 0px 0px, 0px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px 0px, 0px 0px)`,
-                          }}
-                        >
-                          <MediaView
-                            element={editingMedia.element}
-                            staticVideo={true}
-                            presentation={false}
-                            editorPlayback="inactive"
+        <SceneTextureSceneContext.Provider value={rasterScene}>
+          <TextStylesContext.Provider value={deck}>
+            <VideoPreparationContext.Provider value={prepareVideo}>
+              <ImageDocumentContext.Provider value={imageContext}>
+                <div
+                  ref={root}
+                  className="slide-renderer"
+                  data-slide-id={slide.id}
+                  style={{
+                    position: "relative",
+                    width: deck.width,
+                    height: deck.height,
+                    background: slide.background,
+                    overflow: editorOverflow ? "visible" : "hidden",
+                  }}
+                >
+                  {deck.stylesheet && (
+                    <style>{`@scope (.slide-renderer) { ${deck.stylesheet} }`}</style>
+                  )}
+                  {layerRoots(slide).map((root) => {
+                    const layer = layers.get(root.id);
+                    if (!layer || layer.hidden) return null;
+                    return (
+                      <div
+                        key={root.id}
+                        data-layer-id={root.id}
+                        data-layer-locked={layer.locked ? "true" : undefined}
+                        style={{ position: "absolute", inset: 0 }}
+                      >
+                        {root.children.map((element) => (
+                          <ElementView
+                            key={element.id}
+                            element={element}
+                            staticVideo={staticVideo}
+                            presentation={presentation}
+                            editorPlayback={editorPlayback}
+                            editingTextId={editingTextId}
+                            inherited={
+                              resolved?.sources.get(element.id) === "template"
+                            }
+                            composition={composition}
+                            opacityPlan={opacityPlan}
                           />
-                        </div>
-                      )}
-                  </div>
-                </ImageDocumentContext.Provider>
-              </VideoPreparationContext.Provider>
-            </TextStylesContext.Provider>
-          </RasterSceneContext.Provider>
-        </CompositionContext.Provider>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  {editorOverflow &&
+                    editingMedia?.element.content?.type === "image" && (
+                      <div
+                        data-media-edit-reveal={editingMedia.element.id}
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: 0,
+                          width: editingMedia.element.frame.width,
+                          height: editingMedia.element.frame.height,
+                          transform: `matrix(${editingMedia.world.join(",")})`,
+                          transformOrigin: "0 0",
+                          opacity: 0.4,
+                          pointerEvents: "none",
+                          clipPath: `polygon(evenodd, -100000px -100000px, 100000px -100000px, 100000px 100000px, -100000px 100000px, -100000px -100000px, 0px 0px, 0px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px ${editingMedia.element.frame.height}px, ${editingMedia.element.frame.width}px 0px, 0px 0px)`,
+                        }}
+                      >
+                        <MediaView
+                          element={editingMedia.element}
+                          staticVideo={true}
+                          presentation={false}
+                          editorPlayback="inactive"
+                        />
+                      </div>
+                    )}
+                </div>
+              </ImageDocumentContext.Provider>
+            </VideoPreparationContext.Provider>
+          </TextStylesContext.Provider>
+        </SceneTextureSceneContext.Provider>
       </EffectResourcesContext.Provider>
     </EffectRenderContext.Provider>
   );

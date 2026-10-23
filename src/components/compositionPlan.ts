@@ -163,11 +163,47 @@ function prefixChain(prefix?: ScenePrefix) {
   return chain.reverse();
 }
 
+function projectScenePrefix(prefix?: ScenePrefix) {
+  if (!prefix) throw new Error("Backdrop target is not in the visible scene.");
+  const partial = new Set<string>();
+  const elements: Element[] = [];
+  for (const current of prefixChain(prefix)) {
+    // Append inside the active unfinished ancestor, not to its parent's peers.
+    let children = elements;
+    while (children.length && partial.has(children[children.length - 1].id))
+      children = children[children.length - 1].children;
+    if (current.ancestor) {
+      partial.add(current.ancestor.element.id);
+      const ancestor = {
+        ...current.ancestor.element,
+        children: [] as Element[],
+      };
+      children.push(ancestor);
+      children = ancestor.children;
+    }
+    children.push(...current.earlier.map((group) => group.element));
+  }
+  return { elements, partial };
+}
+
+/** Exact renderer-independent scene identity at one semantic paint point.
+ * The element projection remains an adapter for primitive materialization;
+ * paintEffects prevents distinct effect-entry prefixes from collapsing. */
+export type SceneSurfaceRef = {
+  id: string;
+  point: BackdropPoint;
+  elements: readonly Element[];
+  partial: ReadonlySet<string>;
+  entryEffects: readonly EffectRef[];
+  paintEffects: readonly EffectRef[];
+};
+
 export type CompositionPlan = {
   roots: VisualGroup[];
   groups: ReadonlyMap<string, VisualGroup>;
   prefixes: ReadonlyMap<string, ScenePrefix>;
   dependencies(ref: EffectRef): EffectRef[];
+  surface(point: BackdropPoint): SceneSurfaceRef | null;
 };
 
 export function compileCompositionPlan(
@@ -269,6 +305,16 @@ export function compileCompositionPlan(
   let paintPrefix: PaintPrefix | undefined;
   for (const group of roots)
     paintPrefix = indexPaint(group.visual, group, paintPrefix);
+  const elementEntryDependencies = (elementId: string): EffectRef[] => {
+    const result: EffectRef[] = [];
+    for (const prefix of prefixChain(prefixes.get(elementId))) {
+      // Unfinished ancestor effects are deliberately excluded, as in the v1
+      // background-lens contract. Their completed output depends on this child.
+      for (const prior of prefix.earlier)
+        result.push(...terminals(prior.visual, prior));
+    }
+    return result;
+  };
   const dependencies = ({ elementId, effectId }: EffectRef): EffectRef[] => {
     const group = groups.get(elementId),
       input = group?.inputs.get(effectId);
@@ -292,16 +338,52 @@ export function compileCompositionPlan(
     if (input.kind === "text" || input.kind === "content")
       return input.operation ? terminals(input.operation, group) : [];
     if (input.kind !== "backdrop") return [];
-    const result: EffectRef[] = [];
-    for (const prefix of prefixChain(prefixes.get(input.elementId))) {
-      // Unfinished ancestor effects are deliberately excluded, as in the v1
-      // background-lens contract. Their completed output depends on this child.
-      for (const prior of prefix.earlier)
-        result.push(...terminals(prior.visual, prior));
-    }
-    return result;
+    return elementEntryDependencies(input.elementId);
   };
-  return { roots, groups, prefixes, dependencies };
+
+  const surfaces = new Map<string, SceneSurfaceRef>();
+  const surface = (point: BackdropPoint): SceneSurfaceRef | null => {
+    const prefix = prefixes.get(point.elementId);
+    if (!prefix) return null;
+    if (point.kind === "effect-entry") {
+      const input = groups.get(point.elementId)?.inputs.get(point.effectId);
+      if (input?.kind !== "styled" || !input.backdrop) return null;
+    }
+    const entryEffects = elementEntryDependencies(point.elementId);
+    const paintEffects =
+      point.kind === "effect-entry"
+        ? dependencies({
+            elementId: point.elementId,
+            effectId: point.effectId,
+          })
+        : entryEffects;
+    const structuralPrefix = prefixChain(prefix).map((entry) => [
+      entry.ancestor?.element.id ?? null,
+      entry.earlier.map((group) => group.element.id),
+    ]);
+    const structuralKey = JSON.stringify([
+      point.kind === "effect-entry"
+        ? [point.kind, point.elementId, point.effectId]
+        : [point.kind, point.elementId],
+      structuralPrefix,
+      paintEffects.map((ref) => [ref.elementId, ref.effectId]),
+    ]);
+    let ref = surfaces.get(structuralKey);
+    if (!ref) {
+      const projected = projectScenePrefix(prefix);
+      ref = {
+        id: "scene:" + structuralKey,
+        point,
+        elements: projected.elements,
+        partial: projected.partial,
+        entryEffects,
+        paintEffects,
+      };
+      surfaces.set(structuralKey, ref);
+    }
+    return ref;
+  };
+  return { roots, groups, prefixes, dependencies, surface };
 }
 
 const plans = new WeakMap<
@@ -344,25 +426,5 @@ export function compositionPlanFor(slide: Slide, deck: Deck) {
 /** Existing primitive/capture adapters consume element-shaped prefix slices.
  * Keep this projection at the boundary, rather than deriving paint order from DOM. */
 export function prefixElements(plan: CompositionPlan, elementId: string) {
-  const prefix = plan.prefixes.get(elementId);
-  if (!prefix) throw new Error("Backdrop target is not in the visible scene.");
-  const partial = new Set<string>();
-  const elements: Element[] = [];
-  for (const current of prefixChain(prefix)) {
-    // Append inside the active unfinished ancestor, not to its parent's peers.
-    let children = elements;
-    while (children.length && partial.has(children[children.length - 1].id))
-      children = children[children.length - 1].children;
-    if (current.ancestor) {
-      partial.add(current.ancestor.element.id);
-      const ancestor = {
-        ...current.ancestor.element,
-        children: [] as Element[],
-      };
-      children.push(ancestor);
-      children = ancestor.children;
-    }
-    children.push(...current.earlier.map((group) => group.element));
-  }
-  return { elements, partial };
+  return projectScenePrefix(plan.prefixes.get(elementId));
 }

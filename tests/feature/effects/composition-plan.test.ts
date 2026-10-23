@@ -170,6 +170,45 @@ it("CSS backdrop dependencies name their effect-entry paint point and completed 
   );
 });
 
+it("effect-entry surfaces retain exact paint identity inside one Element", () => {
+  const owner = shape("owner");
+  const f = fixture([owner]);
+  f.slide.effectResources!.css.source =
+    ":scope { backdrop-filter: blur(10px); }";
+  f.add(owner, "generated", "generated", "background");
+  f.add(owner, "glass-a", "css", "background");
+  f.add(owner, "glass-b", "css", "background");
+
+  const plan = f.compile();
+  const pointA = {
+    kind: "effect-entry" as const,
+    elementId: "owner",
+    effectId: "glass-a",
+  };
+  const pointB = {
+    kind: "effect-entry" as const,
+    elementId: "owner",
+    effectId: "glass-b",
+  };
+  const surfaceA = plan.surface(pointA)!;
+  const surfaceB = plan.surface(pointB)!;
+
+  expect(plan.dependencies(ref("owner", "glass-a"))).toEqual([
+    ref("owner", "generated"),
+  ]);
+  expect(plan.dependencies(ref("owner", "glass-b"))).toEqual([
+    ref("owner", "generated"),
+    ref("owner", "glass-a"),
+  ]);
+  expect(surfaceA.paintEffects).toEqual([ref("owner", "generated")]);
+  expect(surfaceB.paintEffects).toEqual([
+    ref("owner", "generated"),
+    ref("owner", "glass-a"),
+  ]);
+  expect(surfaceA.id).not.toBe(surfaceB.id);
+  expect(plan.surface(pointA)).toBe(surfaceA);
+});
+
 it("local CSS without a backdrop read does not depend on unrelated earlier paint", () => {
   const lower = shape("lower"),
     owner = shape("owner");

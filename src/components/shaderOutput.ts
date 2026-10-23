@@ -7,6 +7,12 @@ export type ShaderOutput = {
   revision: number;
 };
 const outputs = new Set<ShaderOutput>();
+let allocations = 0;
+
+export function shaderOutputDiagnostics() {
+  return { allocations, liveOutputs: outputs.size };
+}
+
 /** Logical RGBA8 output texture allocation, not measured GPU residency. */
 export function shaderOutputTextureBytes() {
   return [...outputs].reduce(
@@ -16,8 +22,30 @@ export function shaderOutputTextureBytes() {
 }
 export function disposeShaderOutput(output: ShaderOutput) {
   outputs.delete(output);
-  output.gl.deleteFramebuffer(output.framebuffer);
-  output.gl.deleteTexture(output.texture);
+  if (output.gl.isFramebuffer(output.framebuffer))
+    output.gl.deleteFramebuffer(output.framebuffer);
+  if (output.gl.isTexture(output.texture))
+    output.gl.deleteTexture(output.texture);
+}
+
+/** GPU-only presentation of an explicitly retained terminal output. */
+export function presentShaderOutput(output: ShaderOutput) {
+  const { gl, width, height } = output;
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, output.framebuffer);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.blitFramebuffer(
+    0,
+    0,
+    width,
+    height,
+    0,
+    0,
+    width,
+    height,
+    gl.COLOR_BUFFER_BIT,
+    gl.NEAREST,
+  );
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 export function allocateShaderOutput(
   gl: WebGL2RenderingContext,
@@ -27,6 +55,8 @@ export function allocateShaderOutput(
 ) {
   if (
     previous?.gl === gl &&
+    gl.isTexture(previous.texture) &&
+    gl.isFramebuffer(previous.framebuffer) &&
     previous.width === width &&
     previous.height === height
   )
@@ -81,6 +111,7 @@ export function allocateShaderOutput(
       revision: previous?.revision ?? 0,
     };
     outputs.add(output);
+    allocations++;
     return output;
   } catch (error) {
     gl.deleteFramebuffer(framebuffer);
@@ -90,66 +121,4 @@ export function allocateShaderOutput(
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
   }
-}
-
-/** A direct GPU handoff is valid only when DOM paint adds nothing between the
- * two shaders. CSS filters, transforms, clipping, blending and pseudo-elements
- * must still pass through the browser painter. The source opacity is the
- * renderer's display bypass and is deliberately excluded from this test. */
-export function neutralShaderBridge(
-  source: HTMLElement,
-  stage: HTMLElement,
-  canvas: HTMLCanvasElement,
-  size: { width: number; height: number },
-) {
-  for (const node of [source, stage, canvas]) {
-    const style = getComputedStyle(node);
-    if (
-      style.filter !== "none" ||
-      style.backdropFilter !== "none" ||
-      style.transform !== "none" ||
-      style.clipPath !== "none" ||
-      style.clip !== "auto" ||
-      style.mixBlendMode !== "normal" ||
-      style.boxShadow !== "none" ||
-      style.backgroundImage !== "none" ||
-      style.maskImage !== "none" ||
-      style.translate !== "none" ||
-      style.rotate !== "none" ||
-      style.scale !== "none" ||
-      style.display !== "block" ||
-      style.visibility !== "visible" ||
-      (node !== source && style.opacity !== "1") ||
-      style.objectFit !== "fill" ||
-      style.imageRendering !== "auto" ||
-      !["rgba(0, 0, 0, 0)", "transparent"].includes(style.backgroundColor) ||
-      Math.abs(parseFloat(style.width) - size.width) > 0.02 ||
-      Math.abs(parseFloat(style.height) - size.height) > 0.02 ||
-      parseFloat(style.borderTopLeftRadius) !== 0 ||
-      parseFloat(style.borderTopRightRadius) !== 0 ||
-      parseFloat(style.borderBottomLeftRadius) !== 0 ||
-      parseFloat(style.borderBottomRightRadius) !== 0 ||
-      parseFloat(style.borderTopWidth) !== 0 ||
-      parseFloat(style.borderBottomWidth) !== 0 ||
-      parseFloat(style.borderLeftWidth) !== 0 ||
-      parseFloat(style.borderRightWidth) !== 0 ||
-      parseFloat(style.paddingTop) !== 0 ||
-      parseFloat(style.paddingLeft) !== 0 ||
-      parseFloat(style.paddingBottom) !== 0 ||
-      parseFloat(style.paddingRight) !== 0 ||
-      parseFloat(style.marginTop) !== 0 ||
-      parseFloat(style.marginLeft) !== 0 ||
-      parseFloat(style.marginBottom) !== 0 ||
-      parseFloat(style.marginRight) !== 0 ||
-      !["auto", "0px"].includes(style.left) ||
-      !["auto", "0px"].includes(style.top) ||
-      style.zoom !== "1"
-    )
-      return false;
-    for (const pseudo of ["::before", "::after"]) {
-      const content = getComputedStyle(node, pseudo).content;
-      if (content !== "none" && content !== "normal") return false;
-    }
-  }
-  return true;
 }

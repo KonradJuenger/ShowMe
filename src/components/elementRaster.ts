@@ -1,6 +1,5 @@
 import { nodeTransform, elementWorldTransform } from "./elementDomTransform";
 import { resizeRasterCanvas } from "./canvasAllocation";
-import { cssBackdropOutputs } from "./cssBackdropOutput";
 import { compositionPlanFor, prefixElements } from "./compositionPlan";
 import type { Element, MediaContent } from "../core/element";
 import type { Deck, Slide } from "../core/document";
@@ -13,7 +12,9 @@ import {
 /** A primitive renderer, not a DOM screenshot. DOM bindings supply already
  * decoded resources and Motion's current local transform/font measurements. */
 let sourceScans = 0;
-export function rasterSourceDiagnostics() { return { scans: sourceScans }; }
+export function rasterSourceDiagnostics() {
+  return { scans: sourceScans };
+}
 
 export type RasterContext = {
   root: HTMLElement;
@@ -56,15 +57,6 @@ function sourceEffect(
       : -1;
   const earlier = stop < 0 ? effects : effects.slice(0, stop);
   if (context.partial?.has(element.id)) return null;
-  for (const effect of earlier.slice().reverse()) {
-    const surface = owned(node, "[data-effect-id]").find(
-      (n) => n.dataset.effectId === effect.id,
-    );
-    if (surface && cssBackdropOutputs.has(surface)) {
-      context.flush(surface);
-      return surface;
-    }
-  }
   for (const effect of effects) {
     const surface = owned(node, "[data-effect-id]").find(
       (n) => n.dataset.effectId === effect.id,
@@ -300,21 +292,6 @@ function render(
       : Number(getComputedStyle(node).opacity);
   const previous = sourceEffect(element, node, context);
   if (previous && !previous.dataset.effectError) {
-    const material = cssBackdropOutputs.get(previous);
-    if (material) {
-      path(ctx, element);
-      ctx.clip();
-      ctx.globalAlpha *= opacity;
-      ctx.drawImage(
-        material.canvas,
-        -material.padding,
-        -material.padding,
-        material.width,
-        material.height,
-      );
-      ctx.restore();
-      return;
-    }
     const output = previous.querySelector("canvas");
     if (output) {
       ctx.globalAlpha *= opacity;
@@ -410,6 +387,8 @@ function createRasterSource(
     scan: (element: Element, target: boolean) => unknown[],
   ) => unknown,
   paintSource: (canvas: HTMLCanvasElement) => void,
+  activityNodes: () => readonly HTMLElement[] = () => [context.root],
+  observeEnvironment = true,
 ) {
   const canvas = context.outputCanvas ?? document.createElement("canvas");
   const videos = new Map<HTMLVideoElement, { id: number; revision: number }>();
@@ -418,15 +397,35 @@ function createRasterSource(
     disposed = false,
     fonts = 0,
     dirty = true;
-  const markDirty = () => { dirty = true; invalidate(); };
+  const markDirty = () => {
+    dirty = true;
+    invalidate();
+  };
   const fontChanged = () => {
     fonts++;
     markDirty();
   };
-  document.fonts.addEventListener("loadingdone", fontChanged);
-  const styleObserver = new MutationObserver(markDirty);
-  styleObserver.observe(document.head, { subtree: true, childList: true, attributes: true, characterData: true });
-  for (let ancestor = context.root.parentElement; ancestor; ancestor = ancestor.parentElement) styleObserver.observe(ancestor, { attributes: true, attributeFilter: ["class", "style"] });
+  const styleObserver = observeEnvironment
+    ? new MutationObserver(markDirty)
+    : undefined;
+  if (observeEnvironment) {
+    document.fonts.addEventListener("loadingdone", fontChanged);
+    styleObserver!.observe(document.head, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+    for (
+      let ancestor = context.root.parentElement;
+      ancestor;
+      ancestor = ancestor.parentElement
+    )
+      styleObserver!.observe(ancestor, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+  }
   const seenVideos = new Set<HTMLVideoElement>();
   const scan = (current: Element, target: boolean): unknown[] => {
     const node = visualNode(current, context.root);
@@ -535,9 +534,24 @@ function createRasterSource(
     update(width: number, height: number) {
       // Browser-driven CSS animations and video without frame callbacks remain
       // conservative dynamic inputs, even for custom unregistered content.
-      const animated = context.root.getAnimations({ subtree: true }).some(animation => animation.playState === "running");
-      const dynamicVideo = [...videos.keys()].some(video => typeof video.requestVideoFrameCallback !== "function" && !video.paused);
-      if (!dirty && canvas.width === width && canvas.height === height && !animated && !dynamicVideo) return false;
+      const animated = activityNodes().some((node) =>
+        node
+          .getAnimations({ subtree: true })
+          .some((animation) => animation.playState === "running"),
+      );
+      const dynamicVideo = [...videos.keys()].some(
+        (video) =>
+          typeof video.requestVideoFrameCallback !== "function" &&
+          !video.paused,
+      );
+      if (
+        !dirty &&
+        canvas.width === width &&
+        canvas.height === height &&
+        !animated &&
+        !dynamicVideo
+      )
+        return false;
       const force = dirty || animated || dynamicVideo;
       dirty = false;
       sourceScans++;
@@ -558,8 +572,9 @@ function createRasterSource(
     },
     dispose() {
       disposed = true;
-      styleObserver.disconnect();
-      document.fonts.removeEventListener("loadingdone", fontChanged);
+      styleObserver?.disconnect();
+      if (observeEnvironment)
+        document.fonts.removeEventListener("loadingdone", fontChanged);
       videos.forEach((state, video) => {
         if (state.id) video.cancelVideoFrameCallback(state.id);
       });
@@ -567,6 +582,49 @@ function createRasterSource(
       canvas.width = canvas.height = 1;
     },
   };
+}
+
+/** Retained slide-space composition for a semantic source prefix. Unlike
+ * createBackdropRasterSource this surface is independent of any consumer
+ * transform, so several consumers can crop the same materialized result. */
+export function createScenePrefixRasterSource(
+  elements: readonly Element[],
+  scene: () => { slide: Slide; deck: Deck },
+  context: RasterContext,
+  invalidate: () => void,
+  observeEnvironment = true,
+) {
+  const activityNodes = () =>
+    elements.flatMap((element) => {
+      const node = visualNode(element, context.root);
+      return node ? [node] : [];
+    });
+  return createRasterSource(
+    context,
+    invalidate,
+    (scan) => {
+      const { slide, deck } = scene();
+      return [
+        slide.background,
+        deck.width,
+        deck.height,
+        ...elements.map((entry) => scan(entry, false)),
+      ];
+    },
+    (canvas) => {
+      const { slide, deck } = scene();
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Cannot allocate scene prefix surface");
+      ctx.resetTransform();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(canvas.width / deck.width, canvas.height / deck.height);
+      ctx.fillStyle = slide.background;
+      ctx.fillRect(0, 0, deck.width, deck.height);
+      for (const entry of elements) render(ctx, entry, context, false);
+    },
+    activityNodes,
+    observeEnvironment,
+  );
 }
 
 /** Complete lower subtrees plus unfinished ancestors. Never visits the target,

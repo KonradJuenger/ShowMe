@@ -13,6 +13,7 @@ import {
   IMAGE_RECIPE,
   imageIdentity,
   planPresentationImages,
+  audienceImageProfile,
   type PreparedImage,
 } from "../../src/core/presentationImages";
 import type { PresenterState } from "../../src/platform/api";
@@ -83,6 +84,47 @@ export function mountAudienceNavigationHarness(stress = false) {
     model.deck.slideMeta[id] = { ...firstMeta, name: `Slide ${index + 1}` };
     if (index !== 0) model.deck.slideIds.push(id);
   }
+  // Construct full-resolution patterned fixtures before mounting the audience,
+  // outside navigation/CPU measurement. Do not replace decoded image work with
+  // one-pixel placeholders merely to eliminate timed PNG encoding.
+  const fixtureUrls = new Map<string, string>();
+  for (const requirement of planPresentationImages(
+    model.deck,
+    Object.values(model.slides),
+    audienceImageProfile(innerWidth, innerHeight, devicePixelRatio),
+    true,
+  )) {
+    const canvas = document.createElement("canvas");
+    canvas.width = requirement.width;
+    canvas.height = requirement.height;
+    const context = canvas.getContext("2d")!;
+    context.fillStyle =
+      requirement.assetId === lateAsset ? "#c94b32" : "#2165ba";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    if (stress) {
+      const tint = Number.parseInt(requirement.assetId.slice(-2), 16);
+      const gradient = context.createLinearGradient(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+      gradient.addColorStop(0, `hsl(${tint * 3} 70% 40%)`);
+      gradient.addColorStop(1, `hsl(${tint * 3 + 90} 60% 75%)`);
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#ffffff66";
+      for (let y = 0; y < canvas.height; y += 16)
+        for (let x = 0; x < canvas.width; x += 16)
+          if ((x + y) % 32 === 0) context.fillRect(x, y, 8, 8);
+    }
+    fixtureUrls.set(
+      imageIdentity(requirement.assetId, requirement.width, requirement.height),
+      canvas.toDataURL(),
+    );
+    canvas.width = canvas.height = 1;
+  }
+
   const runtime = new DocumentRuntime(model, {
     actorId: "audience-navigation-test",
     durableCommit: async () => {},
@@ -153,41 +195,22 @@ export function mountAudienceNavigationHarness(stress = false) {
     );
     let variant = variants.get(hash);
     if (!variant) {
-      const canvas = document.createElement("canvas");
-      canvas.width = requirement.width;
-      canvas.height = requirement.height;
-      const context = canvas.getContext("2d")!;
-      context.fillStyle =
-        requirement.assetId === lateAsset ? "#c94b32" : "#2165ba";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      if (stress) {
-        const tint = Number.parseInt(requirement.assetId.slice(-2), 16);
-        const gradient = context.createLinearGradient(
-          0,
-          0,
-          canvas.width,
-          canvas.height,
+      const url = fixtureUrls.get(hash);
+      if (!url)
+        throw new Error(
+          "Audience fixture was not prepared at the negotiated output size",
         );
-        gradient.addColorStop(0, `hsl(${tint * 3} 70% 40%)`);
-        gradient.addColorStop(1, `hsl(${tint * 3 + 90} 60% 75%)`);
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = "#ffffff66";
-        for (let y = 0; y < canvas.height; y += 16)
-          for (let x = 0; x < canvas.width; x += 16)
-            if ((x + y) % 32 === 0) context.fillRect(x, y, 8, 8);
-      }
       const image: PreparedImage = {
         assetId: requirement.assetId,
         hash,
         size: requirement.size,
-        width: canvas.width,
-        height: canvas.height,
+        width: requirement.width,
+        height: requirement.height,
         sourceWidth: 4096,
         sourceHeight: 4096,
         mime: "image/png",
         recipe: IMAGE_RECIPE,
-        url: canvas.toDataURL(),
+        url,
       };
       if (requirement.assetId === lateAsset && !stress) {
         lateUrls.add(image.url);

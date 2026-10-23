@@ -183,6 +183,10 @@ export const effectStartLabels = {
   slide: "Slide start",
   click: "Click (timeline)",
 } as const;
+/** Shader input describes ownership, not a rendering backend.
+ * "none" is GPU-owned. "content" and "backdrop" currently request rendered
+ * Chromium pixels through SceneTexture. Known media may later bypass capture
+ * and bind its owned texture directly without changing normal DOM rendering. */
 export type ShaderInput = "none" | "content" | "backdrop";
 export type EffectResources = z.infer<typeof effectResourcesSchema>;
 export type ElementEffect = z.infer<typeof elementEffectSchema>;
