@@ -226,6 +226,7 @@ async function finish(reason = "requested") {
     backend: renderer?.kind ?? backend,
     received,
     rendered,
+    droppedOrLateFrames: Math.max(0, received - rendered),
     renderErrors,
     contextLosses,
     durationMs,
