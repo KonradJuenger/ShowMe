@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useCallback,
   useContext,
   useLayoutEffect,
   useRef,
@@ -14,9 +16,16 @@ import type { TextContent } from "../core/text";
 import type { EffectDefinition, ElementEffect } from "../core/effects";
 import type { EffectResources } from "../core/effects";
 import type { Element } from "../core/element";
-import { effectSurface, mountEffectSurface } from "./effectRuntime";
+import {
+  createShaderChain,
+  effectSurface,
+  mountEffectSurface,
+  type ShaderChain,
+} from "./effectRuntime";
 import { EffectRenderContext } from "./EffectRenderContext";
 import { useDisplayDensity } from "./useDisplayDensity";
+
+const ShaderChainContext = createContext<ShaderChain | null>(null);
 
 export function EffectSurface({
   definition,
@@ -29,6 +38,7 @@ export function EffectSurface({
   sceneTextureSource,
   samplingEnvelope,
   nativeOpacity,
+  directShaderInput = false,
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
@@ -36,6 +46,7 @@ export function EffectSurface({
   height: number;
   samplingEnvelope?: number;
   nativeOpacity?: string;
+  directShaderInput?: boolean;
   children?: ReactNode;
   textContent?: TextContent;
   sceneTextureSource?: {
@@ -62,6 +73,22 @@ export function EffectSurface({
 }) {
   const root = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null);
+  const inheritedShaderChain = useContext(ShaderChainContext);
+  const ownedShaderChain = useRef<ShaderChain | null>(null);
+  if (!ownedShaderChain.current) ownedShaderChain.current = createShaderChain();
+  const shaderChain =
+    definition.kind === "fragment-glsl"
+      ? (inheritedShaderChain ?? ownedShaderChain.current)
+      : null;
+  const ownsShaderChain =
+    definition.kind === "fragment-glsl" && inheritedShaderChain === null;
+  const setCanvas = useCallback(
+    (value: HTMLCanvasElement | null) => {
+      canvas.current = value;
+      if (ownsShaderChain && shaderChain) shaderChain.canvas = value;
+    },
+    [ownsShaderChain, shaderChain],
+  );
   const [error, setError] = useState("");
   const copyErrors = useContext(EffectErrorCopyContext);
   const render = useContext(EffectRenderContext);
@@ -132,6 +159,10 @@ export function EffectSurface({
       setError,
       mountedContent,
       undefined,
+      shaderChain ?? undefined,
+      !!inheritedShaderChain,
+      directShaderInput,
+      ownsShaderChain,
     );
   }, [
     mountedDefinition,
@@ -140,6 +171,10 @@ export function EffectSurface({
     height,
     textContent,
     mountedContent,
+    shaderChain,
+    inheritedShaderChain,
+    directShaderInput,
+    ownsShaderChain,
   ]);
   useLayoutEffect(() => {
     if (root.current)
@@ -171,6 +206,13 @@ export function EffectSurface({
     surface?.setTiming(previewTiming);
     void surface?.flush();
   }, [definition, instance, previewTiming]);
+  const effectChildren = directShaderInput && shaderChain ? (
+    <ShaderChainContext.Provider value={shaderChain}>
+      {children}
+    </ShaderChainContext.Provider>
+  ) : (
+    children
+  );
   return (
     <div
       ref={root}
@@ -185,8 +227,9 @@ export function EffectSurface({
     >
       {definition.kind === "fragment-glsl" && (
         <canvas
-          ref={canvas}
+          ref={setCanvas}
           aria-hidden="true"
+          data-shader-stage={inheritedShaderChain ? "intermediate" : "terminal"}
           style={{ width: "100%", height: "100%", display: "block" }}
         />
       )}
@@ -195,10 +238,10 @@ export function EffectSurface({
           data-effect-source="true"
           style={{ position: "absolute", inset: 0 }}
         >
-          {children}
+          {effectChildren}
         </div>
       ) : (
-        children
+        effectChildren
       )}
       {error && (
         <span
