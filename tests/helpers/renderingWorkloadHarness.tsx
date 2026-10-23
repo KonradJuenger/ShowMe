@@ -1,6 +1,7 @@
 import { mountMixedEffectsHarness } from "./mixedEffectsHarness";
 import { createMotionRuntime } from "../../src/components/motionRuntime";
 import {
+  effectSurface,
   shaderRuntimeDiagnostics,
   flushEffectSurfaces,
 } from "../../src/components/effectRuntime";
@@ -98,23 +99,27 @@ function instrumentDiscovery() {
   let styleReads = 0;
   let queries = 0;
   let canvasAllocations = 0;
-  window.getComputedStyle = ((...args: Parameters<typeof getComputedStyle>) => {
+  window.getComputedStyle = ((...args: unknown[]) => {
     styleReads++;
-    return nativeStyle(...args);
+    return nativeStyle(...(args as Parameters<typeof getComputedStyle>));
   }) as typeof getComputedStyle;
-  Element.prototype.querySelectorAll = function (...args) {
+  (Element.prototype as unknown as { querySelectorAll: typeof nativeQuery })
+    .querySelectorAll = function (selectors: string) {
     queries++;
-    return nativeQuery.apply(this, args as [selectors: string]);
+    return nativeQuery.call(this, selectors);
   };
-  document.createElement = ((tagName: string, options?: ElementCreationOptions) => {
+  (document as unknown as { createElement: typeof document.createElement })
+    .createElement = ((tagName: string, options?: ElementCreationOptions) => {
     if (tagName.toLowerCase() === "canvas") canvasAllocations++;
     return nativeCreate(tagName, options);
   }) as typeof document.createElement;
   return {
     finish() {
       window.getComputedStyle = nativeStyle;
-      Element.prototype.querySelectorAll = nativeQuery;
-      document.createElement = nativeCreate;
+      (Element.prototype as unknown as { querySelectorAll: typeof nativeQuery })
+        .querySelectorAll = nativeQuery;
+      (document as unknown as { createElement: typeof document.createElement })
+        .createElement = nativeCreate;
       return { styleReads, queries, canvasAllocations };
     },
   };
@@ -314,7 +319,6 @@ async function generatedWorkload() {
     for (const node of harness.host.querySelectorAll<HTMLElement>(
       "[data-effect-id]",
     )) {
-      const { effectSurface } = await import("../../src/components/effectRuntime");
       effectSurface(node)?.setTiming({
         time: time / 1000,
         duration: 1,
