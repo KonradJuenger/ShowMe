@@ -1,3 +1,4 @@
+import { gpuGeneration } from "./gpuGeneration";
 export type ShaderOutput = {
   gl: WebGL2RenderingContext;
   texture: WebGLTexture;
@@ -5,6 +6,7 @@ export type ShaderOutput = {
   width: number;
   height: number;
   revision: number;
+  generation: number;
 };
 const outputs = new Set<ShaderOutput>();
 let allocations = 0;
@@ -22,9 +24,9 @@ export function shaderOutputTextureBytes() {
 }
 export function disposeShaderOutput(output: ShaderOutput) {
   outputs.delete(output);
-  if (output.gl.isFramebuffer(output.framebuffer))
+  if (output.generation === gpuGeneration(output.gl))
     output.gl.deleteFramebuffer(output.framebuffer);
-  if (output.gl.isTexture(output.texture))
+  if (output.generation === gpuGeneration(output.gl))
     output.gl.deleteTexture(output.texture);
 }
 
@@ -55,8 +57,7 @@ export function allocateShaderOutput(
 ) {
   if (
     previous?.gl === gl &&
-    gl.isTexture(previous.texture) &&
-    gl.isFramebuffer(previous.framebuffer) &&
+    previous.generation === gpuGeneration(gl) &&
     previous.width === width &&
     previous.height === height
   )
@@ -103,6 +104,7 @@ export function allocateShaderOutput(
       );
     if (previous) disposeShaderOutput(previous);
     const output = {
+      generation: gpuGeneration(gl),
       gl,
       texture,
       framebuffer,

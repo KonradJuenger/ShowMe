@@ -1,3 +1,4 @@
+import { gpuGeneration } from "./gpuGeneration";
 export interface PixelSource {
   canvas: HTMLCanvasElement;
   readonly revision: number;
@@ -8,6 +9,7 @@ type Texture = {
   gl: WebGL2RenderingContext;
   value: WebGLTexture;
   revision: number;
+  generation: number;
   width: number;
   height: number;
   users: Set<symbol>;
@@ -36,7 +38,7 @@ export class EffectSources<Source extends PixelSource> {
     if (!entry) return;
     entry.source.dispose();
     for (const texture of entry.textures.values()) {
-      if (texture.gl.isTexture(texture.value))
+      if (texture.generation === gpuGeneration(texture.gl))
         texture.gl.deleteTexture(texture.value);
       metrics.liveTextures--;
     }
@@ -97,13 +99,14 @@ export class EffectSources<Source extends PixelSource> {
       upload(gl: WebGL2RenderingContext) {
         if (released) throw new Error("Shader input lease was released");
         let texture = owned.textures.get(gl);
-        if (!texture || !gl.isTexture(texture.value)) {
+        if (!texture || texture.generation !== gpuGeneration(gl)) {
           const value = gl.createTexture();
           if (!value) throw new Error("Cannot allocate shader input texture");
           texture = {
             gl,
             value,
             revision: -1,
+            generation: gpuGeneration(gl),
             width: 0,
             height: 0,
             users: texture?.users ?? new Set(),
@@ -151,7 +154,8 @@ export class EffectSources<Source extends PixelSource> {
           if (!texture) continue;
           texture.users.delete(token);
           if (!texture.users.size) {
-            if (gl.isTexture(texture.value)) gl.deleteTexture(texture.value);
+            if (texture.generation === gpuGeneration(gl))
+              gl.deleteTexture(texture.value);
             owned.textures.delete(gl);
             metrics.liveTextures--;
           }

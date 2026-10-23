@@ -239,15 +239,17 @@ it("one scene flush shares its dependency cohort and a subsequent flush resolves
 function textureContext() {
   const live = new Set<object>();
   const calls = { allocations: 0, uploads: 0, deletions: 0 };
+  const canvas = new EventTarget();
   const gl = {
+    canvas,
     createTexture() {
       calls.allocations++;
       const value = {};
       live.add(value);
       return value;
     },
-    isTexture(value: object) {
-      return live.has(value);
+    isTexture() {
+      throw new Error("Owned texture validity must use the context generation");
     },
     deleteTexture(value: object) {
       calls.deletions++;
@@ -263,7 +265,14 @@ function textureContext() {
     getError: () => 0,
     NO_ERROR: 0,
   } as unknown as WebGL2RenderingContext;
-  return { gl, calls, lose: () => live.clear() };
+  return {
+    gl,
+    calls,
+    lose: () => {
+      live.clear();
+      canvas.dispatchEvent(new Event("webglcontextlost"));
+    },
+  };
 }
 
 it("shared scene pixels retain one upload per context across alternating consumers and context restoration", () => {

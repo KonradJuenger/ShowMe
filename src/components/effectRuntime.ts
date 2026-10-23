@@ -1,3 +1,4 @@
+import { gpuGeneration as resourceGeneration } from "./gpuGeneration";
 import { createTextEffectRunner } from "./textEffectRunner";
 import { frame, cancelFrame } from "motion";
 import {
@@ -141,6 +142,18 @@ in vec2 position;
 out vec2 v_uv;
 void main() { v_uv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }`;
 
+type ProgramBinding = {
+  uniforms: Map<string, WebGLUniformLocation | null>;
+  position: number;
+  vao: WebGLVertexArrayObject;
+};
+const programBindings = new WeakMap<WebGLProgram, ProgramBinding>();
+function deleteProgram(gl: WebGL2RenderingContext, program: WebGLProgram) {
+  const binding = programBindings.get(program);
+  if (binding) gl.deleteVertexArray(binding.vao);
+  programBindings.delete(program);
+  gl.deleteProgram(program);
+}
 type ShaderGpuState = {
   canvas: OffscreenCanvas;
   gl: WebGL2RenderingContext;
@@ -295,7 +308,7 @@ function disposeShaderChain(chain: ShaderChain) {
       if ([...activeShaderChains].some((other) => other.sources.has(source)))
         continue;
       const program = state.programs.get(source);
-      if (program) state.gl.deleteProgram(program);
+      if (program) deleteProgram(state.gl, program);
       state.programs.delete(source);
     }
     if (!activeShaderChains.size) state.canvas.width = state.canvas.height = 1;
@@ -324,7 +337,7 @@ export function shaderProgram(source: string, chain = validationShaderChain()) {
   const cached = programs.get(source);
   if (cached) {
     chain.sources.add(source);
-    return { ...state, program: cached };
+    return { ...state, program: cached, binding: programBindings.get(cached)! };
   }
   const shaders: WebGLShader[] = [];
   let program: WebGLProgram | null = null;
@@ -349,12 +362,14 @@ export function shaderProgram(source: string, chain = validationShaderChain()) {
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS))
       throw new Error(gl.getProgramInfoLog(program) || "Shader linking failed");
+    const uniforms = new Map<string, WebGLUniformLocation | null>();
     for (
       let i = 0;
       i < (gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS) as number);
       i++
     ) {
       const uniform = gl.getActiveUniform(program, i)!;
+      uniforms.set(uniform.name, gl.getUniformLocation(program, uniform.name));
       if (uniform.name === "u_resolution" || uniform.name === "u_size") {
         if (uniform.type !== gl.FLOAT_VEC2)
           throw new Error(`${uniform.name} must be vec2`);
@@ -372,14 +387,25 @@ export function shaderProgram(source: string, chain = validationShaderChain()) {
           ![...activeShaderChains].some((owner) => owner.sources.has(key)),
       );
       if (unused) {
-        gl.deleteProgram(unused[1]);
+        deleteProgram(gl, unused[1]);
         programs.delete(unused[0]);
       }
     }
+    const vao = gl.createVertexArray();
+    if (!vao) throw new Error("Cannot allocate shader vertex state");
+    const position = gl.getAttribLocation(program, "position");
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, state.buffer);
+    if (position >= 0) {
+      gl.enableVertexAttribArray(position);
+      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    }
+    const binding = { uniforms, position, vao };
+    programBindings.set(program, binding);
     programs.set(source, program);
     chain.sources.add(source);
     shaderMetrics.shaderCompilations++;
-    return { ...state, program };
+    return { ...state, program, binding };
   } catch (error) {
     if (program) gl.deleteProgram(program);
     throw error;
@@ -606,13 +632,17 @@ export function mountEffectSurface(
     source: HTMLImageElement | HTMLVideoElement;
     key: string;
     revision: number;
+    generation: number;
   } | null = null;
   let videoFrameId: number | null = null;
   let videoFrameNode: HTMLVideoElement | null = null;
   let ownedMediaChanged: ((event: Event) => void) | null = null;
 
   const disposeOwnedMediaTexture = () => {
-    if (ownedMediaTexture?.gl.isTexture(ownedMediaTexture.texture))
+    if (
+      ownedMediaTexture &&
+      ownedMediaTexture.generation === resourceGeneration(ownedMediaTexture.gl)
+    )
       ownedMediaTexture.gl.deleteTexture(ownedMediaTexture.texture);
     ownedMediaTexture = null;
   };
@@ -652,12 +682,19 @@ export function mountEffectSurface(
     if (
       !ownedMediaTexture ||
       ownedMediaTexture.gl !== gl ||
-      !gl.isTexture(ownedMediaTexture.texture)
+      ownedMediaTexture.generation !== resourceGeneration(gl)
     ) {
       disposeOwnedMediaTexture();
       const texture = gl.createTexture();
       if (!texture) throw new Error("Cannot allocate owned media texture");
-      ownedMediaTexture = { gl, texture, source, key: "", revision: 0 };
+      ownedMediaTexture = {
+        gl,
+        texture,
+        source,
+        key: "",
+        revision: 0,
+        generation: resourceGeneration(gl),
+      };
     }
     const state = ownedMediaTexture;
     gl.activeTexture(gl.TEXTURE0);
@@ -732,7 +769,7 @@ export function mountEffectSurface(
     if (
       !sampleableOutput ||
       !shaderOutput ||
-      !shaderOutput.gl.isTexture(shaderOutput.texture)
+      shaderOutput.generation !== resourceGeneration(shaderOutput.gl)
     ) {
       try {
         const { gl } = shaderGpu(shaderChain!);
@@ -942,8 +979,8 @@ export function mountEffectSurface(
         const {
           gl,
           canvas: gpuCanvas,
-          buffer,
           program,
+          binding,
           capabilities,
           textureSize,
           generation,
@@ -1066,12 +1103,15 @@ export function mountEffectSurface(
         if (!shaderIntermediate) {
           if (canvas.width !== width) canvas.width = width;
           if (canvas.height !== height) canvas.height = height;
+          const resized =
+            gpuCanvas.width !== width || gpuCanvas.height !== height;
           if (gpuCanvas.width !== width) gpuCanvas.width = width;
           if (gpuCanvas.height !== height) gpuCanvas.height = height;
           if (
-            gl.drawingBufferWidth !== width ||
-            gl.drawingBufferHeight !== height ||
-            gl.getError() !== gl.NO_ERROR
+            resized &&
+            (gl.drawingBufferWidth !== width ||
+              gl.drawingBufferHeight !== height ||
+              gl.getError() !== gl.NO_ERROR)
           )
             throw new Error(
               `Cannot allocate ${width} × ${height} visible shader drawing buffer`,
@@ -1086,7 +1126,7 @@ export function mountEffectSurface(
         if (resolvedInput.kind === "shaderTexture") {
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, resolvedInput.output.texture);
-          gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
+          gl.uniform1i(binding.uniforms.get("u_input") ?? null, 0);
           node.dataset.effectSourceBackend = "gpu";
           node.dataset.effectSourceRevision = String(
             resolvedInput.output.revision,
@@ -1097,7 +1137,7 @@ export function mountEffectSurface(
         ) {
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, resolvedInput.texture);
-          gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
+          gl.uniform1i(binding.uniforms.get("u_input") ?? null, 0);
           node.dataset.effectSourceBackend =
             resolvedInput.kind === "videoTexture" ? "video" : "image";
           node.dataset.effectSourceRevision = String(resolvedInput.revision);
@@ -1107,22 +1147,19 @@ export function mountEffectSurface(
           node.dataset.effectSourceRevision = String(
             resolvedInput.texture.revision,
           );
-          gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
+          gl.uniform1i(binding.uniforms.get("u_input") ?? null, 0);
         } else {
           node.dataset.effectSourceBackend = "none";
           delete node.dataset.effectSourceRevision;
         }
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        const position = gl.getAttribLocation(program, "position");
-        gl.enableVertexAttribArray(position);
-        gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+        gl.bindVertexArray(binding.vao);
         gl.uniform2f(
-          gl.getUniformLocation(program, "u_resolution"),
+          binding.uniforms.get("u_resolution") ?? null,
           width,
           height,
         );
         gl.uniform2f(
-          gl.getUniformLocation(program, "u_size"),
+          binding.uniforms.get("u_size") ?? null,
           logicalSize.width,
           logicalSize.height,
         );
@@ -1143,7 +1180,7 @@ export function mountEffectSurface(
           ...params,
         }))
           if (typeof value === "number")
-            gl.uniform1f(gl.getUniformLocation(program, key), value);
+            gl.uniform1f(binding.uniforms.get(key) ?? null, value);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 6);

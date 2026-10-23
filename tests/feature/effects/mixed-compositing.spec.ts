@@ -1753,6 +1753,22 @@ test("animated shader and text backdrop publishes completed captures during cont
     const background = nodes[0],
       glass = nodes.at(-1)!;
     const before = Number(glass.dataset.effectRevision);
+    let locationQueries = 0;
+    const prototype = WebGL2RenderingContext.prototype;
+    const uniform = prototype.getUniformLocation,
+      attribute = prototype.getAttribLocation;
+    prototype.getUniformLocation = function (
+      ...args: Parameters<typeof uniform>
+    ) {
+      locationQueries++;
+      return uniform.apply(this, args);
+    };
+    prototype.getAttribLocation = function (
+      ...args: Parameters<typeof attribute>
+    ) {
+      locationQueries++;
+      return attribute.apply(this, args);
+    };
     await new Promise<void>((resolve) => {
       let frame = 0;
       const tick = () => {
@@ -1768,7 +1784,10 @@ test("animated shader and text backdrop publishes completed captures during cont
       };
       requestAnimationFrame(tick);
     });
+    prototype.getUniformLocation = uniform;
+    prototype.getAttribLocation = attribute;
     const result = {
+      locationQueries,
       before,
       after: Number(glass.dataset.effectRevision),
       visibility: glass.querySelector("canvas")!.style.visibility,
@@ -1826,6 +1845,7 @@ test("animated shader and text backdrop publishes completed captures during cont
     };
   });
   expect(result.error).toBeUndefined();
+  expect(result.locationQueries).toBe(0);
   expect(result.after).toBeGreaterThan(result.before + 2);
   expect(result.visibility).toBe("visible");
   expect(result.afterStatic).toBe(result.frozen);
