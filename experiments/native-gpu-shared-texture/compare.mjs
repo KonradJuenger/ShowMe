@@ -19,6 +19,7 @@ const width = Math.round(numberOption("--width", 1596));
 const height = Math.round(numberOption("--height", 998));
 const dpr = numberOption("--dpr", 1.6042);
 const durationMs = numberOption("--duration", 20000);
+const warmupMs = numberOption("--warmup", 1500);
 const output = path.resolve(option("--output", ".benchmark-data/shared-texture/comparison.json"));
 const evidenceDir = option("--evidence-dir", "");
 const require = createRequire(import.meta.url);
@@ -31,7 +32,7 @@ function run(command, commandArgs) {
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} exited ${result.status}`);
 }
-const common = [`--width=${width}`, `--height=${height}`, `--dpr=${dpr}`, `--duration=${durationMs}`];
+const common = [`--width=${width}`, `--height=${height}`, `--dpr=${dpr}`, `--duration=${durationMs}`, `--warmup=${warmupMs}`];
 const legacyArgs = ["experiments/native-gpu-shared-texture/legacy-scene-texture.mjs", ...common, `--output=${legacyOutput}`];
 if (evidenceDir) legacyArgs.push(`--evidence=${path.resolve(evidenceDir, "legacy-scene-texture.png")}`);
 run(process.execPath, legacyArgs);
@@ -52,6 +53,7 @@ const checks = {
   legacyPhysicalCanvasMatchesRequested: legacy.outputCanvas?.width === expectedPhysical.width && legacy.outputCanvas?.height === expectedPhysical.height,
   sharedPhysicalTextureMatchesRequested: sharedShapes.includes(expectedShape),
   durationMatches: legacy.configuration.durationMs === durationMs && shared.configuration.durationMs === durationMs,
+  warmupMatches: legacy.configuration.warmupMs === warmupMs && shared.configuration.warmupMs === warmupMs,
   sameFinalShader: legacy.claims?.finalShaderMatchesSharedTextureHarness === true,
   noLegacyRendererErrors: Array.isArray(legacy.errors) && legacy.errors.length === 0,
   boundedSharedLifetime: (shared.transport?.queue?.maxRetained ?? Infinity) <= (shared.configuration.maxActive + 1) && shared.transport?.queue?.retained === 0,
@@ -59,10 +61,15 @@ const checks = {
 const report = {
   schemaVersion: 1,
   createdAt: new Date().toISOString(),
-  comparisonKind: "controlled-approximate-scene",
-  controlledVariables: ["logical width", "logical height", "DPR", "physical pixel dimensions", "duration", "final shader", "hardware Electron process"],
+  comparisonKind: "cadence-reference-not-apples-to-apples",
+  controlledVariables: ["logical width", "logical height", "DPR", "physical pixel dimensions", "duration", "warmup", "final shader", "hardware Electron process"],
   expectedPhysical,
-  sceneEquivalence: "Both workloads are generated-GPU background -> native text/CSS -> cheap full-frame shader. They are intentionally approximate rather than pixel-identical so the legacy side can use the real ShowMe SlideRenderer/SceneTexture implementation without integrating the experimental transport into production.",
+  sceneEquivalence: "Not equivalent. The shared-texture source intentionally includes additional animated native CSS and decoration. The legacy run is therefore a broad cadence reference for the current SceneTexture path, not an apples-to-apples CPU or transport speedup comparison.",
+  claims: {
+    cadenceReferenceUseful: true,
+    cpuCostDirectlyComparable: false,
+    transportSpeedupApplesToApples: false,
+  },
   checks,
   legacySceneTexture: legacy,
   sharedTextureWebGpu: shared,
