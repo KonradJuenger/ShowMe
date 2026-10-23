@@ -976,7 +976,7 @@
     "runtime": "unit",
     "created": "2026-10-21",
     "lastReviewed": "2026-10-23",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure; exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points; browser-native CSS now has an explicit backend boundary that disables native-group/restoration planning while explicit scene-input shaders remain on the advanced path; the retained legacy planner remains testable only when explicitly selected Removed the obsolete selectable CSS backend contract together with the unused compositor implementation; semantic composition, paint prefixes, effect ordering and native runtime boundaries retain their coverage."
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure. Exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points. Semantic composition and explicit scene-input ordering remain covered after deleting the unused selectable CSS compositor."
   },
   {
     "id": "effects-native-composition",

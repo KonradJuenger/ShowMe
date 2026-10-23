@@ -3,7 +3,8 @@
 Branch: `experimental/browser-native-renderer`
 
 Current direct-GPU follow-up: [architecture and validation](DIRECT_GPU_RENDERER_VALIDATION.md).
-Terminal shaders now draw directly into visible WebGL canvases; qualified owned
+Terminal shaders now share one Offscreen WebGL context and publish GPU ImageBitmaps
+with preservation disabled; qualified owned
 media and compatible chains bypass capture, and Motion binds its Effect flush
 targets once. The older shader-copy and follow-up descriptions below are history.
 

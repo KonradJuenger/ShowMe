@@ -157,8 +157,9 @@ dependencies, effect lifecycle, scoped style binding and preserved DOM identity.
 Not run: full/deprecated/release suites, installer packaging, cross-platform tests,
 4K physical-display capture, full manual/MCP deck walkthrough and export-specific
 visual continuity. The existing 4K shader-sampling regression did execute and pass.
+
 # Direct GPU follow-up
 
-The following continuity evidence predates the direct visible WebGL follow-up.
+The following continuity evidence predates the bounded GPU bitmap-presentation follow-up.
 See [current architecture, measurements and verification](DIRECT_GPU_RENDERER_VALIDATION.md)
 for its source revisions and retained limitations.
