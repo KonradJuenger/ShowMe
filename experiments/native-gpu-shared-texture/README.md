@@ -11,7 +11,7 @@ The main process imports each `OffscreenSharedTexture`, transfers it to a second
 - `webgpu`: `VideoFrame -> GPUDevice.importExternalTexture -> WGSL -> visible canvas`
 - `webgl`: `VideoFrame -> texImage2D -> GLSL -> visible canvas`
 
-The WebGPU path is the primary experiment. The WebGL path is only a comparison and must not be described as zero-copy without measurement. The WebGPU consumer keeps each `VideoFrame` alive until `GPUQueue.onSubmittedWorkDone()` resolves, then closes it so Electron can release the imported/source texture safely.
+The WebGPU path is the primary experiment. The WebGL path is only a comparison and must not be described as zero-copy without measurement. After a WebGPU submission the consumer closes its `VideoFrame`; Electron's shared-texture lifetime machinery keeps the underlying GPU resource alive until GPU use completes. `GPUQueue.onSubmittedWorkDone()` is sampled periodically for diagnostics only and is not awaited in the per-frame hot path.
 
 The source-frame queue is bounded: at most two transferred frames are active by default and at most one pending frame is retained. If a newer frame arrives while the pending slot is occupied, the older pending texture is released immediately. The pending frame is therefore "latest frame wins" and retained shared textures cannot grow without bound.
 
@@ -80,7 +80,7 @@ Important fields:
 - GPU feature/basic information;
 - optional post-timing evidence PNG.
 
-`shaderPublicationsPerSec` means application-level completed shader submissions, not measured physical-display FPS.
+`shaderPublicationsPerSec` means application-level shader submissions that reached the consumer path, not measured physical-display FPS.
 
 ## Success signal
 
