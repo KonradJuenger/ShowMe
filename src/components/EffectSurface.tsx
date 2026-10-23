@@ -39,6 +39,7 @@ export function EffectSurface({
   samplingEnvelope,
   nativeOpacity,
   directShaderInput = false,
+  ownedMediaInput = false,
 }: {
   definition: EffectDefinition;
   instance: ElementEffect;
@@ -47,6 +48,7 @@ export function EffectSurface({
   samplingEnvelope?: number;
   nativeOpacity?: string;
   directShaderInput?: boolean;
+  ownedMediaInput?: boolean;
   children?: ReactNode;
   textContent?: TextContent;
   sceneTextureSource?: {
@@ -163,6 +165,7 @@ export function EffectSurface({
       !!inheritedShaderChain,
       directShaderInput,
       ownsShaderChain,
+      ownedMediaInput,
     );
   }, [
     mountedDefinition,
@@ -175,6 +178,7 @@ export function EffectSurface({
     inheritedShaderChain,
     directShaderInput,
     ownsShaderChain,
+    ownedMediaInput,
   ]);
   useLayoutEffect(() => {
     if (root.current)
