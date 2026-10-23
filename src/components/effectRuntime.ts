@@ -142,8 +142,8 @@ export type ShaderChain = {
   state: ShaderGpuState | null;
   redraws: Set<() => void>;
   boundCanvas: HTMLCanvasElement | null;
-  onLost: ((event: WebGLContextEvent) => void) | null;
-  onRestored: (() => void) | null;
+  onLost: EventListener | null;
+  onRestored: EventListener | null;
 };
 
 const shaderMetrics = {
@@ -181,12 +181,12 @@ function bindShaderContextLifecycle(chain: ShaderChain, canvas: HTMLCanvasElemen
     chain.boundCanvas.removeEventListener("webglcontextlost", chain.onLost);
     chain.boundCanvas.removeEventListener("webglcontextrestored", chain.onRestored);
   }
-  const lost = (event: WebGLContextEvent) => {
+  const lost: EventListener = (event) => {
     event.preventDefault();
     chain.state = null;
     chain.redraws.forEach((redraw) => redraw());
   };
-  const restored = () => {
+  const restored: EventListener = () => {
     chain.state = null;
     chain.redraws.forEach((redraw) => redraw());
   };
@@ -1211,7 +1211,14 @@ export function mountEffectSurface(
     },
     prepareSampling,
     setTransport(matrix) {
-      const next = new DOMMatrix(matrix);
+      const next = new DOMMatrix([
+        matrix.a,
+        matrix.b,
+        matrix.c,
+        matrix.d,
+        matrix.e,
+        matrix.f,
+      ]);
       const key = next.toString();
       if (key === semanticTransformKey) return;
       semanticTransform = next;
