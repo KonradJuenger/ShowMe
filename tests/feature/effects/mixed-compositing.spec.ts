@@ -1748,7 +1748,7 @@ test("qualified GPU SceneTexture preserves native text and translucent backgroun
             ...resources.backdrop,
             input: "none" as const,
             source:
-              "#version 300 es\nprecision highp float;uniform float u_t;out vec4 outColor;void main(){outColor=vec4(fract(u_t),0.2,0.4,0.5);}",
+              "#version 300 es\nprecision highp float;uniform float u_t;in vec2 v_uv;out vec4 outColor;void main(){outColor=vec4(fract(u_t)*v_uv.x,0.2+0.2*v_uv.y,0.4,0.5);}",
           };
           resources.generated = shader;
           background.effects = [

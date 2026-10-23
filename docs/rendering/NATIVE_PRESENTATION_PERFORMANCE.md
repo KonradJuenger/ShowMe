@@ -219,3 +219,62 @@ installer/cross-platform checks and the main-commit audience-navigation gate wer
 not rerun; this remains local branch work with no main integration or push.
 
 [Raw Phase 3 evidence](evidence/native-presentation-phase3-2026-10-23.json).
+
+## Phase 4 — qualified GPU SceneTexture assembly
+
+Clean production baseline `22836e6` versus corrected candidate `83ae593`.
+Three serial alternating ten-second pairs, matching hardware/reference deck,
+1596×998 CSS viewport, DPR 1.6042, GPU and harness hashes. The original user app
+remained running; no verification jobs ran during timing.
+
+| Version | Audience rAF FPS median [min, max] | Glass publications/sec median [min, max] | Frame p95 ms median [min, max] |
+| --- | --- | --- | --- |
+| Phase 3 native capture | 46.7 [46.6, 47.9] | 23.3 [23.3, 23.9] | 33.6 [33.6, 33.6] |
+| Phase 4 GPU assembly | 60.0 [59.5, 60.0] | 60.0 [59.5, 60.0] | 17.2 [17.2, 17.3] |
+
+The audience callback median improved about 29%, while glass publications rose
+about 2.6× and now follow the audience cadence. This workload reaches approximately
+60 callbacks/publications per second at its original resolution. This does not
+measure physical scanout, establish every deck at 60 FPS or imply comparable
+results on other hardware. These are within-phase pairs; earlier phase medians
+came from separate runs.
+
+Qualification is deliberately narrow: a flat, translated generated-background
+rectangle followed by static native text/shapes, with a top-level translated
+backdrop target, no scene motion, custom stylesheet, video or additional effects.
+Unsupported compositions retain the current native capture route. Accepted scene
+replacement conservatively falls back to native capture until the provider is
+rebuilt. There is no document/schema/persistence change or general compositor.
+
+The generated shader's presented canvas is imported into the consuming context;
+static native foreground pixels and a coverage mask are captured once and reused.
+An FBO assembles those layers synchronously before the glass shader draws. The
+mask records native background coverage in RGB and slide coverage in alpha,
+preserving Chromium's fractional clipping/bitmap filtering. A hard geometric
+edge approximation failed the fractional-edge comparison and was replaced before
+the recorded final measurements. The static snapshots release their DOM capture
+machinery after preparation. Context generations rebuild GPU resources after loss;
+provider disposal releases GPU assembly state and leases.
+
+Both variants use two bounded shared shader contexts. Cross-context WebGL textures
+cannot be shared directly, so this uses a browser-managed canvas import rather
+than claiming a direct shared texture or guaranteed zero-copy driver path. No
+animated DOM capture or CPU pixel readback is requested. Additional cached coverage,
+background import and FBO storage trade memory for throughput; actual VRAM/peak GPU
+memory and driver transfer internals were not measured. Resolution is unchanged.
+
+Verification on the corrected production source: `npm run build` (includes
+typecheck), `npm run verify:build`, focused `npx eslint` over the changed runtime
+and test files, `npm run test:stats`, `npm run test:audit` (668 active declarations)
+and `git diff --check` passed. With SHOWME_TEST_FILES selecting mixed-compositing,
+`npx playwright test --grep 'qualified GPU SceneTexture|GPU shader handoff|continuous invalidation|neutral live video|mixed-size shader' --output test-results-phase4-final`
+passed **5 tests**. Coverage includes native text/translucent pixels within one
+channel value, translated input and fractional out-of-slide edges, no recurring
+DOM captures, teardown, static/live context recovery, video and mixed output sizes.
+The parity test was then strengthened with a spatial gradient and passed again
+using `--grep 'qualified GPU SceneTexture' --output test-results-phase4-gradient`.
+Production screenshots were inspected. Full/release, installer, cross-platform and
+main-integration audience-navigation checks were not run; no integration/push was
+requested. Keep the candidate on the performance branch.
+
+[Final paired evidence and harness](evidence/native-presentation-phase4-2026-10-23.json).

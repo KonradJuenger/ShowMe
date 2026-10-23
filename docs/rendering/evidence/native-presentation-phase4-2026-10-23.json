@@ -1,0 +1,803 @@
+{
+  "experiment": "Qualified GPU backdrop assembly with cached native text and fractional coverage masks",
+  "baseline": "22836e6",
+  "candidate": "83ae593",
+  "notes": [
+    "Three serial alternating ten-second clean production pairs, same machine/deck/GPU/viewport/harness.",
+    "Original user app remained running; no tests/builds ran during timing.",
+    "rAF callbacks and shader publications, not measured physical display FPS.",
+    "Background crosses bounded contexts via browser canvas import; no CPU pixel readback or animated DOM capture requested; driver transfer implementation and actual VRAM not measured.",
+    "Two shared shader contexts per audience renderer. Additional imported background, static coverage texture and assembly FBO trade memory for reduced capture work.",
+    "Final candidate includes native fractional clipping mask; initial candidate results excluded."
+  ],
+  "summary": {
+    "phase3": {
+      "fps": 46.684127396907655,
+      "glass": 23.292080692675555,
+      "p95": 33.600000000000364,
+      "contexts": [
+        2,
+        2,
+        2
+      ]
+    },
+    "phase4": {
+      "fps": 60.012381922178996,
+      "glass": 60.012381922178996,
+      "p95": 17.200000000000728,
+      "contexts": [
+        2,
+        2,
+        2
+      ]
+    }
+  },
+  "harness": "import {execFileSync}from'node:child_process';import{createHash}from'node:crypto';import {_electron} from '@playwright/test';import fs from 'node:fs/promises';import path from 'node:path';const mode=process.env.FPS_MODE??'normal';const dir=path.resolve('.agenttmp/fps-user-'+Date.now());await fs.mkdir(dir,{recursive:true});const settings=JSON.parse(await fs.readFile(path.join(process.env.APPDATA,'show-me','settings.json'),'utf8'));await fs.writeFile(path.join(dir,'settings.json'),JSON.stringify(settings));const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;let app;try{app=await _electron.launch({args:[path.resolve('.'),'--user-data-dir='+dir,'D:/01_Projekte/06_presentations/showme-examples/shader-text-shader.sme'],env});const editor=await app.firstWindow();await editor.getByTestId('stage').waitFor();if(mode==='no-presenter')await app.evaluate(({BrowserWindow})=>{const original=BrowserWindow.prototype.loadFile;BrowserWindow.prototype.loadFile=function(file,options){if(options?.query?.present==='console'){this.hide();return this.loadURL('about:blank');}return original.call(this,file,options);};});await app.context().addInitScript(()=>{window.__gpuCanvases=new Set();for(const proto of [OffscreenCanvas.prototype,HTMLCanvasElement.prototype]){const get=proto.getContext;proto.getContext=function(kind,...args){const value=get.call(this,kind,...args);if(value&&kind==='webgl2')window.__gpuCanvases.add(this);return value;};}});await editor.getByRole('button',{name:'Present',exact:true}).click();await new Promise(r=>setTimeout(r,1500));const audience=app.windows().find(p=>p.url().includes('present=audience'));if(!audience)throw Error('Audience not found');const sessions=[];for(const p of app.windows()){const c=await p.context().newCDPSession(p);await c.send('Performance.enable');sessions.push({p,publications:await p.evaluate(()=>[...document.querySelectorAll('[data-effect-id]')].map(n=>({id:n.dataset.effectId,revision:Number(n.dataset.effectRevision??0)}))),name:p.url().includes('present=audience')?'audience':p.url().includes('present=console')?'presenter':p.url().includes('slidePreview')?'thumbnail':p.url()==='about:blank'?'disabled-presenter':'editor',c,before:(await c.send('Performance.getMetrics')).metrics});}const result=await audience.evaluate(async()=>{const frames=[];const initial=new Map([...document.querySelectorAll(\"[data-effect-id]\")].map(n=>[n.dataset.effectId,Number(n.dataset.effectRevision??0)]));const start=performance.now();let last=start;await new Promise(resolve=>{const tick=now=>{frames.push(now-last);last=now;if(now-start<10000)requestAnimationFrame(tick);else resolve();};requestAnimationFrame(tick);});const sorted=frames.slice(2).sort((a,b)=>a-b);const canvases=[...(window.__gpuCanvases??[])].map(c=>({width:c.width,height:c.height}));const gl=new OffscreenCanvas(1,1).getContext('webgl2');const ext=gl.getExtension('WEBGL_debug_renderer_info');return {webglCanvases:canvases,logicalColorBufferBytes:canvases.reduce((n,c)=>n+c.width*c.height*4,0),durationMs:last-start,frames:frames.length,fps:1000*frames.length/(last-start),p50Ms:sorted[Math.floor(sorted.length*.5)],p95Ms:sorted[Math.floor(sorted.length*.95)],maxMs:sorted.at(-1),width:innerWidth,height:innerHeight,dpr:devicePixelRatio,gpu:gl.getParameter(ext.UNMASKED_RENDERER_WEBGL),effects:[...document.querySelectorAll('[data-effect-id]')].map(n=>({id:n.dataset.effectId,sceneAssembly:n.dataset.effectSceneAssembly,ready:n.dataset.effectReady,error:n.dataset.effectError,revision:n.dataset.effectRevision,updatesPerSecond:1000*(Number(n.dataset.effectRevision??0)-(initial.get(n.dataset.effectId)??0))/(last-start)}))};});result.mode=mode;result.cpu={};result.windowPublications={};for(const {name,c,before,p,publications}of sessions){const after=(await c.send('Performance.getMetrics')).metrics;result.windowPublications[name]=await p.evaluate(({publications,seconds})=>[...document.querySelectorAll('[data-effect-id]')].map(n=>({id:n.dataset.effectId,updatesPerSecond:(Number(n.dataset.effectRevision??0)-(publications.find(x=>x.id===n.dataset.effectId)?.revision??0))/seconds,ready:n.dataset.effectReady,error:n.dataset.effectError})),{publications,seconds:result.durationMs/1000});const value=(list,key)=>list.find(m=>m.name===key)?.value??0;result.cpu[name]=Object.fromEntries(['TaskDuration','ScriptDuration','LayoutDuration','RecalcStyleDuration','LayoutCount','RecalcStyleCount'].map(key=>[key,(value(after,key)-value(before,key))*(key.endsWith('Duration')?1000:1)]));}result.revision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();result.dirty=!!execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim();result.harnessSha256=createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex');result.documentSha256=createHash('sha256').update(await fs.readFile('D:/01_Projekte/06_presentations/showme-examples/shader-text-shader.sme')).digest('hex');await audience.screenshot({path:'.agenttmp/fps-'+mode+'-'+(process.env.FPS_RUN??'0')+'.png'});console.log(JSON.stringify(result,null,2));await fs.writeFile('.agenttmp/fps-'+mode+'-'+(process.env.FPS_RUN??'0')+'.json',JSON.stringify(result,null,2));}finally{await app?.close();}\r\n",
+  "runs": [
+    {
+      "phase": "phase3",
+      "run": 0,
+      "webglCanvases": [
+        {
+          "width": 2561,
+          "height": 1441
+        },
+        {
+          "width": 1414,
+          "height": 1443
+        }
+      ],
+      "logicalColorBufferBytes": 22923212,
+      "durationMs": 10003.600000035764,
+      "frames": 479,
+      "fps": 47.8827622054348,
+      "p50Ms": 16.700000000000273,
+      "p95Ms": 33.600000000000364,
+      "maxMs": 49.899999999999636,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "524",
+          "updatesPerSecond": 47.8827622054348
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "263",
+          "updatesPerSecond": 23.89139909623991
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 50.774,
+          "ScriptDuration": 25.44,
+          "LayoutDuration": 6.925,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 0.6250000000000001,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9472.941,
+          "ScriptDuration": 913.031,
+          "LayoutDuration": 26.769000000000002,
+          "RecalcStyleDuration": 174.065,
+          "LayoutCount": 482,
+          "RecalcStyleCount": 722
+        },
+        "presenter": {
+          "TaskDuration": 31.330999999999996,
+          "ScriptDuration": 14.834,
+          "LayoutDuration": 6.364,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.898596505244169,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.8993162461445952,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 48.28261825725471,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 24.191291135104844,
+            "ready": "true"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "22836e64b0b2ff2a2a0d42cac742baf81646af47",
+      "dirty": false,
+      "harnessSha256": "5a9bc5b9e56f08dc2f9f5f939da59e8b988351ca34827b9fd3797180a4295837",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase4",
+      "run": 0,
+      "webglCanvases": [
+        {
+          "width": 2561,
+          "height": 1441
+        },
+        {
+          "width": 1414,
+          "height": 1443
+        }
+      ],
+      "logicalColorBufferBytes": 22923212,
+      "durationMs": 10011.900000023841,
+      "frames": 601,
+      "fps": 60.028566006309376,
+      "p50Ms": 16.699999999999818,
+      "p95Ms": 17.299999999999272,
+      "maxMs": 33.19999999999982,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "653",
+          "updatesPerSecond": 60.028566006309376
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "sceneAssembly": "gpu",
+          "ready": "true",
+          "revision": "653",
+          "updatesPerSecond": 60.028566006309376
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 51.083999999999996,
+          "ScriptDuration": 27.389,
+          "LayoutDuration": 6.412,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.39,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 3679.375,
+          "ScriptDuration": 3195.14,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 103.05,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 605
+        },
+        "presenter": {
+          "TaskDuration": 39.358000000000004,
+          "ScriptDuration": 19.678,
+          "LayoutDuration": 6.5040000000000004,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.6956022333335223,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -3.4958399504506295,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 60.42809057207516,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 60.42809057207516,
+            "ready": "true"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "83ae593f3fbe7ec4b261f6e80a2112f22b406168",
+      "dirty": false,
+      "harnessSha256": "5a9bc5b9e56f08dc2f9f5f939da59e8b988351ca34827b9fd3797180a4295837",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase3",
+      "run": 1,
+      "webglCanvases": [
+        {
+          "width": 2561,
+          "height": 1441
+        },
+        {
+          "width": 1414,
+          "height": 1443
+        }
+      ],
+      "logicalColorBufferBytes": 22923212,
+      "durationMs": 10003.399999952317,
+      "frames": 467,
+      "fps": 46.684127396907655,
+      "p50Ms": 16.700000000000728,
+      "p95Ms": 33.599999999999454,
+      "maxMs": 50.100000000000364,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "520",
+          "updatesPerSecond": 46.684127396907655
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "261",
+          "updatesPerSecond": 23.292080692675555
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 49.279,
+          "ScriptDuration": 24.869,
+          "LayoutDuration": 5.513,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.13,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9467.499,
+          "ScriptDuration": 973.1600000000001,
+          "LayoutDuration": 28.608,
+          "RecalcStyleDuration": 179.24200000000002,
+          "LayoutCount": 470,
+          "RecalcStyleCount": 704
+        },
+        "presenter": {
+          "TaskDuration": 28.926000000000002,
+          "ScriptDuration": 13.759,
+          "LayoutDuration": 4.998,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.2988783813660656,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.599456184904759,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 47.08399144313385,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 23.591978727345197,
+            "ready": "true"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "22836e64b0b2ff2a2a0d42cac742baf81646af47",
+      "dirty": false,
+      "harnessSha256": "5a9bc5b9e56f08dc2f9f5f939da59e8b988351ca34827b9fd3797180a4295837",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase4",
+      "run": 1,
+      "webglCanvases": [
+        {
+          "width": 2561,
+          "height": 1441
+        },
+        {
+          "width": 1414,
+          "height": 1443
+        }
+      ],
+      "logicalColorBufferBytes": 22923212,
+      "durationMs": 10012.400000011921,
+      "frames": 596,
+      "fps": 59.52618752739507,
+      "p50Ms": 16.699999999999818,
+      "p95Ms": 17.199999999999818,
+      "maxMs": 49.899999999999864,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "646",
+          "updatesPerSecond": 59.52618752739507
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "sceneAssembly": "gpu",
+          "ready": "true",
+          "revision": "646",
+          "updatesPerSecond": 59.52618752739507
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 64.271,
+          "ScriptDuration": 36.371,
+          "LayoutDuration": 6.161,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.3419999999999999,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 3738.76,
+          "ScriptDuration": 3262.339,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 101.545,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 598
+        },
+        "presenter": {
+          "TaskDuration": 44.168,
+          "ScriptDuration": 19.851,
+          "LayoutDuration": 7.22,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.795293835639283,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -3.5955415285003736,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 59.825815988103436,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 59.825815988103436,
+            "ready": "true"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "83ae593f3fbe7ec4b261f6e80a2112f22b406168",
+      "dirty": false,
+      "harnessSha256": "5a9bc5b9e56f08dc2f9f5f939da59e8b988351ca34827b9fd3797180a4295837",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase3",
+      "run": 2,
+      "webglCanvases": [
+        {
+          "width": 2561,
+          "height": 1441
+        },
+        {
+          "width": 1414,
+          "height": 1443
+        }
+      ],
+      "logicalColorBufferBytes": 22923212,
+      "durationMs": 10004.000000035763,
+      "frames": 466,
+      "fps": 46.58136745285227,
+      "p50Ms": 16.700000000000728,
+      "p95Ms": 33.600000000000364,
+      "maxMs": 49.899999999999636,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "515",
+          "updatesPerSecond": 46.58136745285227
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "ready": "false",
+          "revision": "259",
+          "updatesPerSecond": 23.290683726426135
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 54.928000000000004,
+          "ScriptDuration": 27.910999999999998,
+          "LayoutDuration": 7.154,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 0.825,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 9474.225,
+          "ScriptDuration": 965.093,
+          "LayoutDuration": 29.073999999999998,
+          "RecalcStyleDuration": 189.65599999999998,
+          "LayoutCount": 468,
+          "RecalcStyleCount": 702
+        },
+        "presenter": {
+          "TaskDuration": 39.812,
+          "ScriptDuration": 19.597,
+          "LayoutDuration": 5.556,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.6985205917500728,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -1.799280287878414,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 46.881247500832,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 23.490603758412625,
+            "ready": "true"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "22836e64b0b2ff2a2a0d42cac742baf81646af47",
+      "dirty": false,
+      "harnessSha256": "5a9bc5b9e56f08dc2f9f5f939da59e8b988351ca34827b9fd3797180a4295837",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    },
+    {
+      "phase": "phase4",
+      "run": 2,
+      "webglCanvases": [
+        {
+          "width": 2561,
+          "height": 1441
+        },
+        {
+          "width": 1414,
+          "height": 1443
+        }
+      ],
+      "logicalColorBufferBytes": 22923212,
+      "durationMs": 10014.600000035764,
+      "frames": 601,
+      "fps": 60.012381922178996,
+      "p50Ms": 16.699999999999818,
+      "p95Ms": 17.200000000000728,
+      "maxMs": 33.69999999999982,
+      "width": 1596,
+      "height": 998,
+      "dpr": 1.6041666269302368,
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "effects": [
+        {
+          "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+          "ready": "true",
+          "revision": "654",
+          "updatesPerSecond": 60.012381922178996
+        },
+        {
+          "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+          "sceneAssembly": "gpu",
+          "ready": "true",
+          "revision": "654",
+          "updatesPerSecond": 60.012381922178996
+        }
+      ],
+      "mode": "normal",
+      "cpu": {
+        "editor": {
+          "TaskDuration": 56.412000000000006,
+          "ScriptDuration": 28.937,
+          "LayoutDuration": 6.7749999999999995,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        },
+        "thumbnail": {
+          "TaskDuration": 1.0440000000000003,
+          "ScriptDuration": 0,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 0
+        },
+        "audience": {
+          "TaskDuration": 3782.7409999999995,
+          "ScriptDuration": 3313.395,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 100.53,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 604
+        },
+        "presenter": {
+          "TaskDuration": 32.811,
+          "ScriptDuration": 16.764000000000003,
+          "LayoutDuration": 5.468,
+          "RecalcStyleDuration": 0,
+          "LayoutCount": 10,
+          "RecalcStyleCount": 0
+        }
+      },
+      "windowPublications": {
+        "editor": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": -3.295189024013156,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": -3.095480598315389,
+            "ready": "true"
+          }
+        ],
+        "thumbnail": [],
+        "audience": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 60.41179877357453,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 60.41179877357453,
+            "ready": "true"
+          }
+        ],
+        "presenter": [
+          {
+            "id": "6801424e-a57f-4fb7-8674-959bbe71d25f",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          },
+          {
+            "id": "976c27fb-8517-4d5a-8196-1da6e6b566f7",
+            "updatesPerSecond": 0,
+            "ready": "true"
+          }
+        ]
+      },
+      "revision": "83ae593f3fbe7ec4b261f6e80a2112f22b406168",
+      "dirty": false,
+      "harnessSha256": "5a9bc5b9e56f08dc2f9f5f939da59e8b988351ca34827b9fd3797180a4295837",
+      "documentSha256": "5fa0835bf156b18ec81067569002163cbae888356124e36c581a66477bf4fe4c"
+    }
+  ]
+}

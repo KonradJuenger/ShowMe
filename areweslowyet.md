@@ -82,3 +82,18 @@ No merge/push to main.
 
 [Investigation and verification](docs/rendering/NATIVE_PRESENTATION_PERFORMANCE.md),
 [Phase 3 paired evidence and harness](docs/rendering/evidence/native-presentation-phase3-2026-10-23.json).
+
+## Qualified GPU SceneTexture assembly — 2026-10-23
+
+Three clean serial production pairs on the same Radeon 880M/reference deck:
+Phase 3 `22836e6` versus Phase 4 `83ae593`. Median audience rAF **46.7 → 60.0 FPS**,
+glass publications **23.3 → 60.0/sec**, frame p95 **33.6 → 17.2 ms**. Original
+resolution and two shared shader contexts retained. Static native text and native
+fractional coverage are cached; an FBO assembles the animated backdrop. Other
+compositions retain native capture. Background transfer remains a browser canvas
+import across contexts; actual VRAM/driver transfer cost was not isolated.
+
+This reaches the target on the reference workload, not measured physical display
+FPS or a universal 60 FPS guarantee. The original app remained running. No main
+merge/push. [Method, boundaries and checks](docs/rendering/NATIVE_PRESENTATION_PERFORMANCE.md),
+[final paired evidence](docs/rendering/evidence/native-presentation-phase4-2026-10-23.json).
