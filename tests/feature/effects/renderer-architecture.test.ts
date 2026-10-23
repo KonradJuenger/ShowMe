@@ -1,18 +1,34 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 
-const components = new URL("../../../src/components/", import.meta.url);
+const sourceRoot = new URL("../../../src/", import.meta.url);
+const components = new URL("components/", sourceRoot);
 const component = (name: string) =>
   readFileSync(new URL(name, components), "utf8");
-const productionSources = Object.fromEntries(
-  readdirSync(components)
-    .filter((name) => /\.(ts|tsx)$/.test(name))
-    .map((name) => [name, component(name)]),
-);
+
+function collectSources(directory: URL, prefix = ""): [string, string][] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = prefix + entry.name;
+    if (entry.isDirectory())
+      return collectSources(new URL(entry.name + "/", directory), path + "/");
+    return /\.(ts|tsx)$/.test(entry.name)
+      ? [[path, readFileSync(new URL(entry.name, directory), "utf8")] as [string, string]]
+      : [];
+  });
+}
+const productionSources = Object.fromEntries(collectSources(sourceRoot));
+const importedModules = (source: string) =>
+  [...source.matchAll(/(?:from\\s+|import\\s*\\()\\s*["']([^"']+)["']/g)].map(
+    (match) => match[1],
+  );
 const importers = (name: string) =>
   Object.entries(productionSources)
     .filter(([, source]) =>
-      new RegExp(`from\\s+["']\\./${name}["']`).test(source),
+      importedModules(source).some(
+        (specifier) =>
+          specifier === `./${name}` ||
+          specifier.endsWith(`/${name}`),
+      ),
     )
     .map(([path]) => path)
     .sort();
@@ -73,11 +89,11 @@ it("uses SceneTexture as the sole production doorway to legacy scene capture", (
   expect(adapter).toContain('from "./domRaster"');
 
   const legacyCompositorIsland = new Set([
-    "backdropRestoration.ts",
-    "compositionRuntime.ts",
-    "compositionSurface.ts",
-    "cssBackdrop.ts",
-    "legacyCssBackdropValidation.ts",
+    "components/backdropRestoration.ts",
+    "components/compositionRuntime.ts",
+    "components/compositionSurface.ts",
+    "components/cssBackdrop.ts",
+    "components/legacyCssBackdropValidation.ts",
   ]);
   for (const target of [
     "backdropRestoration",
@@ -93,13 +109,13 @@ it("uses SceneTexture as the sole production doorway to legacy scene capture", (
 
   const legacyCaptureIsland = new Set([
     ...legacyCompositorIsland,
-    "sceneTextureLegacy.ts",
+    "components/sceneTextureLegacy.ts",
   ]);
   for (const target of ["elementRaster", "domRaster"])
     expect(
       importers(target).filter((path) => !legacyCaptureIsland.has(path)),
     ).toEqual([]);
-  expect(importers("sceneTextureLegacy")).toEqual(["sceneTexture.ts"]);
+  expect(importers("sceneTextureLegacy")).toEqual(["components/sceneTexture.ts"]);
 });
 
 it("keeps observers and frame-time traversal out of the normal hot path", () => {

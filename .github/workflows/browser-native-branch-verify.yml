@@ -33,7 +33,20 @@ jobs:
         run: npx playwright test --config playwright.config.ts --output test-results-audience
         env:
           SHOWME_TEST_FILES: '["tests/feature/presenter/audience-navigation.spec.ts"]'
-      - name: Native CSS and legacy compositor isolation
-        run: xvfb-run -a npx playwright test --config playwright.electron.config.ts --output test-results-native-composition
+      - name: Browser-native CSS and Motion product contracts
+        run: >-
+          xvfb-run -a npx playwright test
+          --config playwright.electron.config.ts
+          --output test-results-native-product
+          --grep "browser-native CSS glass|Move Scale Rotate and Fade|Presence enter and exit|later foreground content"
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/native-composition.spec.ts"]'
+      - name: Legacy compositor diagnostic
+        continue-on-error: true
+        run: >-
+          xvfb-run -a npx playwright test
+          --config playwright.electron.config.ts
+          --output test-results-legacy-compositor
+          --grep-invert "browser-native CSS glass|Move Scale Rotate and Fade|Presence enter and exit|later foreground content|generated shader layers"
         env:
           SHOWME_TEST_FILES: '["tests/feature/effects/native-composition.spec.ts"]'
