@@ -155,6 +155,8 @@ function hasAnyEffects(
 export function createLegacySceneTextureProvider(
   request: SceneTextureRequest,
   context: SceneTextureContext,
+  excludedElements: ReadonlySet<string> = new Set(),
+  transparentRoot = false,
 ): SceneTextureProvider {
   const observationRoot =
     request.kind === "backdrop" ? context.inputRoot : context.owner;
@@ -198,6 +200,7 @@ export function createLegacySceneTextureProvider(
     prefixElements.clear();
     const visit = (elements: readonly Element[]) =>
       elements.forEach((element) => {
+        if (excludedElements.has(element.id)) return;
         allowed.add(element.id);
         prefixElements.set(element.id, element);
         visit(element.children);
@@ -208,7 +211,9 @@ export function createLegacySceneTextureProvider(
   const resolveInputElements = () => {
     if (request.kind !== "backdrop" || !context.scene) return [context.element];
     const { slide, deck } = context.scene();
-    return backdropPrefix(slide, deck, context.element.id).elements;
+    return backdropPrefix(slide, deck, context.element.id).elements.filter(
+      (element) => !excludedElements.has(element.id),
+    );
   };
 
   let qualified: {
@@ -412,6 +417,8 @@ export function createLegacySceneTextureProvider(
         )
           clone.style.setProperty("opacity", "1", "important");
         if (original === context.inputRoot && request.kind === "backdrop") {
+          if (transparentRoot)
+            clone.style.setProperty("background", "transparent", "important");
           clone.style.setProperty("transform", "none", "important");
           clone.style.setProperty("transform-origin", "0 0", "important");
         }
@@ -443,7 +450,8 @@ export function createLegacySceneTextureProvider(
       sampling.logicalWidth +
       "x" +
       sampling.logicalHeight +
-      (retain ? "|semantic:" + semanticRevision : "");
+      (retain ? "|semantic:" + semanticRevision : "") +
+      (transparentRoot ? "|transparent" : "");
     if (key === leaseKey && lease?.isCurrent()) return;
     lease?.release();
     const cache = retain ? retainedStaticSources : shared.cache;
@@ -617,6 +625,13 @@ export function createLegacySceneTextureProvider(
     if (
       event.target instanceof Node &&
       event.target !== context.effectNode &&
+      !(
+        event.target instanceof HTMLElement &&
+        excludedElements.has(
+          event.target.closest<HTMLElement>("[data-element-id]")?.dataset
+            .elementId ?? "",
+        )
+      ) &&
       observationRoot.contains(event.target)
     )
       sourceChanged();

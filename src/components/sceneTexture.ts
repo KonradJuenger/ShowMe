@@ -1,3 +1,7 @@
+import {
+  createGpuSceneTextureProvider,
+  gpuSceneTextureDiagnostics,
+} from "./sceneTextureGpu";
 import type { Deck, Slide } from "../core/document";
 import type { Element } from "../core/element";
 import type { EffectResources } from "../core/effects";
@@ -29,14 +33,13 @@ export type SceneTextureSampling = {
 /** Rendered scene pixels exposed without leaking the capture backend. */
 export interface SceneTexture {
   readonly revision: number;
+  prepareGpu?(gl: WebGL2RenderingContext): void;
   bind(gl: WebGL2RenderingContext): void;
 }
 
 export interface SceneTextureProvider {
   prepare(sampling: SceneTextureSampling): void | Promise<void>;
-  acquire(
-    sampling: SceneTextureSampling,
-  ): SceneTexture | Promise<SceneTexture>;
+  acquire(sampling: SceneTextureSampling): SceneTexture | Promise<SceneTexture>;
   invalidate(): void;
   dispose(): void;
 }
@@ -60,7 +63,10 @@ export function createSceneTextureProvider(
   request: SceneTextureRequest,
   context: SceneTextureContext,
 ): SceneTextureProvider {
-  return createLegacySceneTextureProvider(request, context);
+  return (
+    createGpuSceneTextureProvider(request, context) ??
+    createLegacySceneTextureProvider(request, context)
+  );
 }
 
 export function sceneTextureTextureBytes() {
@@ -68,5 +74,8 @@ export function sceneTextureTextureBytes() {
 }
 
 export function sceneTextureDiagnostics() {
-  return legacySceneTextureDiagnostics();
+  return {
+    ...legacySceneTextureDiagnostics(),
+    gpu: gpuSceneTextureDiagnostics(),
+  };
 }

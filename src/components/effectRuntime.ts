@@ -1132,6 +1132,8 @@ export function mountEffectSurface(
               `Cannot allocate ${width} × ${height} visible shader drawing buffer`,
             );
         }
+        if (resolvedInput.kind === "sceneTexture")
+          resolvedInput.texture.prepareGpu?.(gl);
         if (sampleableOutput) {
           shaderOutput = allocateShaderOutput(gl, width, height, shaderOutput);
           gl.bindFramebuffer(gl.FRAMEBUFFER, shaderOutput.framebuffer);
@@ -1159,6 +1161,9 @@ export function mountEffectSurface(
         } else if (resolvedInput.kind === "sceneTexture") {
           resolvedInput.texture.bind(gl);
           node.dataset.effectSourceBackend = "scene-texture";
+          node.dataset.effectSceneAssembly = resolvedInput.texture.prepareGpu
+            ? "gpu"
+            : "capture";
           node.dataset.effectSourceRevision = String(
             resolvedInput.texture.revision,
           );

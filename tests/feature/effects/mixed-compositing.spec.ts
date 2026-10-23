@@ -1704,6 +1704,100 @@ test("font completion invalidates a retained static SceneTexture between mounted
   expect(result.opaque).toBeGreaterThan(0);
 });
 
+test("qualified GPU SceneTexture preserves native text and translucent background pixels without recurring captures", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const { mountMixedEffectsHarness } = (await import(
+      /* @vite-ignore */ String("/tests/helpers/mixedEffectsHarness.tsx")
+    )) as typeof import("../../helpers/mixedEffectsHarness");
+    const { createBasicShape } = (await import(
+      /* @vite-ignore */ String("/src/core/elementFactory.ts")
+    )) as typeof import("../../../src/core/elementFactory");
+    const { newEffectInstance } = (await import(
+      /* @vite-ignore */ String("/src/core/effects.ts")
+    )) as typeof import("../../../src/core/effects");
+    const gpu = (await import(
+      /* @vite-ignore */ String("/src/components/sceneTextureGpu.ts")
+    )) as typeof import("../../../src/components/sceneTextureGpu");
+    const { domRasterDiagnostics } = (await import(
+      /* @vite-ignore */ String("/src/components/domRaster.ts")
+    )) as typeof import("../../../src/components/domRaster");
+    const { readWebGlPixels } = (await import(
+      /* @vite-ignore */ String("/tests/helpers/webglPixels.ts")
+    )) as typeof import("../../helpers/webglPixels");
+    const run = async (enabled: boolean) => {
+      gpu.setGpuSceneTextureForTests(enabled);
+      const h = await mountMixedEffectsHarness(undefined, 0, undefined, {
+        configure(model) {
+          model.deck.stylesheet = "";
+          const slide = model.slides[model.deck.slideIds[0]],
+            resources = slide.effectResources!;
+          const background = createBasicShape("background", "rectangle", {
+            x: 0,
+            y: 0,
+          });
+          Object.assign(background.frame, { width: 640, height: 360 });
+          background.appearance.fill = null;
+          const shader = {
+            ...resources.backdrop,
+            input: "none" as const,
+            source:
+              "#version 300 es\nprecision highp float;uniform float u_t;out vec4 outColor;void main(){outColor=vec4(fract(u_t),0.2,0.4,0.5);}",
+          };
+          resources.generated = shader;
+          background.effects = [
+            newEffectInstance("generated", shader, "background"),
+          ];
+          const [text, glass] = slide.nodes[0].children;
+          text.effects = [];
+          Object.assign(glass.frame, { x: 40, y: 20, width: 500, height: 300 });
+          slide.nodes[0].children = [background, text, glass];
+        },
+      });
+      try {
+        await h.advance(0.37);
+        const glass = h.host.querySelector<HTMLCanvasElement>(
+          '[data-element-id="glass"] canvas',
+        )!;
+        const pixels = Array.from(readWebGlPixels(glass));
+        const before = domRasterDiagnostics().captures,
+          assemblies = gpu.gpuSceneTextureDiagnostics().assemblies;
+        for (const time of [0.41, 0.45, 0.49]) await h.advance(time);
+        return {
+          pixels,
+          captures: domRasterDiagnostics().captures - before,
+          assemblies: gpu.gpuSceneTextureDiagnostics().assemblies - assemblies,
+          errors: h.inspect().errors,
+        };
+      } finally {
+        h.dispose();
+      }
+    };
+    try {
+      const native = await run(false),
+        assembled = await run(true);
+      let max = 0;
+      for (let i = 0; i < native.pixels.length; i++)
+        max = Math.max(max, Math.abs(native.pixels[i] - assembled.pixels[i]));
+      return {
+        max,
+        ...assembled,
+        pixels: undefined,
+        providers: gpu.gpuSceneTextureDiagnostics().providers,
+      };
+    } finally {
+      gpu.setGpuSceneTextureForTests(true);
+    }
+  });
+  expect(result.errors).toEqual([]);
+  expect(result.max).toBeLessThanOrEqual(1);
+  expect(result.captures).toBe(0);
+  expect(result.assemblies).toBeGreaterThanOrEqual(3);
+  expect(result.providers).toBe(0);
+});
+
 test("animated shader and text backdrop publishes completed captures during continuous invalidation", async ({
   page,
 }) => {
@@ -1732,6 +1826,7 @@ test("animated shader and text backdrop publishes completed captures during cont
           { x: 0, y: 0 },
         );
         Object.assign(background.frame, { width: 640, height: 360 });
+        background.appearance.fill = null;
         const shader = {
           ...resources.backdrop,
           input: "none" as const,
