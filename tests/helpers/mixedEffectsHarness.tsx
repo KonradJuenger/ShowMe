@@ -6,7 +6,6 @@ import {
   flushEffectSurfaces,
 } from "../../src/components/effectRuntime";
 import { domRasterDiagnostics } from "../../src/components/domRaster";
-import { readWebGlPixels } from "./webglPixels";
 import {
   newPresentationDocument,
   type PresentationDocument,
@@ -161,14 +160,13 @@ export async function mountMixedEffectsHarness(
       host.querySelectorAll<HTMLElement>("[data-effect-text-output]"),
     ).map((node) => node.textContent),
     surfaces: Array.from(host.querySelectorAll<HTMLElement>("[data-effect-id]"))
-      .filter((node) =>
-        node.querySelector(':scope > canvas[data-shader-stage="terminal"]'),
-      )
+      .filter((node) => node.querySelector(":scope > canvas"))
       .map((node) => {
-        const canvas = node.querySelector<HTMLCanvasElement>(
-          ':scope > canvas[data-shader-stage="terminal"]',
-        )!;
-        const pixels = readWebGlPixels(canvas);
+        const canvas =
+          node.querySelector<HTMLCanvasElement>(":scope > canvas")!;
+        const pixels = canvas
+          .getContext("2d")!
+          .getImageData(0, 0, canvas.width, canvas.height).data;
         let red = 0,
           green = 0,
           blue = 0,
@@ -213,10 +211,8 @@ export async function mountMixedEffectsHarness(
   await new Promise<void>((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
   );
-  await advance(0);
+  await stage(0);
   return {
-    model,
-    slide,
     stage,
     advance,
     inspect,

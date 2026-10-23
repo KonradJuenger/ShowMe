@@ -1,8 +1,8 @@
 import type { EffectDefinition } from "../core/effects";
 
 /** Pixel-tested capabilities, deliberately stricter than CSS syntax support.
- * Retained only for legacy CSS compositor validation. Browser-native CSS does
- * not consult this capability table. */
+ * Engine upgrades change this single table after the native pixel contracts
+ * pass. All backend selection consumes the same result. */
 const testedChromium = new Set([152]);
 export function compositorCapabilities(userAgent = navigator.userAgent) {
   const version = /\bChrome\/(\d+)\./.exec(userAgent);
@@ -52,7 +52,7 @@ export function scopedStyle(definition: EffectDefinition) {
 }
 
 /** Declaration capabilities are shared by all three implementations. Topology
- * and paint-region proofs are evaluated only by legacy CSS validation. */
+ * and paint-region proofs are evaluated once by compositionBackendPlan. */
 export function backdropStyleCapabilities(definition: EffectDefinition) {
   const style = scopedStyle(definition);
   if (!style) return null;

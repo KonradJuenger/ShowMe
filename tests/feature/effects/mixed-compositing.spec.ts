@@ -63,7 +63,7 @@ test("backdrop pixels recover after dragging outside the slide without resizing"
   });
   for (const state of states) expect(state.errors).toEqual([]);
   const initial = states[0].surfaces[1];
-  expect(initial.backend).toBe("scene-texture");
+  expect(initial.backend).toBe("primitive");
   expect(initial.green).toBeGreaterThan(0);
   expect(states[1].surfaces[1].green).toBeLessThan(initial.green);
   expect(states[2].surfaces[1].opaque).toBe(0);
@@ -196,10 +196,14 @@ test("unused, disabled and unrelated CSS effects preserve primitive content and 
     }
     return rows;
   });
-  for (const { state } of rows) {
+  for (const { placement, state } of rows) {
     expect(state.errors).toEqual([]);
     expect(
-      state.surfaces.every((surface) => surface.backend === "scene-texture"),
+      state.surfaces.every(
+        (surface) =>
+          surface.backend ===
+          (placement === "contributing" ? "native" : "primitive"),
+      ),
     ).toBe(true);
     expect(state.surfaces.every((surface) => surface.green > 1000)).toBe(true);
   }
@@ -363,14 +367,14 @@ test("a mounted backdrop switches from primitive capture when lower CSS is added
   expect(result.before.errors).toEqual([]);
   expect(result.before.surfaces.at(-1)!.opaque).toBeGreaterThan(1000);
   expect(result.visible.errors).toEqual([]);
-  expect(result.visible.surfaces.at(-1)!.backend).toBe("scene-texture");
+  expect(result.visible.surfaces.at(-1)!.backend).toBe("native");
   expect(result.visible.surfaces.at(-1)!.green).toBeGreaterThan(1000);
   expect(result.hidden.surfaces.at(-1)!.green).toBe(0);
   expect(result.restored.errors).toEqual([]);
-  expect(result.restored.surfaces.at(-1)!.backend).toBe("scene-texture");
+  expect(result.restored.surfaces.at(-1)!.backend).toBe("primitive");
   expect(result.restored.surfaces.at(-1)!.green).toBeGreaterThan(1000);
   expect(result.styled.errors).toEqual([]);
-  expect(result.styled.surfaces.at(-1)!.backend).toBe("scene-texture");
+  expect(result.styled.surfaces.at(-1)!.backend).toBe("native");
   expect(result.styled.surfaces.at(-1)!.green).toBe(0);
   expect(result.warnings).toEqual([]);
 });
@@ -807,11 +811,8 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
           const slide = model.slides[model.deck.slideIds[0]],
             text = slide.nodes[0].children[0];
           slide.nodes[0].children = [text];
-          // Scope text paint to its owned JS output. A document stylesheet is
-          // intentionally a conservative SceneTexture boundary for chaining.
-          model.deck.stylesheet = "";
-          slide.effectResources!.js.styleSource =
-            ":scope { color: rgb(255,0,0); text-shadow: 3px 2px 1px rgb(0,0,255); opacity: .5; }";
+          model.deck.stylesheet +=
+            " [data-effect-text-output] { opacity: 0.5 !important; }";
           if (gap)
             text.effects!.push(
               newEffectInstance("css", slide.effectResources!.css, "content"),
@@ -824,54 +825,26 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
             ),
           };
           slide.effectResources!.second = second;
-          if (!gpu) {
-            const identity = {
-              ...slide.effectResources!.css,
-              source: ":scope { opacity: 1; }",
-            };
-            slide.effectResources!.identity = identity;
-            text.effects!.push(
-              newEffectInstance("identity", identity, "content"),
-            );
-          }
           text.effects!.push(newEffectInstance("second", second, "content"));
         },
       });
       const state = await harness.stage(0.5, 1, 1);
       const canvas = harness.host.querySelector<HTMLCanvasElement>(
-        '[data-effect-id] > canvas[data-shader-stage="terminal"]',
+        "[data-effect-id] > canvas",
       )!;
-      const surface = runtime.effectSurface(canvas.parentElement!)!;
-      surface.materialize();
-      const output = surface.gpuOutput()!;
-      const gl = output.gl;
-      const buffer = new Uint8Array(canvas.width * canvas.height * 4);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
-      gl.readPixels(
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        buffer,
+      const pixels = Array.from(
+        canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height)
+          .data,
       );
-      const pixels = Array.from(buffer);
       let recovered = null;
       if (lose) {
-        // Inject loss after the submitted frame reaches the browser render
-        // phase; synchronous loss inside native capture's paint task crashes
-        // Chromium before the WebGL context-loss event can be delivered.
+        const gl = runtime.shaderProgram(
+          "#version 300 es\nprecision highp float;out vec4 outColor;void main(){outColor=vec4(1.0);}",
+        ).gl;
+        gl.getExtension("WEBGL_lose_context")!.loseContext();
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => resolve()),
         );
-        const surface = runtime.effectSurface(canvas.parentElement!)!;
-        const active = surface.gpuContext()!;
-        const extension = active.getExtension("WEBGL_lose_context")!;
-        extension.loseContext();
-        await new Promise<void>((resolve) => setTimeout(resolve, 20));
-        extension.restoreContext();
-        await new Promise<void>((resolve) => setTimeout(resolve, 50));
         recovered = await harness.stage(0.5, 1, 1);
       }
       harness.dispose();
@@ -911,11 +884,11 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
   expect(
     result.recovered?.surfaces.every((surface) => surface.ready === "true"),
   ).toBe(true);
-  expect(result.css.surfaces[0].backend).toBe("scene-texture");
+  expect(result.css.surfaces[0].backend).toBe("native");
   expect(result.remaining).toBe(0);
 });
 
-test("mixed-size shader outputs preserve pixels and release their visible WebGL contexts", async ({
+test("mixed-size shader outputs reuse their presentation buffer without changing pixels or retaining an idle bridge", async ({
   page,
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
@@ -945,7 +918,6 @@ test("mixed-size shader outputs preserve pixels and release their visible WebGL 
       "#version 300 es\nprecision highp float;in vec2 v_uv;out vec4 outColor;void main(){outColor=vec4(v_uv.x,v_uv.y,0.25,0.75);}";
     const run = async (gpu: boolean) => {
       runtime.setEffectExecutionForTests(gpu ? "refined" : "naive");
-      const initialContexts = runtime.shaderRuntimeDiagnostics().activeContexts;
       const h = await mountMixedEffectsHarness(undefined, 0, undefined, {
         configure(model) {
           model.deck.stylesheet = "";
@@ -976,32 +948,16 @@ test("mixed-size shader outputs preserve pixels and release their visible WebGL 
         samples.push({
           width: canvas.width,
           height: canvas.height,
-          pixels: (() => {
-            const surface = runtime.effectSurface(canvas.parentElement!)!;
-            surface.materialize();
-            const output = surface.gpuOutput()!;
-            const gl = output.gl;
-            const pixels = new Uint8Array(canvas.width * canvas.height * 4);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
-            gl.readPixels(
-              0,
-              0,
-              canvas.width,
-              canvas.height,
-              gl.RGBA,
-              gl.UNSIGNED_BYTE,
-              pixels,
-            );
-            return Array.from(pixels);
-          })(),
+          pixels: Array.from(
+            canvas
+              .getContext("2d")!
+              .getImageData(0, 0, canvas.width, canvas.height).data,
+          ),
         });
       }
       h.dispose();
-      return {
-        samples,
-        released:
-          runtime.shaderRuntimeDiagnostics().activeContexts === initialContexts,
-      };
+      const bridge = runtime.shaderProgram(source).canvas;
+      return { samples, idle: bridge.width === 1 && bridge.height === 1 };
     };
     try {
       const reference = await run(false),
@@ -1015,13 +971,13 @@ test("mixed-size shader outputs preserve pixels and release their visible WebGL 
         for (let i = 0; i < a.pixels.length; i++)
           max = Math.max(max, Math.abs(a.pixels[i] - b.pixels[i]));
       }
-      return { max, released: actual.released };
+      return { max, idle: actual.idle };
     } finally {
       runtime.setEffectExecutionForTests("refined");
     }
   });
   expect(result.max).toBeLessThanOrEqual(1);
-  expect(result.released).toBe(true);
+  expect(result.idle).toBe(true);
 });
 
 test("backdrop pixels retain the red element's world position at editor zoom and fractional display scaling", async ({
@@ -1029,9 +985,6 @@ test("backdrop pixels retain the red element's world position at editor zoom and
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
   const rows = await page.evaluate(async () => {
-    const pixelPath = "/tests/helpers/webglPixels.ts";
-    const { readWebGlPixels }: typeof import("../../helpers/webglPixels") =
-      await import(/* @vite-ignore */ pixelPath);
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
       factoryPath = "/src/core/elementFactory.ts";
     const {
@@ -1066,16 +1019,18 @@ test("backdrop pixels retain the red element's world position at editor zoom and
         )!.style.width = "500px";
       await harness.advance(0, 0, 1);
       const canvas = harness.host.querySelector<HTMLCanvasElement>(
-        '[data-effect-id] > canvas[data-shader-stage="terminal"]',
+        "[data-effect-id] > canvas",
       )!;
-      const data = readWebGlPixels(canvas);
+      const data = canvas
+        .getContext("2d")!
+        .getImageData(0, 0, canvas.width, canvas.height).data;
       let x0 = Infinity,
         y0 = Infinity,
         x1 = -1,
         y1 = -1;
       for (let y = 0; y < canvas.height; y++)
         for (let x = 0; x < canvas.width; x++) {
-          const i = ((canvas.height - 1 - y) * canvas.width + x) * 4;
+          const i = (y * canvas.width + x) * 4;
           if (
             data[i] > 240 &&
             data[i + 1] < 10 &&
@@ -1154,630 +1109,4 @@ test("custom pseudo-element rules remain independent across duplicated shader in
     state.surfaces[1].green + 1000,
   );
   expect(state.surfaces[1].red).toBeGreaterThan(state.surfaces[0].red + 1000);
-});
-
-test("representative browser-native presentation crosses SceneTexture only for explicit scene-pixel shaders", async ({
-  page,
-}) => {
-  await page.goto("/tests/helpers/effects-harness.html");
-  const result = await page.evaluate(async () => {
-    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
-      factoryPath = "/src/core/elementFactory.ts",
-      authoringPath = "/src/core/effectAuthoring.ts",
-      effectsPath = "/src/core/effects.ts",
-      mediaPath = "/src/core/media.ts",
-      textPath = "/src/core/text.ts",
-      platformPath = "/src/platform/index.ts",
-      runtimePath = "/src/components/effectRuntime.ts";
-    const {
-      mountMixedEffectsHarness,
-    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
-      /* @vite-ignore */ harnessPath
-    );
-    const {
-      createBasicShape,
-    }: typeof import("../../../src/core/elementFactory") = await import(
-      /* @vite-ignore */ factoryPath
-    );
-    const { blankEffect }: typeof import("../../../src/core/effectAuthoring") =
-      await import(/* @vite-ignore */ authoringPath);
-    const { newEffectInstance }: typeof import("../../../src/core/effects") =
-      await import(/* @vite-ignore */ effectsPath);
-    const { createMediaElement }: typeof import("../../../src/core/media") =
-      await import(/* @vite-ignore */ mediaPath);
-    const { createTextElement }: typeof import("../../../src/core/text") =
-      await import(/* @vite-ignore */ textPath);
-    const { platform }: typeof import("../../../src/platform") = await import(
-      /* @vite-ignore */ platformPath
-    );
-    const {
-      effectSourceTextureBytes,
-    }: typeof import("../../../src/components/effectRuntime") = await import(
-      /* @vite-ignore */ runtimePath
-    );
-
-    const source = document.createElement("canvas");
-    source.width = 320;
-    source.height = 180;
-    const context = source.getContext("2d")!;
-    const gradient = context.createLinearGradient(0, 0, 320, 180);
-    gradient.addColorStop(0, "#113c8d");
-    gradient.addColorStop(1, "#e56b35");
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, 320, 180);
-    const imageUrl = source.toDataURL("image/png");
-    platform.assetUrl = async () => imageUrl;
-
-    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
-      configure(model) {
-        const slide = model.slides[model.deck.slideIds[0]];
-        const resources = slide.effectResources!;
-        const originalText = slide.nodes[0].children[0];
-        const sceneBackdrop = slide.nodes[0].children[1];
-        model.deck.stylesheet = "";
-        resources.js.styleSource =
-          ":scope { color: rgb(255,0,0); text-shadow: 3px 2px 1px rgb(0,0,255); }";
-
-        const imageAsset = {
-          version: 1 as const,
-          id: "c".repeat(64),
-          filename: "renderer-boundary.png",
-          names: ["renderer-boundary.png"],
-          type: "image" as const,
-          mediaType: "image" as const,
-          mime: "image/png" as const,
-          bytes: 1,
-          width: 320,
-          height: 180,
-          createdAt: "2026-10-23T00:00:00Z",
-        };
-        const directImageShader = {
-          ...blankEffect("shader"),
-          input: "content" as const,
-          target: "content" as const,
-          source:
-            "#version 300 es\nprecision highp float; uniform sampler2D u_input; in vec2 v_uv; out vec4 outColor; void main(){ outColor=texture(u_input,v_uv); }",
-        };
-        const background = createMediaElement("background-image", imageAsset, {
-          x: 0,
-          y: 0,
-        });
-        Object.assign(background.frame, {
-          x: 0,
-          y: 0,
-          width: 640,
-          height: 360,
-        });
-        background.effects = [
-          newEffectInstance("direct-image", directImageShader, "content"),
-        ];
-
-        const generated = {
-          ...blankEffect("shader"),
-          input: "none" as const,
-          target: "background" as const,
-          source:
-            "#version 300 es\nprecision highp float; uniform float u_t; in vec2 v_uv; out vec4 outColor; void main(){ outColor=vec4(v_uv.x,.25+.08*sin(u_t),1.-v_uv.x,.22); }",
-        };
-        const generatedLayer = createBasicShape(
-          "generated-layer",
-          "rectangle",
-          { x: 0, y: 0 },
-        );
-        Object.assign(generatedLayer.frame, { width: 640, height: 360 });
-        generatedLayer.appearance.fill = "";
-        generatedLayer.effects = [
-          newEffectInstance("generated", generated, "background"),
-        ];
-
-        const nestedFrame = createBasicShape("nested-frame", "rectangle", {
-          x: 365,
-          y: 22,
-        });
-        Object.assign(nestedFrame.frame, { width: 220, height: 125 });
-        nestedFrame.appearance.fill = "#00000000";
-        nestedFrame.appearance.radius = 14;
-        nestedFrame.clipChildren = true;
-        const nestedImage = createMediaElement("nested-image", imageAsset, {
-          x: -18,
-          y: -8,
-        });
-        Object.assign(nestedImage.frame, {
-          x: -18,
-          y: -8,
-          width: 270,
-          height: 152,
-          rotation: -4,
-        });
-        nestedFrame.children = [nestedImage];
-
-        const nativeCss = {
-          ...blankEffect("css-js"),
-          source:
-            ":scope { backdrop-filter: blur(14px) saturate(120%); background: rgba(255,255,255,.24); border: 1px solid rgba(255,255,255,.7); border-radius: 18px; overflow: hidden; }",
-        };
-        const nativeGlass = createBasicShape("native-glass", "rectangle", {
-          x: 345,
-          y: 178,
-        });
-        Object.assign(nativeGlass.frame, { width: 245, height: 130 });
-        nativeGlass.appearance.fill = "#ffffff18";
-        nativeGlass.appearance.radius = 18;
-        nativeGlass.clipChildren = true;
-        nativeGlass.effects = [
-          newEffectInstance("native-css", nativeCss, "content"),
-        ];
-        const label = createTextElement("native-label", { x: 18, y: 38 });
-        Object.assign(label.frame, { width: 205, height: 55 });
-        if (label.content?.type === "text") {
-          label.content.text = "Chromium glass";
-          if (label.content.format.kind === "local")
-            label.content.format.typography.fontSize = 24;
-        }
-        nativeGlass.children = [label];
-
-        const foreground = createBasicShape("foreground-overlap", "ellipse", {
-          x: 535,
-          y: 250,
-        });
-        Object.assign(foreground.frame, { width: 90, height: 90 });
-        foreground.appearance.fill = "#11c9aacc";
-
-        resources.generated = generated;
-        resources["direct-image"] = directImageShader;
-        resources["native-css"] = nativeCss;
-        sceneBackdrop.frame.width = 320;
-        sceneBackdrop.frame.height = 180;
-        sceneBackdrop.frame.x = 0;
-        sceneBackdrop.frame.y = 180;
-        slide.nodes[0].children = [
-          background,
-          generatedLayer,
-          originalText,
-          sceneBackdrop,
-          nestedFrame,
-          nativeGlass,
-          foreground,
-        ];
-        slide.motion = {
-          stages: [
-            {
-              id: "representative-stage",
-              tracks: [
-                {
-                  id: "native-glass-move",
-                  elementId: "native-glass",
-                  property: "transform.x",
-                  keyframes: [
-                    {
-                      id: "native-glass-move-a",
-                      at: 0,
-                      value: { type: "absolute", value: 345 },
-                      easeToNext: "linear",
-                    },
-                    {
-                      id: "native-glass-move-b",
-                      at: 1000,
-                      value: { type: "absolute", value: 380 },
-                    },
-                  ],
-                },
-              ],
-              blocks: [
-                {
-                  id: "native-glass-presence",
-                  label: "Presence",
-                  members: [],
-                  binding: { kind: "presence", elementId: "native-glass" },
-                  presenceSchedule: {
-                    version: 1,
-                    startOffsetMs: 0,
-                    end: { mode: "after", durationMs: 1000 },
-                    enterTransition: {
-                      kind: "fade",
-                      durationMs: 150,
-                      easing: [0, 0, 1, 1],
-                    },
-                    exitTransition: {
-                      kind: "fade",
-                      durationMs: 150,
-                      easing: [0, 0, 1, 1],
-                    },
-                  },
-                },
-              ],
-            },
-          ],
-        };
-      },
-    });
-
-    try {
-      const root = harness.host.querySelector<HTMLElement>(".slide-renderer")!;
-      const nativeGlass = root.querySelector<HTMLElement>(
-        '[data-element-id="native-glass"]',
-      )!;
-      const nativeEffect =
-        nativeGlass.querySelector<HTMLElement>("[data-effect-id]")!;
-      await Promise.all(
-        Array.from(root.querySelectorAll<HTMLImageElement>("img")).map(
-          (image) => image.decode().catch(() => undefined),
-        ),
-      );
-      await harness.advance(0.25);
-      const directImageEffect = root.querySelector<HTMLElement>(
-        '[data-element-id="background-image"] [data-effect-id]',
-      )!;
-      const generatedEffect = root.querySelector<HTMLElement>(
-        '[data-element-id="generated-layer"] [data-effect-id]',
-      )!;
-      const contentShader = Array.from(
-        root.querySelectorAll<HTMLElement>(
-          '[data-element-id="animated"] [data-effect-id]',
-        ),
-      ).find((node) => node.querySelector(":scope > canvas"))!;
-      const backdropShader = root.querySelector<HTMLElement>(
-        '[data-element-id="glass"] [data-effect-id]',
-      )!;
-      const beforeTransform = getComputedStyle(nativeGlass).transform;
-      await harness.setMotion({
-        stageId: "representative-stage",
-        stageIndex: 0,
-        time: 500,
-        running: false,
-        startedAt: 1000,
-      });
-      await harness.advance(0.5, 0, 0.5);
-      const state = harness.inspect();
-      const afterTransform = getComputedStyle(nativeGlass).transform;
-      const foreground = root.querySelector<HTMLElement>(
-        '[data-element-id="foreground-overlap"]',
-      )!;
-      return {
-        errors: state.errors,
-        text: state.text,
-        directImageBackend:
-          directImageEffect.dataset.effectSourceBackend ?? null,
-        contentBackend: contentShader.dataset.effectSourceBackend ?? null,
-        backdropBackend: backdropShader.dataset.effectSourceBackend ?? null,
-        sceneTextureBytes: effectSourceTextureBytes(),
-        generatedReady: generatedEffect.dataset.effectReady,
-        generatedBackend: generatedEffect.dataset.effectSourceBackend ?? null,
-        generatedCanvas:
-          generatedEffect.querySelectorAll(":scope > canvas").length,
-        nativeCanvas: nativeEffect.querySelectorAll(":scope > canvas").length,
-        nativeBackdrop: getComputedStyle(nativeEffect).backdropFilter,
-        restoration: root.querySelectorAll("[data-backdrop-restore]").length,
-        cssReplay: root.querySelectorAll("[data-css-backdrop]").length,
-        compositionBackend: root.dataset.compositionBackend ?? null,
-        nestedImage: root.querySelectorAll(
-          '[data-element-id="nested-frame"] [data-element-id="nested-image"] img',
-        ).length,
-        motionChanged: beforeTransform !== afterTransform,
-        present: nativeGlass.dataset.presentationAbsent,
-        foregroundAfter: Boolean(
-          nativeGlass.compareDocumentPosition(foreground) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-        ),
-      };
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  expect(result.errors).toEqual([]);
-  expect(result.text).toContain("FIRST");
-  expect(result.directImageBackend).toBe("image");
-  expect(result.contentBackend).toBe("scene-texture");
-  expect(result.backdropBackend).toBe("scene-texture");
-  expect(result.generatedReady).toBe("true");
-  expect(result.generatedBackend).toBe("none");
-  expect(result.generatedCanvas).toBe(1);
-  expect(result.sceneTextureBytes).toBeGreaterThan(0);
-  expect(result.nativeCanvas).toBe(0);
-  expect(result.nativeBackdrop).not.toBe("none");
-  expect(result.restoration).toBe(0);
-  expect(result.cssReplay).toBe(0);
-  expect(result.compositionBackend).toBeNull();
-  expect(result.nestedImage).toBe(1);
-  expect(result.motionChanged).toBe(true);
-  expect(result.present).toBe("false");
-  expect(result.foregroundAfter).toBe(true);
-});
-
-test("neutral live video binds directly as shader input without SceneTexture", async ({
-  page,
-}) => {
-  await page.goto("/tests/helpers/effects-harness.html");
-  const result = await page.evaluate(async () => {
-    const runtimePath = "/src/components/effectRuntime.ts";
-    const {
-      effectSurface,
-    }: typeof import("../../../src/components/effectRuntime") = await import(
-      /* @vite-ignore */ runtimePath
-    );
-    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx",
-      mediaPath = "/src/core/media.ts",
-      authoringPath = "/src/core/effectAuthoring.ts",
-      effectsPath = "/src/core/effects.ts",
-      platformPath = "/src/platform/index.ts",
-      scenePath = "/src/components/sceneTexture.ts";
-    const {
-      mountMixedEffectsHarness,
-    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
-      /* @vite-ignore */ harnessPath
-    );
-    const { createMediaElement }: typeof import("../../../src/core/media") =
-      await import(/* @vite-ignore */ mediaPath);
-    const { blankEffect }: typeof import("../../../src/core/effectAuthoring") =
-      await import(/* @vite-ignore */ authoringPath);
-    const { newEffectInstance }: typeof import("../../../src/core/effects") =
-      await import(/* @vite-ignore */ effectsPath);
-    const { platform }: typeof import("../../../src/platform") = await import(
-      /* @vite-ignore */ platformPath
-    );
-    const {
-      sceneTextureDiagnostics,
-    }: typeof import("../../../src/components/sceneTexture") = await import(
-      /* @vite-ignore */ scenePath
-    );
-
-    platform.assetUrl = async (_id, preview) =>
-      preview ? null : "/tests/fixtures/media/prepared-red.webm";
-    platform.releaseUrl = () => {};
-    const before = sceneTextureDiagnostics();
-    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
-      liveMedia: true,
-      configure(model) {
-        model.deck.stylesheet = "";
-        const slide = model.slides[model.deck.slideIds[0]];
-        const shader = {
-          ...blankEffect("shader"),
-          input: "content" as const,
-          target: "content" as const,
-          source:
-            "#version 300 es\nprecision highp float;uniform sampler2D u_input;in vec2 v_uv;out vec4 outColor;void main(){outColor=texture(u_input,v_uv);}",
-        };
-        const video = createMediaElement("video", {
-          version: 1,
-          id: "e".repeat(64),
-          filename: "prepared-red.webm",
-          names: ["prepared-red.webm"],
-          type: "video",
-          mediaType: "video",
-          mime: "video/webm",
-          bytes: 1,
-          width: 160,
-          height: 90,
-          duration: 0.5,
-          createdAt: "2026-10-23T00:00:00Z",
-        });
-        if (video.content?.type !== "video")
-          throw new Error("Video fixture required");
-        video.content.autoplay = true;
-        video.content.loop = true;
-        video.content.mute = true;
-        video.effects = [newEffectInstance("video-shader", shader, "content")];
-        slide.effectResources = { "video-shader": shader };
-        slide.nodes[0].children = [video];
-        delete slide.motion;
-      },
-    });
-    try {
-      const video = harness.host.querySelector<HTMLVideoElement>("video")!;
-      const deadline = performance.now() + 3000;
-      while (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-        if (performance.now() > deadline)
-          throw new Error("Video shader fixture did not become ready");
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      await video.play().catch(() => undefined);
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-      await harness.advance(0.1);
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
-      const canvas = harness.host.querySelector<HTMLCanvasElement>(
-        "canvas[data-shader-stage='terminal']",
-      )!;
-      const gl = effectSurface(canvas.parentElement!)!.gpuContext()!;
-      const lost = new Promise<void>((resolve) =>
-        gl.canvas.addEventListener("webglcontextlost", () => resolve(), {
-          once: true,
-        }),
-      );
-      const restored = new Promise<void>((resolve) =>
-        gl.canvas.addEventListener("webglcontextrestored", () => resolve(), {
-          once: true,
-        }),
-      );
-      const extension = gl.getExtension("WEBGL_lose_context")!;
-      extension.loseContext();
-      await lost;
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
-      extension.restoreContext();
-      await Promise.race([
-        restored,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Video shader context did not restore")),
-            3000,
-          ),
-        ),
-      ]);
-      await harness.advance(0.2);
-      const effect =
-        harness.host.querySelector<HTMLElement>("[data-effect-id]")!;
-      const after = sceneTextureDiagnostics();
-      return {
-        backend: effect.dataset.effectSourceBackend,
-        ready: effect.dataset.effectReady,
-        captures: after.captures - before.captures,
-        domCaptures: after.domRaster.captures - before.domRaster.captures,
-        errors: harness.inspect().errors,
-        redPixels: harness.inspect().surfaces[0].red,
-      };
-    } finally {
-      harness.dispose();
-    }
-  });
-  expect(result.backend).toBe("video");
-  expect(result.ready).toBe("true");
-  expect(result.captures).toBe(0);
-  expect(result.domCaptures).toBe(0);
-  expect(result.errors).toEqual([]);
-  expect(result.redPixels).toBeGreaterThan(1000);
-});
-
-test("font completion invalidates a retained static SceneTexture between mounted consumers", async ({
-  page,
-}) => {
-  await page.goto("/tests/helpers/effects-harness.html");
-  const result = await page.evaluate(async () => {
-    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
-    const scenePath = "/src/components/sceneTexture.ts";
-    const {
-      mountMixedEffectsHarness,
-    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
-      /* @vite-ignore */ harnessPath
-    );
-    const {
-      sceneTextureDiagnostics,
-    }: typeof import("../../../src/components/sceneTexture") = await import(
-      /* @vite-ignore */ scenePath
-    );
-    const first = await mountMixedEffectsHarness(undefined, 0, undefined, {
-      configure(model) {
-        model.deck.stylesheet = "";
-        const slide = model.slides[model.deck.slideIds[0]];
-        const text = slide.nodes[0].children[0];
-        text.effects = [text.effects![2]];
-        slide.effectResources!.shader.source = slide
-          .effectResources!.shader.source.replace(
-            "in vec2 v_uv",
-            "uniform float u_t; in vec2 v_uv",
-          )
-          .replace("vec4(c.b,c.r,c.g,c.a)", "vec4(c.b,c.r + .001*u_t,c.g,c.a)");
-        slide.nodes[0].children = [text];
-        delete slide.motion;
-      },
-    });
-    const model = first.model;
-    const prepared = sceneTextureDiagnostics();
-    for (let tick = 1; tick <= 8; tick++) await first.advance(tick / 10);
-    const steady = sceneTextureDiagnostics();
-    first.dispose();
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
-    const before = sceneTextureDiagnostics();
-    const warm = await mountMixedEffectsHarness(model);
-    warm.dispose();
-    const reused = sceneTextureDiagnostics();
-    // A FontFaceSet completion signal can arrive while the slide is unmounted.
-    document.fonts.dispatchEvent(new Event("loadingdone"));
-    const refreshed = await mountMixedEffectsHarness(model);
-    const state = await refreshed.stage(0);
-    const after = sceneTextureDiagnostics();
-    refreshed.dispose();
-    return {
-      warmCaptures: reused.captures - before.captures,
-      steadyCaptures: steady.captures - prepared.captures,
-      steadyQualifications:
-        steady.qualificationBuilds - prepared.qualificationBuilds,
-      activeCaptureMachinery: steady.domRaster.activeSources,
-      refreshedCaptures: after.captures - reused.captures,
-      errors: state.errors,
-      opaque: state.surfaces[0].opaque,
-    };
-  });
-  expect(result.warmCaptures).toBe(0);
-  expect(result.steadyCaptures).toBe(0);
-  expect(result.steadyQualifications).toBe(0);
-  expect(result.activeCaptureMachinery).toBe(0);
-  expect(result.refreshedCaptures).toBeGreaterThan(0);
-  expect(result.errors).toEqual([]);
-  expect(result.opaque).toBeGreaterThan(0);
-});
-
-test("animated shader and text backdrop publishes completed captures during continuous invalidation", async ({
-  page,
-}) => {
-  await page.goto("/tests/helpers/effects-harness.html");
-  const result = await page.evaluate(async () => {
-    const { mountMixedEffectsHarness } = (await import(
-      /* @vite-ignore */ String("/tests/helpers/mixedEffectsHarness.tsx")
-    )) as typeof import("../../helpers/mixedEffectsHarness");
-    const { createBasicShape } = (await import(
-      /* @vite-ignore */ String("/src/core/elementFactory.ts")
-    )) as typeof import("../../../src/core/elementFactory");
-    const { newEffectInstance } = (await import(
-      /* @vite-ignore */ String("/src/core/effects.ts")
-    )) as typeof import("../../../src/core/effects");
-    const { effectSurface } = (await import(
-      /* @vite-ignore */ String("/src/components/effectRuntime.ts")
-    )) as typeof import("../../../src/components/effectRuntime");
-    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
-      configure(model) {
-        model.deck.stylesheet = "";
-        const slide = model.slides[model.deck.slideIds[0]];
-        const resources = slide.effectResources!;
-        const background = createBasicShape(
-          "animated background",
-          "rectangle",
-          { x: 0, y: 0 },
-        );
-        Object.assign(background.frame, { width: 640, height: 360 });
-        const shader = {
-          ...resources.backdrop,
-          input: "none" as const,
-          source:
-            "#version 300 es\nprecision highp float; uniform float u_t; out vec4 outColor; void main(){outColor=vec4(fract(u_t),0.2,0.4,1.0);}",
-        };
-        resources.generated = shader;
-        background.effects = [
-          newEffectInstance("generated", shader, "background"),
-        ];
-        const [text, glass] = slide.nodes[0].children;
-        text.effects = [];
-        slide.nodes[0].children = [background, text, glass];
-      },
-    });
-    const nodes = [
-      ...harness.host.querySelectorAll<HTMLElement>("[data-effect-id]"),
-    ];
-    const background = nodes[0],
-      glass = nodes.at(-1)!;
-    const before = Number(glass.dataset.effectRevision);
-    await new Promise<void>((resolve) => {
-      let frame = 0;
-      const tick = () => {
-        effectSurface(background)!.setTiming({
-          time: ++frame / 60,
-          duration: 1,
-          running: false,
-        });
-        void effectSurface(background)!.flush();
-        void effectSurface(glass)!.flush();
-        if (frame < 45) requestAnimationFrame(tick);
-        else resolve();
-      };
-      requestAnimationFrame(tick);
-    });
-    const result = {
-      before,
-      after: Number(glass.dataset.effectRevision),
-      visibility: glass.querySelector("canvas")!.style.visibility,
-      error: glass.dataset.effectError,
-    };
-    harness.dispose();
-    return result;
-  });
-  expect(result.error).toBeUndefined();
-  expect(result.after).toBeGreaterThan(result.before + 2);
-  expect(result.visibility).toBe("visible");
 });

@@ -2,12 +2,10 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { SlideRenderer } from "../../src/components/SlideRenderer";
 import {
-  createShaderChain,
   effectSurface,
   flushEffectSurfaces,
   shaderProgram,
 } from "../../src/components/effectRuntime";
-import { readWebGlPixel } from "./webglPixels";
 import { newPresentationDocument } from "../../src/core/document";
 import {
   createBasicShape,
@@ -94,12 +92,19 @@ void main() {
     return {
       width: canvas.width,
       height: canvas.height,
-      pixel: readWebGlPixel(
-        canvas,
-        Math.floor(canvas.width / 2),
-        Math.floor(canvas.height / 2),
+      pixel: Array.from(
+        canvas
+          .getContext("2d")!
+          .getImageData(
+            Math.floor(canvas.width / 2),
+            Math.floor(canvas.height / 2),
+            1,
+            1,
+          ).data,
       ),
-      uniforms: readWebGlPixel(canvas, 0, 0),
+      uniforms: Array.from(
+        canvas.getContext("2d")!.getImageData(0, 0, 1, 1).data,
+      ),
       font: getComputedStyle(content).fontSize,
       textFraction:
         content.getBoundingClientRect().height /
@@ -123,18 +128,9 @@ void main() {
     },
     inspect,
     async transform(value: string) {
-      const transformed = structuredClone(slide);
-      const parent = transformed.nodes[0].children.find(
-        (element) => element.id === "parent",
-      )!;
-      Object.assign(
-        parent.frame,
-        value.includes("scale(2, 1)")
-          ? { x: 0, y: 0, rotation: 45, scaleX: 2, scaleY: 1 }
-          : { x: 123, y: 45, rotation: 45, scaleX: 1, scaleY: 1 },
-      );
-      sampledSlide = transformed;
-      render(1);
+      host.querySelector<HTMLElement>(
+        '[data-element-id="parent"]',
+      )!.style.transform = value;
       return inspect();
     },
     async motion(time: number) {
@@ -220,37 +216,39 @@ void main() {
       return inspect();
     },
     async allocationFailure() {
-      const output = document.createElement("canvas");
-      const original = output.getContext.bind(output);
-      Object.defineProperty(output, "getContext", {
+      const surface = host.querySelector<HTMLElement>("[data-effect-id]")!;
+      const canvas = surface.querySelector<HTMLCanvasElement>("canvas")!;
+      const original = canvas.getContext.bind(canvas);
+      Object.defineProperty(canvas, "getContext", {
         configurable: true,
         value: () => null,
       });
-      const chain = createShaderChain();
-      chain.canvas = output;
-      let error = "";
-      try {
-        shaderProgram(definition.source, chain);
-      } catch (value) {
-        error = value instanceof Error ? value.message : String(value);
-      } finally {
-        Object.defineProperty(output, "getContext", {
-          configurable: true,
-          value: original,
-        });
-      }
-      return { error };
+      effectSurface(surface)!.setSampling({
+        x: 2,
+        y: 2,
+        mode: "live",
+        root: host.querySelector<HTMLElement>(".slide-renderer"),
+      });
+      await effectSurface(surface)!.flush();
+      const result = {
+        error: surface.dataset.effectError,
+        hidden: canvas.style.visibility,
+        originalOpacity: surface.querySelector<HTMLElement>(
+          "[data-effect-source]",
+        )!.style.opacity,
+      };
+      Object.defineProperty(canvas, "getContext", {
+        configurable: true,
+        value: original,
+      });
+      return result;
     },
     async loseContext() {
-      const surface = host.querySelector<HTMLElement>("[data-effect-id]")!;
-      const gl = effectSurface(surface)!.gpuContext();
-      const extension = gl?.getExtension("WEBGL_lose_context");
+      const { gl } = shaderProgram(definition.source);
+      const extension = gl.getExtension("WEBGL_lose_context");
       if (!extension) throw new Error("Test browser lacks WEBGL_lose_context");
       extension.loseContext();
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
-      extension.restoreContext();
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-      await effectSurface(surface)!.flush();
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
       return inspect();
     },
     dispose() {

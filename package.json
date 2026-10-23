@@ -32,8 +32,7 @@
     "test:release": "node scripts/test-suite.mjs release",
     "test:deprecated": "node scripts/test-suite.mjs deprecated",
     "test:stats": "node scripts/test-suite.mjs stats",
-    "test:audit": "node scripts/test-suite.mjs audit",
-    "benchmark:renderer": "node scripts/benchmark-renderer-workloads.mjs"
+    "test:audit": "node scripts/test-suite.mjs audit"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
@@ -87,12 +86,7 @@
       "src/assets/material-icons/APACHE-2.0.txt"
     ],
     "asar": true,
-    "extraResources": [
-      {
-        "from": "dist-electron/showme-mcp.cjs",
-        "to": "showme-mcp.cjs"
-      }
-    ],
+    "extraResources": [{ "from": "dist-electron/showme-mcp.cjs", "to": "showme-mcp.cjs" }],
     "fileAssociations": [
       {
         "ext": "sme",

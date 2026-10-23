@@ -8,13 +8,7 @@ import {
 } from "motion";
 import type { Slide } from "../core/document";
 import { presentationSpan } from "./presentationDiagnostics";
-import {
-  IDENTITY,
-  localMatrix,
-  multiply,
-  walkElements,
-  type Matrix,
-} from "../core/element";
+import { walkElements } from "../core/element";
 import {
   motionPropertyDescriptor,
   unavailable,
@@ -26,7 +20,7 @@ import {
   motionElement,
 } from "../core/motion";
 import { stageDuration } from "../core/motionModel";
-import { bindEffectSurfaceFlusher, effectSurface } from "./effectRuntime";
+import { effectSurface, flushEffectSurfaces } from "./effectRuntime";
 import {
   numericEffectParameters,
   effectTiming,
@@ -110,36 +104,6 @@ export function createMotionRuntime(
   const elements = new Map(
     walkElements(slide.nodes.flatMap((r) => r.children)).map((e) => [e.id, e]),
   );
-  const parents = new Map<string, string | null>();
-  const indexParents = (
-    children: readonly import("../core/element").Element[],
-    parentId: string | null,
-  ) =>
-    children.forEach((child) => {
-      parents.set(child.id, parentId);
-      indexParents(child.children, child.id);
-    });
-  slide.nodes.forEach((root) => indexParents(root.children, null));
-  const semanticWorldTransform = (
-    id: string,
-    overlay: ReturnType<typeof resolveMotion>,
-  ) => {
-    const chain: string[] = [];
-    for (let current: string | null | undefined = id; current;) {
-      chain.push(current);
-      current = parents.get(current);
-    }
-    let matrix: Matrix = IDENTITY;
-    for (const elementId of chain.reverse()) {
-      const element = elements.get(elementId);
-      if (!element) continue;
-      matrix = multiply(
-        matrix,
-        localMatrix(motionElement(element, overlay).frame),
-      );
-    }
-    return new DOMMatrix([...matrix]);
-  };
   const nodes = new Map(
     Array.from(root.querySelectorAll<HTMLElement>("[data-element-id]")).map(
       (n) => [n.dataset.elementId!, n],
@@ -166,13 +130,7 @@ export function createMotionRuntime(
       renderedAlpha: boolean;
       originalVisualOpacity: string;
       values: Record<string, MotionValue<number>>;
-      original: {
-        transform: string;
-        opacity: string;
-        willChange: string;
-        alphaProperty?: string;
-        alpha: string;
-      };
+      original: { transform: string; opacity: string; willChange: string };
       detach: () => void;
     }
   >();
@@ -245,10 +203,6 @@ export function createMotionRuntime(
       transform: node.style.transform,
       opacity: node.style.opacity,
       willChange: node.style.willChange,
-      alphaProperty: node.dataset.nativeOpacity,
-      alpha: node.dataset.nativeOpacity
-        ? node.style.getPropertyValue(node.dataset.nativeOpacity)
-        : "",
     };
     if (compiled.some((track) => track.elementId === id))
       node.style.willChange = "transform";
@@ -260,11 +214,7 @@ export function createMotionRuntime(
     const { opacity, ...transport } = values;
     const detachTransport = styleEffect(
       node,
-      original.alphaProperty
-        ? { ...transport, [original.alphaProperty]: values.opacity }
-        : visual === node && !renderedAlpha
-          ? values
-          : transport,
+      visual === node && !renderedAlpha ? values : transport,
     );
     const detachAlpha =
       visual === node ? () => {} : styleEffect(visual, { opacity });
@@ -365,13 +315,10 @@ export function createMotionRuntime(
     });
     return [{ element, instance, surface, values }];
   });
-  const flushBoundEffects = bindEffectSurfaceFlusher(root);
   const clock = motionValue(0);
   // Effects-only stages still have the same presentation clock.
   const detachClock = clock.on("change", (time) => {
-    const overlay = resolveMotion(slide, stageIndex, time);
-    effectBindings.forEach(({ element, instance, surface }) => {
-      surface.setTransport(semanticWorldTransform(element.id, overlay));
+    effectBindings.forEach(({ element, instance, surface }) =>
       surface.setTiming(
         effectTiming(
           slide.motion,
@@ -382,8 +329,8 @@ export function createMotionRuntime(
           clocks?.(),
           slide.effectResources?.[instance.resourceId]?.timeControl,
         ),
-      );
-    });
+      ),
+    );
   });
   if (duration && (!controls.length || effectBindings.length))
     controls.push(
@@ -423,9 +370,6 @@ export function createMotionRuntime(
       if (binding.visual !== binding.node) styleEffect.flush(binding.visual);
     });
     renderer?.apply(samples);
-    effectBindings.forEach(({ element, surface }) =>
-      surface.setTransport(semanticWorldTransform(element.id, overlay)),
-    );
     if (presenceOnly) return;
     effectBindings.forEach(({ element, instance, surface, values }) => {
       if (
@@ -460,7 +404,7 @@ export function createMotionRuntime(
         ),
       );
     });
-    void flushBoundEffects();
+    void flushEffectSurfaces(root);
   };
   finish();
   return {
@@ -538,11 +482,6 @@ export function createMotionRuntime(
           Object.values(values).forEach((value) => value.destroy());
           node.style.transform = original.transform;
           node.style.opacity = original.opacity;
-          if (original.alphaProperty) {
-            if (original.alpha)
-              node.style.setProperty(original.alphaProperty, original.alpha);
-            else node.style.removeProperty(original.alphaProperty);
-          }
           node.style.willChange = original.willChange;
           if (visual !== node) visual.style.opacity = originalVisualOpacity;
           const saved = visibility.get(node.dataset.elementId!);
