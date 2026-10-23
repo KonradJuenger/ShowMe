@@ -829,21 +829,30 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
       });
       const state = await harness.stage(0.5, 1, 1);
       const canvas = harness.host.querySelector<HTMLCanvasElement>(
-        "[data-effect-id] > canvas",
+        '[data-effect-id] > canvas[data-shader-stage="terminal"]',
       )!;
-      const pixels = Array.from(
-        canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height)
-          .data,
+      const gl = canvas.getContext("webgl2")!;
+      const buffer = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.readPixels(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        buffer,
       );
+      const pixels = Array.from(buffer);
       let recovered = null;
       if (lose) {
-        const gl = runtime.shaderProgram(
-          "#version 300 es\nprecision highp float;out vec4 outColor;void main(){outColor=vec4(1.0);}",
-        ).gl;
-        gl.getExtension("WEBGL_lose_context")!.loseContext();
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => resolve()),
-        );
+        const surface = runtime.effectSurface(canvas.parentElement!)!;
+        const active = surface.gpuContext()!;
+        const extension = active.getExtension("WEBGL_lose_context")!;
+        extension.loseContext();
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        extension.restoreContext();
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
         recovered = await harness.stage(0.5, 1, 1);
       }
       harness.dispose();
@@ -887,7 +896,7 @@ test("GPU shader handoff preserves channel order and alpha, recovers context los
   expect(result.remaining).toBe(0);
 });
 
-test("mixed-size shader outputs reuse their presentation buffer without changing pixels or retaining an idle bridge", async ({
+test("mixed-size shader outputs preserve pixels and release their visible WebGL contexts", async ({
   page,
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
@@ -917,6 +926,7 @@ test("mixed-size shader outputs reuse their presentation buffer without changing
       "#version 300 es\nprecision highp float;in vec2 v_uv;out vec4 outColor;void main(){outColor=vec4(v_uv.x,v_uv.y,0.25,0.75);}";
     const run = async (gpu: boolean) => {
       runtime.setEffectExecutionForTests(gpu ? "refined" : "naive");
+      const initialContexts = runtime.shaderRuntimeDiagnostics().activeContexts;
       const h = await mountMixedEffectsHarness(undefined, 0, undefined, {
         configure(model) {
           model.deck.stylesheet = "";
@@ -947,16 +957,29 @@ test("mixed-size shader outputs reuse their presentation buffer without changing
         samples.push({
           width: canvas.width,
           height: canvas.height,
-          pixels: Array.from(
-            canvas
-              .getContext("2d")!
-              .getImageData(0, 0, canvas.width, canvas.height).data,
-          ),
+          pixels: (() => {
+            const gl = canvas.getContext("webgl2")!;
+            const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.readPixels(
+              0,
+              0,
+              canvas.width,
+              canvas.height,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              pixels,
+            );
+            return Array.from(pixels);
+          })(),
         });
       }
       h.dispose();
-      const bridge = runtime.shaderProgram(source).canvas;
-      return { samples, idle: bridge.width === 1 && bridge.height === 1 };
+      return {
+        samples,
+        released:
+          runtime.shaderRuntimeDiagnostics().activeContexts === initialContexts,
+      };
     };
     try {
       const reference = await run(false),
@@ -970,13 +993,13 @@ test("mixed-size shader outputs reuse their presentation buffer without changing
         for (let i = 0; i < a.pixels.length; i++)
           max = Math.max(max, Math.abs(a.pixels[i] - b.pixels[i]));
       }
-      return { max, idle: actual.idle };
+      return { max, released: actual.released };
     } finally {
       runtime.setEffectExecutionForTests("refined");
     }
   });
   expect(result.max).toBeLessThanOrEqual(1);
-  expect(result.idle).toBe(true);
+  expect(result.released).toBe(true);
 });
 
 test("backdrop pixels retain the red element's world position at editor zoom and fractional display scaling", async ({
@@ -1018,18 +1041,27 @@ test("backdrop pixels retain the red element's world position at editor zoom and
         )!.style.width = "500px";
       await harness.advance(0, 0, 1);
       const canvas = harness.host.querySelector<HTMLCanvasElement>(
-        "[data-effect-id] > canvas",
+        '[data-effect-id] > canvas[data-shader-stage="terminal"]',
       )!;
-      const data = canvas
-        .getContext("2d")!
-        .getImageData(0, 0, canvas.width, canvas.height).data;
+      const gl = canvas.getContext("webgl2")!;
+      const data = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.readPixels(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        data,
+      );
       let x0 = Infinity,
         y0 = Infinity,
         x1 = -1,
         y1 = -1;
       for (let y = 0; y < canvas.height; y++)
         for (let x = 0; x < canvas.width; x++) {
-          const i = (y * canvas.width + x) * 4;
+          const i = ((canvas.height - 1 - y) * canvas.width + x) * 4;
           if (
             data[i] > 240 &&
             data[i + 1] < 10 &&
