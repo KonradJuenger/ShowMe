@@ -34,7 +34,7 @@ export type SceneTextureSampling = {
 export interface SceneTexture {
   readonly revision: number;
   prepareGpu?(gl: WebGL2RenderingContext): void;
-  bind(gl: WebGL2RenderingContext): void;
+  bind(gl: WebGL2RenderingContext, unit?: number): void;
 }
 
 export interface SceneTextureProvider {

@@ -1727,7 +1727,7 @@ test("qualified GPU SceneTexture preserves native text and translucent backgroun
     const { readWebGlPixels } = (await import(
       /* @vite-ignore */ String("/tests/helpers/webglPixels.ts")
     )) as typeof import("../../helpers/webglPixels");
-    const run = async (enabled: boolean) => {
+    const run = async (enabled: boolean, edge = false) => {
       gpu.setGpuSceneTextureForTests(enabled);
       const h = await mountMixedEffectsHarness(undefined, 0, undefined, {
         configure(model) {
@@ -1738,7 +1738,11 @@ test("qualified GPU SceneTexture preserves native text and translucent backgroun
             x: 0,
             y: 0,
           });
-          Object.assign(background.frame, { width: 640, height: 360 });
+          Object.assign(background.frame, {
+            width: 640,
+            height: 360,
+            y: edge ? 0.8125 : 0,
+          });
           background.appearance.fill = null;
           const shader = {
             ...resources.backdrop,
@@ -1752,7 +1756,12 @@ test("qualified GPU SceneTexture preserves native text and translucent backgroun
           ];
           const [text, glass] = slide.nodes[0].children;
           text.effects = [];
-          Object.assign(glass.frame, { x: 40, y: 20, width: 500, height: 300 });
+          Object.assign(glass.frame, {
+            x: edge ? 0 : 40,
+            y: edge ? -1.625 : 20,
+            width: 500,
+            height: edge ? 361.625 : 300,
+          });
           slide.nodes[0].children = [background, text, glass];
         },
       });
@@ -1766,6 +1775,8 @@ test("qualified GPU SceneTexture preserves native text and translucent backgroun
           assemblies = gpu.gpuSceneTextureDiagnostics().assemblies;
         for (const time of [0.41, 0.45, 0.49]) await h.advance(time);
         return {
+          width: glass.width,
+          height: glass.height,
           pixels,
           captures: domRasterDiagnostics().captures - before,
           assemblies: gpu.gpuSceneTextureDiagnostics().assemblies - assemblies,
@@ -1776,25 +1787,34 @@ test("qualified GPU SceneTexture preserves native text and translucent backgroun
       }
     };
     try {
-      const native = await run(false),
-        assembled = await run(true);
-      let max = 0;
-      for (let i = 0; i < native.pixels.length; i++)
-        max = Math.max(max, Math.abs(native.pixels[i] - assembled.pixels[i]));
+      const comparisons = [];
+      for (const edge of [false, true]) {
+        const native = await run(false, edge),
+          assembled = await run(true, edge);
+        let max = 0;
+        for (let i = 0; i < native.pixels.length; i++)
+          max = Math.max(max, Math.abs(native.pixels[i] - assembled.pixels[i]));
+        comparisons.push({
+          max,
+          captures: assembled.captures,
+          assemblies: assembled.assemblies,
+          errors: assembled.errors,
+        });
+      }
       return {
-        max,
-        ...assembled,
-        pixels: undefined,
+        comparisons,
         providers: gpu.gpuSceneTextureDiagnostics().providers,
       };
     } finally {
       gpu.setGpuSceneTextureForTests(true);
     }
   });
-  expect(result.errors).toEqual([]);
-  expect(result.max).toBeLessThanOrEqual(1);
-  expect(result.captures).toBe(0);
-  expect(result.assemblies).toBeGreaterThanOrEqual(3);
+  for (const comparison of result.comparisons) {
+    expect(comparison.errors).toEqual([]);
+    expect(comparison.max).toBeLessThanOrEqual(1);
+    expect(comparison.captures).toBe(0);
+    expect(comparison.assemblies).toBeGreaterThanOrEqual(3);
+  }
   expect(result.providers).toBe(0);
 });
 

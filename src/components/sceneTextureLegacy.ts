@@ -157,6 +157,7 @@ export function createLegacySceneTextureProvider(
   context: SceneTextureContext,
   excludedElements: ReadonlySet<string> = new Set(),
   transparentRoot = false,
+  coverageMask = false,
 ): SceneTextureProvider {
   const observationRoot =
     request.kind === "backdrop" ? context.inputRoot : context.owner;
@@ -211,9 +212,9 @@ export function createLegacySceneTextureProvider(
   const resolveInputElements = () => {
     if (request.kind !== "backdrop" || !context.scene) return [context.element];
     const { slide, deck } = context.scene();
-    return backdropPrefix(slide, deck, context.element.id).elements.filter(
-      (element) => !excludedElements.has(element.id),
-    );
+    return backdropPrefix(slide, deck, context.element.id)
+      .elements.filter((element) => !excludedElements.has(element.id))
+      .map((element) => (coverageMask ? { ...element, effects: [] } : element));
   };
 
   let qualified: {
@@ -260,6 +261,7 @@ export function createLegacySceneTextureProvider(
       resources,
       fonts,
       dom:
+        coverageMask ||
         !!scene?.deck.stylesheet ||
         hasText(elements) ||
         hasDomEffects(elements, resources),
@@ -278,6 +280,7 @@ export function createLegacySceneTextureProvider(
   const stableStyleKey = () => qualification().stableStyleKey;
 
   const collectDependencies = () => {
+    if (coverageMask) return [];
     qualification();
     const candidates = Array.from(
       context.inputRoot.querySelectorAll<HTMLElement>("[data-effect-id]"),
@@ -418,7 +421,11 @@ export function createLegacySceneTextureProvider(
           clone.style.setProperty("opacity", "1", "important");
         if (original === context.inputRoot && request.kind === "backdrop") {
           if (transparentRoot)
-            clone.style.setProperty("background", "transparent", "important");
+            clone.style.setProperty(
+              "background",
+              coverageMask ? "#000000" : "transparent",
+              "important",
+            );
           clone.style.setProperty("transform", "none", "important");
           clone.style.setProperty("transform-origin", "0 0", "important");
         }
@@ -431,6 +438,7 @@ export function createLegacySceneTextureProvider(
           : new DOMMatrix(),
       context.refined,
       stableStyleKey,
+      coverageMask ? "#ffffff" : undefined,
     );
 
   const ensureLease = (sampling: SceneTextureSampling) => {
@@ -451,7 +459,8 @@ export function createLegacySceneTextureProvider(
       "x" +
       sampling.logicalHeight +
       (retain ? "|semantic:" + semanticRevision : "") +
-      (transparentRoot ? "|transparent" : "");
+      (transparentRoot ? "|transparent" : "") +
+      (coverageMask ? "|coverage" : "");
     if (key === leaseKey && lease?.isCurrent()) return;
     lease?.release();
     const cache = retain ? retainedStaticSources : shared.cache;
@@ -577,8 +586,8 @@ export function createLegacySceneTextureProvider(
         get revision() {
           return publicRevision;
         },
-        bind(gl: WebGL2RenderingContext) {
-          activeLease.upload(gl);
+        bind(gl: WebGL2RenderingContext, unit = 0) {
+          activeLease.upload(gl, unit);
         },
       };
     };
@@ -622,6 +631,7 @@ export function createLegacySceneTextureProvider(
     characterData: true,
   });
   const outputChanged = (event: Event) => {
+    if (coverageMask) return;
     if (
       event.target instanceof Node &&
       event.target !== context.effectNode &&

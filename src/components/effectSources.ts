@@ -96,7 +96,7 @@ export class EffectSources<Source extends PixelSource> {
         if (this.entries.get(key) === owned) this.entries.delete(key);
         [...owned.users].forEach((user) => user());
       },
-      upload(gl: WebGL2RenderingContext) {
+      upload(gl: WebGL2RenderingContext, unit = 0) {
         if (released) throw new Error("Shader input lease was released");
         let texture = owned.textures.get(gl);
         if (!texture || texture.generation !== gpuGeneration(gl)) {
@@ -118,7 +118,7 @@ export class EffectSources<Source extends PixelSource> {
         texture.users.add(token);
         contexts.add(gl);
         const canvas = owned.source.canvas;
-        gl.activeTexture(gl.TEXTURE0);
+        gl.activeTexture(gl.TEXTURE0 + unit);
         gl.bindTexture(gl.TEXTURE_2D, texture.value);
         const uploaded = texture.revision !== owned.source.revision;
         if (uploaded) {

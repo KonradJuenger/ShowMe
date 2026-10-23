@@ -28,6 +28,7 @@ export function createDomRasterSource(
   sourceTransform: () => DOMMatrix = () => new DOMMatrix(),
   refined = false,
   stableStyles?: () => unknown,
+  bitmapFill?: string,
 ) {
   const canvas = document.createElement("canvas") as PaintCanvas;
   const context = canvas.getContext("2d") as PaintContext | null;
@@ -460,7 +461,10 @@ export function createDomRasterSource(
           if (output.width && output.height) {
             const bitmapContext = output.getContext("2d")!;
             bitmapContext.clearRect(0, 0, output.width, output.height);
-            bitmapContext.drawImage(original, 0, 0);
+            if (bitmapFill) {
+              bitmapContext.fillStyle = bitmapFill;
+              bitmapContext.fillRect(0, 0, output.width, output.height);
+            } else bitmapContext.drawImage(original, 0, 0);
             bitmapWritten = true;
           }
           pair.revision = next;

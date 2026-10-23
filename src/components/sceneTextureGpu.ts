@@ -104,6 +104,16 @@ export function createGpuSceneTextureProvider(
     new Set([background.id]),
     true,
   );
+  // White background pixels over a black slide encode native background coverage
+  // in RGB and slide-edge coverage in alpha. Capture once, including fractional
+  // clipping and bitmap filtering, rather than approximating Chromium edges.
+  const maskProvider = createLegacySceneTextureProvider(
+    request,
+    context,
+    new Set(staticElements.map((e) => e.id)),
+    true,
+    true,
+  );
   let fallback: SceneTextureProvider | null = null;
   let disposed = false,
     revision = 0,
@@ -151,6 +161,7 @@ export function createGpuSceneTextureProvider(
     gl: WebGL2RenderingContext,
     sampling: SceneTextureSampling,
     overlay: SceneTexture,
+    mask: SceneTexture,
     key: string,
   ) {
     let r = resources.get(gl);
@@ -163,6 +174,12 @@ export function createGpuSceneTextureProvider(
       const program = gl.createProgram()!,
         vao = gl.createVertexArray()!,
         source = gl.createTexture()!;
+      if (!program || !vao || !source) {
+        gl.deleteProgram(program);
+        gl.deleteVertexArray(vao);
+        gl.deleteTexture(source);
+        throw Error("Cannot allocate GPU SceneTexture assembly resources");
+      }
       const shaders: WebGLShader[] = [];
       try {
         for (const [kind, text] of [
@@ -175,14 +192,13 @@ void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Posit
             gl.FRAGMENT_SHADER,
             `#version 300 es
 precision highp float;
-uniform sampler2D background; uniform sampler2D overlay;
+uniform sampler2D background; uniform sampler2D overlay; uniform sampler2D coverage;
 uniform vec2 outputSize; uniform vec4 target; uniform vec4 sourceRect;
-uniform vec2 slideSize; uniform vec4 baseColor; out vec4 color;
+uniform vec4 baseColor; out vec4 color;
 void main(){vec2 uv=gl_FragCoord.xy/outputSize;vec2 world=target.xy+vec2(uv.x,1.-uv.y)*target.zw;
-if(any(lessThan(world,vec2(0)))||any(greaterThanEqual(world,slideSize))){color=vec4(0);return;}
-vec4 b=vec4(baseColor.rgb*baseColor.a,baseColor.a);vec2 p=(world-sourceRect.xy)/sourceRect.zw;
-if(all(greaterThanEqual(p,vec2(0)))&&all(lessThan(p,vec2(1)))){vec4 s=texture(background,vec2(p.x,1.-p.y));b=s+b*(1.-s.a);}
-vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
+vec4 m=texture(coverage,uv);vec4 b=vec4(baseColor.rgb*baseColor.a,baseColor.a)*m.a;vec2 p=(world-sourceRect.xy)/sourceRect.zw;
+vec4 s=texture(background,vec2(p.x,1.-p.y))*m.r;b=s+b*(1.-(m.a>0.?s.a/m.a:0.));
+vec4 t=texture(overlay,uv);color=t+b*(1.-(m.a>0.?t.a/m.a:0.));}`,
           ],
         ] as const) {
           const shader = gl.createShader(kind)!;
@@ -211,10 +227,10 @@ vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
             [
               "background",
               "overlay",
+              "coverage",
               "outputSize",
               "target",
               "sourceRect",
-              "slideSize",
               "baseColor",
             ].map((k) => [k, gl.getUniformLocation(program, k)]),
           ),
@@ -232,6 +248,7 @@ vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
       }
     }
     if (r.signature === key) return;
+    mask.bind(gl, 2);
     overlay.bind(gl);
     // Keep both bounded contexts: Chromium imports the presented shader bitmap;
     // no CPU pixel readback or animated DOM mirror capture is requested here.
@@ -273,6 +290,7 @@ vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
     gl.disable(gl.BLEND);
     const u = (key: string) => r!.locations.get(key)!;
     gl.uniform1i(u("background"), 1);
+    gl.uniform1i(u("coverage"), 2);
     gl.uniform1i(u("overlay"), 0);
     gl.uniform2f(u("outputSize"), sampling.width, sampling.height);
     const t = context.element.frame,
@@ -285,7 +303,6 @@ vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
       sampling.logicalHeight,
     );
     gl.uniform4f(u("sourceRect"), b.x, b.y, b.width, b.height);
-    gl.uniform2f(u("slideSize"), scene!.deck.width, scene!.deck.height);
     gl.uniform4fv(u("baseColor"), rgba);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     r.signature = key;
@@ -294,16 +311,24 @@ vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
   return {
     prepare(sampling) {
       return current()
-        ? staticProvider.prepare(sampling)
+        ? Promise.all([
+            staticProvider.prepare(sampling),
+            maskProvider.prepare(sampling),
+          ]).then(() => {})
         : legacy().prepare(sampling);
     },
     acquire(sampling) {
       if (!current()) return legacy().acquire(sampling);
       const acquired = staticProvider.acquire(sampling);
-      const result = (overlay: SceneTexture): SceneTexture => {
+      const mask = maskProvider.acquire(sampling);
+      const result = (
+        overlay: SceneTexture,
+        coverage: SceneTexture,
+      ): SceneTexture => {
         const key = JSON.stringify([
           stage.dataset.effectRevision,
           overlay.revision,
+          coverage.revision,
           sampling,
         ]);
         if (key !== signature) {
@@ -313,17 +338,19 @@ vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
         return {
           revision,
           prepareGpu(gl) {
-            assemble(gl, sampling, overlay, key);
+            assemble(gl, sampling, overlay, coverage, key);
           },
-          bind(gl) {
-            gl.activeTexture(gl.TEXTURE0);
+          bind(gl, unit = 0) {
+            gl.activeTexture(gl.TEXTURE0 + unit);
             gl.bindTexture(gl.TEXTURE_2D, resources.get(gl)!.output!.texture);
           },
         };
       };
-      return acquired instanceof Promise
-        ? acquired.then(result)
-        : result(acquired);
+      return acquired instanceof Promise || mask instanceof Promise
+        ? Promise.all([acquired, mask]).then(([overlay, coverage]) =>
+            result(overlay, coverage),
+          )
+        : result(acquired, mask);
     },
     invalidate() {
       if (!current()) {
@@ -335,6 +362,7 @@ vec4 t=texture(overlay,uv);color=t+b*(1.-t.a);}`,
       if (disposed) return;
       disposed = true;
       staticProvider.dispose();
+      maskProvider.dispose();
       fallback?.dispose();
       release();
       metrics.providers--;
