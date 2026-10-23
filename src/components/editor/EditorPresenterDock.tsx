@@ -68,6 +68,7 @@ function Preview({
           }}
         >
           <SlideRenderer
+            visualPlayback="static"
             slide={slide}
             deck={deck}
             renderScale={scale}
