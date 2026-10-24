@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { platform } from "../platform";
+import { useRenderResources } from "./renderResources";
 
 export function useAssetUrl(id: string, preview = false, enabled = true) {
+  const resources = useRenderResources();
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     if (!enabled) {
@@ -16,11 +17,11 @@ export function useAssetUrl(id: string, preview = false, enabled = true) {
         .assetUrl(id, preview)
         .then((u) => {
           if (!live) {
-            if (u) platform.releaseUrl(u);
+            if (u) resources.releaseUrl(u);
             return;
           }
           if (current && current !== u) {
-            platform.releaseUrl(current);
+            resources.releaseUrl(current);
           }
           current = u;
           setUrl(u);
@@ -39,8 +40,8 @@ export function useAssetUrl(id: string, preview = false, enabled = true) {
     return () => {
       live = false;
       if (retryTimer) clearTimeout(retryTimer);
-      if (current) platform.releaseUrl(current);
+      if (current) resources.releaseUrl(current);
     };
-  }, [id, preview, enabled]);
+  }, [id, preview, enabled, resources]);
   return url;
 }
