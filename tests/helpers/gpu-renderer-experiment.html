@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>ShowMe general GPU renderer experiment</title>
+  </head>
+  <body>
+    <script type="module">
+      import "/src/presentation.css";
+      import "/src/style.css";
+      import "/src/frame.css";
+      const { mountGpuRendererHarness } = await import("/tests/helpers/gpuRendererHarness.tsx");
+      const params = new URLSearchParams(location.search);
+      const benchmark = params.has("benchmark");
+      window.gpuRendererExperiment = await mountGpuRendererHarness({
+        width: benchmark ? 1920 : 640,
+        height: benchmark ? 1080 : 360,
+        pixelRatio: 1,
+        reference: !params.has("noReference"),
+      });
+    </script>
+  </body>
+</html>

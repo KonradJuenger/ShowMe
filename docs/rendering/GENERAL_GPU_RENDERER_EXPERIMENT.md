@@ -1,6 +1,6 @@
 # General GPU renderer experiment
 
-Status: architecture research branch. No production renderer replacement is authorized.
+Status: architecture research branch with an isolated runnable prototype. No production renderer replacement is authorized.
 
 Branch: `research/general-gpu-renderer`
 
@@ -673,3 +673,310 @@ The final result should answer:
 > deliberate GPU compositor, using Chromium only for native raster sources,
 > gives a cleaner and more performant architecture than keeping Chromium as the
 > scene compositor and repeatedly crossing the native/GPU boundary?
+
+
+## Prototype implementation snapshot — 2026-10-24
+
+This section records the first runnable implementation pass on
+`research/general-gpu-renderer`. It deliberately does not change the production
+renderer and does not revive PR #19 Phase 4 SceneTexture reconstruction.
+
+### Implemented facts
+
+The prototype lives under `src/experiments/gpu-renderer/` and is exercised only
+through a focused test harness.
+
+`graph.ts` compiles directly from `compileCompositionPlan(...)`. It retains the
+existing `Element`, `Composition`, Effect instance and Effect resource identities
+rather than defining another persisted scene model. The experimental graph makes
+these existing semantics explicit for the GPU executor:
+
+- source kind: Chromium-native text, image, SVG or video;
+- fill and stroke paint operations;
+- child/group paint order;
+- rectangular clip operations;
+- ordered Effect stages;
+- content versus backdrop versus generated shader input;
+- the existing semantic backdrop paint point for diagnostics and validation.
+
+`renderer.ts` owns one WebGL2 context. It implements:
+
+- slide clear/background;
+- premultiplied-alpha textured quads;
+- affine element/group transforms using the existing `localMatrix(...)` rules;
+- nested groups;
+- group opacity applied once when a completed child/group target is composited;
+- rectangular clipping by rendering clipped groups into their local frame target;
+- direct image/SVG/video `TexImageSource` upload paths;
+- existing Fit / Fill / Free placement through `resolveMediaFrame(...)`;
+- pooled intermediate textures/FBOs;
+- generated fragment shaders;
+- content fragment shaders;
+- backdrop fragment shaders;
+- final fragment-shader stages;
+- existing Effect timing and numeric Effect-parameter Motion;
+- existing Motion and Presence sampling through `resolveMotion(...)`,
+  `motionElement(...)`, `sampleElementPresence(...)` and
+  `presenceElement(...)`.
+
+The renderer does not call `SlideRenderer`, `SceneTexture` or `elementRaster`.
+The production renderer remains unchanged.
+
+Backdrop input is no longer a Chromium capture in this experiment. Completed
+root groups already exist in the persistent full-slide GPU scene target. When a
+backdrop Effect is reached inside an unfinished group, the renderer composes the
+current scene target plus the unfinished ancestor/local group targets into a
+pooled full-slide scratch target, then maps that scene through the inverse current
+world transform into the Effect's local input target. The shader therefore
+consumes the pixels that exist at its semantic paint point without asking
+Chromium to repaint that prefix.
+
+The render-target pool retains a bounded number of texture/FBO objects. An idle
+target may be resized and reused when dimensions change instead of allocating a
+new target for every historical size. The long-lived full-slide scene target is
+one retained target; other group/effect/backdrop targets are explicitly acquired
+and released during a frame. Diagnostics expose allocations, resizes, live FBOs,
+live textures and estimated RGBA texture bytes.
+
+### Native raster strategy
+
+`nativeRaster.ts` implements the first Chromium raster source for text. It uses
+the existing `createDomRasterSource(...)` native Chromium painter. It does not
+implement text layout itself.
+
+The hidden source DOM reproduces the current `TextView` typography/flex layout
+and applies the deck stylesheet inside a `.slide-renderer` scope. Its semantic
+pixel key contains:
+
+- text and placeholder state;
+- auto-size mode;
+- resolved typography;
+- raster width/height;
+- CSS classes;
+- deck stylesheet.
+
+It deliberately excludes:
+
+- x/y;
+- rotation;
+- scale;
+- flips;
+- parent transforms;
+- authored/group opacity.
+
+The source therefore remains unchanged during transform-only Motion and Presence
+transport. `createDomRasterSource(...)` still provides font-loading invalidation,
+so a completed font load can dirty and rerasterize the native surface without
+making transform Motion part of the raster key.
+
+A focused browser check warms the native surfaces, runs transform/rotation/scale
+Motion for many GPU frames and verifies that native rasterization and texture
+upload counts do not increase. A separate pixel-changing text edit check verifies
+that native rasterization does increase when text pixels change.
+
+### Experiment scene and parity harness
+
+`tests/helpers/gpuRendererHarness.tsx` creates the requested layered scene:
+
+```text
+generated animated shader
+→ Chromium-rasterized native text
+→ direct transformed Fill image
+→ nested clipped group with group opacity
+→ backdrop/glass shader
+→ moving Chromium-rasterized native text
+→ final backdrop shader
+```
+
+The image is an actual browser-platform imported PNG with asymmetric coloured
+quadrants, so orientation and Fit/Fill sampling can be inspected. The same ShowMe
+model can also be mounted through the current `SlideRenderer` beside the GPU
+canvas. A static parity helper captures that Chromium-native reference only for
+comparison and reports coarse channel/alpha error. That reference capture is not
+used by the GPU render loop.
+
+The browser test also probes the asymmetric image orientation and checks that the
+GPU graph remains free of reported runtime errors. The parity check is
+intentionally coarse. It is evidence for obvious semantic disagreement, not a
+production golden-image framework.
+
+### Diagnostics implemented
+
+`GpuRendererExperiment.diagnostics()` currently reports:
+
+- WebGL context count;
+- unmasked GPU vendor/renderer when Chromium exposes it;
+- recent render callbacks/sec;
+- total and recent shader publications/sec;
+- per-Effect shader publication totals and recent rates;
+- native text rasterizations/sec and total rasterizations;
+- native raster cache hits and invalidations;
+- live native surfaces;
+- GPU source uploads;
+- render-target allocations and resizes;
+- live texture/FBO counts;
+- render-target/source/total logical RGBA texture-byte estimates;
+- frame interval p50/p95/max;
+- explicit test-only readback count;
+- diagnosed renderer errors.
+
+Callback/publication rates are application-level measurements. They are not a
+claim about physical display FPS.
+
+### Unsupported or deliberately incomplete
+
+This first pass intentionally stops before the following work:
+
+- CSS Effects and text-JS Effects are not recreated in WebGL. The renderer throws
+  an explicit unsupported-feature error rather than silently changing semantics.
+  A later native-surface adapter would have to rasterize their browser result.
+- Rounded clipping, ellipse masks and arbitrary masks are not implemented.
+- The prototype compiles a slide snapshot when the renderer is constructed. It
+  does not yet implement incremental graph recompilation for editor mutations.
+- Video uses the same direct `TexImageSource` upload path and revision model, but
+  it has not been exercised or benchmarked in this pass.
+- Arbitrary deck CSS is only exercised through the Chromium-native text surface.
+  No CSS parser/compositor is being added to WebGL.
+- Static parity is intentionally lightweight; fractional-edge, rotated nested
+  group and cross-DPR tolerances still need hardware inspection.
+- The pooled full-slide scratch used to materialize nested backdrop input may
+  still be a meaningful memory/bandwidth cost at 4K. It is explicit and bounded,
+  but not yet measured.
+
+None of these gaps caused a new document/persistence model, a second Motion state
+machine, CPU per-frame scene readback, or transform-driven native rerasterization
+in the current prototype.
+
+### Local measurements from this ChatGPT pass
+
+No Radeon 880M / D3D11 performance result was produced here. This environment has
+no checkout with the repository's installed dependencies and its available Node
+runtime is older than the repository's declared Node 24/26 requirement. It would
+be misleading to quote frame-rate numbers from it.
+
+A syntax-oriented TypeScript pass was run over the new experiment files with the
+available global TypeScript compiler. The actual repository build, TypeScript 6
+check, Playwright Chromium painter path and native Windows GPU measurements remain
+for the local handoff below.
+
+### Exact experiment/test commands
+
+From the repository root in PowerShell, with the repository's required Node and
+dependencies installed:
+
+Unit graph/cache-key checks:
+
+```powershell
+$env:SHOWME_TEST_FILES='["tests/feature/effects/gpu-renderer-experiment.test.ts"]'
+npx vitest run --config vitest.config.ts
+```
+
+Focused browser architecture/parity checks:
+
+```powershell
+$env:SHOWME_TEST_FILES='["tests/feature/effects/gpu-renderer-experiment.spec.ts"]'
+npx playwright test --config playwright.config.ts
+```
+
+Headed visual inspection of the same harness:
+
+```powershell
+$env:SHOWME_TEST_FILES='["tests/feature/effects/gpu-renderer-experiment.spec.ts"]'
+npx playwright test --config playwright.config.ts --headed
+```
+
+Full build/type verification requested for the local follow-up:
+
+```powershell
+npm run typecheck
+npm run build
+```
+
+The harness URL served by Vite is:
+
+```text
+/tests/helpers/gpu-renderer-experiment.html
+```
+
+It requires Chromium's `CanvasDrawElement` feature for the native raster source.
+The repository Playwright browser configuration already launches Chromium with
+`--enable-blink-features=CanvasDrawElement`.
+
+### Radeon 880M / D3D11 benchmark procedure
+
+The browser spec contains an explicitly skipped 1920 × 1080 manual benchmark. It
+uses the same renderer and scene, disables the comparison `SlideRenderer`, keeps
+native text at its authored raster resolution and does not downscale the GPU
+scene to obtain a better result.
+
+Run on the reference Windows machine:
+
+```powershell
+$env:SHOWME_GPU_BENCHMARK='1'
+$env:SHOWME_TEST_FILES='["tests/feature/effects/gpu-renderer-experiment.spec.ts"]'
+npx playwright test --config playwright.config.ts --headed -g "manual 1080p GPU renderer benchmark"
+```
+
+The test prints one `SHOWME_GPU_RENDERER_BENCHMARK` JSON object. Inspect:
+
+- `after.gpu.renderer`: confirm Radeon 880M and ANGLE/D3D11 rather than a software
+  renderer;
+- `benchmark.callbackRate`: target roughly 58–60 application render callbacks/s;
+- `after.shaderByEffect[ids.glass].perSecond`: target roughly 58–60;
+- `after.shaderByEffect[ids.final].perSecond`: target roughly 58–60;
+- `after.nativeRasterizations - before.nativeRasterizations`: must be `0` for
+  transform-only Motion after warmup;
+- `after.gpuUploads - before.gpuUploads`: should remain `0` for static text/image
+  sources during the Motion benchmark;
+- `after.renderTargetAllocations`: must remain stable after warmup;
+- `after.renderTargetResizes`: should remain stable for this fixed-local-bounds
+  scene;
+- `after.frameIntervalMs.p95`: should be near one refresh interval and should not
+  show a persistent 33/50/66/83 ms cadence;
+- `after.logicalTextureBytes`, `activeTextures` and `activeFbos`: confirm bounded
+  ownership without frame-over-frame growth;
+- `after.errors`: must remain empty.
+
+Do not interpret `callbackRate` as physical monitor FPS.
+
+### Assumptions to validate locally
+
+- The current ShowMe fragment-shader convention is effectively premultiplied for
+  composited input/output, matching the experiment's `ONE / ONE_MINUS_SRC_ALPHA`
+  composition path.
+- Existing group-opacity semantics are preserved when an unfinished ancestor is
+  materialized for a nested backdrop Effect. Group opacity is intentionally
+  applied only when that group is composited into its parent.
+- Browser `texImage2D(video)` remains an acceptable direct upload/import boundary
+  on Electron/ANGLE without introducing CPU pixel readback.
+- Chromium native-raster output at audience density remains visually acceptable
+  through repeated GPU affine sampling.
+
+### Open questions for local Codex
+
+1. Run TypeScript 6, lint if useful, the focused unit test and focused Playwright
+   browser test. Fix experiment-local mistakes without weakening existing tests.
+2. Inspect the side-by-side static reference for text metrics, image orientation,
+   alpha, rectangular clipping, nested transform/group opacity and Effect order.
+3. Run the explicit 1080p benchmark on Radeon 880M / D3D11 and record the printed
+   diagnostics in this document under a new `Local hardware measurements`
+   subsection. Do not replace callback/publication rates with a physical-FPS
+   claim.
+4. Watch GPU memory while running the benchmark repeatedly. Confirm the pool's
+   texture/FBO count and logical byte estimate stabilize.
+5. Exercise one direct video source. Confirm frame updates use the direct WebGL
+   upload/import path and do not introduce CPU `getImageData`/`readPixels` work in
+   the render loop.
+6. Stress nested backdrop Effects inside transformed/opaque groups. Validate the
+   current-scene + unfinished-ancestor reconstruction against `SlideRenderer`.
+7. Decide whether native CSS/text-JS Effect output can be represented as another
+   cached Chromium raster source without making Chromium a second scene
+   compositor. If not, record that as an architectural failure rather than adding
+   qualification rules.
+8. Measure 4K render-target memory/bandwidth before considering any product
+   integration.
+
+The architectural question remains open until those hardware measurements and
+native-surface semantics are validated. This pass shows that transforms, nesting,
+rectangular clipping, group opacity and backdrop input can be represented as
+ordinary graph operations without Phase 4-style scene-pattern qualification.

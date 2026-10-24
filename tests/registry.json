@@ -1,5 +1,27 @@
 [
   {
+    "id": "effects-gpu-renderer-experiment",
+    "path": "tests/feature/effects/gpu-renderer-experiment.test.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "General GPU graph compiles current composition semantics directly; native text pixel identity excludes transport Motion while preserving pixel-changing invalidation; experiment stays isolated from SceneTexture/SlideRenderer"
+  },
+  {
+    "id": "effects-gpu-renderer-experiment-browser",
+    "path": "tests/feature/effects/gpu-renderer-experiment.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Isolated one-context GPU compositor exercises generated shader, Chromium text raster cache, direct image texture, nested group opacity/clipping, backdrop/final shaders, transform-only Motion stability, current-renderer parity and explicit 1080p hardware diagnostics"
+  },
+  {
     "id": "editor-agent-workspace",
     "path": "tests/feature/editor/agentWorkspace.test.ts",
     "area": "editor",
