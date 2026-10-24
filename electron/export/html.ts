@@ -176,17 +176,23 @@ function selectFonts(
 
 async function runtimeAssets(runtimeDirectory: string) {
   const entries = await fs.readdir(runtimeDirectory);
-  const javascript = entries.find((entry) => entry.endsWith(".js"));
-  if (!javascript)
-    throw new Error("Built HTML presentation runtime JavaScript is missing");
-  const css = entries.find((entry) => entry.endsWith(".css"));
+  const javascript = entries.filter((entry) => entry.endsWith(".js"));
+  if (javascript.length !== 1)
+    throw new Error(
+      `HTML presentation runtime must contain exactly one JavaScript bundle; found ${javascript.length}`,
+    );
+  const css = entries.filter((entry) => entry.endsWith(".css"));
+  if (css.length > 1)
+    throw new Error(
+      `HTML presentation runtime must contain at most one CSS bundle; found ${css.length}`,
+    );
   return {
     javascript: await fs.readFile(
-      path.join(runtimeDirectory, javascript),
+      path.join(runtimeDirectory, javascript[0]),
       "utf8",
     ),
-    css: css
-      ? await fs.readFile(path.join(runtimeDirectory, css), "utf8")
+    css: css[0]
+      ? await fs.readFile(path.join(runtimeDirectory, css[0]), "utf8")
       : "",
   };
 }
