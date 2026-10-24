@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "npm run verify:typescript && tsc --noEmit && vite build && node scripts/build-electron.mjs",
+    "build": "npm run verify:typescript && tsc --noEmit && vite build && vite build --config vite.html-export.config.ts && node scripts/build-electron.mjs",
     "typecheck": "npm run verify:typescript && tsc --noEmit",
     "typecheck:ts6": "tsc6 --noEmit --stableTypeOrdering --noUncheckedSideEffectImports",
     "verify:typescript": "node scripts/verify-typescript.mjs",
@@ -79,6 +79,7 @@
     },
     "files": [
       "dist/**/*",
+      "dist-html-export/**/*",
       "dist-electron/**/*",
       "package.json",
       "LICENSE",
