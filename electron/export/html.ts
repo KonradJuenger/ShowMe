@@ -62,7 +62,9 @@ function visibleElements(
 
 function externalCssUrl(source: string | undefined) {
   if (!source) return null;
-  const match = source.match(/(?:https?:\/\/|(?:^|[("'\\s])\/\/|file:)[^)"'\\s]*/i);
+  const match = source.match(
+    /(?:https?:\/\/|file:|url\(\s*["']?\/\/)[^)"'\s]*/i,
+  );
   return match?.[0]?.trim() ?? null;
 }
 
