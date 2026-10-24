@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "npm run verify:typescript && tsc --noEmit && vite build && vite build --config vite.html-export.config.ts && node scripts/build-electron.mjs",
+    "build": "npm run verify:typescript && tsc --noEmit && vite build && npm run build:html-runtime && node scripts/build-electron.mjs",
     "typecheck": "npm run verify:typescript && tsc --noEmit",
     "typecheck:ts6": "tsc6 --noEmit --stableTypeOrdering --noUncheckedSideEffectImports",
     "verify:typescript": "node scripts/verify-typescript.mjs",
@@ -33,7 +33,8 @@
     "test:deprecated": "node scripts/test-suite.mjs deprecated",
     "test:stats": "node scripts/test-suite.mjs stats",
     "test:audit": "node scripts/test-suite.mjs audit",
-    "benchmark:renderer": "node scripts/benchmark-renderer-workloads.mjs"
+    "benchmark:renderer": "node scripts/benchmark-renderer-workloads.mjs",
+    "build:html-runtime": "vite build --config vite.html-export.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
