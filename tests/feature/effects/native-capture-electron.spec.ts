@@ -65,6 +65,7 @@ async function smoke(kind: "content" | "backdrop", info: TestInfo) {
     electron: process.versions.electron,
     chromium: process.versions.chrome,
     enabledFeatures: app.commandLine.getSwitchValue("enable-blink-features"),
+    gpuFeatures: app.getGPUFeatureStatus(),
   }));
   const result = await page.evaluate(async (kind) => {
     const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
@@ -108,7 +109,28 @@ async function smoke(kind: "content" | "backdrop", info: TestInfo) {
       },
     });
     try {
-      const state = await harness.stage(0);
+      const diagnostics = () =>
+        [...harness.host.querySelectorAll<HTMLElement>("[data-effect-id]")].map(
+          (node) => ({
+            id: node.dataset.effectId,
+            error: node.dataset.effectError,
+            ready: node.dataset.effectReady,
+            backend: node.dataset.effectSourceBackend,
+          }),
+        );
+      let state: ReturnType<typeof harness.inspect>;
+      try {
+        state = await harness.stage(0);
+      } catch (error) {
+        return {
+          capabilities,
+          errors: [String(error)],
+          backend: undefined,
+          coloredPixels: 0,
+          captures: sceneTextureDiagnostics().captures - before.captures,
+          diagnostics: diagnostics(),
+        };
+      }
       const surface = state.surfaces[0];
       return {
         capabilities,
@@ -116,6 +138,7 @@ async function smoke(kind: "content" | "backdrop", info: TestInfo) {
         backend: surface.backend,
         coloredPixels: kind === "content" ? surface.green : surface.red,
         captures: sceneTextureDiagnostics().captures - before.captures,
+        diagnostics: diagnostics(),
       };
     } finally {
       harness.dispose();
