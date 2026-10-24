@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { PresenterState } from "../../platform/api";
 import { SlideRenderer } from "../../components/SlideRenderer";
+import { flushEffectSurfaces } from "../../components/effectRuntime";
 import { RenderResourcesProvider } from "../../components/renderResources";
 import { useSlideTransition } from "../../components/useSlideTransition";
 import {
@@ -36,18 +37,60 @@ function useViewportScale(width: number, height: number) {
   return scale;
 }
 
+function nextPaint() {
+  return new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+  );
+}
+
+function waitForVideo(video: HTMLVideoElement) {
+  if (
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ||
+    video.error ||
+    (!video.currentSrc && !video.getAttribute("src"))
+  )
+    return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const finish = () => {
+      video.removeEventListener("loadeddata", finish);
+      video.removeEventListener("error", finish);
+      resolve();
+    };
+    video.addEventListener("loadeddata", finish, { once: true });
+    video.addEventListener("error", finish, { once: true });
+  });
+}
+
+async function prepareHtmlSlide(root: HTMLElement) {
+  await nextPaint();
+  await Promise.all(
+    Array.from(root.querySelectorAll("img")).map((image) =>
+      image.decode().catch(() => undefined),
+    ),
+  );
+  await Promise.all(
+    Array.from(root.querySelectorAll("video")).map((video) =>
+      waitForVideo(video),
+    ),
+  );
+  await nextPaint();
+  await flushEffectSurfaces(root).catch(() => false);
+}
+
 function HtmlSlide({
   slide,
   deck,
   active,
   state,
   scale,
+  onAudienceReady,
 }: {
   slide: HtmlExportPayload["document"]["slides"][number];
   deck: HtmlExportPayload["document"]["deck"];
   active: boolean;
   state: PresenterState;
   scale: number;
+  onAudienceReady(command: Parameters<typeof applyPresentationCommand>[1]): void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const lastActiveState = useRef<PresenterState | null>(null);
@@ -65,6 +108,39 @@ function HtmlSlide({
     : transition.outgoing
       ? lastActiveState.current
       : null;
+  const sessionStartedAt = state.startedAt;
+  const motionStartedAt = state.motion?.startedAt ?? state.slideStartedAt;
+  useEffect(() => {
+    if (
+      !active ||
+      !state.awaitingAudience ||
+      sessionStartedAt === undefined ||
+      motionStartedAt === undefined ||
+      !root.current
+    )
+      return;
+    let live = true;
+    const node = root.current;
+    void prepareHtmlSlide(node).finally(() => {
+      if (!live) return;
+      onAudienceReady({
+        type: "audience-ready",
+        slideId: slide.id,
+        sessionStartedAt,
+        motionStartedAt,
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [
+    active,
+    state.awaitingAudience,
+    sessionStartedAt,
+    motionStartedAt,
+    slide.id,
+    onAudienceReady,
+  ]);
   return (
     <div
       ref={root}
@@ -81,7 +157,7 @@ function HtmlSlide({
         transformOrigin: "center",
         pointerEvents: active ? "auto" : "none",
         zIndex: active ? 2 : transition.outgoing ? 1 : 0,
-        opacity: transition.visible ? 1 : 0,
+        opacity: transition.visible && !transition.preparing ? 1 : 0,
       }}
     >
       <SlideRenderer
@@ -150,7 +226,7 @@ export function HtmlPresentationApp({
           deck,
           Date.now(),
           motionSlides,
-          false,
+          true,
         ),
       );
     } catch (cause) {
@@ -168,6 +244,11 @@ export function HtmlPresentationApp({
           : current,
       ),
     [],
+  );
+
+  const onAudienceReady = useCallback(
+    (command: Parameters<typeof applyPresentationCommand>[1]) => apply(command),
+    [apply],
   );
 
   const toggleFullscreen = useCallback(async () => {
@@ -255,6 +336,7 @@ export function HtmlPresentationApp({
                   active={id === activeId}
                   state={state}
                   scale={scale}
+                  onAudienceReady={onAudienceReady}
                 />
               );
             })}
