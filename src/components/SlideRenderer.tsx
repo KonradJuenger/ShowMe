@@ -624,10 +624,7 @@ function MediaSurface({
       : intrinsic,
   );
   if (!checking && (failed || url === null)) return <MissingMediaPlaceholder />;
-  if (!frame)
-    return (
-      <div data-media-loading={content.type === "image" ? "true" : undefined} />
-    );
+  if (!frame) return <div data-media-loading="true" />;
 
   const style: CSSProperties = {
     position: "absolute",
@@ -646,8 +643,9 @@ function MediaSurface({
       data-media-asset-id={content.assetId}
       data-media-type={content.type}
       data-media-loading={
-        content.type === "image" &&
-        (url === undefined || checking || decodedUrl !== url)
+        url === undefined ||
+        checking ||
+        (content.type !== "video" && decodedUrl !== url)
           ? "true"
           : undefined
       }
