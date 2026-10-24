@@ -8,6 +8,12 @@ import type { RenderResources } from "../core/renderResources";
 export type { RenderResources } from "../core/renderResources";
 
 let defaultResources: RenderResources | null = null;
+const unavailableRenderResources: RenderResources = {
+  async assetUrl() {
+    return null;
+  },
+  releaseUrl() {},
+};
 const RenderResourcesContext = createContext<RenderResources | null>(null);
 
 /**
@@ -33,8 +39,9 @@ export function RenderResourcesProvider({
 }
 
 export function useRenderResources(): RenderResources {
-  const resources = useContext(RenderResourcesContext) ?? defaultResources;
-  if (!resources)
-    throw new Error("Render resources are unavailable in this rendering host");
-  return resources;
+  return (
+    useContext(RenderResourcesContext) ??
+    defaultResources ??
+    unavailableRenderResources
+  );
 }
