@@ -63,6 +63,7 @@ import { mediaResponse } from "./mediaResponse";
 import path from "node:path";
 import { promises as fs, existsSync } from "node:fs";
 import { exportPowerPoint } from "./export/pptx";
+import { createHtmlExport } from "./export/html";
 import {
   pdfSlides,
   type ExportDocument,
@@ -1012,7 +1013,10 @@ async function packageDocument(documentId: string, beforePersist?: (destination:
 }
 
 let exportBusy = false;
-async function exportPresentation(documentId: string, format: "pdf" | "pptx") {
+async function exportPresentation(
+  documentId: string,
+  format: "pdf" | "pptx" | "html",
+) {
   if (exportBusy) throw new Error("An export is already in progress");
   exportBusy = true;
   try {
@@ -1024,12 +1028,12 @@ async function exportPresentation(documentId: string, format: "pdf" | "pptx") {
 
 async function performExportPresentation(
   documentId: string,
-  format: "pdf" | "pptx",
+  format: "pdf" | "pptx" | "html",
 ) {
   const id = idSchema.parse(documentId);
   if (id !== activeDocumentId)
     throw new Error("Only the current presentation can be exported");
-  const type = z.enum(["pdf", "pptx"]).parse(format);
+  const type = z.enum(["pdf", "pptx", "html"]).parse(format);
   if (collaboration.isGuest(id))
     throw new Error(
       "Collaboration guests cannot export the host presentation because media ownership is local to the host",
@@ -1043,17 +1047,57 @@ async function performExportPresentation(
   const document: ExportDocument = { deck, slides };
   if (type === "pdf" && pdfSlides(document).length === 0)
     throw new Error("There are no slides to export");
+  const exportSpec =
+    type === "pdf"
+      ? { title: "Export as PDF", name: "PDF", extension: "pdf" }
+      : type === "pptx"
+        ? {
+            title: "Export as PowerPoint",
+            name: "PowerPoint",
+            extension: "pptx",
+          }
+        : {
+            title: "Export Deck as HTML",
+            name: "HTML",
+            extension: "html",
+          };
   const result = await dialog.showSaveDialog(editor!, {
-    title: type === "pdf" ? "Export as PDF" : "Export as PowerPoint",
-    defaultPath: `${deck.name.replace(/[<>:"/\\|?*]/g, "_")}.${type === "pdf" ? "pdf" : "pptx"}`,
+    title: exportSpec.title,
+    defaultPath: `${deck.name.replace(/[<>:"/\\|?*]/g, "_")}.${exportSpec.extension}`,
     filters: [
       {
-        name: type === "pdf" ? "PDF" : "PowerPoint",
-        extensions: [type === "pdf" ? "pdf" : "pptx"],
+        name: exportSpec.name,
+        extensions: [exportSpec.extension],
       },
     ],
   });
   if (result.canceled || !result.filePath) return null;
+  if (type === "html") {
+    const exported = await createHtmlExport({
+      document,
+      runtimeVersion: app.getVersion(),
+      runtimeDirectory: path.join(__dirname, "../dist-html-export"),
+      resolveAsset: async (assetId) => {
+        try {
+          const source = await resolveOriginalAsset(
+            currentStorage,
+            id,
+            assetId,
+          );
+          await fs.access(source.file);
+          return source;
+        } catch {
+          return null;
+        }
+      },
+      managedFonts: () => currentStorage.managedFonts(id),
+    });
+    await atomicWrite(
+      result.filePath,
+      Buffer.from(exported.html, "utf8"),
+    );
+    return { warnings: exported.warnings };
+  }
   if (type === "pptx")
     return exportPowerPoint(
       document,
@@ -3004,6 +3048,10 @@ void app.whenReady().then(async () => {
               {
                 label: "PowerPoint...",
                 click: () => sendFileCommand("export-pptx"),
+              },
+              {
+                label: "HTML Deck...",
+                click: () => sendFileCommand("export-html"),
               },
             ],
           },
