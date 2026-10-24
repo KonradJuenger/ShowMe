@@ -451,6 +451,25 @@ function embeddedJson(value: unknown) {
     .replaceAll("\u2029", "\\u2029");
 }
 
+function portableDocumentSnapshot(
+  document: ExportDocument,
+  slideIds: Set<string>,
+): ExportDocument {
+  const ids = document.deck.slideIds.filter((id) => slideIds.has(id));
+  return {
+    deck: {
+      ...document.deck,
+      slideIds: ids,
+      slideMeta: Object.fromEntries(
+        ids.map((id) => [id, document.deck.slideMeta[id]]),
+      ),
+    },
+    slides: document.slides
+      .filter((slide) => slideIds.has(slide.id))
+      .map((slide) => ({ ...slide, notes: "" })),
+  };
+}
+
 export async function createHtmlExport({
   document,
   runtimeVersion,
@@ -539,7 +558,7 @@ export async function createHtmlExport({
     formatVersion: HTML_EXPORT_FORMAT_VERSION,
     runtimeVersion,
     exportedAt: new Date().toISOString(),
-    document,
+    document: portableDocumentSnapshot(document, slideIds),
     assets,
     fonts: selectedFonts.fonts,
     warnings,
