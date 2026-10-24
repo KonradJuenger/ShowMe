@@ -43,6 +43,23 @@ function escapeHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
+function visibleLayerNodes(
+  document: ExportDocument,
+  slide: ExportDocument["slides"][number],
+) {
+  const visible = new Set(
+    document.deck.layers.filter((layer) => !layer.hidden).map((layer) => layer.id),
+  );
+  return slide.nodes.filter((root) => visible.has(root.id));
+}
+
+function visibleElements(
+  document: ExportDocument,
+  slide: ExportDocument["slides"][number],
+) {
+  return walkElements(visibleLayerNodes(document, slide).flatMap((root) => root.children));
+}
+
 function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   for (const slide of document.slides) {
@@ -59,9 +76,7 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
       resources,
       document.deck.stylesheet,
     );
-    for (const element of walkElements(
-      slide.nodes.flatMap((root) => root.children),
-    )) {
+    for (const element of visibleElements(document, slide)) {
       for (const instance of element.effects ?? []) {
         if (!instance.enabled) continue;
         const effect = resources[instance.resourceId];
@@ -109,9 +124,7 @@ function fontOccurrence(
 ) {
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
-    for (const element of walkElements(
-      slide.nodes.flatMap((root) => root.children),
-    )) {
+    for (const element of visibleElements(document, slide)) {
       if (element.content?.type !== "text") continue;
       const typography = resolveTextTypography(document.deck, element.content);
       if (typography.fontFamily.localeCompare(family, undefined, {
@@ -128,7 +141,12 @@ function selectFonts(
   slideIds: Set<string>,
   families: SystemFontFamily[],
 ) {
-  const visibleSlides = document.slides.filter((slide) => slideIds.has(slide.id));
+  const visibleSlides = document.slides
+    .filter((slide) => slideIds.has(slide.id))
+    .map((slide) => ({
+      ...slide,
+      nodes: visibleLayerNodes(document, slide),
+    }));
   const usages = collectUsedFontUsages(visibleSlides, document.deck);
   const selected: HtmlEmbeddedFontFamily[] = [];
   const bundled: FontUsage[] = [];
@@ -227,9 +245,7 @@ export async function createHtmlExport({
   >();
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
-    for (const element of walkElements(
-      slide.nodes.flatMap((root) => root.children),
-    )) {
+    for (const element of visibleElements(document, slide)) {
       const content = element.content;
       if (!content || content.type === "text") continue;
       const occurrences = assetOccurrences.get(content.assetId) ?? [];
