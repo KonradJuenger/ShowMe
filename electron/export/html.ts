@@ -193,6 +193,12 @@ function inlineScript(value: string) {
 function inlineStyle(value: string) {
   return value.replace(/<\/style/gi, "<\\/style");
 }
+function embeddedJson(value: unknown) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+}
 
 export async function createHtmlExport({
   document,
