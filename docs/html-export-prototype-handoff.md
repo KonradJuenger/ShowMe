@@ -1,6 +1,7 @@
 # HTML export prototype handoff
 
 Branch: `chatgpt/html-export-prototype`
+Verification PR: #21 (draft, CI only; do not merge)
 
 Status: implementation prototype only. No build, TypeScript check, lint, tests, Playwright, Electron run, browser run, packaging, or manual verification has been performed in this pass.
 
