@@ -164,7 +164,6 @@ export function HtmlPresentationApp({
   );
   const scale = useViewportScale(deck.width, deck.height);
   const [state, setState] = useState<PresenterState | null>(null);
-  const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [presentedId, setPresentedId] = useState<string>();
   const onError = useCallback((cause: unknown) => setError(String(cause)), []);
@@ -184,27 +183,27 @@ export function HtmlPresentationApp({
     }
   }, [state, resources]);
 
-  const start = useCallback(async () => {
-    if (starting) return;
-    setStarting(true);
-    setError("");
-    try {
-      await resources.installFonts();
-      setState(
-        startSession(
-          { deckId: deck.id, slideIds: [], index: null },
-          deck,
-          Date.now(),
-          motionSlides,
-          true,
-        ),
-      );
-    } catch (cause) {
-      setError(String(cause));
-    } finally {
-      setStarting(false);
-    }
-  }, [deck, motionSlides, resources, starting]);
+  useEffect(() => {
+    let live = true;
+    void resources
+      .installFonts()
+      .then(() => {
+        if (live)
+          setState(
+            startSession(
+              { deckId: deck.id, slideIds: [], index: null },
+              deck,
+              Date.now(),
+              motionSlides,
+              true,
+            ),
+          );
+      })
+      .catch(onError);
+    return () => {
+      live = false;
+    };
+  }, [deck, motionSlides, resources, onError]);
 
   const apply = useCallback(
     (command: Parameters<typeof applyPresentationCommand>[1]) =>
@@ -229,9 +228,11 @@ export function HtmlPresentationApp({
     const keydown = (event: KeyboardEvent) => {
       if (
         event.target instanceof HTMLElement &&
-        event.target.closest(
-          "input, textarea, select, button, [contenteditable=true]",
-        )
+        (event.target.closest(
+          "input, textarea, select, [contenteditable=true]",
+        ) ||
+          (event.target.closest("button") &&
+            (event.key === " " || event.key === "Enter")))
       )
         return;
       const action = presentationShortcut(event.key);
@@ -260,7 +261,9 @@ export function HtmlPresentationApp({
         [
           state.transition?.fromSlideId,
           activeId,
-          state.slideIds[(state.index ?? 0) + 1],
+          state.presentationReady === false
+            ? undefined
+            : state.slideIds[(state.index ?? 0) + 1],
           presentedId,
         ].filter((id): id is string => Boolean(id)),
       ),
@@ -284,25 +287,7 @@ export function HtmlPresentationApp({
           apply({ type: "next" });
         }}
       >
-        {!state ? (
-          <section className="showme-html-start">
-            <div>
-              <h1>{deck.name}</h1>
-              <button
-                type="button"
-                onClick={() => void start()}
-                disabled={starting}
-              >
-                {starting ? "Preparing…" : "Start presentation"}
-              </button>
-              <p>
-                Arrow keys, Space or Enter advance. P pauses, B blacks the
-                screen, F toggles fullscreen, Escape ends.
-              </p>
-              {error && <p className="showme-html-error">{error}</p>}
-            </div>
-          </section>
-        ) : (
+        {state && (
           <>
             {visibleIds.map((id) => {
               const slide = byId.get(id);
@@ -328,9 +313,9 @@ export function HtmlPresentationApp({
                 aria-label="Black presentation output"
               />
             )}
-            {error && <div className="showme-html-runtime-error">{error}</div>}
           </>
         )}
+        {error && <div className="showme-html-runtime-error">{error}</div>}
       </main>
     </RenderResourcesProvider>
   );

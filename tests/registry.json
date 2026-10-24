@@ -1086,6 +1086,6 @@
     "runtime": "browser",
     "created": "2026-10-24",
     "lastReviewed": "2026-10-24",
-    "reason": "Freshly built offline file URL runtime executes canonical navigation, Motion, CSS, text worker, generated and direct-media GLSL, video and restart without network; delayed SVG decode holds initial clocks and input"
+    "reason": "Freshly built offline file URL runtime starts automatically, recovers from blocked autoplay and executes canonical navigation, Motion, CSS, text worker, generated and direct-media GLSL, video and restart without network; delayed SVG decode holds initial clocks and input"
   }
 ]

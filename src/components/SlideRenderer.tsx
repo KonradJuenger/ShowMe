@@ -120,6 +120,7 @@ function VideoView({
   const [presented, setPresented] = useState(false);
   const [ready, setReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
 
   useEffect(() => {
     // Reuse cached posters; playback and warmup capture missing frames below.
@@ -258,7 +259,7 @@ function VideoView({
       return;
     }
     if (ready && contentRef.current.autoplay && editorPlayback !== "trim")
-      void node.play().catch(() => {});
+      void node.play().catch(() => setAutoplayBlocked(true));
   }, [activePlayback, loadVideo, ready, editorPlayback]);
 
   const previousTrim = useRef({
@@ -411,22 +412,25 @@ function VideoView({
       {loadVideo && (
         <div ref={videoHost} style={{ width: "100%", height: "100%" }} />
       )}
-      {presentation && !staticVideo && !content.autoplay && ready && (
-        <button
-          className="movie-click-to-play"
-          style={{ zIndex: 2 }}
-          aria-label={isPlaying ? "Pause video" : "Play video"}
-          onClick={(event) => {
-            event.stopPropagation();
-            const node = video.current;
-            if (!node) return;
-            if (node.paused) void node.play().catch(() => {});
-            else node.pause();
-          }}
-        >
-          {isPlaying ? "Ⅱ" : "▶"}
-        </button>
-      )}
+      {presentation &&
+        !staticVideo &&
+        (!content.autoplay || autoplayBlocked) &&
+        ready && (
+          <button
+            className="movie-click-to-play"
+            style={{ zIndex: 2 }}
+            aria-label={isPlaying ? "Pause video" : "Play video"}
+            onClick={(event) => {
+              event.stopPropagation();
+              const node = video.current;
+              if (!node) return;
+              if (node.paused) void node.play().catch(() => {});
+              else node.pause();
+            }}
+          >
+            {isPlaying ? "Ⅱ" : "▶"}
+          </button>
+        )}
     </div>
   );
 }

@@ -1057,7 +1057,7 @@ async function performExportPresentation(
             extension: "pptx",
           }
         : {
-            title: "Export Deck as HTML",
+            title: "Export HTML",
             name: "HTML",
             extension: "html",
           };
@@ -3050,7 +3050,7 @@ void app.whenReady().then(async () => {
                 click: () => sendFileCommand("export-pptx"),
               },
               {
-                label: "HTML Deck...",
+                label: "Export HTML...",
                 click: () => sendFileCommand("export-html"),
               },
             ],

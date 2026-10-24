@@ -338,7 +338,7 @@ export function PresentationMenu({
                   })
                 }
               >
-                <span>Export Deck as HTML…</span>
+                <span>Export HTML…</span>
               </button>
               <button
                 type="button"

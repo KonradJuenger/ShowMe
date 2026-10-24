@@ -65,6 +65,19 @@ test("standalone file renders canonical text, worker, GLSL and embedded media of
     if (/^https?:/.test(r.url())) requests.push(r.url());
   });
   await page.context().setOffline(true);
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play;
+    let blocked = false;
+    HTMLMediaElement.prototype.play = function () {
+      if (!blocked) {
+        blocked = true;
+        return Promise.reject(
+          new DOMException("Autoplay requires a gesture", "NotAllowedError"),
+        );
+      }
+      return play.call(this);
+    };
+  });
   await page.goto(pathToFileURL(file).href);
   expect(
     await page.evaluate(() => ({
@@ -73,7 +86,9 @@ test("standalone file renders canonical text, worker, GLSL and embedded media of
     })),
   ).toEqual({ desktop: "undefined", require: "undefined" });
   await expect(page.locator("#showme-html-payload")).toHaveCount(0);
-  await page.getByRole("button", { name: "Start presentation" }).click();
+  await expect(
+    page.getByRole("button", { name: "Start presentation" }),
+  ).toHaveCount(0);
   const main = page.locator("main");
   await expect(main).toHaveAttribute("data-awaiting-audience", "false");
   await expect(
@@ -97,6 +112,7 @@ test("standalone file renders canonical text, worker, GLSL and embedded media of
   await expect(
     page.locator('[data-active-slide] [data-effect-ready="true"] canvas'),
   ).toHaveCount(3);
+  await page.getByRole("button", { name: "Play video" }).click();
   await expect
     .poll(() =>
       page
@@ -123,7 +139,11 @@ test("standalone file renders canonical text, worker, GLSL and embedded media of
   await expect(main).toHaveAttribute("data-index", "0");
   await expect(main).toHaveAttribute("data-awaiting-audience", "false");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Start presentation" }).click();
+  await expect(main).toHaveAttribute("data-index", "-1");
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Start presentation" }),
+  ).toHaveCount(0);
   await expect(main).toHaveAttribute("data-awaiting-audience", "false");
   expect(errors).toEqual([]);
   expect(requests).toEqual([]);
@@ -169,7 +189,9 @@ test("initial SVG decoding holds canonical clocks and input until preparation co
     };
   });
   await page.goto(pathToFileURL(file).href);
-  await page.getByRole("button", { name: "Start presentation" }).click();
+  await expect(
+    page.getByRole("button", { name: "Start presentation" }),
+  ).toHaveCount(0);
   await expect(
     page.locator('[data-active-slide] [data-media-loading="true"]'),
   ).toHaveCount(1);

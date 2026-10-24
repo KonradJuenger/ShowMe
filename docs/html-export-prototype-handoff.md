@@ -6,6 +6,12 @@ Local verification: 2026-10-24, Windows x64, Node 26.3.0.
 
 Status: ready for human review as a Chromium/Firefox prototype; not integrated or pushed. Existing draft PR #21 was not modified. Automatic CI remains paused.
 
+## Direct-start follow-up
+
+The exported HTML now opens directly into the presentation after the existing font/media readiness barrier; initial next-slide shader preparation waits for the first slide to become ready to avoid starving its text worker during automatic startup; there is no Start screen. Escape ends to a blank output and reloading starts again. Export actions and the save dialog are named “Export HTML”. If the browser rejects autoplay, VideoView exposes its existing Play control; presentation shortcuts remain available after interacting with it, while Space/Enter still operate a focused button. The earlier Start-interaction measurements below describe the original verification pass.
+
+Follow-up checks: typecheck, focused ESLint, test audit and the two Chromium HTML browser declarations (including forced autoplay rejection and delayed SVG decoding).
+
 ## Architecture retained
 
 One accepted presentation snapshot plus referenced original media, available managed fonts and a frozen prebuilt browser runtime becomes one HTML file. The native export still reads the current DocumentRuntime snapshot and resolves templates through the canonical model. No authority, persistence path, renderer or historical schema was added.
