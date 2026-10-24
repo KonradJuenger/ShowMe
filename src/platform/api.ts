@@ -133,6 +133,7 @@ export type FileCommand =
   | "package"
   | "export-pdf"
   | "export-pptx"
+  | "export-html"
   | "prepare-close";
 export type CloseResult = "closed" | "canceled";
 
@@ -333,7 +334,7 @@ export interface Platform {
   packageDocument?(documentId: string): Promise<string | null>;
   exportPresentation?(
     documentId: string,
-    format: "pdf" | "pptx",
+    format: "pdf" | "pptx" | "html",
   ): Promise<{ warnings: import("../export/shared").ExportWarning[] } | null>;
   exportReady?(error: string | null): Promise<void>;
   packageMediaState?(
