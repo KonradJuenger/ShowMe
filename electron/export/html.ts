@@ -155,6 +155,11 @@ const genericCssFonts = new Set([
   "emoji",
   "math",
   "fangsong",
+  "inherit",
+  "initial",
+  "unset",
+  "revert",
+  "revert-layer",
 ]);
 
 function fontFamiliesFromCss(source: string | undefined) {
@@ -286,7 +291,10 @@ function fontOccurrence(
         return { slideId: slide.id, elementId: element.id };
     }
   }
-  return { slideId: document.deck.slideIds[0] ?? "unknown" };
+  return {
+    slideId:
+      document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown",
+  };
 }
 
 function selectFonts(
@@ -354,7 +362,10 @@ function selectFonts(
     message:
       `Font "${family}" could not be embedded from ShowMe's managed font resources. The HTML export will rely on that font being installed on the viewing computer.`,
   }));
+  const warnedCssFamilies = new Set<string>();
   for (const reference of cssReferences) {
+    const familyKey = reference.family.toLocaleLowerCase();
+    if (warnedCssFamilies.has(familyKey)) continue;
     const embedded = bundled.some(
       (face) =>
         face.family.localeCompare(reference.family, undefined, {
@@ -376,6 +387,7 @@ function selectFonts(
       )
     )
       continue;
+    warnedCssFamilies.add(familyKey);
     warnings.push({
       slideId: reference.slideId,
       elementId: reference.elementId,
@@ -478,7 +490,9 @@ export async function createHtmlExport({
     managedFontFamilies = await managedFonts();
   } catch (cause) {
     warnings.push({
-      slideId: document.deck.slideIds[0] ?? "unknown",
+      slideId:
+        document.deck.slideIds.find((slideId) => slideIds.has(slideId)) ??
+        "unknown",
       code: "managed-fonts-unavailable",
       message:
         "ShowMe could not read its managed font resources for this export: " +
