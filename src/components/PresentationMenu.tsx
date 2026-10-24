@@ -331,6 +331,23 @@ export function PresentationMenu({
                     await flushTransactions();
                     const result = await platform.exportPresentation?.(
                       deckId,
+                      "html",
+                    );
+                    if (result?.warnings.length)
+                      window.alert(formatExportWarnings(result.warnings));
+                  })
+                }
+              >
+                <span>Export Deck as HTML…</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() =>
+                  execute(async () => {
+                    await flushTransactions();
+                    const result = await platform.exportPresentation?.(
+                      deckId,
                       "pptx",
                     );
                     if (result?.warnings.length)
