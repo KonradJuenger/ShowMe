@@ -118,9 +118,9 @@ function externalCssWarnings(document: ExportDocument, slideIds: Set<string>) {
     warnings.push({
       slideId:
         document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown",
-      code: "external-css-resource-blocked",
+      code: "non-embedded-css-resource",
       message:
-        `The deck stylesheet references an external resource (${deckReference}). Portable HTML exports block network and file URL access.`,
+        `The deck stylesheet references a non-embedded resource (${deckReference}). Portable HTML exports block network and file URL access.`,
     });
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
@@ -141,9 +141,9 @@ function externalCssWarnings(document: ExportDocument, slideIds: Set<string>) {
         warnings.push({
           slideId: slide.id,
           elementId: element.id,
-          code: "external-effect-resource-blocked",
+          code: "non-embedded-effect-resource",
           message:
-            `Effect "${effect.name}" references an external CSS resource (${reference}). Portable HTML exports block network and file URL access.`,
+            `Effect "${effect.name}" references a non-embedded CSS resource (${reference}). Portable HTML exports block network and file URL access.`,
         });
       }
     }
@@ -520,7 +520,7 @@ export async function createHtmlExport({
         for (const occurrence of occurrences)
           warnings.push({
             ...occurrence,
-            code: "svg-external-resource-blocked",
+            code: "non-embedded-svg-resource",
             message:
               `SVG media references a non-embedded resource (${reference}). Portable HTML exports contain no sibling resources and block external file/network access.`,
           });
