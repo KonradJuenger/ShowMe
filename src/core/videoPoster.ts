@@ -1,12 +1,13 @@
-import { platform } from "../platform";
+import type { RenderResources } from "./renderResources";
 
 const posters = new Map<string, Promise<string | null>>();
 
 async function capture(
+  resources: RenderResources,
   assetId: string,
   startTime: number,
 ): Promise<string | null> {
-  const url = await platform.assetUrl(assetId);
+  const url = await resources.assetUrl(assetId);
   if (!url) return null;
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
@@ -48,7 +49,7 @@ async function capture(
     video.pause();
     video.removeAttribute("src");
     video.load();
-    platform.releaseUrl(url);
+    resources.releaseUrl(url);
   }
 }
 
@@ -88,6 +89,7 @@ export function captureVideoPoster(
 }
 
 export function videoPoster(
+  resources: RenderResources,
   assetId: string,
   startTime: number,
   captureMissing = true,
@@ -96,7 +98,7 @@ export function videoPoster(
   let result = posters.get(key);
   if (!result && !captureMissing) return Promise.resolve(null);
   if (!result) {
-    result = capture(assetId, startTime).then((value) => {
+    result = capture(resources, assetId, startTime).then((value) => {
       if (!value && posters.get(key) === result) posters.delete(key);
       return value;
     });
