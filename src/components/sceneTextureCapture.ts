@@ -2,11 +2,8 @@ import type { Element } from "../core/element";
 import type { EffectResources } from "../core/effects";
 import { effectPlacement } from "../core/effects";
 import { elementWorldTransform } from "./elementDomTransform";
-import {
-  backdropPrefix,
-  createBackdropRasterSource,
-  createElementRasterSource,
-} from "./elementRaster";
+import { compositionPlanFor, prefixElements } from "./compositionPlan";
+import type { Deck, Slide } from "../core/document";
 import { createDomRasterSource, domRasterDiagnostics } from "./domRaster";
 import { EffectSources } from "./effectSources";
 import type {
@@ -17,9 +14,12 @@ import type {
   SceneTextureSampling,
 } from "./sceneTexture";
 
-type PrimitiveRaster = ReturnType<typeof createElementRasterSource>;
 type DomRaster = ReturnType<typeof createDomRasterSource>;
-type Raster = (PrimitiveRaster | DomRaster) & { readonly immutable?: boolean };
+type Raster = DomRaster & { readonly immutable?: boolean };
+
+function backdropPrefix(slide: Slide, deck: Deck, targetId: string) {
+  return prefixElements(compositionPlanFor(slide, deck), targetId);
+}
 
 /** Own only the resulting bitmap: no source DOM, callbacks or capture observers. */
 function staticPixelSnapshot(raster: Raster): Raster {
@@ -76,7 +76,7 @@ const metrics = {
   retainedSnapshots: 0,
 };
 
-export function legacySceneTextureDiagnostics() {
+export function capturedSceneTextureDiagnostics() {
   return {
     ...metrics,
     retainedTextureBytes: retainedStaticSources.textureBytes,
@@ -96,16 +96,10 @@ function sourcesFor(root: HTMLElement) {
   return shared;
 }
 
-export function legacySceneTextureTextureBytes() {
+export function capturedSceneTextureTextureBytes() {
   return (
     retainedStaticSources.textureBytes +
     [...liveSources].reduce((sum, shared) => sum + shared.cache.textureBytes, 0)
-  );
-}
-
-function hasText(elements: readonly Element[]): boolean {
-  return elements.some(
-    (element) => element.content?.type === "text" || hasText(element.children),
   );
 }
 
@@ -113,23 +107,6 @@ function hasVideo(elements: readonly Element[]): boolean {
   return elements.some(
     (element) =>
       element.content?.type === "video" || hasVideo(element.children),
-  );
-}
-
-function hasDomEffects(
-  elements: readonly Element[],
-  resources: EffectResources,
-  ignoredEffectId?: string,
-): boolean {
-  return elements.some(
-    (element) =>
-      element.effects?.some(
-        (effect) =>
-          effect.id !== ignoredEffectId &&
-          effect.enabled &&
-          resources[effect.resourceId] &&
-          resources[effect.resourceId].kind !== "fragment-glsl",
-      ) || hasDomEffects(element.children, resources, ignoredEffectId),
   );
 }
 
@@ -149,10 +126,8 @@ function hasAnyEffects(
   );
 }
 
-/** Temporary implementation of SceneTexture using the existing primitive and
- * Chromium DOM-capture machinery. This module is the only production adapter
- * allowed to know those mechanisms for shader scene input. */
-export function createLegacySceneTextureProvider(
+/** Chromium owns scene pixels; only explicit scene-sampling GLSL mounts capture. */
+export function createCapturedSceneTextureProvider(
   request: SceneTextureRequest,
   context: SceneTextureContext,
 ): SceneTextureProvider {
@@ -217,7 +192,6 @@ export function createLegacySceneTextureProvider(
     stylesheet: string | undefined;
     resources: EffectResources;
     fonts: number;
-    dom: boolean;
     retain: boolean;
     semanticRevision: string;
     stableStyleKey: unknown;
@@ -254,13 +228,18 @@ export function createLegacySceneTextureProvider(
       stylesheet: scene?.deck.stylesheet,
       resources,
       fonts,
-      dom:
-        !!scene?.deck.stylesheet ||
-        hasText(elements) ||
-        hasDomEffects(elements, resources),
       retain,
       semanticRevision: retain
-        ? JSON.stringify([elements, scene!.deck.textStyles, fonts])
+        ? JSON.stringify([
+            request.kind,
+            request.elementId,
+            request.effectId,
+            context.element.frame,
+            elements,
+            request.kind === "backdrop" ? scene!.slide.background : null,
+            scene!.deck.textStyles,
+            fonts,
+          ])
         : "",
       stableStyleKey:
         context.refined && scene && !scene.deck.stylesheet && !effects
@@ -321,34 +300,6 @@ export function createLegacySceneTextureProvider(
       }
       if (!hidden) context.materializeEffect(dependency);
     }
-  };
-
-  const rasterContext = {
-    root: observationRoot,
-    get resources() {
-      return context.resources();
-    },
-    beforeEffect: request.effectId,
-    typographySource: context.scene ? () => context.scene!().deck : undefined,
-    flush: (dependency: HTMLElement) => context.materializeEffect(dependency),
-  };
-
-  const createPrimitiveRaster = (invalidate: () => void): PrimitiveRaster => {
-    if (request.kind === "backdrop") {
-      if (!context.scene)
-        throw new Error("Backdrop SceneTexture requires a slide scene.");
-      return createBackdropRasterSource(
-        context.element,
-        context.scene,
-        rasterContext,
-        invalidate,
-      );
-    }
-    return createElementRasterSource(
-      context.element,
-      rasterContext,
-      invalidate,
-    );
   };
 
   const createNativeRaster = (invalidate: () => void) =>
@@ -427,14 +378,14 @@ export function createLegacySceneTextureProvider(
     );
 
   const ensureLease = (sampling: SceneTextureSampling) => {
-    const { dom, retain, semanticRevision } = qualification();
+    const { retain, semanticRevision } = qualification();
     const key =
       request.kind +
       ":" +
       context.element.id +
       (request.kind === "element" && !retain ? ":" + request.effectId : "") +
       "|" +
-      (dom ? "dom" : "primitive") +
+      "chromium" +
       "|" +
       sampling.width +
       "x" +
@@ -447,11 +398,7 @@ export function createLegacySceneTextureProvider(
     if (key === leaseKey && lease?.isCurrent()) return;
     lease?.release();
     const cache = retain ? retainedStaticSources : shared.cache;
-    lease = cache.acquire(
-      key,
-      dom ? createNativeRaster : createPrimitiveRaster,
-      invalidateProvider,
-    );
+    lease = cache.acquire(key, createNativeRaster, invalidateProvider);
     leaseKey = key;
     leaseRetained = retain;
     if (retain && lease.reused && lease.source.revision > 0) {
@@ -528,15 +475,12 @@ export function createLegacySceneTextureProvider(
         }
         finishPreparation(version, key, activeLease);
       };
-      const result =
-        "backend" in raster
-          ? raster.update(
-              sampling.width,
-              sampling.height,
-              sampling.logicalWidth,
-              sampling.logicalHeight,
-            )
-          : raster.update(sampling.width, sampling.height);
+      const result = raster.update(
+        sampling.width,
+        sampling.height,
+        sampling.logicalWidth,
+        sampling.logicalHeight,
+      );
       if (result instanceof Promise) return result.then(completed);
       completed();
     };
@@ -577,7 +521,26 @@ export function createLegacySceneTextureProvider(
     return prepared instanceof Promise ? prepared.then(texture) : texture();
   };
 
-  const observer = new MutationObserver((records) => {
+  const relevantNode = (node: Node) => {
+    // Arbitrary selectors can depend on siblings outside the paint prefix.
+    if (context.scene?.().deck.stylesheet) return true;
+    qualification();
+    const target =
+      node instanceof globalThis.Element ? node : node.parentElement;
+    if (!target) return false;
+    // The target's world transform changes which prefix pixels it samples.
+    if (target === context.owner || target.contains(context.owner)) return true;
+    if (target === observationRoot || target.contains(observationRoot))
+      return true;
+    const owner = target.closest<HTMLElement>("[data-element-id]");
+    return (
+      request.kind !== "backdrop" ||
+      !!(owner && allowed.has(owner.dataset.elementId!))
+    );
+  };
+  const observer = new MutationObserver((allRecords) => {
+    const records = allRecords.filter((record) => relevantNode(record.target));
+    if (!records.length) return;
     if (records.some((record) => record.type !== "attributes"))
       qualificationDirty = true;
     const normalizedStyle = (value: string | null) =>
@@ -617,14 +580,19 @@ export function createLegacySceneTextureProvider(
     if (
       event.target instanceof Node &&
       event.target !== context.effectNode &&
-      observationRoot.contains(event.target)
+      observationRoot.contains(event.target) &&
+      relevantNode(event.target)
     )
       sourceChanged();
   };
-  observationRoot.addEventListener("load", sourceChanged, true);
-  observationRoot.addEventListener("loadeddata", sourceChanged, true);
-  observationRoot.addEventListener("seeked", sourceChanged, true);
-  observationRoot.addEventListener("timeupdate", sourceChanged, true);
+  const mediaChanged = (event: Event) => {
+    if (event.target instanceof Node && relevantNode(event.target))
+      sourceChanged();
+  };
+  observationRoot.addEventListener("load", mediaChanged, true);
+  observationRoot.addEventListener("loadeddata", mediaChanged, true);
+  observationRoot.addEventListener("seeked", mediaChanged, true);
+  observationRoot.addEventListener("timeupdate", mediaChanged, true);
   observationRoot.addEventListener("showme-effect-output", outputChanged);
 
   return {
@@ -635,10 +603,10 @@ export function createLegacySceneTextureProvider(
       if (disposed) return;
       disposed = true;
       observer.disconnect();
-      observationRoot.removeEventListener("load", sourceChanged, true);
-      observationRoot.removeEventListener("loadeddata", sourceChanged, true);
-      observationRoot.removeEventListener("seeked", sourceChanged, true);
-      observationRoot.removeEventListener("timeupdate", sourceChanged, true);
+      observationRoot.removeEventListener("load", mediaChanged, true);
+      observationRoot.removeEventListener("loadeddata", mediaChanged, true);
+      observationRoot.removeEventListener("seeked", mediaChanged, true);
+      observationRoot.removeEventListener("timeupdate", mediaChanged, true);
       observationRoot.removeEventListener(
         "showme-effect-output",
         outputChanged,

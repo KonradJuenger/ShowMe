@@ -1028,6 +1028,7 @@ export const SlideRenderer = memo(function SlideRenderer({
   deferImageUpdates = false,
   prepareVideo = false,
   effectClock,
+  visualPlayback = "live",
 }: {
   slide: Slide;
   deck: Deck;
@@ -1046,6 +1047,7 @@ export const SlideRenderer = memo(function SlideRenderer({
   deferImageUpdates?: boolean;
   prepareVideo?: boolean;
   effectClock?: EffectClockOrigins;
+  visualPlayback?: "live" | "static";
 }) {
   const resolved = useMemo(
     () => (templates ? resolveVisualSlide(deck, localSlide, templates) : null),
@@ -1100,8 +1102,21 @@ export const SlideRenderer = memo(function SlideRenderer({
       root,
       retain: deferImageUpdates || playing,
       envelopes,
+      staticFrame: visualPlayback === "static",
+      sceneRevision: slide,
+      deckRevision: deck,
     }),
-    [width, height, output, deferImageUpdates, playing, envelopes],
+    [
+      width,
+      height,
+      output,
+      deferImageUpdates,
+      playing,
+      envelopes,
+      visualPlayback,
+      slide,
+      deck,
+    ],
   );
   useMotionRuntime(
     root,
@@ -1109,6 +1124,9 @@ export const SlideRenderer = memo(function SlideRenderer({
     motionState,
     !!effectClock || !staticVideo,
     effectClock,
+    undefined,
+    undefined,
+    visualPlayback === "static",
   );
   const rasterScene = useRef({ slide, deck });
   rasterScene.current = { slide, deck };
@@ -1154,6 +1172,7 @@ export const SlideRenderer = memo(function SlideRenderer({
                 <div
                   ref={root}
                   className="slide-renderer"
+                  data-visual-playback={visualPlayback}
                   data-slide-id={slide.id}
                   style={{
                     position: "relative",
@@ -1165,6 +1184,14 @@ export const SlideRenderer = memo(function SlideRenderer({
                 >
                   {deck.stylesheet && (
                     <style>{`@scope (.slide-renderer) { ${deck.stylesheet} }`}</style>
+                  )}
+                  {visualPlayback === "static" && (
+                    <style>{`@scope (.slide-renderer[data-visual-playback="static"]) {
+                      :scope, :scope *, :scope::before, :scope::after,
+                      :scope *::before, :scope *::after {
+                        animation-play-state: paused !important;
+                      }
+                    }`}</style>
                   )}
                   {layerRoots(slide).map((root) => {
                     const layer = layers.get(root.id);

@@ -125,7 +125,7 @@ test("inherited shader clocks refresh captured stylesheet pixels after forward a
   }
 });
 
-test("unused, disabled and unrelated CSS effects preserve primitive content and backdrop sources", async ({
+test("unused, disabled and unrelated CSS effects preserve Chromium content and backdrop sources", async ({
   page,
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
@@ -273,7 +273,7 @@ test("excluded animations do not refresh a source while contributing animations 
   expect(result.pixel[2]).toBeGreaterThan(50);
 });
 
-test("a mounted backdrop switches from primitive capture when lower CSS is added", async ({
+test("a mounted Chromium backdrop refreshes when lower CSS is added", async ({
   page,
 }) => {
   await page.goto("/tests/helpers/effects-harness.html");
@@ -1718,7 +1718,7 @@ test("animated shader and text backdrop publishes completed captures during cont
     const { newEffectInstance } = (await import(
       /* @vite-ignore */ String("/src/core/effects.ts")
     )) as typeof import("../../../src/core/effects");
-    const { effectSurface } = (await import(
+    const { effectSurface, flushEffectSurfaces } = (await import(
       /* @vite-ignore */ String("/src/components/effectRuntime.ts")
     )) as typeof import("../../../src/components/effectRuntime");
     const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
@@ -1753,6 +1753,22 @@ test("animated shader and text backdrop publishes completed captures during cont
     const background = nodes[0],
       glass = nodes.at(-1)!;
     const before = Number(glass.dataset.effectRevision);
+    let locationQueries = 0;
+    const prototype = WebGL2RenderingContext.prototype;
+    const uniform = prototype.getUniformLocation,
+      attribute = prototype.getAttribLocation;
+    prototype.getUniformLocation = function (
+      ...args: Parameters<typeof uniform>
+    ) {
+      locationQueries++;
+      return uniform.apply(this, args);
+    };
+    prototype.getAttribLocation = function (
+      ...args: Parameters<typeof attribute>
+    ) {
+      locationQueries++;
+      return attribute.apply(this, args);
+    };
     await new Promise<void>((resolve) => {
       let frame = 0;
       const tick = () => {
@@ -1768,16 +1784,287 @@ test("animated shader and text backdrop publishes completed captures during cont
       };
       requestAnimationFrame(tick);
     });
+    prototype.getUniformLocation = uniform;
+    prototype.getAttribLocation = attribute;
     const result = {
+      locationQueries,
       before,
       after: Number(glass.dataset.effectRevision),
       visibility: glass.querySelector("canvas")!.style.visibility,
       error: glass.dataset.effectError,
     };
+    await harness.setVisualPlayback("static");
+    const frozen = Number(glass.dataset.effectRevision);
+    await new Promise<void>((resolve) => {
+      let frames = 0;
+      const tick = () => {
+        if (++frames < 30) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+    const afterStatic = Number(glass.dataset.effectRevision);
+    const gl = effectSurface(background)!.gpuContext()!;
+    const loss = gl.getExtension("WEBGL_lose_context")!;
+    await new Promise<void>((resolve) => {
+      gl.canvas.addEventListener("webglcontextlost", () => resolve(), {
+        once: true,
+      });
+      loss.loseContext();
+    });
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    await new Promise<void>((resolve) => {
+      gl.canvas.addEventListener("webglcontextrestored", () => resolve(), {
+        once: true,
+      });
+      loss.restoreContext();
+    });
+    await flushEffectSurfaces(harness.host);
+    const recovered = Number(glass.dataset.effectRevision);
+    const recoveryError = glass.dataset.effectError;
+    await harness.setVisualPlayback("live");
+    await new Promise<void>((resolve) => {
+      let frames = 0;
+      const tick = () => {
+        if (++frames < 30) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+    const resumed = Number(glass.dataset.effectRevision);
     harness.dispose();
-    return result;
+    return {
+      ...result,
+      frozen,
+      afterStatic,
+      resumed,
+      recovered,
+      recoveryError,
+    };
   });
   expect(result.error).toBeUndefined();
+  expect(result.locationQueries).toBe(0);
   expect(result.after).toBeGreaterThan(result.before + 2);
   expect(result.visibility).toBe("visible");
+  expect(result.afterStatic).toBe(result.frozen);
+  expect(result.resumed).toBeGreaterThan(result.afterStatic);
+  expect(result.recovered).toBeGreaterThan(result.afterStatic);
+  expect(result.recoveryError).toBeUndefined();
+});
+
+test("SceneTexture ignores later native changes and settles after relevant backdrop changes", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
+    const factoryPath = "/src/core/elementFactory.ts";
+    const texturePath = "/src/components/sceneTexture.ts";
+    const runtimePath = "/src/components/effectRuntime.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const {
+      sceneTextureDiagnostics,
+    }: typeof import("../../../src/components/sceneTexture") = await import(
+      /* @vite-ignore */ texturePath
+    );
+    const {
+      effectSurface,
+    }: typeof import("../../../src/components/effectRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
+    const before = sceneTextureDiagnostics();
+    const cleanup = { activeProviders: -1, activeSources: -1 };
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(model) {
+        const slide = model.slides[model.deck.slideIds[0]];
+        const lower = createBasicShape("lower", "rectangle", { x: 20, y: 20 });
+        lower.appearance.fill = "red";
+        const later = createBasicShape("later", "rectangle", { x: 400, y: 20 });
+        const glass = slide.nodes[0].children[1];
+        slide.nodes[0].children = [lower, glass, later];
+        delete model.deck.stylesheet;
+      },
+    });
+    const glass = harness.host.querySelector<HTMLElement>(
+      '[data-element-id="glass"] [data-effect-id]',
+    )!;
+    const flush = async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      await effectSurface(glass)!.flush();
+    };
+    try {
+      await flush();
+      const first = sceneTextureDiagnostics();
+      const later = harness.host.querySelector<HTMLElement>(
+        '[data-element-id="later"]',
+      )!;
+      later.style.opacity = "0.2";
+      later.append(document.createTextNode("unrelated"));
+      await flush();
+      const unrelated = sceneTextureDiagnostics();
+      const lower = harness.host.querySelector<HTMLElement>(
+        '[data-element-id="lower"]',
+      )!;
+      for (let i = 0; i < 8; i++) {
+        lower.style.opacity = String(0.2 + i / 10);
+        await flush();
+      }
+      const dynamic = sceneTextureDiagnostics();
+      for (let i = 0; i < 5; i++) await flush();
+      const settled = sceneTextureDiagnostics();
+      return {
+        firstCaptures: first.captures - before.captures,
+        unrelatedCaptures: unrelated.captures - first.captures,
+        dynamicCaptures: dynamic.captures - unrelated.captures,
+        settledCaptures: settled.captures - dynamic.captures,
+        activeProviders: settled.activeProviders - before.activeProviders,
+        cleanup,
+        errors: harness.inspect().errors,
+      };
+    } finally {
+      harness.dispose();
+      const after = sceneTextureDiagnostics();
+      cleanup.activeProviders = after.activeProviders - before.activeProviders;
+      cleanup.activeSources =
+        after.domRaster.activeSources - before.domRaster.activeSources;
+    }
+  });
+  expect(result.errors).toEqual([]);
+  expect(result.firstCaptures).toBe(1);
+  expect(result.unrelatedCaptures).toBe(0);
+  expect(result.dynamicCaptures).toBeGreaterThan(0);
+  expect(result.dynamicCaptures).toBeLessThanOrEqual(8);
+  expect(result.settledCaptures).toBe(0);
+  expect(result.activeProviders).toBe(1);
+  expect(result.cleanup).toEqual({ activeProviders: 0, activeSources: 0 });
+  await testInfo.attach("scene-texture-invalidation", {
+    body: JSON.stringify(result, null, 2),
+    contentType: "application/json",
+  });
+});
+
+test("retained Chromium backdrop keys track background and target sampling geometry", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const rows = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
+    const texturePath = "/src/components/sceneTexture.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      sceneTextureDiagnostics,
+    }: typeof import("../../../src/components/sceneTexture") = await import(
+      /* @vite-ignore */ texturePath
+    );
+    const rows = [];
+    let retainedModel:
+      import("../../../src/core/document").PresentationDocument | undefined;
+    for (const [background, x] of [
+      ["red", 0],
+      ["blue", 0],
+      ["blue", 50],
+      ["blue", 50],
+    ] as const) {
+      const before = sceneTextureDiagnostics();
+      const harness = await mountMixedEffectsHarness(
+        retainedModel,
+        0,
+        undefined,
+        {
+          configure(model) {
+            retainedModel = model;
+            const slide = model.slides[model.deck.slideIds[0]];
+            slide.background = background;
+            const glass = slide.nodes[0].children.find(
+              (element) => element.id === "glass",
+            )!;
+            glass.frame.x = x;
+            slide.nodes[0].children = [glass];
+            delete model.deck.stylesheet;
+          },
+        },
+      );
+      try {
+        const state = await harness.stage(0);
+        rows.push({
+          captures: sceneTextureDiagnostics().captures - before.captures,
+          errors: state.errors,
+        });
+      } finally {
+        harness.dispose();
+      }
+    }
+    return rows;
+  });
+  expect(rows.map((row) => row.errors)).toEqual([[], [], [], []]);
+  expect(rows.map((row) => row.captures)).toEqual([1, 1, 1, 0]);
+});
+
+test("static monitor playback pauses native CSS animation and resumes it without remounting", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const harness = await mountMixedEffectsHarness(undefined, 0, undefined, {
+      configure(model) {
+        const slide = model.slides[model.deck.slideIds[0]];
+        slide.nodes[0].children = [slide.nodes[0].children[0]];
+        slide.nodes[0].children[0].effects = [];
+        model.deck.stylesheet =
+          "@keyframes monitor-motion { to { opacity: 0.2; } } [data-text-content] { animation: monitor-motion 10s linear infinite; }";
+      },
+    });
+    try {
+      const text = harness.host.querySelector<HTMLElement>(
+        "[data-text-content]",
+      )!;
+      const initial = text.getAnimations().map((a) => a.playState);
+      await harness.setVisualPlayback("static");
+      const paused = text.getAnimations().map((a) => a.playState);
+      const before = text.getAnimations().map((a) => a.currentTime);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const after = text.getAnimations().map((a) => a.currentTime);
+      await harness.setVisualPlayback("live");
+      return {
+        initial,
+        paused,
+        before,
+        after,
+        resumed: text.getAnimations().map((a) => a.playState),
+        same: text === harness.host.querySelector("[data-text-content]"),
+      };
+    } finally {
+      harness.dispose();
+    }
+  });
+  expect(result.initial).toEqual(["running"]);
+  expect(result.paused).toEqual(["paused"]);
+  expect(result.after).toEqual(result.before);
+  expect(result.resumed).toEqual(["running"]);
+  expect(result.same).toBe(true);
 });

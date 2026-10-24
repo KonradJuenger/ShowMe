@@ -2,10 +2,10 @@ import type { Deck, Slide } from "../core/document";
 import type { Element } from "../core/element";
 import type { EffectResources } from "../core/effects";
 import {
-  createLegacySceneTextureProvider,
-  legacySceneTextureDiagnostics,
-  legacySceneTextureTextureBytes,
-} from "./sceneTextureLegacy";
+  createCapturedSceneTextureProvider,
+  capturedSceneTextureDiagnostics,
+  capturedSceneTextureTextureBytes,
+} from "./sceneTextureCapture";
 
 export type SceneTextureRequest =
   | {
@@ -34,14 +34,12 @@ export interface SceneTexture {
 
 export interface SceneTextureProvider {
   prepare(sampling: SceneTextureSampling): void | Promise<void>;
-  acquire(
-    sampling: SceneTextureSampling,
-  ): SceneTexture | Promise<SceneTexture>;
+  acquire(sampling: SceneTextureSampling): SceneTexture | Promise<SceneTexture>;
   invalidate(): void;
   dispose(): void;
 }
 
-/** Renderer-owned context used only to construct the temporary legacy adapter.
+/** Renderer-owned capture context, created only for explicit pixel consumers.
  * Consumers of SceneTexture never see raster/canvas/DOM-capture details. */
 export type SceneTextureContext = {
   effectNode: HTMLElement;
@@ -60,13 +58,13 @@ export function createSceneTextureProvider(
   request: SceneTextureRequest,
   context: SceneTextureContext,
 ): SceneTextureProvider {
-  return createLegacySceneTextureProvider(request, context);
+  return createCapturedSceneTextureProvider(request, context);
 }
 
 export function sceneTextureTextureBytes() {
-  return legacySceneTextureTextureBytes();
+  return capturedSceneTextureTextureBytes();
 }
 
 export function sceneTextureDiagnostics() {
-  return legacySceneTextureDiagnostics();
+  return capturedSceneTextureDiagnostics();
 }

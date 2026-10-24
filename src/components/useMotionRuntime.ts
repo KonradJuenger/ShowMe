@@ -3,7 +3,7 @@ import {
   endEffectClocks,
   type EffectClockOrigins,
 } from "../core/effectClocks";
-import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useLayoutEffect, useRef, useMemo, type RefObject } from "react";
 import { stageDuration } from "../core/motionModel";
 import type { Slide } from "../core/document";
 import type { MotionPreviewState } from "../core/motionPlayback";
@@ -37,12 +37,35 @@ function offsetsFor(slide: Slide) {
 export function useMotionRuntime(
   root: RefObject<HTMLDivElement | null>,
   slide: Slide,
-  state?: MotionPreviewState | null,
-  continuous = false,
+  inputState?: MotionPreviewState | null,
+  continuousInput = false,
   origins?: EffectClockOrigins,
   bindingTopology?: object | null,
   renderer?: MotionRenderSink,
+  staticFrame = false,
 ) {
+  const continuous = continuousInput && !staticFrame;
+  const staticMode = useRef(staticFrame);
+  staticMode.current = staticFrame;
+  const state = useMemo(
+    () =>
+      staticFrame && inputState
+        ? { ...inputState, running: false }
+        : inputState,
+    [inputState, staticFrame],
+  );
+  const staticKey = [
+    slide.id,
+    state?.stageIndex,
+    state?.time,
+    origins?.slideStartedAt,
+    origins?.stepStartedAt,
+    origins?.pausedAt,
+    staticFrame,
+  ].join(":");
+  const frozen = useRef({ key: staticKey, now: Date.now() });
+  if (frozen.current.key !== staticKey)
+    frozen.current = { key: staticKey, now: Date.now() };
   const hasOrigins = Boolean(origins);
   const origin = useRef({
     slideId: slide.id,
@@ -77,6 +100,7 @@ export function useMotionRuntime(
     transport = latest.current,
     now = Date.now(),
   ): EffectClocks => {
+    if (staticFrame) now = frozen.current.now;
     const preview = transport.state;
     if (!transport.origins && preview) {
       const stepTime =
@@ -144,6 +168,8 @@ export function useMotionRuntime(
         : [];
     });
     return () => {
+      // Suspending a monitor view is not an Effect clock end event.
+      if (staticMode.current) return;
       const endedAt =
         latest.current.slide.id !== transport.slide.id
           ? (latest.current.origins?.slideStartedAt ?? Date.now())
