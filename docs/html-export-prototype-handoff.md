@@ -1,9 +1,7 @@
 # HTML export prototype handoff
 
 Branch: `chatgpt/html-export-prototype`
-Verification PR: #21 (draft, CI only; do not merge)
-
-Status: implementation prototype only. No build, TypeScript check, lint, tests, Playwright, Electron run, browser run, packaging, or manual verification has been performed in this pass.
+Status: implementation prototype with a completed static source review. The review found and fixed several concrete integration defects. A real build, TypeScript check, lint, tests, Playwright, Electron run, browser run, packaging, and manual file verification still have not been run because this remote environment cannot clone the repository and connector-created GitHub events did not start the paused Actions workflow.
 
 ## Architecture
 
@@ -27,7 +25,10 @@ The exporter warns for:
 - missing media
 - managed font lookup failure
 - used non-portable fonts that could not be embedded
+- managed fonts referenced by visible authored CSS when they cannot be embedded
 - missing Effect resources
+- external CSS resources blocked by the offline CSP
+- audible video autoplay that a normal browser may reject
 - GLSL content/backdrop inputs that require Electron SceneTexture capture
 
 Generated GLSL and direct neutral image/video GLSL are intended to remain on the existing browser WebGL path.
@@ -45,15 +46,15 @@ Electron SceneTexture capture remains unsupported in ordinary browsers because `
 7. Verify unsupported SceneTexture Effects produce export warnings and fail visibly rather than silently producing wrong pixels.
 8. Verify large video behavior and Blob URL lifetime. The payload is parsed as JSON at startup, while binary media decoding is lazy.
 9. Verify managed font matching and FontFace installation for exact family/weight/italic combinations.
-10. Review initial presentation readiness. The prototype starts the canonical session with `waitForAudience=false`; unlike `AudienceOutput`, it does not currently perform the audience-ready preparation handshake before clocks begin.
+10. Verify the HTML host's audience-ready handshake: incoming slides wait for mounted image/video/effect readiness before canonical clocks and transitions are released.
 11. Review CSP behavior for Blob workers and authored Effect execution from a local HTML file.
 12. Check export serialization with hostile strings such as `</script>`, U+2028, and U+2029.
 
 ## Known prototype gaps / uncertainty
 
-- No audience-ready handshake or prewarming window equivalent to desktop `AudienceOutput`.
 - No HTML-specific prepared-image cache. The portable runtime deliberately renders embedded originals.
 - No browser SceneTexture provider.
-- Runtime build output naming/path behavior has not been checked against Vite 8 or packaged Electron/asar.
-- Cross-browser autoplay/fullscreen details have not been checked. The explicit Start interaction is intended to provide user activation.
-- The SceneTexture diagnostic mirrors the ordinary direct-media eligibility rules conservatively, but composition edge cases should be compared against the production renderer during verification.
+- Runtime build output and packaged Electron/asar paths have not been executed. The Vite 8 configuration was checked against current Vite/Rolldown documentation and uses `rolldownOptions.output.codeSplitting=false`.
+- Cross-browser autoplay/fullscreen behavior has not been executed. Audible autoplay has a fallback Play control and export warning.
+- CSS font discovery covers explicit `font-family` declarations, not every possible CSS `font` shorthand or computed stylesheet case.
+- The audience-ready host waits for mounted image/video/effect readiness, but does not implement the desktop prepared-image cache/prewarming window.
