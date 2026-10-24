@@ -4,6 +4,7 @@ import { effectPlacement } from "../core/effects";
 import { elementWorldTransform } from "./elementDomTransform";
 import { compositionPlanFor, prefixElements } from "./compositionPlan";
 import type { Deck, Slide } from "../core/document";
+import { getParentId } from "../core/scene";
 import { createDomRasterSource, domRasterDiagnostics } from "./domRaster";
 import { EffectSources } from "./effectSources";
 import type {
@@ -107,6 +108,53 @@ function hasVideo(elements: readonly Element[]): boolean {
   return elements.some(
     (element) =>
       element.content?.type === "video" || hasVideo(element.children),
+  );
+}
+
+/** Missing/loading media may change without a semantic document revision. */
+function imageInputsReady(elements: readonly Element[], root: HTMLElement) {
+  const unresolved = new Set<string>();
+  const visit = (elements: readonly Element[]) => {
+    for (const element of elements) {
+      if (element.content?.type === "image" || element.content?.type === "svg")
+        unresolved.add(element.id);
+      visit(element.children);
+    }
+  };
+  visit(elements);
+  if (!unresolved.size) return true;
+  for (const image of root.querySelectorAll("img")) {
+    if (!image.complete || !image.naturalWidth) continue;
+    const owner = image.closest<HTMLElement>("[data-element-id]");
+    if (owner) unresolved.delete(owner.dataset.elementId!);
+  }
+  return !unresolved.size;
+}
+
+function hasRelevantMotion(
+  slide: Slide,
+  elements: readonly Element[],
+  targetId: string,
+) {
+  const dependencies = new Set<string>();
+  const visit = (elements: readonly Element[]) => {
+    for (const element of elements) {
+      dependencies.add(element.id);
+      visit(element.children);
+    }
+  };
+  visit(elements);
+  // Target/ancestor Motion can change the sampled viewport or inherited paint.
+  for (let id: string | null = targetId; id; id = getParentId(slide, id))
+    dependencies.add(id);
+  return (
+    slide.motion?.stages.some(
+      (stage) =>
+        stage.tracks.some((track) => dependencies.has(track.elementId)) ||
+        stage.blocks?.some(
+          (block) => block.binding && dependencies.has(block.binding.elementId),
+        ),
+    ) ?? false
   );
 }
 
@@ -218,9 +266,10 @@ export function createCapturedSceneTextureProvider(
       context.refined &&
       scene &&
       !scene.deck.stylesheet &&
-      !scene.slide.motion &&
+      !hasRelevantMotion(scene.slide, elements, context.element.id) &&
       !hasVideo(elements) &&
-      !effects
+      !effects &&
+      imageInputsReady(elements, context.inputRoot)
     );
     qualified = {
       slide: scene?.slide,
@@ -467,6 +516,9 @@ export function createCapturedSceneTextureProvider(
           activeLease.isCurrent() &&
           activeLease.source === raster &&
           leaseRetained &&
+          dirtyVersion === version &&
+          qualification().retain &&
+          imageInputsReady(resolveInputElements(), context.inputRoot) &&
           !raster.immutable &&
           raster.revision > 0
         ) {
@@ -541,7 +593,15 @@ export function createCapturedSceneTextureProvider(
   const observer = new MutationObserver((allRecords) => {
     const records = allRecords.filter((record) => relevantNode(record.target));
     if (!records.length) return;
-    if (records.some((record) => record.type !== "attributes"))
+    if (
+      records.some(
+        (record) =>
+          record.type !== "attributes" ||
+          ["src", "srcset", "sizes", "data-media-loading"].includes(
+            record.attributeName ?? "",
+          ),
+      )
+    )
       qualificationDirty = true;
     const normalizedStyle = (value: string | null) =>
       (value ?? "")
@@ -586,10 +646,13 @@ export function createCapturedSceneTextureProvider(
       sourceChanged();
   };
   const mediaChanged = (event: Event) => {
-    if (event.target instanceof Node && relevantNode(event.target))
+    if (event.target instanceof Node && relevantNode(event.target)) {
+      if (event.target instanceof HTMLImageElement) qualificationDirty = true;
       sourceChanged();
+    }
   };
   observationRoot.addEventListener("load", mediaChanged, true);
+  observationRoot.addEventListener("error", mediaChanged, true);
   observationRoot.addEventListener("loadeddata", mediaChanged, true);
   observationRoot.addEventListener("seeked", mediaChanged, true);
   observationRoot.addEventListener("timeupdate", mediaChanged, true);
@@ -604,6 +667,7 @@ export function createCapturedSceneTextureProvider(
       disposed = true;
       observer.disconnect();
       observationRoot.removeEventListener("load", mediaChanged, true);
+      observationRoot.removeEventListener("error", mediaChanged, true);
       observationRoot.removeEventListener("loadeddata", mediaChanged, true);
       observationRoot.removeEventListener("seeked", mediaChanged, true);
       observationRoot.removeEventListener("timeupdate", mediaChanged, true);

@@ -1043,5 +1043,16 @@
     "created": "2026-10-23",
     "lastReviewed": "2026-10-23",
     "reason": "Painted-pixel continuity across image/shader-backed Presence entrance, exit, nested groups, overlaps and backward seeks; injected disappearance and missing blur must be detected. Electron presentation subscription acknowledges every fixture state and detects hidden elements, missing blur, blank shader layers, alpha jumps and stale output. Acknowledged capture is not a claim of full-rate display coverage. Also covers natural-rate sampled presentation continuity with explicit capture gaps, capture-free native frame pacing, captured seek latency, bounded overlap error, and a moving VP9 video plus JS text."
+  },
+  {
+    "id": "effects-scene-texture-retention",
+    "path": "tests/feature/effects/scene-texture-retention.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Retained Chromium pixels exclude unresolved image/SVG inputs; a missing asset arriving while every provider is unmounted refreshes content and backdrop GLSL without document edits. Retention follows native source/target/ancestor Motion and Presence dependencies while unrelated later animation preserves cached revisits."
   }
 ]

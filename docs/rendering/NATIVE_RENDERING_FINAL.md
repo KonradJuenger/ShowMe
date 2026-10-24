@@ -37,8 +37,10 @@ captures publish, avoiding starvation. Intermediate source invalidations coalesc
 there is no per-frame work queue. Completed pixels may be one capture behind a
 changing scene; continuous native-prefix capture remains expensive.
 
-Static, effect-free inputs without video, slide Motion or arbitrary deck CSS can
-retain a pixel-only snapshot after capture. The bounded eight-entry LRU releases
+Static, effect-free inputs without video, relevant Motion/Presence or arbitrary
+deck CSS can retain a pixel-only snapshot after capture. Every sampled image/SVG
+must resolve to a complete native image with nonzero intrinsic width; missing/loading media
+never enters the retained LRU. The bounded eight-entry LRU releases
 DOM mirrors, callbacks and observers belonging to cached sources. Semantic keys
 include input identity, elements, typography, fonts, dimensions and backdrop
 background. Revisits reuse pixels without capture. Font completion invalidates
@@ -228,4 +230,37 @@ npx vitest run
 Final video source follow-up: `a784536`. Its build, typecheck, changed-file ESLint,
 four focused browser contracts and updated registry audit passed. No document,
 asset, persistence, collaboration or animation formats changed. Research refs and
-main remain unchanged; nothing was pushed or merged.
+main remain unchanged; no integration into main is included.
+
+## Retention review follow-up
+
+- P1: missing/loading image or SVG dependencies disqualify retained static pixels.
+  This avoids caching a placeholder while a shared/LAN asset is absent, so arrival
+  while all providers are unmounted cannot reuse that placeholder on reopening.
+  Image load/error and source/readiness mutations requalify mounted providers.
+  Completion rechecks readiness and only detaches a stable capture generation.
+  No global asset observer, second cache schema or persistence path is added.
+- P2: retention checks the sampled element prefix/subtree plus the shader target
+  and its ancestors against canonical Motion tracks and Presence/Effect bindings.
+  Later unrelated animation no longer disables static reuse. Relevant source,
+  target and ancestor animation remains conservative. No animation clock is added.
+- Presenter/editor previews retain the reviewed static-playback product behavior.
+
+The new `scene-texture-retention.spec.ts` reproduces both original failures. It
+checks a missing asset arriving while every provider is unmounted, unchanged
+document data, fresh content/backdrop pixels after reopening, and cache reuse for
+unrelated Motion/Presence versus rejection for source/target/ancestor animation.
+These are correctness/cache-lifetime changes; no new FPS benchmark is claimed.
+
+Follow-up verification:
+
+- `npm run typecheck`, `npm run build`, and changed-file ESLint: passed.
+- With `SHOWME_TEST_FILES` selecting `renderer-architecture.test.ts`,
+  `execution-graph.test.ts`, `render-sampling.test.ts`, and
+  `motion/presence.test.ts`: `npx vitest run`, 47 passed.
+- `SHOWME_TEST_FILES='["tests/feature/effects/scene-texture-retention.spec.ts","tests/feature/effects/mixed-compositing.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'
+  then `npx playwright test --output test-results-scene-texture-review-regression`:
+  29 passed, including both audience-navigation declarations.
+- `npm run test:stats`, `npm run test:audit`, and `git diff --check`: passed.
+- Earlier Electron results and their recorded timing limitation remain as above;
+  no full/release or additional performance runs were required for this follow-up.
