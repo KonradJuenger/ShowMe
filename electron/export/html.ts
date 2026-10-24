@@ -198,7 +198,7 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
       resources,
     );
     const opacity = nativeOpacityPlan(
-      slide.nodes.flatMap((root) => root.children),
+      visibleLayerNodes(document, slide).flatMap((root) => root.children),
       resources,
       document.deck.stylesheet,
     );
