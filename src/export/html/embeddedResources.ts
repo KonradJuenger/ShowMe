@@ -33,7 +33,10 @@ export class EmbeddedRenderResources implements RenderResources {
     this.assets = new Map(assets.map((asset) => [asset.id, asset]));
   }
 
-  async assetUrl(id: string): Promise<string | null> {
+  async assetUrl(id: string, preview = false): Promise<string | null> {
+    // Electron previews are separate cached poster images. The portable deck
+    // embeds originals only, so let the existing video-poster path capture one.
+    if (preview) return null;
     const existingUrl = this.assetUrls.get(id);
     if (existingUrl) {
       const existing = this.urls.get(existingUrl);
