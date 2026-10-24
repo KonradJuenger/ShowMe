@@ -2068,3 +2068,81 @@ test("static monitor playback pauses native CSS animation and resumes it without
   expect(result.resumed).toEqual(["running"]);
   expect(result.same).toBe(true);
 });
+
+test("stable native styles keep video SceneTexture inputs live and reuse paused pixels", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const rasterPath = "/src/components/domRaster.ts";
+    const {
+      createDomRasterSource,
+    }: typeof import("../../../src/components/domRaster") = await import(
+      /* @vite-ignore */ rasterPath
+    );
+    const root = document.createElement("div");
+    root.style.cssText = "width:160px;height:90px";
+    const video = document.createElement("video");
+    video.src = "/tests/fixtures/media/native-motion.webm";
+    video.muted = true;
+    video.loop = true;
+    video.style.cssText = "width:160px;height:90px";
+    root.append(video);
+    document.body.append(root);
+    let invalidations = 0;
+    const stable = {};
+    const source = createDomRasterSource(
+      () => root,
+      () => true,
+      () => {},
+      () => invalidations++,
+      async () => {},
+      undefined,
+      true,
+      () => stable,
+    );
+    const tick = () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    try {
+      await source.update(160, 90, 160, 90);
+      const before = source.revision;
+      const beforeInvalidations = invalidations;
+      await video.play();
+      await new Promise<void>((resolve) =>
+        video.requestVideoFrameCallback(() => resolve()),
+      );
+      for (let i = 0; i < 8; i++) {
+        await tick();
+        await source.update(160, 90, 160, 90);
+      }
+      const playing = source.revision;
+      const playingInvalidations = invalidations - beforeInvalidations;
+      video.pause();
+      await tick();
+      await source.update(160, 90, 160, 90);
+      await tick();
+      await source.update(160, 90, 160, 90);
+      const paused = source.revision;
+      for (let i = 0; i < 4; i++) {
+        await tick();
+        await source.update(160, 90, 160, 90);
+      }
+      return {
+        before,
+        playing,
+        playingInvalidations,
+        paused,
+        settled: source.revision,
+      };
+    } finally {
+      source.dispose();
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      root.remove();
+    }
+  });
+  expect(result.playingInvalidations).toBeGreaterThan(0);
+  expect(result.playing).toBeGreaterThan(result.before);
+  expect(result.settled).toBe(result.paused);
+});

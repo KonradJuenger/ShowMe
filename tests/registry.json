@@ -162,7 +162,7 @@
     "runtime": "browser",
     "created": "2026-10-12",
     "lastReviewed": "2026-10-24",
-    "reason": "Chromium SceneTexture content/backdrop pixel parity, CSS/JS/media/clock dependencies, fractional zoom and target geometry, static retention and font invalidation, unrelated-prefix isolation, dynamic capture settling and teardown, native static monitor animation suspension, direct media and shader handoff, bounded cohorts and context restoration. No primitive scene replay or GPU prefix reconstruction."
+    "reason": "Chromium SceneTexture content/backdrop pixel parity, CSS/JS/media/clock dependencies, fractional zoom and target geometry, static retention and font invalidation, unrelated-prefix isolation, dynamic capture settling and teardown, native static monitor animation suspension, direct media and shader handoff, bounded cohorts and context restoration. No primitive scene replay or GPU prefix reconstruction. Stable CSS declaration caching cannot suppress live video polling; pause/end/seek events wake and settle capture."
   },
   {
     "id": "editor-scale-properties",
