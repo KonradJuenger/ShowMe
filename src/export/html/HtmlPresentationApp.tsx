@@ -142,7 +142,8 @@ export function HtmlPresentationApp({
     setStarting(true);
     setError("");
     try {
-      await resources.installFonts();
+      const fontWarnings = await resources.installFonts();
+      if (fontWarnings.length) setError(fontWarnings.join("\n"));
       setState(
         startSession(
           { deckId: deck.id, slideIds: [], index: null },
