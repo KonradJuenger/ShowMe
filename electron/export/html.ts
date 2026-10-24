@@ -62,10 +62,26 @@ function visibleElements(
 
 function externalCssUrl(source: string | undefined) {
   if (!source) return null;
-  const match = source.match(
-    /(?:https?:\/\/|file:|url\(\s*["']?\/\/)[^)"'\s]*/i,
-  );
-  return match?.[0]?.trim() ?? null;
+  for (const match of source.matchAll(/url\(\s*(?:["']([^"']+)["']|([^)]*))\s*\)/gi)) {
+    const value = (match[1] ?? match[2] ?? "").trim();
+    if (!value || /^data:/i.test(value) || value.startsWith("#")) continue;
+    return value;
+  }
+  const imported = source.match(/@import\s+["']([^"']+)["']/i)?.[1]?.trim();
+  return imported || null;
+}
+
+function externalSvgUrl(source: string) {
+  const cssReference = externalCssUrl(source);
+  if (cssReference) return cssReference;
+  for (const match of source.matchAll(
+    /(?:href|src)\s*=\s*["']([^"']+)["']/gi,
+  )) {
+    const value = match[1].trim();
+    if (!value || /^data:/i.test(value) || value.startsWith("#")) continue;
+    return value;
+  }
+  return null;
 }
 
 function browserCapabilityWarnings(
@@ -478,10 +494,22 @@ export async function createHtmlExport({
         });
       continue;
     }
+    const bytes = await fs.readFile(source.file);
+    if (source.mime === "image/svg+xml") {
+      const reference = externalSvgUrl(bytes.toString("utf8"));
+      if (reference)
+        for (const occurrence of occurrences)
+          warnings.push({
+            ...occurrence,
+            code: "svg-external-resource-blocked",
+            message:
+              `SVG media references a non-embedded resource (${reference}). Portable HTML exports contain no sibling resources and block external file/network access.`,
+          });
+    }
     assets.push({
       id: assetId,
       mime: source.mime,
-      data: (await fs.readFile(source.file)).toString("base64"),
+      data: bytes.toString("base64"),
     });
   }
 
