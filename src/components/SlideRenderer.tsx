@@ -120,6 +120,7 @@ function VideoView({
   const [presented, setPresented] = useState(false);
   const [ready, setReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
 
   useEffect(() => {
     // Reuse cached posters; playback and warmup capture missing frames below.
@@ -141,6 +142,7 @@ function VideoView({
     setReady(false);
     setPresented(false);
     setIsPlaying(false);
+    setAutoplayBlocked(false);
     if (!loadVideo || !url) {
       node.pause();
       node.removeAttribute("src");
@@ -254,7 +256,10 @@ function VideoView({
       return;
     }
     if (ready && contentRef.current.autoplay && editorPlayback !== "trim")
-      void node.play().catch(() => {});
+      void node.play().then(
+        () => setAutoplayBlocked(false),
+        () => setAutoplayBlocked(true),
+      );
   }, [activePlayback, loadVideo, ready, editorPlayback]);
 
   const previousTrim = useRef({
@@ -339,7 +344,10 @@ function VideoView({
       objectFit: "fill",
       visibility: activePlayback ? "visible" : "hidden",
     });
-    const play = () => setIsPlaying(true),
+    const play = () => {
+        setIsPlaying(true);
+        if (content.autoplay) setAutoplayBlocked(false);
+      },
       pause = () => setIsPlaying(false);
     const update = () => enforceEnd(node);
     const ended = () => {
@@ -404,7 +412,10 @@ function VideoView({
       {loadVideo && (
         <div ref={videoHost} style={{ width: "100%", height: "100%" }} />
       )}
-      {presentation && !staticVideo && !content.autoplay && ready && (
+      {presentation &&
+        !staticVideo &&
+        ready &&
+        (!content.autoplay || autoplayBlocked) && (
         <button
           className="movie-click-to-play"
           style={{ zIndex: 2 }}
