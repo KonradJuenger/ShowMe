@@ -248,7 +248,7 @@ export function HtmlPresentationApp({
               if (!slide) return null;
               return (
                 <HtmlSlide
-                  key={id}
+                  key={`${id}:${state.restartToken ?? 0}`}
                   slide={slide}
                   deck={deck}
                   active={id === activeId}
