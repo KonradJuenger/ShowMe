@@ -68,6 +68,33 @@ function externalCssUrl(source: string | undefined) {
   return match?.[0]?.trim() ?? null;
 }
 
+function browserCapabilityWarnings(
+  document: ExportDocument,
+  slideIds: Set<string>,
+) {
+  const warnings: ExportWarning[] = [];
+  for (const slide of document.slides) {
+    if (!slideIds.has(slide.id)) continue;
+    for (const element of visibleElements(document, slide)) {
+      const content = element.content;
+      if (
+        content?.type === "video" &&
+        content.autoplay &&
+        !content.mute &&
+        content.volume > 0
+      )
+        warnings.push({
+          slideId: slide.id,
+          elementId: element.id,
+          code: "browser-autoplay-may-require-interaction",
+          message:
+            "This video autoplays with audible audio. Standard browser autoplay policy may block it; the HTML runtime will show a Play control when that happens.",
+        });
+    }
+  }
+  return warnings;
+}
+
 function externalCssWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   const deckReference = externalCssUrl(document.deck.stylesheet);
@@ -409,6 +436,7 @@ export async function createHtmlExport({
   const warnings: ExportWarning[] = [
     ...sceneTextureWarnings(document, slideIds),
     ...externalCssWarnings(document, slideIds),
+    ...browserCapabilityWarnings(document, slideIds),
   ];
   const assetOccurrences = new Map<
     string,
