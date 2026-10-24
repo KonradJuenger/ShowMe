@@ -108,6 +108,84 @@ function externalCssWarnings(document: ExportDocument, slideIds: Set<string>) {
   return warnings;
 }
 
+type CssFontReference = {
+  family: string;
+  slideId: string;
+  elementId?: string;
+};
+
+const genericCssFonts = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "emoji",
+  "math",
+  "fangsong",
+]);
+
+function fontFamiliesFromCss(source: string | undefined) {
+  if (!source) return [];
+  const families: string[] = [];
+  for (const match of source.matchAll(/font-family\s*:\s*([^;{}]+)/gi)) {
+    for (const raw of match[1].split(",")) {
+      const family = raw
+        .replace(/!important\s*$/i, "")
+        .trim()
+        .replace(/^(['"])(.*)\1$/, "$2")
+        .trim();
+      if (
+        family &&
+        !family.includes("var(") &&
+        !genericCssFonts.has(family.toLowerCase())
+      )
+        families.push(family);
+    }
+  }
+  return families;
+}
+
+function cssFontReferences(
+  document: ExportDocument,
+  slideIds: Set<string>,
+): CssFontReference[] {
+  const references: CssFontReference[] = [];
+  const firstSlide =
+    document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown";
+  for (const family of fontFamiliesFromCss(document.deck.stylesheet))
+    references.push({ family, slideId: firstSlide });
+  for (const slide of document.slides) {
+    if (!slideIds.has(slide.id)) continue;
+    const resources = slide.effectResources ?? {};
+    for (const element of visibleElements(document, slide)) {
+      for (const instance of element.effects ?? []) {
+        if (!instance.enabled) continue;
+        const effect = resources[instance.resourceId];
+        if (!effect) continue;
+        const source =
+          effect.kind === "css"
+            ? effect.source
+            : effect.kind === "text-js"
+              ? effect.styleSource
+              : undefined;
+        for (const family of fontFamiliesFromCss(source))
+          references.push({
+            family,
+            slideId: slide.id,
+            elementId: element.id,
+          });
+      }
+    }
+  }
+  return references;
+}
+
 function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   for (const slide of document.slides) {
@@ -196,6 +274,7 @@ function selectFonts(
       nodes: visibleLayerNodes(document, slide),
     }));
   const usages = collectUsedFontUsages(visibleSlides, document.deck);
+  const cssReferences = cssFontReferences(document, slideIds);
   const selected: HtmlEmbeddedFontFamily[] = [];
   const bundled: FontUsage[] = [];
   for (const family of families) {
@@ -205,13 +284,21 @@ function selectFonts(
           sensitivity: "base",
         }) === 0,
     );
-    if (!required.length) continue;
-    const sources = (family.sources ?? []).filter((source) =>
-      required.some(
-        (usage) =>
-          usage.weight === source.weight && usage.italic === source.italic,
-      ),
+    const cssRequired = cssReferences.some(
+      (reference) =>
+        reference.family.localeCompare(family.family, undefined, {
+          sensitivity: "base",
+        }) === 0,
     );
+    if (!required.length && !cssRequired) continue;
+    const sources = cssRequired
+      ? (family.sources ?? [])
+      : (family.sources ?? []).filter((source) =>
+          required.some(
+            (usage) =>
+              usage.weight === source.weight && usage.italic === source.italic,
+          ),
+        );
     if (!sources.length) continue;
     selected.push({
       family: family.family,
@@ -231,12 +318,45 @@ function selectFonts(
       })),
     );
   }
-  const warnings = nonPortableFontFamilies(usages, bundled).map((family) => ({
+  const warnings: ExportWarning[] = nonPortableFontFamilies(
+    usages,
+    bundled,
+  ).map((family) => ({
     ...fontOccurrence(document, slideIds, family),
     code: "font-not-embedded",
     message:
       `Font "${family}" could not be embedded from ShowMe's managed font resources. The HTML export will rely on that font being installed on the viewing computer.`,
   }));
+  for (const reference of cssReferences) {
+    const embedded = bundled.some(
+      (face) =>
+        face.family.localeCompare(reference.family, undefined, {
+          sensitivity: "base",
+        }) === 0,
+    );
+    if (embedded) continue;
+    if (
+      ["arial", "times new roman", "courier new"].includes(
+        reference.family.toLowerCase(),
+      )
+    )
+      continue;
+    if (
+      warnings.some(
+        (warning) =>
+          warning.code === "font-not-embedded" &&
+          warning.message.includes(`"${reference.family}"`),
+      )
+    )
+      continue;
+    warnings.push({
+      slideId: reference.slideId,
+      elementId: reference.elementId,
+      code: "stylesheet-font-not-embedded",
+      message:
+        `CSS references font "${reference.family}", but ShowMe has no embeddable managed font data for it. The HTML export will rely on that font being installed on the viewing computer.`,
+    });
+  }
   return { fonts: selected, warnings };
 }
 
