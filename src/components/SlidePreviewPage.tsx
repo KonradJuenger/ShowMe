@@ -364,6 +364,7 @@ export function installSlidePreviewPage() {
         if (
           element.content?.type === "video" &&
           !(await videoPoster(
+            platform,
             element.content.assetId,
             element.content.startTime,
           ))
