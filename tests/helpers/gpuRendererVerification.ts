@@ -153,7 +153,17 @@ void main() { outColor = texture(u_input, v_uv); }`,
   lens.effects = [newEffectInstance("identity", definition, "overlay")];
   const later = shape("later", "#00ff00", 10);
   slide.nodes[0].children = [lens, later];
+  // Probe a coordinate covered by later green paint, publishing elsewhere so
+  // later paint cannot hide a wrong input. Own red and later green both fail.
+  definition.source = definition.source.replace(
+    "texture(u_input, v_uv)",
+    "texture(u_input, vec2(0.05, 0.5))",
+  );
   const elementEntry = await render();
+  definition.source = definition.source.replace(
+    "texture(u_input, vec2(0.05, 0.5))",
+    "texture(u_input, v_uv)",
+  );
   lens.appearance.fill = null;
   const prior = shape("prior", "#ff0000");
   const group = createContainerElement("parent", [prior, lens], { x: 0, y: 0 });
@@ -162,6 +172,19 @@ void main() { outColor = texture(u_input, v_uv); }`,
   group.clipChildren = true;
   slide.nodes[0].children = [group];
   const nestedOpacity = await render();
+  const outer = createContainerElement("outer", [group], { x: 2.25, y: 1.5 });
+  outer.frame.width = outer.frame.height = 100;
+  outer.frame.rotation = 7;
+  outer.frame.scaleX = 0.9;
+  outer.appearance.opacity = 0.7;
+  outer.clipChildren = true;
+  group.frame.rotation = -5;
+  group.frame.x = 4.5;
+  group.frame.y = 3.5;
+  slide.nodes[0].children = [outer];
+  const nestedTransforms = await render();
+  group.frame.rotation = group.frame.x = group.frame.y = 0;
+  slide.nodes[0].children = [group];
   group.frame.width = 30;
   definition.source = definition.source.replace(
     "texture(u_input, v_uv)",
@@ -186,5 +209,11 @@ void main() { outColor = texture(u_input, v_uv); }`,
   ];
   slide.nodes[0].children = [chained];
   const contentChain = await render();
-  return { elementEntry, nestedOpacity, ancestorClip, contentChain };
+  return {
+    elementEntry,
+    nestedOpacity,
+    nestedTransforms,
+    ancestorClip,
+    contentChain,
+  };
 }

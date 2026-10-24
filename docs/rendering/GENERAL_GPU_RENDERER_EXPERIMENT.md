@@ -680,6 +680,11 @@ This section records the first runnable implementation pass on
 `research/general-gpu-renderer`. It deliberately does not change the production
 renderer and does not revive PR #19 Phase 4 SceneTexture reconstruction.
 
+This is a historical implementation description, not verified evidence. The local
+audit below found and corrected backdrop-prefix and render-target reuse bugs.
+The **Local hardware verification** section supersedes the original launch,
+benchmark and correctness claims.
+
 ### Implemented facts
 
 The prototype lives under `src/experiments/gpu-renderer/` and is exercised only
@@ -909,10 +914,10 @@ The repository Playwright browser configuration already launches Chromium with
 
 ### Radeon 880M / D3D11 benchmark procedure
 
-The browser spec contains an explicitly skipped 1920 × 1080 manual benchmark. It
-uses the same renderer and scene, disables the comparison `SlideRenderer`, keeps
-native text at its authored raster resolution and does not downscale the GPU
-scene to obtain a better result.
+The original conditional browser benchmark has been replaced by an always-running
+short correctness check and a standalone production Electron measurement runner.
+The original browser command below is historical; use
+`node scripts/benchmark-general-gpu.mjs` for hardware measurements.
 
 Run on the reference Windows machine:
 
@@ -985,3 +990,261 @@ The architectural question remains open until those hardware measurements and
 native-surface semantics are validated. This pass shows that transforms, nesting,
 rectangular clipping, group opacity and backdrop input can be represented as
 ordinary graph operations without Phase 4-style scene-pattern qualification.
+
+## Local hardware verification — 2026-10-24
+
+### Implemented
+
+Audited original experiment `a1d4ba7` against Phase 3 base `22836e6`, including
+every changed implementation/test file and the production composition plan,
+Element/media transforms, Effects/runtime, Motion/Presence, TextView and
+SceneTexture adapters. Production source and existing architecture tests are
+unchanged. `main` remains `a699fbd`; no merge, push or CI change was made.
+
+The scene actually includes generated animated GLSL, three Chromium text
+sources, an asymmetric PNG using Fill, a rotated clipped group containing text
+and a shape at opacity 0.56, a backdrop lens, moving text and a final backdrop
+shader. A separate pixel probe exercises **two nested groups** with fractional
+translation, rotation, nonuniform scale, clipping and opacity. Video is a
+separate direct-upload smoke, not part of the measured layered scene.
+
+Narrow fixes in measured revision `256dd1ae65de042b87500381088b83c1d5b8ad07`:
+
+- Preserve the current/preceding frame's render-target working set. Previously
+  72 fixed-bounds frames caused 864 unnecessary target resizes (48 → 912), even
+  though the object count stayed bounded. Older idle targets remain recyclable
+  across changing dimensions. Frame-final cleanup also releases transient leases
+  after failures.
+- Backdrop input excludes the target element's own fill and earlier Effects,
+  honoring v1 **element-entry**, rather than sampling its current local paint.
+- Reconstruct unfinished ancestors inside out, preserving ancestor clipping and
+  opacity instead of flattening each ancestor into the scene at opacity 1.
+- Add a separate successful final-output submission counter. Measure full-window
+  deltas and interval distributions; rolling diagnostics alone are insufficient.
+- Replace the conditional skipped browser benchmark with an executable short
+  check; regenerate previously stale test statistics. Add the production-bundled
+  Electron runner without adding a product switch or another renderer path.
+
+No compile/type repair was needed. These are executor/verification fixes, not a
+new architecture or expanded CSS implementation.
+
+### Verified correctness
+
+Four experiment browser declarations pass. GPU output matches the current
+Chromium renderer for element-entry exclusion (including later green paint at
+the sampled coordinate), ancestor opacity, clipping outside an ancestor frame,
+two transformed nested groups and a two-stage content shader chain. The content
+probe inverts twice, so sampling the original input twice cannot pass.
+
+On production Electron, initial prefix probes matched exactly: blue element-entry
+and clip inputs `[0,0,255,255]`, nested-opacity output `[64,0,191,255]`, and red
+content-chain output `[255,0,0,255]`. The deeper transformed/later-paint probes
+were subsequently added and passed in focused Chromium verification, with a
+four-channel-unit tolerance against the unchanged production renderer.
+
+At audience density, the 640×360 static comparison has mean absolute RGBA channel
+error **1.277/255**, mean alpha error **0**, across 1027×578 raster pixels.
+[Inspected side-by-side screenshot](evidence/general-gpu-static-parity-2026-10-24.png).
+Text layout/wrapping, image orientation/Fill crop, relative transforms, group alpha,
+clipping and effect order look consistent in this scene. Rotated/fractional edges
+show different smoothing: expected sampling differences (category 2), because
+the GPU prototype uses unmultisampled intermediate targets. This is not proof
+of arbitrary CSS, typography or cross-DPR pixel parity. The actual backdrop
+discrepancies discovered before the fixes were implementation bugs (category 1).
+
+Raster-cache audit, 90 GPU publications per phase:
+
+| Phase | Native raster count before → after |
+| --- | --- |
+| Text translation | 3 → 3 |
+| Text rotation | 3 → 3 |
+| Text scale X | 3 → 3 |
+| Text scale Y | 3 → 3 |
+| Parent/group rotation | 3 → 3 |
+| Group opacity | 3 → 3 |
+| Change text | 3 → 4 |
+| Change typography to Courier New | 4 → 5 |
+| Change native text-shadow CSS | 5 → 6 |
+| Real local FontFace load/completion, after restoring original text/style | 7 → 10 |
+
+All six transform-only phases also had zero source uploads. The font completion
+event invalidated all three native surfaces. Publications continued throughout.
+This validates the cache separation; it does not validate animated arbitrary CSS.
+
+### Measured performance
+
+Reproducible launch/measurement command:
+
+```powershell
+node scripts/benchmark-general-gpu.mjs
+```
+
+The runner creates an optimized Vite production bundle in `.agenttmp/general-gpu`,
+serves it on loopback, and opens a visible fullscreen installed Electron window.
+It uses the browser asset adapter in that isolated window; there is no production
+editor, presenter, audience lifecycle or desktop document bridge under test.
+Electron **44.4.1**, Chromium **152.0.7977.78**, Windows **10.0.26200**, Ryzen AI 9
+365, Radeon **880M / ANGLE D3D11**, AMD driver **32.0.13062.24001**, Node **26.3.0**.
+An RTX 5060 is also installed but was not the active renderer.
+
+Actual viewport **1596×998 CSS**, DPR **1.6041666269**, output **2560×1601**.
+No resolution reduction. Three serial ten-second measurements, each preceded by
+three seconds of warmup, followed by a separate 30-second sample. Checkout was
+clean at `256dd1a`; no builds or tests ran during sampling. There is only one
+renderer configuration, so there is no alternating A/B claim.
+
+The display/runtime's unpaced callbacks were much faster than 60 Hz in an initial
+dirty exploratory run. Final measurements therefore use an explicit **60 Hz
+submission target**, keeping raw rAF intervals separate from rendered intervals.
+The cap is measurement scheduling, not another semantic animation timeline.
+Rates count submitted WebGL draws/blits, not completed GPU fences or physical
+display scanout. The experiment's existing rolling diagnostics also count failed
+render attempts; the benchmark's successful callback/output deltas avoid using
+those diagnostics as proof of successful frames.
+
+| Run | Graph / output submissions/s | Generated / glass / final each/s | Render interval p50 / p95 / max ms | Raw rAF p50 / p95 / max ms |
+| --- | --- | --- | --- | --- |
+| 1 | 59.940 | 59.940 | 16.2 / 26.0 / 29.0 | 8.3 / 12.7 / 18.2 |
+| 2 | 59.996 | 59.996 | 15.9 / 26.2 / 30.1 | 8.2 / 12.6 / 18.1 |
+| 3 | 59.983 | 59.983 | 16.0 / 26.3 / 29.3 | 8.1 / 12.7 / 18.2 |
+
+Each run: **0 rasterizations/s, 0 uploads/s, 1800 native cache hits, 0 new target
+allocations/resizes**, 17 retained textures, 13 retained FBOs, **88,456,600 bytes
+(84.36 MiB)** logical texture storage, and zero render-loop readbacks/errors.
+Counts include idle pooled resources. The 30-second sample submitted 1800 frames
+at 59.993/s, p50/p95/max 16.1/26.3/30.6 ms, with the same resources and bytes.
+
+This meets the rate/cache/resource targets for this scene. **26 ms p95 is uneven
+cadence**, not a one-refresh tail-latency result. No intervals reached 33 ms in
+these measurement windows. The renderer has not demonstrated physical 60 FPS.
+
+The historical Phase 3 values (49.7 audience callbacks/s, 24.8 glass/s, p95 33.5 ms)
+are contextual only. Hardware, CSS viewport and DPR match, but this scene has
+different shaders/content, a different aspect/output workload, no complete app
+state and a different scheduling/measurement harness. There is no paired baseline
+or defensible percentage speedup. See [persistent raw evidence](evidence/general-gpu-local-2026-10-24.json).
+
+### Resource lifetime
+
+The fixed scene remained at 13 pooled targets throughout the short and longer
+samples. A 120-frame changing-width exercise plateaued at 14 FBOs / 18 textures;
+checkpoint logical bytes stayed 90,170,200. Returning to the original width retained
+one idle target (90,105,100 bytes); the pool is bounded, not immediately minimal.
+Resize operations increased when dimensions actually changed, as expected.
+
+Five dispose/remount cycles used 640×360, 800×500, 320×240, 1596×998 and 640×360
+scenes, alternating enabled/disabled Effects through recompilation. Every disposal
+reported **0 textures, 0 FBOs, 0 native surfaces, 0 logical bytes**; each remount had
+exactly three native source hosts. Repeated benchmark calls also exercised
+start/stop. Incremental live slide/effect switching is not implemented.
+
+Process private memory before samples / after the long run / after lifecycle work:
+renderer **88.72 / 83.55 / 86.23 MiB**, GPU process **571.97 / 405.70 / 463.36 MiB**.
+These coarse process observations show no monotonic growth in this run; they do
+not measure VRAM or prove long-term absence of leaks. Logical texture estimates
+exclude drawing buffers, native raster canvases and driver allocations. Idle gaps
+from process-memory inspection contaminate rolling lifetime interval diagnostics;
+use the explicitly timed sample arrays for stalls.
+
+Context loss was exercised. **Restoration failed**, because the prototype has no
+loss/restoration handlers or resource-generation rebuild. A remount is required.
+The `contexts: 1` diagnostic is a topology constant, not a live-context counter;
+disposal deletes tracked GPU objects but context retirement still follows browser
+canvas/GC lifetime. These are lifecycle limitations, not verified recovery.
+
+The optional 80×40 looping WebM smoke submitted 83 frames/uploads in 1006 ms,
+with zero renderer CPU readbacks, WebGL error 0, and zero resources after dispose.
+This verifies the direct `texImage2D(video)` path only. The currentTime revision
+can upload the same decoded frame repeatedly. Decode synchronization, audio,
+large video performance and video as the limiting cost remain unmeasured.
+
+### Architecture findings
+
+The graph is a derived execution representation of current Elements and
+`compositionPlan`, not a second persisted document model. Motion, Presence,
+media Fit/Fill/Free math and Effect timing are reused. Transforms, ordinary
+nesting, opacity and rectangular clips use the same operations; adding a nested
+group did not require scene-pattern qualification. Generated/content/backdrop GLSL
+and shader chains execute in one WebGL context without Chromium round trips.
+Chromium produces cached native text pixels; it is not the final compositor.
+There is no custom text layout engine, arbitrary CSS implementation in GLSL,
+renderer-owned independent animation state machine, steady CPU scene readback,
+per-element persistent full-slide texture scheme, or observed unbounded FBO pool.
+
+Resource ownership is understandable: one retained scene, scoped local/effect
+targets, a recyclable working set, native/media texture maps and cached programs
+within a fixed slide snapshot. It is conceptually simpler at shader boundaries
+than repeated native-prefix capture. The measured scene pays about 84 MiB in
+logical textures, so this does not establish dense-slide/4K efficiency. Source
+identity/cache invalidation, context restoration and failure diagnostics need
+hardening before production use.
+
+**Architectural red flag / blocker:** the native adapter duplicates TextView's DOM
+styling and captures each text source in an isolated wrapper. Ancestor-dependent
+selectors/inheritance, CSS on groups/shapes/media, overflow/shadows, CSS animation
+and native CSS/text-JS Effect output are not generally represented. Some deck CSS
+outside text is silently ignored rather than rejected. A pixel-changing effect
+cannot simply be classified as transform-only transport. The stable-style raster
+key is not a general animation/CSS invalidation solution. This boundary must be
+resolved explicitly, not disguised as more qualified scene reconstruction.
+
+### Unsupported / not established
+
+- CSS Effects and text-JS Effects (explicit unsupported errors); general deck CSS
+  composition and cross-element/ancestor styling (incomplete, sometimes ignored).
+- Rounded/ellipse/arbitrary masks and general geometry. The current renderer
+  rejects nonrectangular clip/fill/stroke operations rather than providing parity.
+- Incremental accepted-revision recompilation, real slide navigation and live
+  graph mutation. Effect toggles in lifetime checks use fresh snapshots.
+- Context recovery, exhaustive exceptional constructor/disposal interleavings,
+  long-term VRAM behavior, dense real slides, 4K, cross-platform rendering.
+- GPU Fit and Free pixel parity: shared domain math is tested, but this demo uses
+  Fill. Comprehensive alpha/shader conventions and fractional-edge parity also
+  remain open. Source revisions for mutable canvas/ImageBitmap replacements are
+  not a general content-revision protocol.
+- Full application/Electron audience lifecycle, video decode/audio synchronization,
+  physical scanout continuity, and a comparable paired Phase 3 benchmark.
+
+### Exact verification
+
+```powershell
+npm run typecheck
+npm run build
+npm run verify:build
+npx eslint src/experiments/gpu-renderer tests/helpers/gpuNativeTextRaster.ts tests/helpers/gpuRendererHarness.tsx tests/helpers/gpuRendererVerification.ts tests/feature/effects/gpu-renderer-experiment.test.ts tests/feature/effects/gpu-renderer-experiment.spec.ts
+node --check scripts/benchmark-general-gpu.mjs
+$env:SHOWME_TEST_FILES='["tests/feature/effects/gpu-renderer-experiment.test.ts","tests/feature/effects/composition-plan.test.ts","tests/feature/effects/execution-graph.test.ts","tests/feature/effects/renderer-architecture.test.ts","tests/feature/motion/sampling.test.ts","tests/feature/motion/presence.test.ts","tests/feature/media/frame-rules.test.ts"]'
+npx vitest run --config vitest.config.ts
+$env:SHOWME_TEST_FILES='["tests/feature/effects/gpu-renderer-experiment.spec.ts"]'
+npx playwright test --config playwright.config.ts
+$env:SHOWME_TEST_FILES='["tests/feature/effects/mixed-compositing.spec.ts","tests/feature/effects/native-composition.spec.ts"]'
+npx playwright test --config playwright.config.ts -g 'GPU shader handoff|mixed-size shader outputs|Move Scale Rotate and Fade|Presence enter and exit|generated shader layers'
+npm run test:stats
+npm run test:audit
+git diff --check
+```
+
+All passed: 59 unit tests in seven files, four experiment browser tests, five
+existing browser tests; audit 674 active declarations / 97 groups. After adding
+the deeper nested/later-paint probes, the exact focused browser command
+`npx playwright test --config playwright.config.ts -g 'GPU backdrop reads'`
+passed again with the experiment spec selected. Existing tests were not weakened.
+No full/release suite, installer, cross-platform or audience-navigation gate was
+run. This is isolated research-branch work; there is no commit/integration into
+`main` requiring that gate.
+
+### Decision
+
+**Promising with specific architectural blocker.** The composition executor is
+genuinely generic for its supported semantic subset; it is not another
+simple-scene/one-shader qualification path. It is also not a general replacement
+for ShowMe's current renderer yet. The architectural blocker is preserving the
+native CSS/Effect pixel boundary without recreating Chromium composition or
+silently changing CSS semantics. Context recovery and cadence need separate
+engineering work as well.
+
+Continue B as an isolated research candidate, with the next decision focused on
+native CSS/Effect semantics and a real-slide comparison. This pass provides
+credible local evidence for GPU graph composition and cached native text, but
+does **not** justify choosing B over A or integrating either experiment. Keep
+the shared-texture experiment separate and production rendering unchanged.

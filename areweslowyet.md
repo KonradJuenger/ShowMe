@@ -1,5 +1,29 @@
 # Are we slow yet?
 
+## General GPU graph research — 2026-10-24
+
+Clean research revision `256dd1a`, visible production Electron 44.4.1 / Chromium
+152, Radeon 880M / ANGLE D3D11, Ryzen AI 9 365, Windows. Isolated representative
+scene at 1596×998 CSS, DPR 1.6042, 2560×1601 backing buffer; explicit 60 Hz
+submission target. Three serial ten-second samples after three-second warmups,
+with no concurrent builds/tests, then a separate 30-second sample.
+
+Graph/output and generated/glass/final submissions each measured
+**59.940 / 59.996 / 59.983 per second**. Render-interval p95 was
+**26.0 / 26.2 / 26.3 ms**, maximum **30.1 ms** across the short samples.
+Zero warm text rasterizations, uploads, target allocations or target resizes;
+17 retained textures / 13 FBOs / 84.36 MiB logical texture storage. The longer
+sample remained stable. These are submissions, not physical display FPS or GPU
+completion measurements; cadence is uneven despite meeting the rate target.
+
+The fixture, full application state and measurement harness differ from Phase 3,
+so this is **not a paired speedup claim**. Generic composition and transform-only
+native-text caching look promising; arbitrary native CSS/Effect semantics and
+context restoration still prevent production replacement. No main integration.
+Command: `node scripts/benchmark-general-gpu.mjs`.
+[Review, boundaries and exact verification](docs/rendering/GENERAL_GPU_RENDERER_EXPERIMENT.md#local-hardware-verification--2026-10-24).
+[Persistent raw measurements](docs/rendering/evidence/general-gpu-local-2026-10-24.json).
+
 ## Paired renderer follow-up — 2026-10-23
 
 Three clean serial alternating main/candidate pairs now replace the earlier dirty
