@@ -1,5 +1,5 @@
 import type { Platform, SystemFontFamily } from "./api";
-import { setDefaultRenderResources } from "../components/renderResources";
+import { setDefaultRenderResources } from "../core/renderResources";
 import {
   collectSystemFontFamilies,
   fallbackSystemFonts,
