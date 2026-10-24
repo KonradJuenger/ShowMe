@@ -111,7 +111,7 @@ export function AudienceOutput() {
                 if (element.content?.type !== "video") continue;
                 const key = videoPlayerKey(deckId, record.value.id, element.id);
                 usefulPlayers.add(key);
-                await warmVideoPlayer(key, element.content, () => live);
+                await warmVideoPlayer(key, element.content, () => live, platform);
                 if (!live) return;
               }
             } catch {
