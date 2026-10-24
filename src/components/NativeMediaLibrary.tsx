@@ -73,7 +73,7 @@ function EntryPreview({ entry }: { entry: LibraryBrowserEntry }) {
       const assetId = entry.asset?.id;
       const load =
         entry.category === "video" && assetId
-          ? videoPreviewWork.run(0, () => videoPoster(assetId, 0))
+          ? videoPreviewWork.run(0, () => videoPoster(platform, assetId, 0))
           : platform
               .libraryBrowser({ type: "preview", path: entry.path })
               .then((result) => result.preview);
