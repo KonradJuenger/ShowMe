@@ -1,5 +1,4 @@
 import { createContext, useState } from "react";
-import { platform } from "../platform";
 
 // Only authoring previews opt in; presentation surfaces retain their behavior.
 export const EffectErrorCopyContext = createContext(false);
@@ -8,8 +7,8 @@ export function EffectErrorMessage({ message }: { message: string }) {
   const [result, setResult] = useState<{ message: string; status: string }>();
   async function copy() {
     try {
-      if (platform.writeTextClipboard)
-        await platform.writeTextClipboard(message);
+      if (window.desktop?.writeTextClipboard)
+        await window.desktop.writeTextClipboard(message);
       else await navigator.clipboard.writeText(message);
       setResult({ message, status: "Error copied to clipboard" });
     } catch {
