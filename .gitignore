@@ -2,6 +2,7 @@
 node_modules/
 dist/
 dist-electron/
+dist-html-export/
 /release/
 coverage/
 test-results*/
