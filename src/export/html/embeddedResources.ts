@@ -25,6 +25,7 @@ export class EmbeddedRenderResources implements RenderResources {
   >();
   private readonly assetUrls = new Map<string, string>();
   private readonly faces = new Set<FontFace>();
+  private readonly installedFontKeys = new Set<string>();
 
   constructor(
     assets: readonly HtmlEmbeddedAsset[],
@@ -74,6 +75,8 @@ export class EmbeddedRenderResources implements RenderResources {
     }
     for (const family of this.fonts) {
       for (const source of family.sources) {
+        const key = `${family.family}:${source.id}:${source.weight}:${source.italic ? 1 : 0}`;
+        if (this.installedFontKeys.has(key)) continue;
         try {
           const bytes = decodeBase64(source.data);
           const face = new FontFace(family.family, bytes.buffer, {
@@ -83,6 +86,7 @@ export class EmbeddedRenderResources implements RenderResources {
           await face.load();
           document.fonts.add(face);
           this.faces.add(face);
+          this.installedFontKeys.add(key);
         } catch (cause) {
           warnings.push(
             `Could not install ${family.family} ${source.weight}${source.italic ? " italic" : ""}: ${String(cause)}`,
@@ -113,5 +117,6 @@ export class EmbeddedRenderResources implements RenderResources {
     this.assetUrls.clear();
     for (const face of this.faces) document.fonts.delete(face);
     this.faces.clear();
+    this.installedFontKeys.clear();
   }
 }
