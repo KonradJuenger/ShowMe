@@ -41,6 +41,7 @@ import { locateElement, layerRoots } from "../core/scene";
 import { captureVideoPoster, videoPoster } from "../core/videoPoster";
 import { videoBounds } from "../core/video";
 import { useAssetUrl } from "./useAssetUrl";
+import { useRenderResources } from "./renderResources";
 import { useDisplayDensity } from "./useDisplayDensity";
 import { EffectRenderContext } from "./EffectRenderContext";
 import {
@@ -90,6 +91,7 @@ function VideoView({
   onSize: (size: { width: number; height: number }) => void;
   onError: () => void;
 }) {
+  const resources = useRenderResources();
   const video = useRef<HTMLVideoElement>(null);
   const videoHost = useRef<HTMLDivElement>(null);
   const contentRef = useRef(content);
@@ -100,14 +102,14 @@ function VideoView({
   const editorPreview = editorPlayback === "preview";
   useLayoutEffect(() => {
     if (!loadVideo || !videoHost.current) return;
-    const player = acquireVideoPlayer(playerKey, content.assetId);
+    const player = acquireVideoPlayer(playerKey, content.assetId, resources);
     video.current = player.node;
     videoHost.current.append(player.node);
     return () => {
       video.current = null;
       player.release();
     };
-  }, [playerKey, content.assetId, loadVideo]);
+  }, [playerKey, content.assetId, loadVideo, resources]);
   const editorInactive = editorPlayback === "inactive";
   const posterKey = `${content.assetId}:${content.startTime}`;
   const [poster, setPoster] = useState<{
@@ -121,7 +123,7 @@ function VideoView({
   useEffect(() => {
     // Reuse cached posters; playback and warmup capture missing frames below.
     let live = true;
-    void videoPoster(content.assetId, content.startTime, !loadVideo).then(
+    void videoPoster(resources, content.assetId, content.startTime, !loadVideo).then(
       (url) => {
         if (live) setPoster({ key: posterKey, url });
       },
@@ -129,7 +131,7 @@ function VideoView({
     return () => {
       live = false;
     };
-  }, [content.assetId, content.startTime, posterKey, loadVideo]);
+  }, [content.assetId, content.startTime, posterKey, loadVideo, resources]);
 
   // Keep the prepared element and source when the upcoming slide becomes active.
   useEffect(() => {
