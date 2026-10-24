@@ -77,7 +77,17 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
       for (const instance of element.effects ?? []) {
         if (!instance.enabled) continue;
         const effect = slide.effectResources?.[instance.resourceId];
-        if (effect?.kind !== "fragment-glsl") continue;
+        if (!effect) {
+          warnings.push({
+            slideId: slide.id,
+            elementId: element.id,
+            code: "missing-effect-resource",
+            message:
+              `Effect resource "${instance.resourceId}" is missing and cannot be reproduced in the HTML export.`,
+          });
+          continue;
+        }
+        if (effect.kind !== "fragment-glsl") continue;
         const direct =
           effect.input === "content" &&
           directMediaShaderInput(document.deck, element);
