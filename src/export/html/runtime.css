@@ -1,3 +1,9 @@
+* {
+  box-sizing: border-box;
+}
+:root {
+  font-synthesis: none;
+}
 html,
 body,
 #root,
