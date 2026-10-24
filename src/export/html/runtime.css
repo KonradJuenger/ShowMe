@@ -96,3 +96,22 @@ body {
   cursor: pointer;
   pointer-events: auto;
 }
+
+.effect-error-copy {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: copy;
+}
+.effect-error-copy:hover {
+  text-decoration: underline;
+}
+.effect-error-copy-status {
+  display: block;
+  font-size: 12px;
+}
