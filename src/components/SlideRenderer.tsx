@@ -12,6 +12,7 @@ import { nativeOpacityPlan, type NativeOpacity } from "./nativeOpacity";
 import type { EffectResources } from "../core/effects";
 import {
   compileCompositionPlan,
+  compositionIsOwnedMediaOnly,
   type Composition,
   type CompositionPlan,
 } from "./compositionPlan";
@@ -860,46 +861,6 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
-  const ownedMediaOnly = (operation: Composition): boolean => {
-    const mediaContent = element.content;
-    if (
-      !mediaContent ||
-      (mediaContent.type !== "image" && mediaContent.type !== "video") ||
-      element.children.length ||
-      element.geometry.type !== "rect" ||
-      appearance.radius !== 0 ||
-      appearance.fill ||
-      appearance.strokeWidth !== 0 ||
-      mediaContent.opacity !== 1
-    )
-      return false;
-    const media = resolveMediaFrame(element);
-    if (
-      !media ||
-      Math.abs(media.x) > 1e-6 ||
-      Math.abs(media.y) > 1e-6 ||
-      Math.abs(media.width - frame.width) > 1e-6 ||
-      Math.abs(media.height - frame.height) > 1e-6 ||
-      Math.abs(media.rotation) > 1e-6 ||
-      Math.abs(media.scaleX - 1) > 1e-6 ||
-      Math.abs(media.scaleY - 1) > 1e-6 ||
-      media.flipX ||
-      media.flipY
-    )
-      return false;
-    switch (operation.kind) {
-      case "source":
-        return true;
-      case "children":
-        return element.children.length === 0;
-      case "sequence":
-        return operation.items.every(ownedMediaOnly);
-      case "clip":
-        return element.clipChildren && ownedMediaOnly(operation.input);
-      default:
-        return false;
-    }
-  };
   const lower = (operation: Composition, opacity?: string): ReactNode => {
     switch (operation.kind) {
       case "source":
@@ -929,7 +890,7 @@ const ElementView = memo(function ElementView({
           definition?.kind === "fragment-glsl" &&
           definition.input === "content" &&
           !!operation.input &&
-          ownedMediaOnly(operation.input);
+          compositionIsOwnedMediaOnly(operation.input, element);
         return surface(
           operation.effect,
           operation.input ? lower(operation.input) : undefined,
