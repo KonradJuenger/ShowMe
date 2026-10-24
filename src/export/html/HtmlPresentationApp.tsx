@@ -43,34 +43,33 @@ function nextPaint() {
   );
 }
 
-function waitForVideo(video: HTMLVideoElement) {
-  if (
-    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ||
-    video.error ||
-    (!video.currentSrc && !video.getAttribute("src"))
-  )
-    return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const finish = () => {
-      video.removeEventListener("loadeddata", finish);
-      video.removeEventListener("error", finish);
-      resolve();
-    };
-    video.addEventListener("loadeddata", finish, { once: true });
-    video.addEventListener("error", finish, { once: true });
-  });
+function mediaSettled(root: HTMLElement) {
+  if (root.querySelector('[data-media-loading="true"]')) return false;
+  for (const owner of root.querySelectorAll<HTMLElement>(
+    '[data-media-type="video"]',
+  )) {
+    const video = owner.querySelector("video");
+    if (!video) return false;
+    if (
+      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA &&
+      !video.error
+    )
+      return false;
+  }
+  return true;
+}
+
+async function waitForMedia(root: HTMLElement) {
+  const deadline = performance.now() + 12000;
+  while (!mediaSettled(root) && performance.now() < deadline)
+    await nextPaint();
 }
 
 async function prepareHtmlSlide(root: HTMLElement) {
-  await nextPaint();
+  await waitForMedia(root);
   await Promise.all(
     Array.from(root.querySelectorAll("img")).map((image) =>
       image.decode().catch(() => undefined),
-    ),
-  );
-  await Promise.all(
-    Array.from(root.querySelectorAll("video")).map((video) =>
-      waitForVideo(video),
     ),
   );
   await nextPaint();
