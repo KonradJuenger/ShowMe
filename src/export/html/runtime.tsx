@@ -4,11 +4,7 @@ import type { HtmlExportPayload } from "./types";
 import "./runtime.css";
 
 function decodePayload(value: string): HtmlExportPayload {
-  const binary = atob(value.trim());
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++)
-    bytes[index] = binary.charCodeAt(index);
-  return JSON.parse(new TextDecoder().decode(bytes)) as HtmlExportPayload;
+  return JSON.parse(value) as HtmlExportPayload;
 }
 
 function boot() {
