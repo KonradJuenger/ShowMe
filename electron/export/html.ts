@@ -14,7 +14,12 @@ import {
   type FontUsage,
 } from "../../src/core/fonts";
 import { resolveTextTypography } from "../../src/core/textTypography";
-import { resolveMediaFrame, walkElements, type Element } from "../../src/core/element";
+import { walkElements } from "../../src/core/element";
+import {
+  compileCompositionPlan,
+  compositionIsOwnedMediaOnly,
+} from "../../src/components/compositionPlan";
+import { nativeOpacityPlan } from "../../src/components/nativeOpacity";
 import { getPresentationSlideIds } from "../../src/core/presentationSequence";
 
 export interface HtmlAssetSource {
@@ -38,45 +43,28 @@ function escapeHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
-function directMediaShaderInput(deck: ExportDocument["deck"], element: Element) {
-  const content = element.content;
-  if (
-    deck.stylesheet?.trim() ||
-    !content ||
-    (content.type !== "image" && content.type !== "video") ||
-    element.children.length ||
-    element.geometry.type !== "rect" ||
-    element.appearance.radius !== 0 ||
-    element.appearance.fill ||
-    element.appearance.strokeWidth !== 0 ||
-    content.opacity !== 1
-  )
-    return false;
-  const media = resolveMediaFrame(element);
-  return Boolean(
-    media &&
-      Math.abs(media.x) <= 1e-6 &&
-      Math.abs(media.y) <= 1e-6 &&
-      Math.abs(media.width - element.frame.width) <= 1e-6 &&
-      Math.abs(media.height - element.frame.height) <= 1e-6 &&
-      Math.abs(media.rotation) <= 1e-6 &&
-      Math.abs(media.scaleX - 1) <= 1e-6 &&
-      Math.abs(media.scaleY - 1) <= 1e-6 &&
-      !media.flipX &&
-      !media.flipY
-  );
-}
-
 function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
+    const resources = slide.effectResources ?? {};
+    const composition = compileCompositionPlan(
+      slide,
+      document.deck,
+      undefined,
+      resources,
+    );
+    const opacity = nativeOpacityPlan(
+      slide.nodes.flatMap((root) => root.children),
+      resources,
+      document.deck.stylesheet,
+    );
     for (const element of walkElements(
       slide.nodes.flatMap((root) => root.children),
     )) {
       for (const instance of element.effects ?? []) {
         if (!instance.enabled) continue;
-        const effect = slide.effectResources?.[instance.resourceId];
+        const effect = resources[instance.resourceId];
         if (!effect) {
           warnings.push({
             slideId: slide.id,
@@ -88,12 +76,19 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
           continue;
         }
         if (effect.kind !== "fragment-glsl") continue;
-        const direct =
+        const input = composition.groups.get(element.id)?.inputs.get(instance.id);
+        const browserContentInput =
           effect.input === "content" &&
-          directMediaShaderInput(document.deck, element);
+          !document.deck.stylesheet?.trim() &&
+          !opacity.get(element.id)?.distribute &&
+          input?.kind === "content" &&
+          ((input.operation.kind === "effect" &&
+            resources[input.operation.effect.resourceId]?.kind ===
+              "fragment-glsl") ||
+            compositionIsOwnedMediaOnly(input.operation, element));
         if (
           effect.input === "backdrop" ||
-          (effect.input === "content" && !direct)
+          (effect.input === "content" && !browserContentInput)
         )
           warnings.push({
             slideId: slide.id,
@@ -107,7 +102,6 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   }
   return warnings;
 }
-
 function fontOccurrence(
   document: ExportDocument,
   slideIds: Set<string>,
