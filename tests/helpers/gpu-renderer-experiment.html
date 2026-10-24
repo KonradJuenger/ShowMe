@@ -9,13 +9,19 @@
       import "/src/presentation.css";
       import "/src/style.css";
       import "/src/frame.css";
-      const { mountGpuRendererHarness } = await import("/tests/helpers/gpuRendererHarness.tsx");
+      const { mountGpuRendererHarness } =
+        await import("/tests/helpers/gpuRendererHarness.tsx");
+      window.mountGpuRendererHarness = mountGpuRendererHarness;
+      const { verifyGpuSemantics, verifyGpuVideo } =
+        await import("/tests/helpers/gpuRendererVerification.ts");
+      window.verifyGpuSemantics = verifyGpuSemantics;
+      window.verifyGpuVideo = verifyGpuVideo;
       const params = new URLSearchParams(location.search);
       const benchmark = params.has("benchmark");
       window.gpuRendererExperiment = await mountGpuRendererHarness({
-        width: benchmark ? 1920 : 640,
-        height: benchmark ? 1080 : 360,
-        pixelRatio: 1,
+        width: Number(params.get("width")) || (benchmark ? 1920 : 640),
+        height: Number(params.get("height")) || (benchmark ? 1080 : 360),
+        pixelRatio: Number(params.get("dpr")) || 1,
         reference: !params.has("noReference"),
       });
     </script>

@@ -19,7 +19,7 @@
     "runtime": "browser",
     "created": "2026-10-24",
     "lastReviewed": "2026-10-24",
-    "reason": "Isolated one-context GPU compositor exercises generated shader, Chromium text raster cache, direct image texture, nested group opacity/clipping, backdrop/final shaders, transform-only Motion stability, current-renderer parity and explicit 1080p hardware diagnostics"
+    "reason": "Isolated GPU compositor verifies element-entry backdrop exclusion, ancestor opacity/clip, content chains, Chromium raster reuse across six Motion phases and font/style invalidation, media orientation, current-renderer parity and bounded warm diagnostics"
   },
   {
     "id": "editor-agent-workspace",

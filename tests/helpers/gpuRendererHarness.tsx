@@ -3,8 +3,14 @@ import { flushSync } from "react-dom";
 import { SlideRenderer } from "../../src/components/SlideRenderer";
 import { flushEffectSurfaces } from "../../src/components/effectRuntime";
 import { createDomRasterSource } from "../../src/components/domRaster";
-import { newPresentationDocument, type PresentationDocument } from "../../src/core/document";
-import { createBasicShape, createContainerElement } from "../../src/core/elementFactory";
+import {
+  newPresentationDocument,
+  type PresentationDocument,
+} from "../../src/core/document";
+import {
+  createBasicShape,
+  createContainerElement,
+} from "../../src/core/elementFactory";
 import { createTextElement } from "../../src/core/text";
 import { blankEffect } from "../../src/core/effectAuthoring";
 import { newEffectInstance } from "../../src/core/effects";
@@ -25,7 +31,10 @@ function scaleFrame(element: Element, scaleX: number, scaleY: number) {
 }
 
 function setText(element: Element, text: string, fontSize: number) {
-  if (element.content?.type !== "text" || element.content.format.kind !== "local")
+  if (
+    element.content?.type !== "text" ||
+    element.content.format.kind !== "local"
+  )
     throw new Error("GPU renderer fixture text is invalid");
   element.content.text = text;
   element.content.placeholder = false;
@@ -126,7 +135,11 @@ function drawFixtureImage() {
 async function importFixtureImage() {
   const canvas = drawFixtureImage();
   const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("PNG encode failed"))), "image/png"),
+    canvas.toBlob(
+      (value) =>
+        value ? resolve(value) : reject(new Error("PNG encode failed")),
+      "image/png",
+    ),
   );
   const [asset] = await platform.importAssets([
     new File([blob], "gpu-renderer-experiment.png", { type: "image/png" }),
@@ -161,7 +174,9 @@ function buildDocument(
   background.frame.width = size.width;
   background.frame.height = size.height;
   background.appearance.fill = null;
-  background.effects = [newEffectInstance("generated", generated, "background")];
+  background.effects = [
+    newEffectInstance("generated", generated, "background"),
+  ];
 
   const title = createTextElement("gpu-title", { x: 34, y: 25 });
   title.frame.width = 420;
@@ -224,7 +239,10 @@ function buildDocument(
   group.clipChildren = true;
   scaleFrame(group, sx, sy);
 
-  const glassElement = createBasicShape("gpu-glass", "rectangle", { x: 330, y: 62 });
+  const glassElement = createBasicShape("gpu-glass", "rectangle", {
+    x: 330,
+    y: 62,
+  });
   glassElement.frame.width = 245;
   glassElement.frame.height = 178;
   glassElement.appearance.fill = null;
@@ -238,7 +256,10 @@ function buildDocument(
   setText(moving, "MOVE WITHOUT RASTER", 28 * ss);
   moving.cssClasses = ["gpu-moving-native"];
 
-  const finalElement = createBasicShape("gpu-final", "rectangle", { x: 0, y: 0 });
+  const finalElement = createBasicShape("gpu-final", "rectangle", {
+    x: 0,
+    y: 0,
+  });
   finalElement.frame.width = size.width;
   finalElement.frame.height = size.height;
   finalElement.appearance.fill = null;
@@ -307,7 +328,10 @@ function nextPaint() {
   );
 }
 
-function motionState(model: PresentationDocument, timeMs: number): MotionPreviewState {
+function motionState(
+  model: PresentationDocument,
+  timeMs: number,
+): MotionPreviewState {
   const slide = model.slides[model.deck.slideIds[0]];
   const stage = slide.motion!.stages[0];
   return {
@@ -319,12 +343,15 @@ function motionState(model: PresentationDocument, timeMs: number): MotionPreview
   };
 }
 
-export async function mountGpuRendererHarness(options: {
-  width?: number;
-  height?: number;
-  pixelRatio?: number;
-  reference?: boolean;
-} = {}) {
+export async function mountGpuRendererHarness(
+  options: {
+    width?: number;
+    height?: number;
+    pixelRatio?: number;
+    reference?: boolean;
+    effects?: boolean;
+  } = {},
+) {
   const size = {
     width: options.width ?? BASE.width,
     height: options.height ?? BASE.height,
@@ -332,6 +359,9 @@ export async function mountGpuRendererHarness(options: {
   const fixture = await importFixtureImage();
   const model = buildDocument(fixture.asset.id, size);
   const slide = model.slides[model.deck.slideIds[0]];
+  if (options.effects === false)
+    for (const element of slide.nodes[0].children)
+      for (const effect of element.effects ?? []) effect.enabled = false;
 
   document.body.replaceChildren();
   document.body.style.margin = "0";
@@ -339,9 +369,11 @@ export async function mountGpuRendererHarness(options: {
   document.body.style.color = "white";
   const shell = document.createElement("main");
   shell.dataset.gpuRendererExperiment = "true";
-  shell.style.cssText = "font:13px Arial,sans-serif;padding:12px;display:grid;gap:12px";
+  shell.style.cssText =
+    "font:13px Arial,sans-serif;padding:12px;display:grid;gap:12px";
   const row = document.createElement("div");
-  row.style.cssText = "display:flex;gap:12px;align-items:flex-start;overflow:auto";
+  row.style.cssText =
+    "display:flex;gap:12px;align-items:flex-start;overflow:auto";
   shell.append(row);
   document.body.append(shell);
 
@@ -357,7 +389,9 @@ export async function mountGpuRendererHarness(options: {
   const renderer = new GpuRendererExperiment(canvas, slide, model.deck, {
     pixelRatio: options.pixelRatio ?? 1,
     mediaSource: (element) =>
-      element.content && element.content.type !== "text" && element.content.assetId === fixture.asset.id
+      element.content &&
+      element.content.type !== "text" &&
+      element.content.assetId === fixture.asset.id
         ? fixture.image
         : null,
     nativeTextSource: createChromiumNativeTextRasterSource,
@@ -418,8 +452,11 @@ export async function mountGpuRendererHarness(options: {
 
   const nativePixelChangeCheck = async () => {
     await warm();
-    const moving = slide.nodes[0].children.find((element) => element.id === "gpu-moving-text")!;
-    if (moving.content?.type !== "text") throw new Error("Moving text fixture is missing");
+    const moving = slide.nodes[0].children.find(
+      (element) => element.id === "gpu-moving-text",
+    )!;
+    if (moving.content?.type !== "text")
+      throw new Error("Moving text fixture is missing");
     const original = moving.content.text;
     const before = renderer.diagnostics();
     moving.content.text = original + "*";
@@ -429,6 +466,84 @@ export async function mountGpuRendererHarness(options: {
     moving.content.text = original;
     await render(1200);
     return { before, changed };
+  };
+
+  const nativeCacheAudit = async () => {
+    await warm();
+    const motion = slide.motion;
+    const moving = slide.nodes[0].children.find(
+      (element) => element.id === "gpu-moving-text",
+    )!;
+    const parent = slide.nodes[0].children.find(
+      (element) => element.id === "gpu-group",
+    )!;
+    const phases = [];
+    for (const [element, property, from, to] of [
+      [moving, "transform.x", moving.frame.x, moving.frame.x + 50],
+      [moving, "transform.rotation", -15, 15],
+      [moving, "transform.scaleX", 0.8, 1.2],
+      [moving, "transform.scaleY", 0.8, 1.2],
+      [parent, "transform.rotation", -15, 15],
+      [parent, "appearance.opacity", 0.2, 0.8],
+    ] as const) {
+      slide.motion = addParameterAnimation(
+        undefined,
+        0,
+        element.id,
+        property,
+        "Cache audit",
+        from,
+        to,
+        2400,
+      );
+      const before = renderer.diagnostics();
+      for (let index = 0; index < 90; index++)
+        await render((index * 2400) / 89);
+      phases.push({
+        elementId: element.id,
+        property,
+        before,
+        after: renderer.diagnostics(),
+      });
+    }
+    slide.motion = motion;
+    const changes = [];
+    if (
+      moving.content?.type !== "text" ||
+      moving.content.format.kind !== "local"
+    )
+      throw new Error("Audit text missing");
+    const original = structuredClone(moving.content);
+    const stylesheet = model.deck.stylesheet;
+    for (const kind of ["text", "typography", "native-style"] as const) {
+      const before = renderer.diagnostics();
+      if (kind === "text") moving.content.text += "!";
+      if (kind === "typography")
+        moving.content.format.typography.fontFamily = "Courier New";
+      if (kind === "native-style")
+        model.deck.stylesheet +=
+          "\n.gpu-moving-native [data-text-content] { text-shadow: 3px 1px red !important; }";
+      await render(1200);
+      await nextPaint();
+      await render(1200);
+      changes.push({ kind, before, after: renderer.diagnostics() });
+    }
+    moving.content = original;
+    model.deck.stylesheet = stylesheet;
+    await warm();
+    const beforeFont = renderer.diagnostics();
+    const font = new FontFace("GpuCacheAuditFont", 'local("Arial")');
+    document.fonts.add(font);
+    await font.load();
+    await document.fonts.ready;
+    await nextPaint();
+    await render(1200);
+    const fontCompletion = {
+      before: beforeFont,
+      after: renderer.diagnostics(),
+    };
+    document.fonts.delete(font);
+    return { phases, changes, fontCompletion };
   };
 
   const staticParity = async (timeMs = 1200) => {
@@ -449,16 +564,22 @@ export async function mountGpuRendererHarness(options: {
       true,
     );
     referenceRaster.markDirty();
-    await referenceRaster.update(size.width, size.height, size.width, size.height);
-    const reference = referenceRaster.canvas.getContext("2d")!.getImageData(
-      0,
-      0,
+    const rasterWidth = Math.ceil(size.width * (options.pixelRatio ?? 1));
+    const rasterHeight = Math.ceil(size.height * (options.pixelRatio ?? 1));
+    await referenceRaster.update(
+      rasterWidth,
+      rasterHeight,
       size.width,
       size.height,
-    ).data;
+    );
+    const reference = referenceRaster.canvas
+      .getContext("2d")!
+      .getImageData(0, 0, rasterWidth, rasterHeight).data;
     const gpu = renderer.readPixels();
     if (gpu.length !== reference.length)
-      throw new Error(`Parity size mismatch ${gpu.length} != ${reference.length}`);
+      throw new Error(
+        `Parity size mismatch ${gpu.length} != ${reference.length}`,
+      );
     let total = 0;
     let alpha = 0;
     let visible = 0;
@@ -481,10 +602,16 @@ export async function mountGpuRendererHarness(options: {
     };
   };
 
-  const runBenchmark = async (durationMs = 3000) => {
+  const runBenchmark = async (durationMs = 3000, targetHz = 60) => {
     await warm();
+    const before = renderer.diagnostics();
     const started = performance.now();
     let callbacks = 0;
+    let previous = 0;
+    const intervals: number[] = [];
+    const rafIntervals: number[] = [];
+    let previousRaf = 0;
+    let nextRenderAt = started;
     await new Promise<void>((resolve, reject) => {
       const tick = async (now: number) => {
         try {
@@ -492,7 +619,17 @@ export async function mountGpuRendererHarness(options: {
             resolve();
             return;
           }
+          if (previousRaf) rafIntervals.push(now - previousRaf);
+          previousRaf = now;
+          if (targetHz > 0 && now + 0.2 < nextRenderAt) {
+            requestAnimationFrame(tick);
+            return;
+          }
+          if (targetHz > 0)
+            nextRenderAt = Math.max(nextRenderAt + 1000 / targetHz, now);
           callbacks++;
+          if (previous) intervals.push(now - previous);
+          previous = now;
           await render((now - started) % 2400);
           requestAnimationFrame(tick);
         } catch (error) {
@@ -502,11 +639,24 @@ export async function mountGpuRendererHarness(options: {
       requestAnimationFrame(tick);
     });
     const elapsed = performance.now() - started;
+    const after = renderer.diagnostics();
+    const ordered = [...intervals].sort((a, b) => a - b);
+    const percentile = (p: number) =>
+      ordered[Math.floor((ordered.length - 1) * p)] ?? 0;
     return {
       callbacks,
       elapsed,
       callbackRate: (callbacks * 1000) / elapsed,
-      diagnostics: renderer.diagnostics(),
+      before,
+      diagnostics: after,
+      intervals,
+      rafIntervals,
+      targetHz,
+      frameIntervalMs: {
+        p50: percentile(0.5),
+        p95: percentile(0.95),
+        max: Math.max(0, ...intervals),
+      },
     };
   };
 
@@ -522,6 +672,7 @@ export async function mountGpuRendererHarness(options: {
     renderReference,
     transformOnlyCheck,
     nativePixelChangeCheck,
+    nativeCacheAudit,
     staticParity,
     runBenchmark,
     effectIds: {

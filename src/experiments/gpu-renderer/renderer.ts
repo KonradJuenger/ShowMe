@@ -63,8 +63,9 @@ type RenderTarget = {
   height: number;
   bounds: Bounds;
   inUse: boolean;
+  lastFrame: number;
 };
-type SceneLayer = { target: RenderTarget; world: Matrix };
+type SceneLayer = { target: RenderTarget; world: Matrix; opacity: number };
 type Program = {
   value: WebGLProgram;
   attributes: Map<string, number>;
@@ -149,6 +150,15 @@ class GpuRenderTargetPool {
   private readonly targets: RenderTarget[] = [];
   allocations = 0;
   resizes = 0;
+  private frame = 0;
+
+  beginFrame() {
+    this.frame++;
+  }
+
+  endFrame(retained: RenderTarget) {
+    for (const target of this.targets) target.inUse = target === retained;
+  }
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
@@ -162,7 +172,13 @@ class GpuRenderTargetPool {
     let target = this.targets.find(
       (candidate) => !candidate.inUse && candidate.width === width && candidate.height === height,
     );
-    target ??= this.targets.find((candidate) => !candidate.inUse);
+    // Preserve this and the preceding frame's working set. Otherwise every
+    // released group target is immediately resized for the next operation,
+    // even for a completely static scene. Older idle targets can be recycled
+    // across changing sizes; historical dimensions do not accumulate forever.
+    target ??= this.targets.find(
+      (candidate) => !candidate.inUse && candidate.lastFrame < this.frame - 1,
+    );
     if (!target) {
       const texture = this.gl.createTexture();
       const framebuffer = this.gl.createFramebuffer();
@@ -200,7 +216,7 @@ class GpuRenderTargetPool {
         this.gl.deleteTexture(texture);
         throw new Error(`Cannot allocate ${width} x ${height} GPU renderer target`);
       }
-      target = { texture, framebuffer, width, height, bounds, inUse: true };
+      target = { texture, framebuffer, width, height, bounds, inUse: true, lastFrame: this.frame };
       this.targets.push(target);
       this.allocations++;
     } else {
@@ -224,6 +240,7 @@ class GpuRenderTargetPool {
       target.inUse = true;
       target.bounds = bounds;
     }
+    target.lastFrame = this.frame;
     return target;
   }
 
@@ -336,6 +353,7 @@ export class GpuRendererExperiment {
   private disposed = false;
   private uploads = 0;
   private shaderPublications = 0;
+  private outputPublications = 0;
   private readbacks = 0;
   private frameTimestamps: number[] = [];
   private shaderTimestamps: number[] = [];
@@ -810,9 +828,39 @@ export class GpuRendererExperiment {
     });
     this.clear(full);
     this.drawTexture(this.scene, full, this.scene.bounds);
-    for (const layer of [...context.ancestorLayers, { target: context.target, world: context.world }])
-      this.drawTexture(layer.target, full, layer.target.bounds, layer.world, 1);
-    const local = this.pool.acquire(fullRect(this.sampledElement(context.group.id).element));
+    // v1 backdrop is the element-entry prefix, never this element's fill,
+    // earlier Effects, or content. Rebuild unfinished ancestors inside out so
+    // their clip and group opacity remain ordinary composition operations.
+    let partial: SceneLayer | undefined;
+    for (const layer of [...context.ancestorLayers].reverse()) {
+      const target = this.pool.acquire(layer.target.bounds);
+      this.clear(target);
+      this.drawTexture(layer.target, target, layer.target.bounds);
+      if (partial) {
+        this.drawTexture(
+          partial.target,
+          target,
+          partial.target.bounds,
+          multiply(inverse(layer.world), partial.world),
+          partial.opacity,
+        );
+        this.pool.release(partial.target);
+      }
+      partial = { ...layer, target };
+    }
+    if (partial) {
+      this.drawTexture(
+        partial.target,
+        full,
+        partial.target.bounds,
+        partial.world,
+        partial.opacity,
+      );
+      this.pool.release(partial.target);
+    }
+    const local = this.pool.acquire(
+      fullRect(this.sampledElement(context.group.id).element),
+    );
     this.clear(local);
     this.drawTexture(full, local, full.bounds, inverse(context.world), 1);
     this.pool.release(full);
@@ -864,7 +912,10 @@ export class GpuRendererExperiment {
   }
 
   private async renderChildren(context: RenderContext) {
-    const layers = [...context.ancestorLayers, { target: context.target, world: context.world }];
+    const layers = [...context.ancestorLayers, {
+      target: context.target, world: context.world,
+      opacity: this.sampledElement(context.group.id).element.appearance.opacity,
+    }];
     for (const childId of context.group.children) {
       const sample = this.sampledElement(childId);
       if (!sample.present) continue;
@@ -945,6 +996,7 @@ export class GpuRendererExperiment {
     if (this.disposed) throw new Error("GPU renderer experiment is disposed");
     const started = performance.now();
     try {
+      this.pool.beginFrame();
       this.sampleFrame(input);
       this.clear(this.scene, this.cssColor(this.graph.slide.background));
       for (const rootId of this.graph.roots) {
@@ -976,12 +1028,14 @@ export class GpuRendererExperiment {
         gl.NEAREST,
       );
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.outputPublications++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.errors.push(message);
       this.options.onDiagnostic?.(message);
       throw error;
     } finally {
+      this.pool.endFrame(this.scene);
       const now = performance.now();
       if (this.lastFrameAt) this.frameIntervals.push(now - this.lastFrameAt);
       this.lastFrameAt = now;
@@ -1018,6 +1072,7 @@ export class GpuRendererExperiment {
       frames: this.frameTimestamps.length,
       renderFramesPerSecond: this.frameTimestamps.filter((time) => time >= now - 1000).length,
       shaderPublications: this.shaderPublications,
+      outputPublications: this.outputPublications,
       shaderPublicationsPerSecond: this.shaderTimestamps.filter((time) => time >= now - 1000).length,
       shaderByEffect: Object.fromEntries(
         [...this.shaderByEffect].map(([id, value]) => [
