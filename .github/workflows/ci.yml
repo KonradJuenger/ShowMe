@@ -1,6 +1,9 @@
 name: Development checks
 on:
-  # Automatic CI is paused; development verification runs locally.
+  # Temporary branch-only trigger for verification of the HTML export prototype.
+  push:
+    branches:
+      - chatgpt/html-export-prototype
   workflow_dispatch:
 permissions:
   contents: read
