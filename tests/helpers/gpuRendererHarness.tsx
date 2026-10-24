@@ -132,7 +132,7 @@ function drawFixtureImage() {
   return canvas;
 }
 
-async function importFixtureImage() {
+export async function importFixtureImage() {
   const canvas = drawFixtureImage();
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
@@ -152,7 +152,7 @@ async function importFixtureImage() {
   return { asset, url, image };
 }
 
-function buildDocument(
+export function buildDocument(
   assetId: string,
   size: { width: number; height: number },
 ): PresentationDocument {
