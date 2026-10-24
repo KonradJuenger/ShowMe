@@ -644,6 +644,7 @@ function MediaSurface({
     <div
       data-showme-part="content"
       data-media-asset-id={content.assetId}
+      data-media-type={content.type}
       data-media-loading={
         content.type === "image" &&
         (url === undefined || checking || decodedUrl !== url)
