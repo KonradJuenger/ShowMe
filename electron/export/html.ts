@@ -259,9 +259,7 @@ export async function createHtmlExport({
     fonts: selectedFonts.fonts,
     warnings,
   };
-  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString(
-    "base64",
-  );
+  const encodedPayload = embeddedJson(payload);
   const title = escapeHtml(document.deck.name);
   const html = `<!doctype html>
 <html lang="en">
@@ -276,7 +274,7 @@ export async function createHtmlExport({
 </head>
 <body>
 <div id="root"></div>
-<script id="showme-html-payload" type="application/octet-stream">${encodedPayload}</script>
+<script id="showme-html-payload" type="application/json">${encodedPayload}</script>
 <script>${inlineScript(runtime.javascript)}</script>
 </body>
 </html>`;
