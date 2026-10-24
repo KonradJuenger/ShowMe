@@ -236,6 +236,8 @@ export function createCapturedSceneTextureProvider(
 
   let qualified: {
     slide: unknown;
+    deckWidth: number | undefined;
+    deckHeight: number | undefined;
     textStyles: unknown;
     stylesheet: string | undefined;
     resources: EffectResources;
@@ -252,6 +254,8 @@ export function createCapturedSceneTextureProvider(
       !qualificationDirty &&
       qualified &&
       qualified.slide === scene?.slide &&
+      qualified.deckWidth === scene?.deck.width &&
+      qualified.deckHeight === scene?.deck.height &&
       qualified.textStyles === scene?.deck.textStyles &&
       qualified.stylesheet === scene?.deck.stylesheet &&
       qualified.resources === resources &&
@@ -273,6 +277,8 @@ export function createCapturedSceneTextureProvider(
     );
     qualified = {
       slide: scene?.slide,
+      deckWidth: scene?.deck.width,
+      deckHeight: scene?.deck.height,
       textStyles: scene?.deck.textStyles,
       stylesheet: scene?.deck.stylesheet,
       resources,
@@ -285,6 +291,8 @@ export function createCapturedSceneTextureProvider(
             request.effectId,
             context.element.frame,
             elements,
+            scene!.deck.width,
+            scene!.deck.height,
             request.kind === "backdrop" ? scene!.slide.background : null,
             scene!.deck.textStyles,
             fonts,

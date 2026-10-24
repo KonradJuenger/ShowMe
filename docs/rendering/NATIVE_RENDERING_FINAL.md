@@ -264,3 +264,42 @@ Follow-up verification:
 - `npm run test:stats`, `npm run test:audit`, and `git diff --check`: passed.
 - Earlier Electron results and their recorded timing limitation remain as above;
   no full/release or additional performance runs were required for this follow-up.
+
+## Deck viewport identity and shipping-platform smoke checks
+
+Retained keys and mounted qualification identity include `deck.width` and
+`deck.height`, independently of the shader target's sampling dimensions. The
+regression changes width, then height while every provider is unmounted, checks
+fresh backdrop pixels after each change, and checks zero captures on an unchanged
+revisit. It failed before the fix with capture counts 1/0/0/0 and passes with
+1/1/1/0; shader backing-store dimensions remain 300x500 throughout.
+
+`tests/feature/effects/native-capture-electron.spec.ts` launches the built ShowMe
+Electron entrypoint, using the production startup feature switches. The test does
+not enable `CanvasDrawElement` itself. Its two explicit contracts verify
+`drawElementImage`/`requestPaint` availability, successful SceneTexture capture,
+and native styled pixels reaching content and backdrop GLSL output. Each test
+writes a JSON report with platform, architecture, Electron/Chromium versions,
+capabilities, capture count and pixel/error results.
+
+Local checks for this follow-up: `npm run build` (including typecheck), changed-file
+ESLint, all three retention browser tests, both shipping-Electron smoke tests,
+`npm run test:stats`, `npm run test:audit`, and `git diff --check` passed. Windows
+x64 reports Electron 44.4.1 / Chromium 152.0.7977.78, both APIs present, one capture
+per smoke case and no Effect errors.
+
+Automatic CI remains paused under repository policy. The existing manual
+`Desktop verification` workflow now accepts `suite: native-capture`, which runs
+only these two smoke tests after building on the shipping Windows x64, macOS x64
+and macOS arm64 runners. The default `release` selection retains the existing full
+verification behavior. Per-platform JSON evidence is uploaded for passing and
+failing runs. Dispatch against the PR branch with:
+
+```powershell
+gh workflow run release-verification.yml --ref codex/native-rendering-finalization -f suite=native-capture
+```
+
+These are native Electron smoke checks, not a full cross-platform release suite
+or a performance benchmark. The workflow/check results on the tested PR head are
+the authoritative remote outcome; local Windows success does not stand in for
+macOS validation.

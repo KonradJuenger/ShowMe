@@ -1,10 +1,17 @@
 name: Desktop verification
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Desktop verification scope
+        type: choice
+        options: [release, native-capture]
+        default: release
 permissions:
   contents: read
 jobs:
   release:
+    if: inputs.suite == 'release'
     strategy:
       fail-fast: false
       matrix:
@@ -32,3 +39,41 @@ jobs:
           name: desktop-failure-${{ matrix.os }}
           path: test-results-*/
           retention-days: 3
+
+  native-capture:
+    if: inputs.suite == 'native-capture'
+    name: Native capture (${{ matrix.platform }} ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            platform: Windows
+            arch: x64
+          - os: macos-15-intel
+            platform: macOS
+            arch: x64
+          - os: macos-15
+            platform: macOS
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Native content and backdrop GLSL in shipping Electron
+        run: npx playwright test --config playwright.electron.config.ts --output test-results-native-capture
+        env:
+          SHOWME_TEST_FILES: '["tests/feature/effects/native-capture-electron.spec.ts"]'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-capture-${{ matrix.platform }}-${{ matrix.arch }}
+          path: test-results-native-capture/
+          if-no-files-found: error
+          retention-days: 7

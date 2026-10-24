@@ -1053,6 +1053,17 @@
     "runtime": "browser",
     "created": "2026-10-24",
     "lastReviewed": "2026-10-24",
-    "reason": "Retained Chromium pixels exclude unresolved image/SVG inputs; a missing asset arriving while every provider is unmounted refreshes content and backdrop GLSL without document edits. Retention follows native source/target/ancestor Motion and Presence dependencies while unrelated later animation preserves cached revisits."
+    "reason": "Retained Chromium pixels exclude unresolved image/SVG inputs; a missing asset arriving while every provider is unmounted refreshes content and backdrop GLSL without document edits. Retention follows native source/target/ancestor Motion and Presence dependencies while unrelated later animation preserves cached revisits. Deck width/height changes while unmounted invalidate retained backdrop pixels independently of target sampling size; unchanged revisits reuse them."
+  },
+  {
+    "id": "effects-native-capture-electron",
+    "path": "tests/feature/effects/native-capture-electron.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Two focused shipping-Electron smoke contracts launch the built ShowMe entrypoint with its production feature switches. Styled native content and backdrop GLSL must expose native capture APIs, cross SceneTexture, produce shader-sampled pixels and avoid diagnostics on every shipping platform/architecture."
   }
 ]

@@ -270,3 +270,106 @@ test("retention follows sampled Motion and Presence dependencies instead of the 
     }
   }
 });
+
+test("retained backdrop pixels follow deck dimensions across unmounted revisits", async ({
+  page,
+}) => {
+  await page.goto("/tests/helpers/effects-harness.html");
+  const result = await page.evaluate(async () => {
+    const harnessPath = "/tests/helpers/mixedEffectsHarness.tsx";
+    const factoryPath = "/src/core/elementFactory.ts";
+    const texturePath = "/src/components/sceneTexture.ts";
+    const {
+      mountMixedEffectsHarness,
+    }: typeof import("../../helpers/mixedEffectsHarness") = await import(
+      /* @vite-ignore */ harnessPath
+    );
+    const {
+      createBasicShape,
+    }: typeof import("../../../src/core/elementFactory") = await import(
+      /* @vite-ignore */ factoryPath
+    );
+    const {
+      sceneTextureDiagnostics,
+    }: typeof import("../../../src/components/sceneTexture") = await import(
+      /* @vite-ignore */ texturePath
+    );
+    let model:
+      import("../../../src/core/document").PresentationDocument | undefined;
+    let elements = "";
+    const rows = [];
+    for (const [width, height] of [
+      [640, 360],
+      [840, 360],
+      [840, 500],
+      [840, 500],
+    ]) {
+      if (model) {
+        model.deck.width = width;
+        model.deck.height = height;
+      }
+      const before = sceneTextureDiagnostics();
+      const harness = await mountMixedEffectsHarness(
+        model,
+        0,
+        undefined,
+        model
+          ? {}
+          : {
+              configure(value) {
+                delete value.deck.stylesheet;
+                const slide = value.slides[value.deck.slideIds[0]];
+                const top = createBasicShape("top", "rectangle", {
+                  x: 600,
+                  y: 0,
+                });
+                Object.assign(top.frame, { width: 200, height: 100 });
+                top.appearance.fill = "red";
+                const bottom = createBasicShape("bottom", "rectangle", {
+                  x: 550,
+                  y: 400,
+                });
+                Object.assign(bottom.frame, { width: 100, height: 50 });
+                bottom.appearance.fill = "red";
+                const glass = slide.nodes[0].children[1];
+                Object.assign(glass.frame, {
+                  x: 500,
+                  y: 0,
+                  width: 300,
+                  height: 500,
+                });
+                slide.nodes[0].children = [top, bottom, glass];
+              },
+            },
+      );
+      model = harness.model;
+      elements ||= JSON.stringify(harness.slide.nodes);
+      try {
+        const state = await harness.stage(0);
+        rows.push({
+          captures: sceneTextureDiagnostics().captures - before.captures,
+          red: state.surfaces[0].red,
+          width: state.surfaces[0].width,
+          height: state.surfaces[0].height,
+          unchanged: elements === JSON.stringify(harness.slide.nodes),
+          errors: state.errors,
+        });
+      } finally {
+        harness.dispose();
+      }
+    }
+    return rows;
+  });
+  expect(result.map((row) => row.errors)).toEqual([[], [], [], []]);
+  expect(result.every((row) => row.unchanged)).toBe(true);
+  expect(result.map((row) => [row.width, row.height])).toEqual([
+    [300, 500],
+    [300, 500],
+    [300, 500],
+    [300, 500],
+  ]);
+  expect(result.map((row) => row.captures)).toEqual([1, 1, 1, 0]);
+  expect(result[1].red).toBeGreaterThan(result[0].red);
+  expect(result[2].red).toBeGreaterThan(result[1].red);
+  expect(result[3].red).toBe(result[2].red);
+});
