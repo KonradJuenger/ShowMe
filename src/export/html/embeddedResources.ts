@@ -65,21 +65,33 @@ export class EmbeddedRenderResources implements RenderResources {
       this.assetUrls.delete(current.assetId);
   }
 
-  async installFonts(): Promise<void> {
-    if (typeof FontFace === "undefined" || !document.fonts) return;
+  async installFonts(): Promise<string[]> {
+    const warnings: string[] = [];
+    if (typeof FontFace === "undefined" || !document.fonts) {
+      if (this.fonts.length)
+        warnings.push("This browser does not support embedded FontFace resources.");
+      return warnings;
+    }
     for (const family of this.fonts) {
       for (const source of family.sources) {
-        const bytes = decodeBase64(source.data);
-        const face = new FontFace(family.family, bytes.buffer, {
-          weight: String(source.weight),
-          style: source.italic ? "italic" : "normal",
-        });
-        await face.load();
-        document.fonts.add(face);
-        this.faces.add(face);
+        try {
+          const bytes = decodeBase64(source.data);
+          const face = new FontFace(family.family, bytes.buffer, {
+            weight: String(source.weight),
+            style: source.italic ? "italic" : "normal",
+          });
+          await face.load();
+          document.fonts.add(face);
+          this.faces.add(face);
+        } catch (cause) {
+          warnings.push(
+            `Could not install ${family.family} ${source.weight}${source.italic ? " italic" : ""}: ${String(cause)}`,
+          );
+        }
       }
     }
     await document.fonts.ready;
+    return warnings;
   }
 
   async managedFonts() {
