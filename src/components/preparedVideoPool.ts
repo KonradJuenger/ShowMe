@@ -39,7 +39,11 @@ export function acquireVideoPlayer(
   resources: RenderResources,
 ) {
   let player = players.get(key);
-  if (player && player.assetId !== assetId && !player.owners) {
+  if (
+    player &&
+    (player.assetId !== assetId || player.resources !== resources) &&
+    !player.owners
+  ) {
     discard(key, player);
     player = undefined;
   }
