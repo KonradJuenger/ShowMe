@@ -93,7 +93,7 @@ GLSL and high-resolution captures remain expensive. Prefer equivalent native CSS
 when authoring; do not silently change shader semantics or reconstruct Chromium
 paint to hide this cost. Callback/submission rates are not physical display FPS.
 
-Validation and actual workload measurements are recorded below after execution.
+Validation and workload measurements are recorded below.
 
 ## Verification before measurements
 
@@ -120,3 +120,112 @@ Effects authoring UI checks were not rerun; this change targets renderer executi
 The React review covered hook dependencies, renderer remounts, frozen clocks,
 scoped CSS suspension and listener cleanup. Test-only optimization reference
 controls remain for parity comparisons; they do not select a second compositor.
+
+## Measured workloads (2026-10-24)
+
+[Raw observations and provenance](evidence/native-rendering-final-2026-10-24.json).
+Measured clean main `a699fbd` against clean renderer commit `aa0dee9` on Windows,
+Ryzen AI 9 365 / Radeon 880M, D3D11. No other verification jobs ran during timing.
+The original user app remained open. A later focused video-polling fix affects
+video-containing captures; the measured saved deck contains no video. Attribute
+these measurements to `aa0dee9`, not video follow-up `a784536`.
+
+### A/B/C/E: isolated native, generated and static capture
+
+Existing `rendering-workloads.spec.ts`, three headed Chromium runs per checkout,
+1280x720, DPR approximately 1. Actual GPU strings confirm Radeon 880M, rather
+than SwiftShader. Main batch preceded candidate batch; these are architecture
+measurements, not an interleaved causal comparison. Fixture and instrumentation
+files match; the helper adds preview playback plumbing defaulting to live.
+
+| Workload | Main | Candidate |
+| --- | --- | --- |
+| Native text/image/CSS/Motion/Presence SceneTexture captures | 0 / 0 / 0 | 0 / 0 / 0 |
+| Native frame-callback interval p95 median | 3.4 ms | 3.4 ms |
+| Native task CPU median | 43.5 ms | 45.5 ms |
+| Generated GLSL SceneTexture captures | 0 / 0 / 0 | 0 / 0 / 0 |
+| Generated frame-callback interval p95 median | 3.4 ms | 3.4 ms |
+| Generated task CPU median | 146.9 ms | 55.2 ms |
+| Static SceneTexture initial capture | 1 / 1 / 1 | 1 / 1 / 1 |
+| Static SceneTexture revisit capture | 0 / 0 / 0 | 0 / 0 / 0 |
+| Static revisit readiness median | 9.7 ms | 11.2 ms |
+
+Native computed-style reads, generated Canvas2D presentation copies and steady
+shader compilations/texture allocations were zero. Native CSS glass remains inside the native
+workload; it does not create capture machinery. The existing direct-video shader
+check also passed with zero SceneTexture captures. Generated 16/24/32-output
+stress checks passed three repetitions each and released active ownership.
+There is no claim that ordinary native presentation became faster. These short
+callback-based fixtures do not measure physical refresh/scanout or establish a
+universal performance target.
+
+### D: saved real-deck dynamic GLSL backdrop
+
+Existing local production-Electron saved-deck harness, instrumented to count
+`drawElementImage` calls. Three serial alternating main/candidate pairs, ten
+seconds each, identical harness/document/GPU/viewport/DPR hashes. Audience viewport
+1596x998 CSS pixels, DPR 1.6042 (approximately 2561x1601 output).
+
+| Metric | Main median [min, max] | Candidate median [min, max] |
+| --- | --- | --- |
+| Audience callbacks/sec | 34.5 [34.2, 34.8] | 85.7 [80.5, 86.6] |
+| Backdrop publications/sec | 17.2 [17.1, 17.3] | 42.8 [40.2, 43.3] |
+| Callback interval p95 | 57.6 [56.2, 61.1] ms | 22.5 [21.5, 23.7] ms |
+| Captures in ten seconds, each run | 172 / 174 / 171 | 403 / 428 / 433 |
+| Shared audience shader contexts | 1 | 2 |
+| Logical shared drawing-buffer bytes | 14,761,604 | 22,923,212 |
+| Active audience capture mirrors | 1 | 1 |
+
+More captures here mean more useful dynamic publications, not capture elimination.
+Dynamic native capture remains approximately half audience callback cadence.
+Logical buffer bytes are not measured VRAM; the second cohort adds about 7.8 MiB.
+Rates above 60 are callback/submission rates and must not be called display FPS.
+This comparison supports the coherent native-first change, not attribution to one
+individual optimization.
+
+Presenter publications were zero during candidate measurement. The older harness
+matches editor counters by Effect ID, which is ambiguous across duplicate current/
+next instances; its negative editor deltas are invalid diagnostics and excluded
+from conclusions. An independent index-based lifecycle check passed: all editor
+and presenter counters froze, font completion refreshed output, controls remained
+available, and ending presentation resumed live editor output.
+
+A deterministic dependency workload recorded exactly: initial capture 1, unrelated
+later native changes 0, eight relevant changes 8, settled captures 0. Teardown
+returned provider and capture-source deltas to 0. Retention checks also captured
+once for each changed background/target geometry and zero on unchanged revisit.
+
+### Exact measurement commands
+
+In each checkout, with `SHOWME_TEST_FILES` selecting
+`tests/feature/effects/rendering-workloads.spec.ts`:
+
+```powershell
+$env:SHOWME_RENDERER_BENCHMARK='1'
+$env:SHOWME_RENDERER_BENCHMARK_OUTPUT='<separate absolute output directory>'
+npx playwright test --headed --repeat-each 3 --output <separate test output>
+```
+
+The saved-deck harness and alternating runner remain locally in
+`.agenttmp/native-final-hardware.mjs` and `.agenttmp/run-native-final-hardware.mjs`:
+`node .agenttmp/run-native-final-hardware.mjs`. The harness hash and all six raw
+observations are in the evidence. Lifecycle verification used
+`node .agenttmp/phase1-lifecycle.mjs`; its index-based observations are also saved.
+
+The later video fix passed typecheck, changed-file ESLint and the exact focused
+browser selection `--grep 'stable native styles|excluded animations|SceneTexture ignores|animated shader and text'`
+with `mixed-compositing.spec.ts` selected: four passed. Its stable-style test verifies
+video capture progresses, native playback events wake observation, and pause
+settles capture without changing ordinary/direct-media rendering.
+
+Reproducible unit selection used:
+
+```powershell
+$env:SHOWME_TEST_FILES = node -e "console.log(JSON.stringify(require('./tests/registry.json').filter(e=>e.status==='active'&&e.runtime==='unit'&&['effects','motion','media','presenter'].includes(e.area)).map(e=>e.path)))"
+npx vitest run
+```
+
+Final video source follow-up: `a784536`. Its build, typecheck, changed-file ESLint,
+four focused browser contracts and updated registry audit passed. No document,
+asset, persistence, collaboration or animation formats changed. Research refs and
+main remain unchanged; nothing was pushed or merged.
