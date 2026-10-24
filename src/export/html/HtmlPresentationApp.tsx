@@ -63,17 +63,19 @@ async function waitForMedia(root: HTMLElement) {
   const deadline = performance.now() + 12000;
   while (!mediaSettled(root) && performance.now() < deadline)
     await nextPaint();
+  return mediaSettled(root);
 }
 
 async function prepareHtmlSlide(root: HTMLElement) {
-  await waitForMedia(root);
+  const mediaReady = await waitForMedia(root);
   await Promise.all(
     Array.from(root.querySelectorAll("img")).map((image) =>
       image.decode().catch(() => undefined),
     ),
   );
   await nextPaint();
-  await flushEffectSurfaces(root).catch(() => false);
+  const effectsReady = await flushEffectSurfaces(root).catch(() => false);
+  return { mediaReady, effectsReady };
 }
 
 function HtmlSlide({
@@ -83,6 +85,7 @@ function HtmlSlide({
   state,
   scale,
   onAudienceReady,
+  onWarning,
 }: {
   slide: HtmlExportPayload["document"]["slides"][number];
   deck: HtmlExportPayload["document"]["deck"];
@@ -90,6 +93,7 @@ function HtmlSlide({
   state: PresenterState;
   scale: number;
   onAudienceReady(command: Parameters<typeof applyPresentationCommand>[1]): void;
+  onWarning(message: string): void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const lastActiveState = useRef<PresenterState | null>(null);
@@ -120,15 +124,27 @@ function HtmlSlide({
       return;
     let live = true;
     const node = root.current;
-    void prepareHtmlSlide(node).finally(() => {
-      if (!live) return;
-      onAudienceReady({
-        type: "audience-ready",
-        slideId: slide.id,
-        sessionStartedAt,
-        motionStartedAt,
+    void prepareHtmlSlide(node)
+      .then(({ mediaReady, effectsReady }) => {
+        if (!live) return;
+        if (!mediaReady)
+          onWarning(
+            `Slide "${slide.id}" media did not become ready before playback started.`,
+          );
+        if (!effectsReady)
+          onWarning(
+            `Slide "${slide.id}" contains Effect output that could not become ready in this browser.`,
+          );
+      })
+      .finally(() => {
+        if (!live) return;
+        onAudienceReady({
+          type: "audience-ready",
+          slideId: slide.id,
+          sessionStartedAt,
+          motionStartedAt,
+        });
       });
-    });
     return () => {
       live = false;
     };
@@ -139,6 +155,7 @@ function HtmlSlide({
     motionStartedAt,
     slide.id,
     onAudienceReady,
+    onWarning,
   ]);
   return (
     <div
@@ -249,6 +266,15 @@ export function HtmlPresentationApp({
     (command: Parameters<typeof applyPresentationCommand>[1]) => apply(command),
     [apply],
   );
+  const reportWarning = useCallback((message: string) => {
+    setError((current) =>
+      current.includes(message)
+        ? current
+        : current
+          ? `${current}\n${message}`
+          : message,
+    );
+  }, []);
 
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -336,6 +362,7 @@ export function HtmlPresentationApp({
                   state={state}
                   scale={scale}
                   onAudienceReady={onAudienceReady}
+                  onWarning={reportWarning}
                 />
               );
             })}
