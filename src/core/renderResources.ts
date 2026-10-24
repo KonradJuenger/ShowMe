@@ -1,4 +1,3 @@
-import type { SystemFontFamily } from "../platform/api";
 import type {
   ImageOutputProfile,
   ImageReadiness,
@@ -6,10 +5,23 @@ import type {
   PreparedSlideImages,
 } from "./presentationImages";
 
+export interface RenderFontSource {
+  id: string;
+  weight: number;
+  italic: boolean;
+  data: Uint8Array;
+}
+
+export interface RenderFontFamily {
+  family: string;
+  weights: number[];
+  sources?: RenderFontSource[];
+}
+
 export interface RenderResources {
   assetUrl(id: string, preview?: boolean): Promise<string | null>;
   releaseUrl(url: string): void;
-  managedFonts?(documentId?: string): Promise<SystemFontFamily[]>;
+  managedFonts?(documentId?: string): Promise<RenderFontFamily[]>;
   retainUrl?(url: string): void;
   preparedImage?(
     documentId: string,
