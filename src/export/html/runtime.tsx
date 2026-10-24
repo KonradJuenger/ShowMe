@@ -1,13 +1,16 @@
 import { createRoot } from "react-dom/client";
 import { HtmlPresentationApp } from "./HtmlPresentationApp";
-import type { HtmlExportPayload } from "./types";
+import {
+  HTML_EXPORT_FORMAT_VERSION,
+  type HtmlExportPayload,
+} from "./types";
 import "./runtime.css";
 
 function decodePayload(value: string): HtmlExportPayload {
   const payload = JSON.parse(value) as Partial<HtmlExportPayload>;
   if (
     payload.kind !== "showme-html-export" ||
-    payload.formatVersion !== 1 ||
+    payload.formatVersion !== HTML_EXPORT_FORMAT_VERSION ||
     !payload.document ||
     !Array.isArray(payload.assets) ||
     !Array.isArray(payload.fonts)
