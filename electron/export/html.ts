@@ -60,6 +60,52 @@ function visibleElements(
   return walkElements(visibleLayerNodes(document, slide).flatMap((root) => root.children));
 }
 
+function externalCssUrl(source: string | undefined) {
+  if (!source) return null;
+  const match = source.match(/(?:https?:\/\/|(?:^|[("'\\s])\/\/|file:)[^)"'\\s]*/i);
+  return match?.[0]?.trim() ?? null;
+}
+
+function externalCssWarnings(document: ExportDocument, slideIds: Set<string>) {
+  const warnings: ExportWarning[] = [];
+  const deckReference = externalCssUrl(document.deck.stylesheet);
+  if (deckReference)
+    warnings.push({
+      slideId:
+        document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown",
+      code: "external-css-resource-blocked",
+      message:
+        `The deck stylesheet references an external resource (${deckReference}). Portable HTML exports block network and file URL access.`,
+    });
+  for (const slide of document.slides) {
+    if (!slideIds.has(slide.id)) continue;
+    const resources = slide.effectResources ?? {};
+    for (const element of visibleElements(document, slide)) {
+      for (const instance of element.effects ?? []) {
+        if (!instance.enabled) continue;
+        const effect = resources[instance.resourceId];
+        if (!effect) continue;
+        const reference = externalCssUrl(
+          effect.kind === "css"
+            ? effect.source
+            : effect.kind === "text-js"
+              ? effect.styleSource
+              : undefined,
+        );
+        if (!reference) continue;
+        warnings.push({
+          slideId: slide.id,
+          elementId: element.id,
+          code: "external-effect-resource-blocked",
+          message:
+            `Effect "${effect.name}" references an external CSS resource (${reference}). Portable HTML exports block network and file URL access.`,
+        });
+      }
+    }
+  }
+  return warnings;
+}
+
 function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   for (const slide of document.slides) {
@@ -238,7 +284,10 @@ export async function createHtmlExport({
   const slideIds = new Set(getPresentationSlideIds(document.deck));
   if (!slideIds.size) throw new Error("There are no visible slides to export");
 
-  const warnings: ExportWarning[] = sceneTextureWarnings(document, slideIds);
+  const warnings: ExportWarning[] = [
+    ...sceneTextureWarnings(document, slideIds),
+    ...externalCssWarnings(document, slideIds),
+  ];
   const assetOccurrences = new Map<
     string,
     Array<{ slideId: string; elementId: string }>
