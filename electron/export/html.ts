@@ -258,10 +258,22 @@ export async function createHtmlExport({
     });
   }
 
+  let managedFontFamilies: SystemFontFamily[] = [];
+  try {
+    managedFontFamilies = await managedFonts();
+  } catch (cause) {
+    warnings.push({
+      slideId: document.deck.slideIds[0] ?? "unknown",
+      code: "managed-fonts-unavailable",
+      message:
+        "ShowMe could not read its managed font resources for this export: " +
+        String(cause),
+    });
+  }
   const selectedFonts = selectFonts(
     document,
     slideIds,
-    await managedFonts(),
+    managedFontFamilies,
   );
   warnings.push(...selectedFonts.warnings);
   const runtime = await runtimeAssets(runtimeDirectory);
