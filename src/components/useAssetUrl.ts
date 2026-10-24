@@ -13,7 +13,7 @@ export function useAssetUrl(id: string, preview = false, enabled = true) {
       current: string | null = null,
       retryTimer: ReturnType<typeof setTimeout> | undefined;
     const fetchUrl = () => {
-      platform
+      resources
         .assetUrl(id, preview)
         .then((u) => {
           if (!live) {
