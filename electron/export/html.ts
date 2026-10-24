@@ -14,7 +14,11 @@ import {
   type FontUsage,
 } from "../../src/core/fonts";
 import { resolveTextTypography } from "../../src/core/textTypography";
-import { resolveMediaFrame, walkElements, type Element } from "../../src/core/element";
+import { walkElements } from "../../src/core/element";
+import {
+  compileCompositionPlan,
+  compositionIsOwnedMediaOnly,
+} from "../../src/components/compositionPlan";
 import { getPresentationSlideIds } from "../../src/core/presentationSequence";
 
 export interface HtmlAssetSource {
@@ -38,42 +42,13 @@ function escapeHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
-function directMediaShaderInput(deck: ExportDocument["deck"], element: Element) {
-  const content = element.content;
-  if (
-    deck.stylesheet?.trim() ||
-    !content ||
-    (content.type !== "image" && content.type !== "video") ||
-    element.children.length ||
-    element.geometry.type !== "rect" ||
-    element.appearance.radius !== 0 ||
-    element.appearance.fill ||
-    element.appearance.strokeWidth !== 0 ||
-    content.opacity !== 1
-  )
-    return false;
-  const media = resolveMediaFrame(element);
-  return Boolean(
-    media &&
-      Math.abs(media.x) <= 1e-6 &&
-      Math.abs(media.y) <= 1e-6 &&
-      Math.abs(media.width - element.frame.width) <= 1e-6 &&
-      Math.abs(media.height - element.frame.height) <= 1e-6 &&
-      Math.abs(media.rotation) <= 1e-6 &&
-      Math.abs(media.scaleX - 1) <= 1e-6 &&
-      Math.abs(media.scaleY - 1) <= 1e-6 &&
-      !media.flipX &&
-      !media.flipY
-  );
-}
-
 function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
-    for (const element of walkElements(
-      slide.nodes.flatMap((root) => root.children),
-    )) {
+    const plan = compileCompositionPlan(slide, document.deck);
+    for (const group of plan.groups.values()) {
+      const element = group.element;
       for (const instance of element.effects ?? []) {
         if (!instance.enabled) continue;
         const effect = slide.effectResources?.[instance.resourceId];
@@ -82,15 +57,21 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
             slideId: slide.id,
             elementId: element.id,
             code: "missing-effect-resource",
-            message:
-              `Effect resource "${instance.resourceId}" is missing and cannot be reproduced in the HTML export.`,
+            message: `Effect resource "${instance.resourceId}" is missing and cannot be reproduced in the HTML export.`,
           });
           continue;
         }
         if (effect.kind !== "fragment-glsl") continue;
+        const input = group.inputs.get(instance.id);
+        const operation =
+          input?.kind === "content" ? input.operation : undefined;
         const direct =
-          effect.input === "content" &&
-          directMediaShaderInput(document.deck, element);
+          !document.deck.stylesheet?.trim() &&
+          operation &&
+          (compositionIsOwnedMediaOnly(element, operation) ||
+            (operation.kind === "effect" &&
+              slide.effectResources?.[operation.effect.resourceId]?.kind ===
+                "fragment-glsl"));
         if (
           effect.input === "backdrop" ||
           (effect.input === "content" && !direct)
@@ -99,8 +80,7 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
             slideId: slide.id,
             elementId: element.id,
             code: "unsupported-browser-scene-texture",
-            message:
-              `Effect "${effect.name}" requires rendered Chromium DOM/backdrop pixels through SceneTexture. Standard browsers do not provide ShowMe's Electron native capture APIs, so this effect is not portable in the HTML prototype.`,
+            message: `Effect "${effect.name}" (${instance.id}) requires rendered Chromium DOM/backdrop pixels through SceneTexture. Standard browsers do not provide ShowMe's Electron native capture APIs, so this effect is not portable in the HTML prototype.`,
           });
       }
     }
@@ -120,9 +100,11 @@ function fontOccurrence(
     )) {
       if (element.content?.type !== "text") continue;
       const typography = resolveTextTypography(document.deck, element.content);
-      if (typography.fontFamily.localeCompare(family, undefined, {
-        sensitivity: "base",
-      }) === 0)
+      if (
+        typography.fontFamily.localeCompare(family, undefined, {
+          sensitivity: "base",
+        }) === 0
+      )
         return { slideId: slide.id, elementId: element.id };
     }
   }
@@ -134,7 +116,9 @@ function selectFonts(
   slideIds: Set<string>,
   families: SystemFontFamily[],
 ) {
-  const visibleSlides = document.slides.filter((slide) => slideIds.has(slide.id));
+  const visibleSlides = document.slides.filter((slide) =>
+    slideIds.has(slide.id),
+  );
   const usages = collectUsedFontUsages(visibleSlides, document.deck);
   const selected: HtmlEmbeddedFontFamily[] = [];
   const bundled: FontUsage[] = [];
@@ -174,15 +158,17 @@ function selectFonts(
   const warnings = nonPortableFontFamilies(usages, bundled).map((family) => ({
     ...fontOccurrence(document, slideIds, family),
     code: "font-not-embedded",
-    message:
-      `Font "${family}" could not be embedded from ShowMe's managed font resources. The HTML export will rely on that font being installed on the viewing computer.`,
+    message: `Font "${family}" could not be embedded from ShowMe's managed font resources. The HTML export will rely on that font being installed on the viewing computer.`,
   }));
   return { fonts: selected, warnings };
 }
 
 async function runtimeAssets(runtimeDirectory: string) {
   const entries = await fs.readdir(runtimeDirectory);
-  const javascript = entries.find((entry) => entry.endsWith(".js"));
+  const scripts = entries.filter((entry) => entry.endsWith(".js"));
+  if (scripts.length !== 1)
+    throw new Error("HTML runtime must contain exactly one JavaScript bundle");
+  const javascript = scripts[0];
   if (!javascript)
     throw new Error("Built HTML presentation runtime JavaScript is missing");
   const css = entries.find((entry) => entry.endsWith(".css"));
@@ -191,9 +177,7 @@ async function runtimeAssets(runtimeDirectory: string) {
       path.join(runtimeDirectory, javascript),
       "utf8",
     ),
-    css: css
-      ? await fs.readFile(path.join(runtimeDirectory, css), "utf8")
-      : "",
+    css: css ? await fs.readFile(path.join(runtimeDirectory, css), "utf8") : "",
   };
 }
 
@@ -270,11 +254,7 @@ export async function createHtmlExport({
         String(cause),
     });
   }
-  const selectedFonts = selectFonts(
-    document,
-    slideIds,
-    managedFontFamilies,
-  );
+  const selectedFonts = selectFonts(document, slideIds, managedFontFamilies);
   warnings.push(...selectedFonts.warnings);
   const runtime = await runtimeAssets(runtimeDirectory);
   const payload: HtmlExportPayload = {

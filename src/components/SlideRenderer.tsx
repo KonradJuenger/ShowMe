@@ -12,6 +12,7 @@ import { nativeOpacityPlan, type NativeOpacity } from "./nativeOpacity";
 import type { EffectResources } from "../core/effects";
 import {
   compileCompositionPlan,
+  compositionIsOwnedMediaOnly,
   type Composition,
   type CompositionPlan,
 } from "./compositionPlan";
@@ -123,11 +124,14 @@ function VideoView({
   useEffect(() => {
     // Reuse cached posters; playback and warmup capture missing frames below.
     let live = true;
-    void videoPoster(resources, content.assetId, content.startTime, !loadVideo).then(
-      (url) => {
-        if (live) setPoster({ key: posterKey, url });
-      },
-    );
+    void videoPoster(
+      resources,
+      content.assetId,
+      content.startTime,
+      !loadVideo,
+    ).then((url) => {
+      if (live) setPoster({ key: posterKey, url });
+    });
     return () => {
       live = false;
     };
@@ -180,6 +184,7 @@ function VideoView({
           current.assetId,
           current.startTime,
           node,
+          resources,
         );
         if (url) {
           capturedStart = current.startTime;
@@ -236,7 +241,7 @@ function VideoView({
       node.removeEventListener("seeked", decoded);
       node.pause();
     };
-  }, [url, loadVideo, onSize]);
+  }, [url, loadVideo, onSize, resources]);
 
   useEffect(() => {
     const node = video.current;
@@ -374,7 +379,10 @@ function VideoView({
     (poster?.key === posterKey ? poster.url : null) ||
     (content.startTime === 0 ? previewUrl : null);
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div
+      data-media-loading={loadVideo && !ready ? "true" : undefined}
+      style={{ position: "relative", width: "100%", height: "100%" }}
+    >
       {(editorInactive || !presented || staticVideo) && posterUrl && (
         <img
           data-video-poster-time={content.startTime}
@@ -612,10 +620,7 @@ function MediaSurface({
       : intrinsic,
   );
   if (!checking && (failed || url === null)) return <MissingMediaPlaceholder />;
-  if (!frame)
-    return (
-      <div data-media-loading={content.type === "image" ? "true" : undefined} />
-    );
+  if (!frame) return <div data-media-loading="true" />;
 
   const style: CSSProperties = {
     position: "absolute",
@@ -633,8 +638,8 @@ function MediaSurface({
       data-showme-part="content"
       data-media-asset-id={content.assetId}
       data-media-loading={
-        content.type === "image" &&
-        (url === undefined || checking || decodedUrl !== url)
+        url === undefined ||
+        (content.type !== "video" && (checking || decodedUrl !== url))
           ? "true"
           : undefined
       }
@@ -860,46 +865,6 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
-  const ownedMediaOnly = (operation: Composition): boolean => {
-    const mediaContent = element.content;
-    if (
-      !mediaContent ||
-      (mediaContent.type !== "image" && mediaContent.type !== "video") ||
-      element.children.length ||
-      element.geometry.type !== "rect" ||
-      appearance.radius !== 0 ||
-      appearance.fill ||
-      appearance.strokeWidth !== 0 ||
-      mediaContent.opacity !== 1
-    )
-      return false;
-    const media = resolveMediaFrame(element);
-    if (
-      !media ||
-      Math.abs(media.x) > 1e-6 ||
-      Math.abs(media.y) > 1e-6 ||
-      Math.abs(media.width - frame.width) > 1e-6 ||
-      Math.abs(media.height - frame.height) > 1e-6 ||
-      Math.abs(media.rotation) > 1e-6 ||
-      Math.abs(media.scaleX - 1) > 1e-6 ||
-      Math.abs(media.scaleY - 1) > 1e-6 ||
-      media.flipX ||
-      media.flipY
-    )
-      return false;
-    switch (operation.kind) {
-      case "source":
-        return true;
-      case "children":
-        return element.children.length === 0;
-      case "sequence":
-        return operation.items.every(ownedMediaOnly);
-      case "clip":
-        return element.clipChildren && ownedMediaOnly(operation.input);
-      default:
-        return false;
-    }
-  };
   const lower = (operation: Composition, opacity?: string): ReactNode => {
     switch (operation.kind) {
       case "source":
@@ -929,7 +894,7 @@ const ElementView = memo(function ElementView({
           definition?.kind === "fragment-glsl" &&
           definition.input === "content" &&
           !!operation.input &&
-          ownedMediaOnly(operation.input);
+          compositionIsOwnedMediaOnly(element, operation.input);
         return surface(
           operation.effect,
           operation.input ? lower(operation.input) : undefined,

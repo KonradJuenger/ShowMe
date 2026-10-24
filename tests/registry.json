@@ -1065,5 +1065,27 @@
     "created": "2026-10-24",
     "lastReviewed": "2026-10-24",
     "reason": "Two focused shipping-Electron smoke contracts launch the built ShowMe entrypoint with its production feature switches. Styled native content and backdrop GLSL must expose native capture APIs, cross SceneTexture, produce shader-sampled pixels and avoid diagnostics on every shipping platform/architecture."
+  },
+  {
+    "id": "html-export-unit",
+    "path": "tests/feature/html-export/html-export.test.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Single-file assembly escaping, missing resource diagnostics, composition-exact SceneTexture eligibility, exact font variants, lazy provider URL ownership and isolated video posters"
+  },
+  {
+    "id": "html-export-browser",
+    "path": "tests/feature/html-export/html-export.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Freshly built offline file URL runtime executes canonical navigation, Motion, CSS, text worker, generated and direct-media GLSL, video and restart without network; delayed SVG decode holds initial clocks and input"
   }
 ]

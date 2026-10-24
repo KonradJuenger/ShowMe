@@ -81,7 +81,8 @@ export async function warmVideoPlayer(
 ) {
   const existing = players.get(key);
   if (
-    existing?.assetId === content.assetId &&
+    existing?.resources === resources &&
+    existing.assetId === content.assetId &&
     (existing.owners || (existing.url && existing.node.readyState >= 2))
   )
     return;
@@ -143,4 +144,10 @@ export function cancelVideoWarmup(
       !slidePrefixes.some((prefix) => key.startsWith(prefix))
     )
       discard(key, player);
+}
+
+/** Drop idle players before their provider revokes its URLs. */
+export function releasePreparedVideos(resources: RenderResources) {
+  for (const [key, player] of players)
+    if (player.resources === resources && !player.owners) discard(key, player);
 }

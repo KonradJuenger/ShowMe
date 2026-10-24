@@ -3,7 +3,9 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  publicDir: false,
   plugins: [react()],
+  define: { "process.env.NODE_ENV": JSON.stringify("production") },
   build: {
     target: "es2022",
     outDir: "dist-html-export",

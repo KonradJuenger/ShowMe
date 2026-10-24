@@ -1,6 +1,17 @@
 import type { RenderResources } from "./renderResources";
 
-const posters = new Map<string, Promise<string | null>>();
+const providers = new WeakMap<
+  RenderResources,
+  Map<string, Promise<string | null>>
+>();
+function postersFor(resources: RenderResources) {
+  let cache = providers.get(resources);
+  if (!cache) {
+    cache = new Map();
+    providers.set(resources, cache);
+  }
+  return cache;
+}
 
 async function capture(
   resources: RenderResources,
@@ -25,7 +36,7 @@ async function capture(
       };
       const render = () => {
         if (settled) return;
-        finish(captureVideoPoster(assetId, startTime, video));
+        finish(captureVideoPoster(assetId, startTime, video, resources));
       };
       const draw = () => {
         if ("requestVideoFrameCallback" in video) {
@@ -61,7 +72,9 @@ export function captureVideoPoster(
   assetId: string,
   startTime: number,
   video: HTMLVideoElement,
+  resources: RenderResources,
 ): string | null {
+  const posters = postersFor(resources);
   if (
     video.seeking ||
     video.readyState < 2 ||
@@ -94,6 +107,7 @@ export function videoPoster(
   startTime: number,
   captureMissing = true,
 ) {
+  const posters = postersFor(resources);
   const key = posterKey(assetId, startTime);
   let result = posters.get(key);
   if (!result && !captureMissing) return Promise.resolve(null);

@@ -1,10 +1,7 @@
 import type { RenderResources } from "../../core/renderResources";
-import type {
-  HtmlEmbeddedAsset,
-  HtmlEmbeddedFontFamily,
-} from "./types";
+import type { HtmlEmbeddedAsset, HtmlEmbeddedFontFamily } from "./types";
 
-function decodeBase64(value: string): Uint8Array {
+function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
   const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
   const bytes = new Uint8Array(Math.floor((value.length * 3) / 4) - padding);
   let offset = 0;
@@ -18,6 +15,7 @@ function decodeBase64(value: string): Uint8Array {
 }
 
 export class EmbeddedRenderResources implements RenderResources {
+  private disposed = false;
   private readonly assets: Map<string, HtmlEmbeddedAsset>;
   private readonly urls = new Map<
     string,
@@ -25,6 +23,7 @@ export class EmbeddedRenderResources implements RenderResources {
   >();
   private readonly assetUrls = new Map<string, string>();
   private readonly faces = new Set<FontFace>();
+  private readonly installedSources = new Set<string>();
 
   constructor(
     assets: readonly HtmlEmbeddedAsset[],
@@ -36,7 +35,7 @@ export class EmbeddedRenderResources implements RenderResources {
   async assetUrl(id: string, preview = false): Promise<string | null> {
     // Electron previews are separate cached poster images. The portable deck
     // embeds originals only, so let the existing video-poster path capture one.
-    if (preview) return null;
+    if (this.disposed || preview) return null;
     const existingUrl = this.assetUrls.get(id);
     if (existingUrl) {
       const existing = this.urls.get(existingUrl);
@@ -69,14 +68,18 @@ export class EmbeddedRenderResources implements RenderResources {
     if (typeof FontFace === "undefined" || !document.fonts) return;
     for (const family of this.fonts) {
       for (const source of family.sources) {
+        const key = `${family.family}:${source.id}:${source.weight}:${source.italic}`;
+        if (this.installedSources.has(key)) continue;
         const bytes = decodeBase64(source.data);
         const face = new FontFace(family.family, bytes.buffer, {
           weight: String(source.weight),
           style: source.italic ? "italic" : "normal",
         });
         await face.load();
+        if (this.disposed) return;
         document.fonts.add(face);
         this.faces.add(face);
+        this.installedSources.add(key);
       }
     }
     await document.fonts.ready;
@@ -96,10 +99,12 @@ export class EmbeddedRenderResources implements RenderResources {
   }
 
   dispose() {
+    this.disposed = true;
     for (const url of this.urls.keys()) URL.revokeObjectURL(url);
     this.urls.clear();
     this.assetUrls.clear();
     for (const face of this.faces) document.fonts.delete(face);
     this.faces.clear();
+    this.installedSources.clear();
   }
 }

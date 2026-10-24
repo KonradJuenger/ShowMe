@@ -6,6 +6,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePreparedSlideImages } from "../../components/usePreparedSlideImages";
+import { useAudienceReady } from "../../components/useAudienceReady";
+import { releasePreparedVideos } from "../../components/preparedVideoPool";
+import type { PresentationCommand } from "../../core/presentationSession";
 import type { PresenterState } from "../../platform/api";
 import { SlideRenderer } from "../../components/SlideRenderer";
 import { RenderResourcesProvider } from "../../components/renderResources";
@@ -21,18 +25,21 @@ import { EmbeddedRenderResources } from "./embeddedResources";
 import type { HtmlExportPayload } from "./types";
 
 function useViewportScale(width: number, height: number) {
-  const measure = () =>
-    Math.min(
-      window.innerWidth / Math.max(1, width),
-      window.innerHeight / Math.max(1, height),
-    );
+  const measure = useCallback(
+    () =>
+      Math.min(
+        window.innerWidth / Math.max(1, width),
+        window.innerHeight / Math.max(1, height),
+      ),
+    [width, height],
+  );
   const [scale, setScale] = useState(measure);
   useLayoutEffect(() => {
     const resize = () => setScale(measure());
     resize();
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
-  }, [width, height]);
+  }, [measure]);
   return scale;
 }
 
@@ -42,16 +49,37 @@ function HtmlSlide({
   active,
   state,
   scale,
+  held,
+  onPrepared,
+  apply,
+  onError,
 }: {
   slide: HtmlExportPayload["document"]["slides"][number];
   deck: HtmlExportPayload["document"]["deck"];
   active: boolean;
   state: PresenterState;
   scale: number;
+  held: boolean;
+  onPrepared: (id: string) => void;
+  apply: (command: PresentationCommand) => void;
+  onError: (cause: unknown) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const lastActiveState = useRef<PresenterState | null>(null);
-  if (active) lastActiveState.current = state;
+  useEffect(() => {
+    if (active) lastActiveState.current = state;
+  }, [active, state]);
+  const ready = usePreparedSlideImages(root, slide, scale, deck.id);
+  const waiting = active && !!state.awaitingAudience;
+  useAudienceReady(
+    root,
+    slide.id,
+    state,
+    waiting && ready,
+    onPrepared,
+    apply,
+    onError,
+  );
   const transition = useSlideTransition(
     root,
     slide.id,
@@ -69,6 +97,8 @@ function HtmlSlide({
     <div
       ref={root}
       data-html-slide={slide.id}
+      data-active-slide={active ? "" : undefined}
+      data-images-prepared={ready ? "true" : "false"}
       style={{
         position: "absolute",
         left: "50%",
@@ -80,8 +110,11 @@ function HtmlSlide({
         transform: `scale(${scale})`,
         transformOrigin: "center",
         pointerEvents: active ? "auto" : "none",
-        zIndex: active ? 2 : transition.outgoing ? 1 : 0,
-        opacity: transition.visible ? 1 : 0,
+        zIndex: active && ready ? 2 : held || transition.outgoing ? 1 : 0,
+        opacity:
+          held || (transition.visible && ready && !transition.preparing)
+            ? 1
+            : 0,
       }}
     >
       <SlideRenderer
@@ -89,13 +122,12 @@ function HtmlSlide({
         deck={deck}
         presentation
         preparedImages={false}
-        staticVideo={!active && !transition.outgoing}
+        staticVideo={waiting || (!active && !transition.outgoing)}
+        prepareVideo={!active || waiting}
         renderScale={scale}
         motionState={playbackState?.motion}
         effectClock={
-          playbackState
-            ? presenterEffectClockOrigins(playbackState)
-            : undefined
+          playbackState ? presenterEffectClockOrigins(playbackState) : undefined
         }
       />
     </div>
@@ -134,8 +166,23 @@ export function HtmlPresentationApp({
   const [state, setState] = useState<PresenterState | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  const [presentedId, setPresentedId] = useState<string>();
+  const onError = useCallback((cause: unknown) => setError(String(cause)), []);
+  const onPrepared = useCallback((id: string) => setPresentedId(id), []);
 
-  useEffect(() => () => resources.dispose(), [resources]);
+  useEffect(
+    () => () => {
+      releasePreparedVideos(resources);
+      resources.dispose();
+    },
+    [resources],
+  );
+  useEffect(() => {
+    if (!state) {
+      setPresentedId(undefined);
+      releasePreparedVideos(resources);
+    }
+  }, [state, resources]);
 
   const start = useCallback(async () => {
     if (starting) return;
@@ -149,7 +196,7 @@ export function HtmlPresentationApp({
           deck,
           Date.now(),
           motionSlides,
-          false,
+          true,
         ),
       );
     } catch (cause) {
@@ -163,7 +210,10 @@ export function HtmlPresentationApp({
     (command: Parameters<typeof applyPresentationCommand>[1]) =>
       setState((current) =>
         current
-          ? applyPresentationCommand(current, command, Date.now())
+          ? current.awaitingAudience &&
+            !["audience-ready", "black", "toggle-black"].includes(command.type)
+            ? current
+            : applyPresentationCommand(current, command, Date.now())
           : current,
       ),
     [],
@@ -179,7 +229,9 @@ export function HtmlPresentationApp({
     const keydown = (event: KeyboardEvent) => {
       if (
         event.target instanceof HTMLElement &&
-        event.target.closest("input, textarea, select, button, [contenteditable=true]")
+        event.target.closest(
+          "input, textarea, select, button, [contenteditable=true]",
+        )
       )
         return;
       const action = presentationShortcut(event.key);
@@ -205,18 +257,23 @@ export function HtmlPresentationApp({
     if (!state || !activeId) return [];
     return [
       ...new Set(
-        [state.transition?.fromSlideId, activeId].filter(
-          (id): id is string => Boolean(id),
-        ),
+        [
+          state.transition?.fromSlideId,
+          activeId,
+          state.slideIds[(state.index ?? 0) + 1],
+          presentedId,
+        ].filter((id): id is string => Boolean(id)),
       ),
     ];
-  }, [activeId, state]);
+  }, [activeId, state, presentedId]);
 
   return (
     <RenderResourcesProvider resources={resources}>
       <main
         className="showme-html-presentation"
         data-showme-html-runtime={payload.runtimeVersion}
+        data-awaiting-audience={state?.awaitingAudience ? "true" : "false"}
+        data-index={state?.index ?? -1}
         onClick={(event) => {
           if (!state || state.black) return;
           if (
@@ -231,7 +288,11 @@ export function HtmlPresentationApp({
           <section className="showme-html-start">
             <div>
               <h1>{deck.name}</h1>
-              <button type="button" onClick={() => void start()} disabled={starting}>
+              <button
+                type="button"
+                onClick={() => void start()}
+                disabled={starting}
+              >
                 {starting ? "Preparing…" : "Start presentation"}
               </button>
               <p>
@@ -254,6 +315,10 @@ export function HtmlPresentationApp({
                   active={id === activeId}
                   state={state}
                   scale={scale}
+                  held={id === presentedId && id !== activeId}
+                  onPrepared={onPrepared}
+                  apply={apply}
+                  onError={onError}
                 />
               );
             })}

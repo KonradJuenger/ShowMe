@@ -22,6 +22,7 @@ function boot() {
   if (!root || !payloadNode)
     throw new Error("ShowMe HTML export shell is incomplete");
   const payload = decodePayload(payloadNode.textContent ?? "");
+  payloadNode.remove();
   createRoot(root).render(<HtmlPresentationApp payload={payload} />);
 }
 
