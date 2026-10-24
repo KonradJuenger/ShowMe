@@ -674,7 +674,6 @@ The final result should answer:
 > gives a cleaner and more performant architecture than keeping Chromium as the
 > scene compositor and repeatedly crossing the native/GPU boundary?
 
-
 ## Prototype implementation snapshot — 2026-10-24
 
 This section records the first runnable implementation pass on
@@ -719,8 +718,11 @@ these existing semantics explicit for the GPU executor:
   `motionElement(...)`, `sampleElementPresence(...)` and
   `presenceElement(...)`.
 
-The renderer does not call `SlideRenderer`, `SceneTexture` or `elementRaster`.
-The production renderer remains unchanged.
+The renderer does not call `SlideRenderer`, `SceneTexture`, `elementRaster` or
+`domRaster`. The production renderer remains unchanged. The Chromium raster
+implementation is injected by the experiment harness through a narrow native
+raster-source contract, so existing production renderer architecture gates remain
+unchanged.
 
 Backdrop input is no longer a Chromium capture in this experiment. Completed
 root groups already exist in the persistent full-slide GPU scene target. When a
@@ -740,11 +742,14 @@ live textures and estimated RGBA texture bytes.
 
 ### Native raster strategy
 
-`nativeRaster.ts` implements the first Chromium raster source for text. It uses
-the existing `createDomRasterSource(...)` native Chromium painter. It does not
-implement text layout itself.
+`nativeRaster.ts` defines the renderer-facing native-raster contract, the text
+pixel identity and the DOM styling needed to match the current `TextView`. The
+actual Chromium implementation lives in `tests/helpers/gpuNativeTextRaster.ts`
+and uses the existing `createDomRasterSource(...)` native Chromium painter. The
+GPU renderer receives that source through dependency injection. It does not
+implement text layout itself and it does not import the production capture path.
 
-The hidden source DOM reproduces the current `TextView` typography/flex layout
+The injected hidden source DOM reproduces the current `TextView` typography/flex layout
 and applies the deck stylesheet inside a `.slide-renderer` scope. Its semantic
 pixel key contains:
 

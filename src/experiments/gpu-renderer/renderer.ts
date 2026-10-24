@@ -26,7 +26,10 @@ import {
   type GpuRenderGroup,
   type GpuRenderOperation,
 } from "./graph";
-import { GpuNativeTextRasterSource } from "./nativeRaster";
+import type {
+  GpuNativeRasterSource,
+  GpuNativeRasterSourceFactory,
+} from "./nativeRaster";
 
 export type GpuMediaSourceResolver = (
   element: Element,
@@ -41,6 +44,7 @@ export type GpuRendererFrame = {
 export type GpuRendererOptions = {
   pixelRatio?: number;
   mediaSource?: GpuMediaSourceResolver;
+  nativeTextSource?: GpuNativeRasterSourceFactory;
   onDiagnostic?: (message: string) => void;
 };
 
@@ -73,7 +77,7 @@ type SourceTexture = {
   height: number;
   bytes: number;
 };
-type NativeTexture = SourceTexture & { source: GpuNativeTextRasterSource };
+type NativeTexture = SourceTexture & { source: GpuNativeRasterSource };
 type SampledElement = { element: Element; present: boolean };
 
 type RenderContext = {
@@ -311,7 +315,7 @@ function sourceRevision(source: TexImageSource) {
 
 /**
  * Isolated architecture experiment. It owns one WebGL2 context and composes the
- * existing ShowMe semantic graph without participating in SlideRenderer.
+ * existing ShowMe semantic graph without participating in the production slide renderer.
  */
 export class GpuRendererExperiment {
   readonly graph: GpuRenderGraph;
@@ -603,7 +607,11 @@ export class GpuRendererExperiment {
   private async nativeTexture(element: Element) {
     let entry = this.nativeTextures.get(element.id);
     if (!entry) {
-      const source = new GpuNativeTextRasterSource(element, this.graph.deck, () => {});
+      const source = this.options.nativeTextSource?.(element, this.graph.deck, () => {});
+      if (!source)
+        throw new GpuRendererUnsupportedError(
+          "Native text requires an injected Chromium raster source",
+        );
       const texture = this.gl.createTexture();
       if (!texture) {
         source.dispose();

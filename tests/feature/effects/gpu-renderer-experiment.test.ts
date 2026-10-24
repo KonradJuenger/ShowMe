@@ -128,4 +128,13 @@ it("keeps the experiment isolated from SceneTexture and the production renderer"
   expect(source).not.toContain("sceneTextureGpu");
   expect(source).not.toContain("elementRaster");
   expect(source).not.toContain("SlideRenderer");
+
+  const nativeBoundary = readFileSync(
+    new URL(
+      "../../../src/experiments/gpu-renderer/nativeRaster.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  expect(nativeBoundary).not.toContain("components/domRaster");
 });

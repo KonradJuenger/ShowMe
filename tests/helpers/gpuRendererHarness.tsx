@@ -13,6 +13,7 @@ import type { MotionPreviewState } from "../../src/core/motionPlayback";
 import type { Element } from "../../src/core/element";
 import { platform } from "../../src/platform";
 import { GpuRendererExperiment } from "../../src/experiments/gpu-renderer/renderer";
+import { createChromiumNativeTextRasterSource } from "./gpuNativeTextRaster";
 
 const BASE = { width: 640, height: 360 } as const;
 
@@ -359,6 +360,7 @@ export async function mountGpuRendererHarness(options: {
       element.content && element.content.type !== "text" && element.content.assetId === fixture.asset.id
         ? fixture.image
         : null,
+    nativeTextSource: createChromiumNativeTextRasterSource,
   });
 
   let referenceRoot: Root | null = null;
