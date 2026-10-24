@@ -1,4 +1,5 @@
 import type { Platform, SystemFontFamily } from "./api";
+import { setDefaultRenderResources } from "../components/renderResources";
 import {
   collectSystemFontFamilies,
   fallbackSystemFonts,
@@ -129,6 +130,8 @@ export const platform: Platform = {
     return result;
   },
 };
+
+setDefaultRenderResources(platform);
 
 // Managed Library fonts must be available to the editor and presenter even if the OS
 // does not have them installed. Installed system fonts are enumerated only when the
