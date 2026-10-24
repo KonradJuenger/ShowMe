@@ -4,7 +4,16 @@ import type { HtmlExportPayload } from "./types";
 import "./runtime.css";
 
 function decodePayload(value: string): HtmlExportPayload {
-  return JSON.parse(value) as HtmlExportPayload;
+  const payload = JSON.parse(value) as Partial<HtmlExportPayload>;
+  if (
+    payload.kind !== "showme-html-export" ||
+    payload.formatVersion !== 1 ||
+    !payload.document ||
+    !Array.isArray(payload.assets) ||
+    !Array.isArray(payload.fonts)
+  )
+    throw new Error("Unsupported or invalid ShowMe HTML export");
+  return payload as HtmlExportPayload;
 }
 
 function boot() {
