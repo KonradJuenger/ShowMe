@@ -4,7 +4,7 @@ import type {
   ImageOutputProfile,
   PreparedSlideImages,
 } from "../core/presentationImages";
-import { platform } from "../platform";
+import { useRenderResources, type RenderResources } from "./renderResources";
 import { useImageGeneration } from "./useImageGeneration";
 
 export interface SlideImagePlan {
@@ -12,11 +12,11 @@ export interface SlideImagePlan {
   images: PreparedSlideImages | null;
 }
 
-function release(images: PreparedSlideImages) {
+function release(resources: RenderResources, images: PreparedSlideImages) {
   for (const url of new Set(
     Object.values(images).flatMap((image) => (image ? [image.url] : [])),
   ))
-    platform.releaseUrl(url);
+    resources.releaseUrl(url);
 }
 
 /** A slide owns one bulk result; individual media views borrow its URL leases. */
@@ -27,6 +27,7 @@ export function useSlideImagePlan(
   enabled: boolean,
   defer: boolean,
 ): SlideImagePlan | undefined {
+  const resources = useRenderResources();
   const generation = useImageGeneration(deck.id);
   const width = profile?.width,
     height = profile?.height;
@@ -39,19 +40,19 @@ export function useSlideImagePlan(
   const owned = useRef<PreparedSlideImages | null>(null);
   useLayoutEffect(() => {
     if (owned.current && owned.current !== result?.images)
-      release(owned.current);
+      release(resources, owned.current);
     owned.current = result?.images ?? null;
-  }, [result]);
+  }, [result, resources]);
   useEffect(
     () => () => {
-      if (owned.current) release(owned.current);
+      if (owned.current) release(resources, owned.current);
     },
-    [],
+    [resources],
   );
   useEffect(() => {
-    if (!enabled || defer) return;
+    if (!enabled || defer || !resources.preparedSlideImages) return;
     let live = true;
-    void platform.preparedSlideImages!(
+    void resources.preparedSlideImages!(
       deck.id,
       slide.id,
       width && height ? { width, height } : undefined,
@@ -59,7 +60,7 @@ export function useSlideImagePlan(
       .then((images) => {
         if (live) {
           setResult({ slide, key, images });
-        } else release(images);
+        } else release(resources, images);
       })
       .catch(() => {
         if (live) setResult({ slide, key, images: {} });
@@ -67,7 +68,7 @@ export function useSlideImagePlan(
     return () => {
       live = false;
     };
-  }, [enabled, defer, deck.id, slide, key, width, height]);
+  }, [enabled, defer, deck.id, slide, key, width, height, resources]);
   return useMemo(() => {
     if (!enabled) return undefined;
     if (defer && result) return { key: result.key, images: result.images };
