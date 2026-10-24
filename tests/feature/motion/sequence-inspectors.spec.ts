@@ -731,7 +731,7 @@ test("Presence inspector authors lifecycle and preview gates rendering without c
   ).toBe(1);
 });
 
-test("Presence event tails sample through presentation waits, retain mounted media and gate raster paint", async ({
+test("Presence event tails sample through presentation waits, retain mounted media and gate native visibility", async ({
   page,
 }) => {
   await start(page);
@@ -739,8 +739,7 @@ test("Presence event tails sample through presentation waits, retain mounted med
     const runtimePath = "/src/components/motionRuntime.ts",
       presencePath = "/src/core/presence.ts",
       factoryPath = "/src/core/elementFactory.ts",
-      documentPath = "/src/core/document.ts",
-      rasterPath = "/src/components/elementRaster.ts";
+      documentPath = "/src/core/document.ts";
     const {
       createMotionRuntime,
     }: typeof import("../../../src/components/motionRuntime") = await import(
@@ -761,11 +760,6 @@ test("Presence event tails sample through presentation waits, retain mounted med
       newPresentationDocument,
     }: typeof import("../../../src/core/document") = await import(
       /* @vite-ignore */ documentPath
-    );
-    const {
-      renderElementToSurface,
-    }: typeof import("../../../src/components/elementRaster") = await import(
-      /* @vite-ignore */ rasterPath
     );
     const doc = newPresentationDocument("Presence"),
       slide = doc.slides[doc.deck.slideIds[0]],
@@ -798,16 +792,9 @@ test("Presence event tails sample through presentation waits, retain mounted med
       startedAt: Date.now(),
       running: false,
     });
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 100;
-    const context = { root, resources: {}, beforeEffect: "", flush() {} };
-    renderElementToSurface(element, canvas, context);
-    const duringAlpha = canvas.getContext("2d")!.getImageData(50, 50, 1, 1)
-      .data[3];
+    const duringVisibility = getComputedStyle(node).visibility;
     runtime.samplePresence(500);
-    renderElementToSurface(element, canvas, context);
-    const absentAlpha = canvas.getContext("2d")!.getImageData(50, 50, 1, 1)
-      .data[3];
+    const absentVisibility = getComputedStyle(node).visibility;
     const absent = node.dataset.presentationAbsent,
       inert = node.inert,
       sameMedia = node.querySelector("video") === video,
@@ -819,8 +806,8 @@ test("Presence event tails sample through presentation waits, retain mounted med
       node.style.visibility === "";
     root.remove();
     return {
-      duringAlpha,
-      absentAlpha,
+      duringVisibility,
+      absentVisibility,
       absent,
       inert,
       sameMedia,
@@ -829,8 +816,8 @@ test("Presence event tails sample through presentation waits, retain mounted med
     };
   });
   expect(result).toEqual({
-    duringAlpha: 255,
-    absentAlpha: 0,
+    duringVisibility: "visible",
+    absentVisibility: "hidden",
     absent: "true",
     inert: true,
     sameMedia: true,

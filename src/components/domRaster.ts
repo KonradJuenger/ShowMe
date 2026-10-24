@@ -107,16 +107,17 @@ export function createDomRasterSource(
       const target = animation.effect.target;
       return target instanceof HTMLElement && included(target);
     });
+  // Stable declarations do not imply stable decoded media pixels.
+  const hasPlayingVideo = () =>
+    Array.from(originalRoot.querySelectorAll("video")).some(
+      (video) => (!refined || included(video)) && !video.paused && !video.ended,
+    );
   // Polling preserves decoder throughput in the native capture route.
   const pollAnimations = () => {
     animationFrame = 0;
     if (disposed) return;
     const animated = hasRunningAnimations();
-    const playing =
-      !semanticStyles() &&
-      Array.from(originalRoot.querySelectorAll("video")).some(
-        (video) => (!refined || included(video)) && !video.paused,
-      );
+    const playing = hasPlayingVideo();
     if (animated || playing || wasDynamic) {
       dirty = true;
       invalidate();
@@ -128,8 +129,7 @@ export function createDomRasterSource(
     if (disposed) return;
     dirty = true;
     invalidate();
-    if (!semanticStyles() && !animationFrame)
-      animationFrame = requestAnimationFrame(pollAnimations);
+    if (!animationFrame) animationFrame = requestAnimationFrame(pollAnimations);
   };
   const observer = new MutationObserver((records) => {
     const relevant = records.filter((record) => {
@@ -222,6 +222,13 @@ export function createDomRasterSource(
   document.fonts.addEventListener("loadingdone", fontChanged);
   const loaded = () => markDirty();
   source().addEventListener("load", loaded, true);
+  const mediaEvents = ["playing", "pause", "ended", "loadeddata", "seeked"];
+  const mediaChanged = (event: Event) => {
+    if (event.target instanceof HTMLVideoElement && included(event.target))
+      markDirty();
+  };
+  for (const event of mediaEvents)
+    source().addEventListener(event, mediaChanged, true);
   const originalRoot = source();
   animationFrame = requestAnimationFrame(pollAnimations);
   // Freeze pseudo-elements without copying global page styles into the mirror.
@@ -520,11 +527,7 @@ export function createDomRasterSource(
       if (inFlight) return inFlight;
       const requestedTransform = sourceTransform().toString();
       const animated = hasRunningAnimations();
-      const video =
-        !semanticStyles() &&
-        Array.from(originalRoot.querySelectorAll("video")).some(
-          (node) => (!refined || included(node)) && !node.paused,
-        );
+      const video = hasPlayingVideo();
       if (
         !dirty &&
         canvas.width === width &&
@@ -670,6 +673,8 @@ export function createDomRasterSource(
       observer.disconnect();
       document.fonts.removeEventListener("loadingdone", fontChanged);
       originalRoot.removeEventListener("load", loaded, true);
+      for (const event of mediaEvents)
+        originalRoot.removeEventListener(event, mediaChanged, true);
       canvas.remove();
       canvas.width = canvas.height = 1;
       pairs = [];

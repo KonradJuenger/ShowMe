@@ -161,8 +161,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-23",
-    "reason": "Explicit rendered-pixel shaders now cross the SceneTexture boundary while the temporary adapter preserves native Chromium capture; the suite composes isolated JS text, sampled CSS/keyframes and custom shadows with content/backdrop shaders; inherited clocks refresh stylesheet pixels through seeks and stylesheet edits without recapturing unchanged clocks; unused, disabled and unrelated CSS resources preserve primitive sources; excluded animations avoid source refresh while contributing animations update pixels; mounted backdrops reroute after lower CSS/stylesheet edits and release replaced sources; duplicated instances retain independent captured inputs; batched reads preserve pseudo/text/media pixels; retained mirrors preserve mixed text topology and unchanged-media CSS changes; paused caches, viewport/transform changes, failed-capture retry and teardown preserve live DOM identities; editor zoom/DPR retain world geometry; GPU handoff preserves ordered translucent output, captures CSS boundaries and recovers context loss; primitive backdrops repaint after out-of-slide drags without resizing; mixed-size shader outputs reuse the presentation buffer with exact pixels and release the idle bridge; capture backend assertions use the SceneTexture semantic boundary rather than primitive/native implementation labels A representative real-SlideRenderer integration fixture combines image-backed DOM, nested clipped media, text JS, browser-native CSS glass, generated GLSL, explicit content/backdrop SceneTexture shaders, Motion, Presence and overlapping foreground content while asserting the boundary split. Direct chains use scoped text paint, compare with an identity CSS capture boundary at unchanged pixel tolerances, and inject context loss after the browser render phase.; continuously animated shader plus text backdrop must publish completed SceneTexture captures without starvation"
+    "lastReviewed": "2026-10-24",
+    "reason": "Chromium SceneTexture content/backdrop pixel parity, CSS/JS/media/clock dependencies, fractional zoom and target geometry, static retention and font invalidation, unrelated-prefix isolation, dynamic capture settling and teardown, native static monitor animation suspension, direct media and shader handoff, bounded cohorts and context restoration. No primitive scene replay or GPU prefix reconstruction. Stable CSS declaration caching cannot suppress live video polling; pause/end/seek events wake and settle capture."
   },
   {
     "id": "editor-scale-properties",
@@ -414,7 +414,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-10-24",
     "reason": "Click Timeline opening/trigger behavior, Edit/Preview mode retaining the playhead, Space advancing one click or playing Slide-start-only motion, Motion/Effect timing inspectors, block context actions, authoritative easing and Slide-start relocation clearing delayed Effect offsets"
   },
   {
@@ -733,7 +733,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-10-24",
     "reason": "Production shader output above 2048, content/backdrop pixels, logical uniforms/text proportions, nested CSS/Motion transforms, paused density updates, PDF density, allocation fallback and context recreation"
   },
   {
@@ -953,7 +953,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-13",
-    "lastReviewed": "2026-10-23",
+    "lastReviewed": "2026-10-24",
     "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership; per-context texture ownership, alternating consumers without upload thrashing, restored context uploads and capture-to-immutable-pixel replacement"
   },
   {
@@ -1019,8 +1019,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-23",
-    "lastReviewed": "2026-10-23",
-    "reason": "Production import boundaries exclude the removed CSS compositor and restrict DOM capture to explicit SceneTexture. Shared Offscreen WebGL and ImageBitmap presentation avoid Canvas2D terminal copies; generated/direct media inputs bypass SceneTexture. Motion binds Effect flush targets once; arbitrary stylesheet dimensions remain a conservative discovery boundary."
+    "lastReviewed": "2026-10-24",
+    "reason": "One Chromium compositor with a lazy SceneTexture capture boundary, no primitive/GPU scene reconstruction; native CSS, generated/direct media independence, bounded shared GPU shader ownership, zero Canvas2D terminal copies and semantic Motion transport."
   },
   {
     "id": "effects-native-opacity",
@@ -1043,5 +1043,27 @@
     "created": "2026-10-23",
     "lastReviewed": "2026-10-23",
     "reason": "Painted-pixel continuity across image/shader-backed Presence entrance, exit, nested groups, overlaps and backward seeks; injected disappearance and missing blur must be detected. Electron presentation subscription acknowledges every fixture state and detects hidden elements, missing blur, blank shader layers, alpha jumps and stale output. Acknowledged capture is not a claim of full-rate display coverage. Also covers natural-rate sampled presentation continuity with explicit capture gaps, capture-free native frame pacing, captured seek latency, bounded overlap error, and a moving VP9 video plus JS text."
+  },
+  {
+    "id": "effects-scene-texture-retention",
+    "path": "tests/feature/effects/scene-texture-retention.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Retained Chromium pixels exclude unresolved image/SVG inputs; a missing asset arriving while every provider is unmounted refreshes content and backdrop GLSL without document edits. Retention follows native source/target/ancestor Motion and Presence dependencies while unrelated later animation preserves cached revisits. Deck width/height changes while unmounted invalidate retained backdrop pixels independently of target sampling size; unchanged revisits reuse them."
+  },
+  {
+    "id": "effects-native-capture-electron",
+    "path": "tests/feature/effects/native-capture-electron.spec.ts",
+    "area": "effects",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Two focused shipping-Electron smoke contracts launch the built ShowMe entrypoint with its production feature switches. Styled native content and backdrop GLSL must expose native capture APIs, cross SceneTexture, produce shader-sampled pixels and avoid diagnostics on every shipping platform/architecture."
   }
 ]

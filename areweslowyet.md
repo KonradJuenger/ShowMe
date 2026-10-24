@@ -62,3 +62,36 @@ pipeline. These are diagnostic observations, not a shipped console-disable featu
 or physical-display FPS. No current document or user preferences were changed.
 
 [Raw comparison and profile shares](docs/rendering/evidence/audience-console-ablation-2026-10-23.json).
+
+## Native rendering finalization — 2026-10-24
+
+Production remains Chromium-native; SceneTexture exclusively captures Chromium
+pixels for explicit GLSL consumers. The primitive scene replay path is removed.
+Preview suspension, GPU generation/binding caches and two bounded shader cohorts
+are retained from performance Phase 1–3; GPU reconstruction/shared-texture/general
+GPU renderer experiments are not integrated.
+
+Three clean serial alternating production-Electron pairs compared main `a699fbd`
+with `aa0dee9`, Radeon 880M/D3D11, the same saved deck, viewport/DPR and harness.
+Audience callback median: **34.5 -> 85.7/sec**; dynamic backdrop publications:
+**17.2 -> 42.8/sec**; callback p95: **57.6 -> 22.5 ms**. These are callback and
+publication rates, not physical display FPS. The original app remained open;
+no concurrent verification ran. Dynamic capture is still the expensive path.
+Captures per ten-second run: main 172/174/171, candidate 403/428/433; one active
+capture mirror, two bounded shader contexts (about 7.8 MiB extra logical shared
+color-buffer storage, not measured VRAM).
+
+Separate headed Radeon workloads measured zero native/CSS/generated captures,
+one static first capture and zero revisit captures in all three repetitions.
+Native callback p95 stayed 3.4 ms; no native speedup is claimed. Dependency checks
+recorded 1 initial, 0 unrelated, 8 captures for 8 relevant changes, 0 settled, and
+0 remaining providers/capture sources after teardown. Static preview/lifecycle,
+font refresh and editor playback resumption passed. A later video-specific fix
+keeps stable-style capture live during video playback and idle after pause; the
+saved benchmark deck has no video, and these timings remain attributed to the
+measured commit.
+
+The broad Electron selection had one 101 ms response against its unchanged
+100 ms budget; isolated main and candidate checks passed. This remains a recorded
+timing limitation. See [architecture and exact commands](docs/rendering/NATIVE_RENDERING_FINAL.md)
+and [raw evidence](docs/rendering/evidence/native-rendering-final-2026-10-24.json).

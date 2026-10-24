@@ -187,7 +187,7 @@ function projectScenePrefix(prefix?: ScenePrefix) {
 }
 
 /** Exact renderer-independent scene identity at one semantic paint point.
- * The element projection remains an adapter for primitive materialization;
+ * The element projection selects native capture dependencies;
  * paintEffects prevents distinct effect-entry prefixes from collapsing. */
 export type SceneSurfaceRef = {
   id: string;

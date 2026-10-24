@@ -1400,6 +1400,7 @@ export function Editor({
             </div>
           )}
           <EditorCanvasSurface
+            visualPlayback={presenter.state?.index != null ? "static" : "live"}
             controller={motionWorkspace.editingController}
             motionSourceSlide={
               motionWorkspace.editingController !== controller

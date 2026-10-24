@@ -67,10 +67,10 @@ it("makes CSS unconditional instead of selecting a rendering backend", () => {
   expect(runtime).not.toContain("compositionSurface");
 });
 
-it("uses SceneTexture as the sole production doorway to legacy scene capture", () => {
+it("uses SceneTexture as the sole production doorway to Chromium scene capture", () => {
   const runtime = component("effectRuntime.ts");
   const boundary = component("sceneTexture.ts");
-  const adapter = component("sceneTextureLegacy.ts");
+  const adapter = component("sceneTextureCapture.ts");
 
   expect(runtime).toContain('from "./sceneTexture"');
   expect(runtime.match(/createSceneTextureProvider\(/g)).toHaveLength(1);
@@ -86,11 +86,18 @@ it("uses SceneTexture as the sole production doorway to legacy scene capture", (
     expect(runtime).not.toContain(legacy);
 
   expect(boundary).toContain("interface SceneTextureProvider");
-  expect(boundary).toContain('from "./sceneTextureLegacy"');
+  expect(boundary).toContain('from "./sceneTextureCapture"');
   expect(boundary).not.toContain("elementRaster");
   expect(boundary).not.toContain("domRaster");
-  expect(adapter).toContain('from "./elementRaster"');
+  expect(productionSources["components/elementRaster.ts"]).toBeUndefined();
+  expect(productionSources["components/sceneTextureGpu.ts"]).toBeUndefined();
+  expect(productionSources["components/sceneTextureLegacy.ts"]).toBeUndefined();
   expect(adapter).toContain('from "./domRaster"');
+  expect(adapter).not.toContain("createFramebuffer");
+  for (const source of Object.values(productionSources))
+    expect(
+      importedModules(source).some((name) => name.includes("experiments/")),
+    ).toBe(false);
 
   const legacyCompositorIsland = new Set([
     "components/backdropRestoration.ts",
@@ -118,13 +125,13 @@ it("uses SceneTexture as the sole production doorway to legacy scene capture", (
 
   const legacyCaptureIsland = new Set([
     ...legacyCompositorIsland,
-    "components/sceneTextureLegacy.ts",
+    "components/sceneTextureCapture.ts",
   ]);
   for (const target of ["elementRaster", "domRaster"])
     expect(
       importers(target).filter((path) => !legacyCaptureIsland.has(path)),
     ).toEqual([]);
-  expect(importers("sceneTextureLegacy")).toEqual([
+  expect(importers("sceneTextureCapture")).toEqual([
     "components/sceneTexture.ts",
   ]);
 });
@@ -138,7 +145,7 @@ it("keeps observers and frame-time traversal out of the normal hot path", () => 
   ])
     expect(component(normal)).not.toContain("MutationObserver");
 
-  expect(component("sceneTextureLegacy.ts")).toContain("MutationObserver");
+  expect(component("sceneTextureCapture.ts")).toContain("MutationObserver");
 
   const hook = component("useMotionRuntime.ts");
   expect(hook).not.toContain("useState");
@@ -160,7 +167,7 @@ it("keeps observers and frame-time traversal out of the normal hot path", () => 
     expect(hotPath).not.toContain(forbidden);
 });
 
-it("presents terminal shaders through one bounded GPU context without Canvas2D copies", () => {
+it("presents terminal shaders through bounded shared GPU contexts without Canvas2D copies", () => {
   const runtime = component("effectRuntime.ts");
   const output = component("shaderOutput.ts");
   expect(runtime).toContain("gl.bindFramebuffer(gl.FRAMEBUFFER, null)");

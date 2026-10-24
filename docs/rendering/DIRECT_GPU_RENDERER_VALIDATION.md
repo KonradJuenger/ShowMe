@@ -1,5 +1,9 @@
 # Direct GPU renderer validation
 
+> Historical PR #18 validation: the branch/status and single-context design below
+> describe that experiment at the time. Current production ownership is defined
+> in [Native rendering finalization](NATIVE_RENDERING_FINAL.md).
+
 Branch: `experimental/browser-native-renderer`. PR #18 remains unmerged.
 
 ## Current rendering ownership
