@@ -136,6 +136,12 @@ function HtmlSlide({
             `Slide "${slide.id}" contains Effect output that could not become ready in this browser.`,
           );
       })
+      .catch((cause) => {
+        if (live)
+          onWarning(
+            `Slide "${slide.id}" preparation failed: ${String(cause)}`,
+          );
+      })
       .finally(() => {
         if (!live) return;
         onAudienceReady({
