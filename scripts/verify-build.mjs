@@ -51,6 +51,10 @@ for (const file of [
   "dist-electron/main.cjs.map",
   "dist-electron/preload.cjs",
   "dist-electron/preload.cjs.map",
+  "dist-electron/imageWorker.cjs",
+  "dist-electron/imageWorker.cjs.map",
+  "dist-electron/showme-mcp.cjs",
+  "dist-electron/showme-mcp.cjs.map",
 ]) {
   await access(path.join(root, file));
 }
