@@ -19,6 +19,7 @@ import {
   compileCompositionPlan,
   compositionIsOwnedMediaOnly,
 } from "../../src/components/compositionPlan";
+import { nativeOpacityPlan } from "../../src/components/nativeOpacity";
 import { getPresentationSlideIds } from "../../src/core/presentationSequence";
 
 export interface HtmlAssetSource {
@@ -42,16 +43,221 @@ function escapeHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
+function visibleLayerNodes(
+  document: ExportDocument,
+  slide: ExportDocument["slides"][number],
+) {
+  const visible = new Set(
+    document.deck.layers
+      .filter((layer) => !layer.hidden)
+      .map((layer) => layer.id),
+  );
+  return slide.nodes.filter((root) => visible.has(root.id));
+}
+
+function visibleElements(
+  document: ExportDocument,
+  slide: ExportDocument["slides"][number],
+) {
+  return walkElements(
+    visibleLayerNodes(document, slide).flatMap((root) => root.children),
+  );
+}
+
+function externalCssUrl(source: string | undefined) {
+  if (!source) return null;
+  for (const match of source.matchAll(
+    /url\(\s*(?:["']([^"']+)["']|([^)]*))\s*\)/gi,
+  )) {
+    const value = (match[1] ?? match[2] ?? "").trim();
+    if (!value || /^data:/i.test(value) || value.startsWith("#")) continue;
+    return value;
+  }
+  const imported = source.match(/@import\s+["']([^"']+)["']/i)?.[1]?.trim();
+  return imported || null;
+}
+
+function externalSvgUrl(source: string) {
+  const cssReference = externalCssUrl(source);
+  if (cssReference) return cssReference;
+  for (const match of source.matchAll(
+    /(?:href|src)\s*=\s*["']([^"']+)["']/gi,
+  )) {
+    const value = match[1].trim();
+    if (!value || /^data:/i.test(value) || value.startsWith("#")) continue;
+    return value;
+  }
+  return null;
+}
+
+function browserCapabilityWarnings(
+  document: ExportDocument,
+  slideIds: Set<string>,
+) {
+  const warnings: ExportWarning[] = [];
+  for (const slide of document.slides) {
+    if (!slideIds.has(slide.id)) continue;
+    for (const element of visibleElements(document, slide)) {
+      const content = element.content;
+      if (
+        content?.type === "video" &&
+        content.autoplay &&
+        !content.mute &&
+        content.volume > 0
+      )
+        warnings.push({
+          slideId: slide.id,
+          elementId: element.id,
+          code: "browser-autoplay-may-require-interaction",
+          message:
+            "This video autoplays with audible audio. Standard browser autoplay policy may block it; the HTML runtime will show a Play control when that happens.",
+        });
+    }
+  }
+  return warnings;
+}
+
+function externalCssWarnings(document: ExportDocument, slideIds: Set<string>) {
+  const warnings: ExportWarning[] = [];
+  const deckReference = externalCssUrl(document.deck.stylesheet);
+  if (deckReference)
+    warnings.push({
+      slideId:
+        document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown",
+      code: "non-embedded-css-resource",
+      message: `The deck stylesheet references a non-embedded resource (${deckReference}). Portable HTML exports block network and file URL access.`,
+    });
+  for (const slide of document.slides) {
+    if (!slideIds.has(slide.id)) continue;
+    const resources = slide.effectResources ?? {};
+    for (const element of visibleElements(document, slide)) {
+      for (const instance of element.effects ?? []) {
+        if (!instance.enabled) continue;
+        const effect = resources[instance.resourceId];
+        if (!effect) continue;
+        const reference = externalCssUrl(
+          effect.kind === "css"
+            ? effect.source
+            : effect.kind === "text-js"
+              ? effect.styleSource
+              : undefined,
+        );
+        if (!reference) continue;
+        warnings.push({
+          slideId: slide.id,
+          elementId: element.id,
+          code: "non-embedded-effect-resource",
+          message: `Effect "${effect.name}" references a non-embedded CSS resource (${reference}). Portable HTML exports block network and file URL access.`,
+        });
+      }
+    }
+  }
+  return warnings;
+}
+
+type CssFontReference = {
+  family: string;
+  slideId: string;
+  elementId?: string;
+};
+
+const genericCssFonts = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "emoji",
+  "math",
+  "fangsong",
+  "inherit",
+  "initial",
+  "unset",
+  "revert",
+  "revert-layer",
+]);
+
+function fontFamiliesFromCss(source: string | undefined) {
+  if (!source) return [];
+  const families: string[] = [];
+  for (const match of source.matchAll(/font-family\s*:\s*([^;{}]+)/gi)) {
+    for (const raw of match[1].split(",")) {
+      const family = raw
+        .replace(/!important\s*$/i, "")
+        .trim()
+        .replace(/^(['"])(.*)\1$/, "$2")
+        .trim();
+      if (
+        family &&
+        !family.includes("var(") &&
+        !genericCssFonts.has(family.toLowerCase())
+      )
+        families.push(family);
+    }
+  }
+  return families;
+}
+
+function cssFontReferences(
+  document: ExportDocument,
+  slideIds: Set<string>,
+): CssFontReference[] {
+  const references: CssFontReference[] = [];
+  const firstSlide =
+    document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown";
+  for (const family of fontFamiliesFromCss(document.deck.stylesheet))
+    references.push({ family, slideId: firstSlide });
+  for (const slide of document.slides) {
+    if (!slideIds.has(slide.id)) continue;
+    const resources = slide.effectResources ?? {};
+    for (const element of visibleElements(document, slide)) {
+      for (const instance of element.effects ?? []) {
+        if (!instance.enabled) continue;
+        const effect = resources[instance.resourceId];
+        if (!effect) continue;
+        const source =
+          effect.kind === "css"
+            ? effect.source
+            : effect.kind === "text-js"
+              ? effect.styleSource
+              : undefined;
+        for (const family of fontFamiliesFromCss(source))
+          references.push({
+            family,
+            slideId: slide.id,
+            elementId: element.id,
+          });
+      }
+    }
+  }
+  return references;
+}
+
 function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
-    const plan = compileCompositionPlan(slide, document.deck);
-    for (const group of plan.groups.values()) {
-      const element = group.element;
+    const resources = slide.effectResources ?? {};
+    const composition = compileCompositionPlan(
+      slide,
+      document.deck,
+      undefined,
+      resources,
+    );
+    const opacity = nativeOpacityPlan(
+      visibleLayerNodes(document, slide).flatMap((root) => root.children),
+      resources,
+      document.deck.stylesheet,
+    );
+    for (const element of visibleElements(document, slide)) {
       for (const instance of element.effects ?? []) {
         if (!instance.enabled) continue;
-        const effect = slide.effectResources?.[instance.resourceId];
+        const effect = resources[instance.resourceId];
         if (!effect) {
           warnings.push({
             slideId: slide.id,
@@ -62,19 +268,21 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
           continue;
         }
         if (effect.kind !== "fragment-glsl") continue;
-        const input = group.inputs.get(instance.id);
-        const operation =
-          input?.kind === "content" ? input.operation : undefined;
-        const direct =
+        const input = composition.groups
+          .get(element.id)
+          ?.inputs.get(instance.id);
+        const browserContentInput =
+          effect.input === "content" &&
           !document.deck.stylesheet?.trim() &&
-          operation &&
-          (compositionIsOwnedMediaOnly(element, operation) ||
-            (operation.kind === "effect" &&
-              slide.effectResources?.[operation.effect.resourceId]?.kind ===
-                "fragment-glsl"));
+          !opacity.get(element.id)?.distribute &&
+          input?.kind === "content" &&
+          ((input.operation.kind === "effect" &&
+            resources[input.operation.effect.resourceId]?.kind ===
+              "fragment-glsl") ||
+            compositionIsOwnedMediaOnly(input.operation, element));
         if (
           effect.input === "backdrop" ||
-          (effect.input === "content" && !direct)
+          (effect.input === "content" && !browserContentInput)
         )
           warnings.push({
             slideId: slide.id,
@@ -87,7 +295,6 @@ function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   }
   return warnings;
 }
-
 function fontOccurrence(
   document: ExportDocument,
   slideIds: Set<string>,
@@ -95,9 +302,7 @@ function fontOccurrence(
 ) {
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
-    for (const element of walkElements(
-      slide.nodes.flatMap((root) => root.children),
-    )) {
+    for (const element of visibleElements(document, slide)) {
       if (element.content?.type !== "text") continue;
       const typography = resolveTextTypography(document.deck, element.content);
       if (
@@ -108,7 +313,9 @@ function fontOccurrence(
         return { slideId: slide.id, elementId: element.id };
     }
   }
-  return { slideId: document.deck.slideIds[0] ?? "unknown" };
+  return {
+    slideId: document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown",
+  };
 }
 
 function selectFonts(
@@ -116,10 +323,14 @@ function selectFonts(
   slideIds: Set<string>,
   families: SystemFontFamily[],
 ) {
-  const visibleSlides = document.slides.filter((slide) =>
-    slideIds.has(slide.id),
-  );
+  const visibleSlides = document.slides
+    .filter((slide) => slideIds.has(slide.id))
+    .map((slide) => ({
+      ...slide,
+      nodes: visibleLayerNodes(document, slide),
+    }));
   const usages = collectUsedFontUsages(visibleSlides, document.deck);
+  const cssReferences = cssFontReferences(document, slideIds);
   const selected: HtmlEmbeddedFontFamily[] = [];
   const bundled: FontUsage[] = [];
   for (const family of families) {
@@ -129,13 +340,21 @@ function selectFonts(
           sensitivity: "base",
         }) === 0,
     );
-    if (!required.length) continue;
-    const sources = (family.sources ?? []).filter((source) =>
-      required.some(
-        (usage) =>
-          usage.weight === source.weight && usage.italic === source.italic,
-      ),
+    const cssRequired = cssReferences.some(
+      (reference) =>
+        reference.family.localeCompare(family.family, undefined, {
+          sensitivity: "base",
+        }) === 0,
     );
+    if (!required.length && !cssRequired) continue;
+    const sources = cssRequired
+      ? (family.sources ?? [])
+      : (family.sources ?? []).filter((source) =>
+          required.some(
+            (usage) =>
+              usage.weight === source.weight && usage.italic === source.italic,
+          ),
+        );
     if (!sources.length) continue;
     selected.push({
       family: family.family,
@@ -155,29 +374,70 @@ function selectFonts(
       })),
     );
   }
-  const warnings = nonPortableFontFamilies(usages, bundled).map((family) => ({
+  const warnings: ExportWarning[] = nonPortableFontFamilies(
+    usages,
+    bundled,
+  ).map((family) => ({
     ...fontOccurrence(document, slideIds, family),
     code: "font-not-embedded",
     message: `Font "${family}" could not be embedded from ShowMe's managed font resources. The HTML export will rely on that font being installed on the viewing computer.`,
   }));
+  const warnedCssFamilies = new Set<string>();
+  for (const reference of cssReferences) {
+    const familyKey = reference.family.toLocaleLowerCase();
+    if (warnedCssFamilies.has(familyKey)) continue;
+    const embedded = bundled.some(
+      (face) =>
+        face.family.localeCompare(reference.family, undefined, {
+          sensitivity: "base",
+        }) === 0,
+    );
+    if (embedded) continue;
+    if (
+      ["arial", "times new roman", "courier new"].includes(
+        reference.family.toLowerCase(),
+      )
+    )
+      continue;
+    if (
+      warnings.some(
+        (warning) =>
+          warning.code === "font-not-embedded" &&
+          warning.message.includes(`"${reference.family}"`),
+      )
+    )
+      continue;
+    warnedCssFamilies.add(familyKey);
+    warnings.push({
+      slideId: reference.slideId,
+      elementId: reference.elementId,
+      code: "stylesheet-font-not-embedded",
+      message: `CSS references font "${reference.family}", but ShowMe has no embeddable managed font data for it. The HTML export will rely on that font being installed on the viewing computer.`,
+    });
+  }
   return { fonts: selected, warnings };
 }
 
 async function runtimeAssets(runtimeDirectory: string) {
   const entries = await fs.readdir(runtimeDirectory);
-  const scripts = entries.filter((entry) => entry.endsWith(".js"));
-  if (scripts.length !== 1)
-    throw new Error("HTML runtime must contain exactly one JavaScript bundle");
-  const javascript = scripts[0];
-  if (!javascript)
-    throw new Error("Built HTML presentation runtime JavaScript is missing");
-  const css = entries.find((entry) => entry.endsWith(".css"));
+  const javascript = entries.filter((entry) => entry.endsWith(".js"));
+  if (javascript.length !== 1)
+    throw new Error(
+      `HTML presentation runtime must contain exactly one JavaScript bundle; found ${javascript.length}`,
+    );
+  const css = entries.filter((entry) => entry.endsWith(".css"));
+  if (css.length > 1)
+    throw new Error(
+      `HTML presentation runtime must contain at most one CSS bundle; found ${css.length}`,
+    );
   return {
     javascript: await fs.readFile(
-      path.join(runtimeDirectory, javascript),
+      path.join(runtimeDirectory, javascript[0]),
       "utf8",
     ),
-    css: css ? await fs.readFile(path.join(runtimeDirectory, css), "utf8") : "",
+    css: css[0]
+      ? await fs.readFile(path.join(runtimeDirectory, css[0]), "utf8")
+      : "",
   };
 }
 
@@ -194,6 +454,25 @@ function embeddedJson(value: unknown) {
     .replaceAll("\u2029", "\\u2029");
 }
 
+function portableDocumentSnapshot(
+  document: ExportDocument,
+  slideIds: Set<string>,
+): ExportDocument {
+  const ids = document.deck.slideIds.filter((id) => slideIds.has(id));
+  return {
+    deck: {
+      ...document.deck,
+      slideIds: ids,
+      slideMeta: Object.fromEntries(
+        ids.map((id) => [id, document.deck.slideMeta[id]]),
+      ),
+    },
+    slides: document.slides
+      .filter((slide) => slideIds.has(slide.id))
+      .map((slide) => ({ ...slide, notes: "" })),
+  };
+}
+
 export async function createHtmlExport({
   document,
   runtimeVersion,
@@ -204,16 +483,18 @@ export async function createHtmlExport({
   const slideIds = new Set(getPresentationSlideIds(document.deck));
   if (!slideIds.size) throw new Error("There are no visible slides to export");
 
-  const warnings: ExportWarning[] = sceneTextureWarnings(document, slideIds);
+  const warnings: ExportWarning[] = [
+    ...sceneTextureWarnings(document, slideIds),
+    ...externalCssWarnings(document, slideIds),
+    ...browserCapabilityWarnings(document, slideIds),
+  ];
   const assetOccurrences = new Map<
     string,
     Array<{ slideId: string; elementId: string }>
   >();
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
-    for (const element of walkElements(
-      slide.nodes.flatMap((root) => root.children),
-    )) {
+    for (const element of visibleElements(document, slide)) {
       const content = element.content;
       if (!content || content.type === "text") continue;
       const occurrences = assetOccurrences.get(content.assetId) ?? [];
@@ -235,10 +516,21 @@ export async function createHtmlExport({
         });
       continue;
     }
+    const bytes = await fs.readFile(source.file);
+    if (source.mime === "image/svg+xml") {
+      const reference = externalSvgUrl(bytes.toString("utf8"));
+      if (reference)
+        for (const occurrence of occurrences)
+          warnings.push({
+            ...occurrence,
+            code: "non-embedded-svg-resource",
+            message: `SVG media references a non-embedded resource (${reference}). Portable HTML exports contain no sibling resources and block external file/network access.`,
+          });
+    }
     assets.push({
       id: assetId,
       mime: source.mime,
-      data: (await fs.readFile(source.file)).toString("base64"),
+      data: bytes.toString("base64"),
     });
   }
 
@@ -247,7 +539,9 @@ export async function createHtmlExport({
     managedFontFamilies = await managedFonts();
   } catch (cause) {
     warnings.push({
-      slideId: document.deck.slideIds[0] ?? "unknown",
+      slideId:
+        document.deck.slideIds.find((slideId) => slideIds.has(slideId)) ??
+        "unknown",
       code: "managed-fonts-unavailable",
       message:
         "ShowMe could not read its managed font resources for this export: " +
@@ -262,7 +556,7 @@ export async function createHtmlExport({
     formatVersion: HTML_EXPORT_FORMAT_VERSION,
     runtimeVersion,
     exportedAt: new Date().toISOString(),
-    document,
+    document: portableDocumentSnapshot(document, slideIds),
     assets,
     fonts: selectedFonts.fonts,
     warnings,

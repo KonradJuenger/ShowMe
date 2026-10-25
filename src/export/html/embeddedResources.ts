@@ -23,7 +23,7 @@ export class EmbeddedRenderResources implements RenderResources {
   >();
   private readonly assetUrls = new Map<string, string>();
   private readonly faces = new Set<FontFace>();
-  private readonly installedSources = new Set<string>();
+  private readonly installedFontKeys = new Set<string>();
 
   constructor(
     assets: readonly HtmlEmbeddedAsset[],
@@ -64,25 +64,40 @@ export class EmbeddedRenderResources implements RenderResources {
       this.assetUrls.delete(current.assetId);
   }
 
-  async installFonts(): Promise<void> {
-    if (typeof FontFace === "undefined" || !document.fonts) return;
+  async installFonts(): Promise<string[]> {
+    const warnings: string[] = [];
+    if (this.disposed) return warnings;
+    if (typeof FontFace === "undefined" || !document.fonts) {
+      if (this.fonts.length)
+        warnings.push(
+          "This browser does not support embedded FontFace resources.",
+        );
+      return warnings;
+    }
     for (const family of this.fonts) {
       for (const source of family.sources) {
-        const key = `${family.family}:${source.id}:${source.weight}:${source.italic}`;
-        if (this.installedSources.has(key)) continue;
-        const bytes = decodeBase64(source.data);
-        const face = new FontFace(family.family, bytes.buffer, {
-          weight: String(source.weight),
-          style: source.italic ? "italic" : "normal",
-        });
-        await face.load();
-        if (this.disposed) return;
-        document.fonts.add(face);
-        this.faces.add(face);
-        this.installedSources.add(key);
+        const key = `${family.family}:${source.id}:${source.weight}:${source.italic ? 1 : 0}`;
+        if (this.installedFontKeys.has(key)) continue;
+        try {
+          const bytes = decodeBase64(source.data);
+          const face = new FontFace(family.family, bytes.buffer, {
+            weight: String(source.weight),
+            style: source.italic ? "italic" : "normal",
+          });
+          await face.load();
+          if (this.disposed) return warnings;
+          document.fonts.add(face);
+          this.faces.add(face);
+          this.installedFontKeys.add(key);
+        } catch (cause) {
+          warnings.push(
+            `Could not install ${family.family} ${source.weight}${source.italic ? " italic" : ""}: ${String(cause)}`,
+          );
+        }
       }
     }
     await document.fonts.ready;
+    return warnings;
   }
 
   async managedFonts() {
@@ -105,6 +120,6 @@ export class EmbeddedRenderResources implements RenderResources {
     this.assetUrls.clear();
     for (const face of this.faces) document.fonts.delete(face);
     this.faces.clear();
-    this.installedSources.clear();
+    this.installedFontKeys.clear();
   }
 }

@@ -70,6 +70,7 @@ import {
   type ExportWarning,
 } from "../src/export/shared";
 import { walkElements } from "../src/core/element";
+import { getPresentationSlideIds } from "../src/core/presentationSequence";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { DocumentStorage, atomicWrite } from "./storage";
@@ -1047,6 +1048,8 @@ async function performExportPresentation(
   const document: ExportDocument = { deck, slides };
   if (type === "pdf" && pdfSlides(document).length === 0)
     throw new Error("There are no slides to export");
+  if (type === "html" && getPresentationSlideIds(deck).length === 0)
+    throw new Error("There are no visible slides to export");
   const exportSpec =
     type === "pdf"
       ? { title: "Export as PDF", name: "PDF", extension: "pdf" }

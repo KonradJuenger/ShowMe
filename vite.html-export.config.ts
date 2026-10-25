@@ -20,9 +20,9 @@ export default defineConfig({
       fileName: () => "showme-html-runtime.js",
       cssFileName: "showme-html-runtime",
     },
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        inlineDynamicImports: true,
+        codeSplitting: false,
       },
     },
   },

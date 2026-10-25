@@ -81,8 +81,8 @@ export async function warmVideoPlayer(
 ) {
   const existing = players.get(key);
   if (
-    existing?.resources === resources &&
-    existing.assetId === content.assetId &&
+    existing?.assetId === content.assetId &&
+    existing.resources === resources &&
     (existing.owners || (existing.url && existing.node.readyState >= 2))
   )
     return;

@@ -27,6 +27,15 @@ afterAll(async () => {
   await rm(runtimeDirectory, { recursive: true, force: true });
 });
 
+function exportedPayload(html: string) {
+  const json = html.match(
+    /<script id="showme-html-payload" type="application\/json">(.*?)<\/script>/s,
+  )![1];
+  return JSON.parse(
+    json,
+  ) as import("../../../src/export/html/types").HtmlExportPayload;
+}
+
 it("assembles one escaped offline document and reports missing media and font resources", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "showme-html-unit-"));
   try {
@@ -211,6 +220,147 @@ it("isolates video posters with identical asset IDs between resource providers",
     expect(await videoPoster(a, "same", 0, false)).toBe("first");
     expect(await videoPoster(b, "same", 0, false)).toBe("second");
   } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("omits hidden slides and notes while resolving assets only from visible layers", async () => {
+  const document = htmlExportFixture();
+  const [first, hidden] = document.slides;
+  first.notes = "private speaker notes";
+  hidden.notes = "hidden notes";
+  document.deck.slideMeta[hidden.id].hidden = true;
+  document.deck.layers.push({
+    ...document.deck.layers[0],
+    id: "hidden-layer",
+    hidden: true,
+  });
+  first.nodes.push({
+    type: "layer",
+    id: "hidden-layer",
+    children: [structuredClone(hidden.nodes[0].children[0])],
+  });
+  const resolveAsset = vi.fn(async () => null);
+  const { html, warnings } = await createHtmlExport({
+    document,
+    runtimeDirectory,
+    runtimeVersion: "test",
+    resolveAsset,
+    managedFonts: async () => [],
+  });
+  const payload = exportedPayload(html);
+  expect(payload.document.deck.slideIds).toEqual([first.id]);
+  expect(Object.keys(payload.document.deck.slideMeta)).toEqual([first.id]);
+  expect(payload.document.slides).toHaveLength(1);
+  expect(payload.document.slides[0].notes).toBe("");
+  expect(resolveAsset).not.toHaveBeenCalled();
+  expect(warnings.some((w) => w.code === "missing-media")).toBe(false);
+  expect(html).not.toContain("private speaker notes");
+  expect(html).not.toContain("hidden notes");
+});
+
+it("embeds visible CSS font variants and identifies blocked external CSS and SVG resources", async () => {
+  const document = htmlExportFixture();
+  document.deck.stylesheet =
+    '.title { font-family: "CSS Fixture"; background: url("./sibling.png"); }';
+  document.slides[0].effectResources!.css.source =
+    ':scope { background: url("https://example.test/effect.png"); }';
+  const file = path.join(runtimeDirectory, "external.svg");
+  await writeFile(
+    file,
+    '<svg xmlns="http://www.w3.org/2000/svg"><image href="./external.png"/></svg>',
+  );
+  const { html, warnings } = await createHtmlExport({
+    document,
+    runtimeDirectory,
+    runtimeVersion: "test",
+    resolveAsset: async () => ({ file, mime: "image/svg+xml" }),
+    managedFonts: async () => [
+      {
+        family: "CSS Fixture",
+        weights: [400, 700],
+        sources: [
+          {
+            id: "regular",
+            weight: 400,
+            italic: false,
+            data: new Uint8Array([1]),
+          },
+          {
+            id: "bold-italic",
+            weight: 700,
+            italic: true,
+            data: new Uint8Array([2]),
+          },
+        ],
+      },
+    ],
+  });
+  expect(
+    exportedPayload(html).fonts[0].sources.map((source) => source.id),
+  ).toEqual(["regular", "bold-italic"]);
+  expect(warnings.some((w) => w.code === "non-embedded-css-resource")).toBe(
+    true,
+  );
+  expect(
+    warnings.some(
+      (w) =>
+        w.code === "non-embedded-effect-resource" && w.elementId === "text",
+    ),
+  ).toBe(true);
+  expect(warnings.some((w) => w.code === "non-embedded-svg-resource")).toBe(
+    true,
+  );
+  expect(warnings.some((w) => w.code === "stylesheet-font-not-embedded")).toBe(
+    false,
+  );
+});
+
+it("reports failed font faces without losing installed variants or reinstalling them", async () => {
+  const add = vi.fn(),
+    remove = vi.fn();
+  vi.stubGlobal("document", {
+    fonts: { add, delete: remove, ready: Promise.resolve() },
+  });
+  vi.stubGlobal(
+    "FontFace",
+    class {
+      constructor(
+        readonly family: string,
+        readonly bytes: ArrayBuffer,
+      ) {}
+      async load() {
+        if (new Uint8Array(this.bytes)[0] === 0) throw Error("invalid font");
+        return this;
+      }
+    },
+  );
+  const resources = new EmbeddedRenderResources(
+    [],
+    [
+      {
+        family: "Fixture",
+        weights: [400, 700],
+        sources: [
+          { id: "good", weight: 400, italic: false, data: "AQ==" },
+          { id: "bad", weight: 700, italic: false, data: "AA==" },
+        ],
+      },
+    ],
+  );
+  try {
+    expect(await resources.installFonts()).toEqual([
+      expect.stringContaining("Fixture 700"),
+    ]);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(await resources.installFonts()).toHaveLength(1);
+    expect(add).toHaveBeenCalledTimes(1);
+    resources.dispose();
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(await resources.installFonts()).toEqual([]);
+    expect(add).toHaveBeenCalledTimes(1);
+  } finally {
+    resources.dispose();
     vi.unstubAllGlobals();
   }
 });

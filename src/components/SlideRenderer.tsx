@@ -145,6 +145,7 @@ function VideoView({
     setReady(false);
     setPresented(false);
     setIsPlaying(false);
+    setAutoplayBlocked(false);
     if (!loadVideo || !url) {
       node.pause();
       node.removeAttribute("src");
@@ -259,7 +260,10 @@ function VideoView({
       return;
     }
     if (ready && contentRef.current.autoplay && editorPlayback !== "trim")
-      void node.play().catch(() => setAutoplayBlocked(true));
+      void node.play().then(
+        () => setAutoplayBlocked(false),
+        () => setAutoplayBlocked(true),
+      );
   }, [activePlayback, loadVideo, ready, editorPlayback]);
 
   const previousTrim = useRef({
@@ -344,7 +348,10 @@ function VideoView({
       objectFit: "fill",
       visibility: activePlayback ? "visible" : "hidden",
     });
-    const play = () => setIsPlaying(true),
+    const play = () => {
+        setIsPlaying(true);
+        if (content.autoplay) setAutoplayBlocked(false);
+      },
       pause = () => setIsPlaying(false);
     const update = () => enforceEnd(node);
     const ended = () => {
@@ -414,8 +421,8 @@ function VideoView({
       )}
       {presentation &&
         !staticVideo &&
-        (!content.autoplay || autoplayBlocked) &&
-        ready && (
+        ready &&
+        (!content.autoplay || autoplayBlocked) && (
           <button
             className="movie-click-to-play"
             style={{ zIndex: 2 }}
@@ -641,9 +648,11 @@ function MediaSurface({
     <div
       data-showme-part="content"
       data-media-asset-id={content.assetId}
+      data-media-type={content.type}
       data-media-loading={
         url === undefined ||
-        (content.type !== "video" && (checking || decodedUrl !== url))
+        checking ||
+        (content.type !== "video" && decodedUrl !== url)
           ? "true"
           : undefined
       }
@@ -898,7 +907,7 @@ const ElementView = memo(function ElementView({
           definition?.kind === "fragment-glsl" &&
           definition.input === "content" &&
           !!operation.input &&
-          compositionIsOwnedMediaOnly(element, operation.input);
+          compositionIsOwnedMediaOnly(operation.input, element);
         return surface(
           operation.effect,
           operation.input ? lower(operation.input) : undefined,

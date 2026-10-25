@@ -166,7 +166,19 @@ export function HtmlPresentationApp({
   const [state, setState] = useState<PresenterState | null>(null);
   const [error, setError] = useState("");
   const [presentedId, setPresentedId] = useState<string>();
-  const onError = useCallback((cause: unknown) => setError(String(cause)), []);
+  const reportWarning = useCallback((message: string) => {
+    setError((current) =>
+      current.includes(message)
+        ? current
+        : current
+          ? current + "\n" + message
+          : message,
+    );
+  }, []);
+  const onError = useCallback(
+    (cause: unknown) => reportWarning(String(cause)),
+    [reportWarning],
+  );
   const onPrepared = useCallback((id: string) => setPresentedId(id), []);
 
   useEffect(
@@ -187,7 +199,8 @@ export function HtmlPresentationApp({
     let live = true;
     void resources
       .installFonts()
-      .then(() => {
+      .then((warnings) => {
+        if (live && warnings.length) reportWarning(warnings.join("\n"));
         if (live)
           setState(
             startSession(
@@ -203,7 +216,7 @@ export function HtmlPresentationApp({
     return () => {
       live = false;
     };
-  }, [deck, motionSlides, resources, onError]);
+  }, [deck, motionSlides, resources, onError, reportWarning]);
 
   const apply = useCallback(
     (command: Parameters<typeof applyPresentationCommand>[1]) =>

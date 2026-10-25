@@ -38,3 +38,13 @@ export interface RenderResources {
     callback: (status: ImageReadiness | null) => void,
   ): () => void;
 }
+
+let defaultRenderResources: RenderResources | null = null;
+
+export function setDefaultRenderResources(resources: RenderResources) {
+  defaultRenderResources = resources;
+}
+
+export function getDefaultRenderResources() {
+  return defaultRenderResources;
+}

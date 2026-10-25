@@ -1074,8 +1074,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-24",
-    "lastReviewed": "2026-10-24",
-    "reason": "Single-file assembly escaping, missing resource diagnostics, composition-exact SceneTexture eligibility, exact font variants, lazy provider URL ownership and isolated video posters"
+    "lastReviewed": "2026-10-25",
+    "reason": "Single-file assembly escaping, hidden-slide/note privacy and visible-layer resources, external CSS/SVG diagnostics, CSS and exact font variants, nonfatal font installation, composition-exact SceneTexture eligibility, lazy URL ownership and isolated video posters"
   },
   {
     "id": "html-export-browser",

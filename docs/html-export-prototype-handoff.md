@@ -4,13 +4,30 @@ Branch: `chatgpt/html-export-prototype`
 
 Local verification: 2026-10-24, Windows x64, Node 26.3.0.
 
-Status: ready for human review as a Chromium/Firefox prototype; not integrated or pushed. Existing draft PR #21 was not modified. Automatic CI remains paused.
+Status: ready for human review as a Chromium/Firefox prototype. The reconciled task branch targets main through a new PR; main is not modified. Previous verification PR #21 is closed. Automatic CI remains paused.
 
 ## Direct-start follow-up
 
 The exported HTML now opens directly into the presentation after the existing font/media readiness barrier; initial next-slide shader preparation waits for the first slide to become ready to avoid starving its text worker during automatic startup; there is no Start screen. Escape ends to a blank output and reloading starts again. Export actions and the save dialog are named “Export HTML”. If the browser rejects autoplay, VideoView exposes its existing Play control; presentation shortcuts remain available after interacting with it, while Space/Enter still operate a focused button. The earlier Start-interaction measurements below describe the original verification pass.
 
 Follow-up checks: typecheck, focused ESLint, test audit and the two Chromium HTML browser declarations (including forced autoplay rejection and delayed SVG decoding).
+
+## Branch reconciliation (2026-10-25)
+
+Merged the remote static-review fixes with the locally tested automatic-start runtime. Retained hidden-slide/note filtering, visible-layer resource selection, external CSS/SVG diagnostics, CSS font embedding, nonfatal font installation warnings, the core resource registry and Vite/build invariants. The alternative HTML readiness loop was removed in favor of the shared useAudienceReady handshake, preserving clock gating without a second timeout-based preparation path. Export naming remains “Export HTML” and there is no Start screen. The verification below dated October 24 remains historical; new checks are recorded separately for this merge candidate.
+
+Verification of the reconciled candidate (2026-10-25):
+
+- `npm run typecheck`: PASS.
+- `npm run lint`: PASS with the existing unused-variable warning in `tests/feature/media/library-work.test.ts`.
+- `npm test`: PASS, 15 core tests.
+- `$env:SHOWME_TEST_FILES='["tests/feature/html-export/html-export.test.ts"]'; npx vitest run`: PASS, 8 HTML unit tests; includes new snapshot privacy, external-resource, CSS-font and runtime-font-warning contracts. The variable was removed after each focused invocation.
+- `npm run test:stats` and `npm run test:audit`: PASS, 686 active declarations / 99 groups.
+- `npm run build` and `npm run verify:build`: PASS. Final runtime output is one JS bundle (489,428 bytes) and one CSS bundle (1,066 bytes); no copied public assets or dynamic chunks.
+- `$env:SHOWME_TEST_FILES='["tests/feature/presenter/audience-navigation.spec.ts","tests/feature/html-export/html-export.spec.ts"]'; npx playwright test --config playwright.config.ts --output test-results-html-export-merge`: PASS, 4/4. Both audience-navigation declarations executed, including dense animated rendering stress.
+- `$env:SHOWME_TEST_FILES='["tests/feature/html-export/html-export.spec.ts"]'; npx playwright test --config playwright.config.ts --browser firefox --output test-results-html-export-merge-firefox`: PASS, 2/2.
+- Native PDF: `$env:SHOWME_TESTING='1'; $env:SHOWME_TEST_ROOT_SELECTION=(Resolve-Path test-results-html-export-merge-native-root).Path; $env:SHOWME_TEST_FILES='["tests/feature/persistence/pdf-rendering.spec.ts"]'; npx playwright test --config playwright.config.ts --output test-results-html-export-merge-pdf`: PASS, 1/1. The isolated root was created beforehand and all environment variables were removed afterward.
+- Conflict/diff review: no conflict markers or whitespace errors; CI configuration still matches main. No full/release suite or repeated benchmark was run for this reconciliation. Prior packaging, media/font probes and WebKit limitations below remain historical observations rather than newly repeated coverage.
 
 ## Architecture retained
 
