@@ -1,0 +1,81 @@
+* {
+  box-sizing: border-box;
+}
+:root {
+  font-synthesis: none;
+}
+html,
+body,
+#root,
+.showme-html-presentation {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+html,
+body {
+  background: #000;
+}
+body {
+  font-family: Arial, sans-serif;
+}
+.showme-html-presentation {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  user-select: none;
+}
+.showme-html-runtime-error {
+  color: #ff9b9b !important;
+}
+.showme-html-runtime-error {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 1001;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 10px 12px;
+  background: #220d0ddd;
+  font: 13px/1.4 monospace;
+}
+.showme-html-black {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #000;
+}
+.movie-click-to-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 50%;
+  width: 64px;
+  height: 64px;
+  background: #ffffffd9;
+  color: #222;
+  font-size: 26px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.effect-error-copy {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: copy;
+}
+.effect-error-copy:hover {
+  text-decoration: underline;
+}
+.effect-error-copy-status {
+  display: block;
+  font-size: 12px;
+}

@@ -5,6 +5,31 @@
   color: #26344c;
 }
 
+.html-export-progress {
+  width: min(420px, calc(100vw - 48px));
+  color: var(--km-text-primary);
+}
+
+.html-export-progress h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.html-export-progress progress {
+  display: block;
+  width: 100%;
+  height: 10px;
+  accent-color: var(--km-accent);
+}
+
+.html-export-progress-detail {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .presentation-menu-popover {
   position: fixed;
   z-index: 10000;
@@ -267,6 +292,7 @@
 }
 
 .settings-dialog-body button,
+.settings-dialog-body input[type="number"],
 .settings-dialog-body select {
   min-height: 32px;
   max-width: 100%;
@@ -277,6 +303,10 @@
   color: var(--km-text-primary);
   font: inherit;
   font-size: 12px;
+}
+
+.settings-dialog-body input[type="number"] {
+  width: 76px;
 }
 
 .settings-dialog-body button:hover:not(:disabled) {

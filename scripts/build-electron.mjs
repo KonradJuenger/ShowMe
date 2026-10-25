@@ -11,6 +11,6 @@ await build({
   bundle: true,
   platform: "node",
   format: "cjs",
-  external: ["electron", "sharp"],
+  external: ["electron", "sharp", "ffmpeg-static"],
   sourcemap: true,
 });

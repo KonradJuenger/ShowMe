@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { platform } from "../platform";
+import { useRenderResources } from "./renderResources";
 import type {
   ImageOutputProfile,
   PreparedImage,
@@ -18,6 +18,7 @@ export function usePreparedImage(
   deferUpdates = false,
   plan?: SlideImagePlan,
 ) {
+  const resources = useRenderResources();
   const [result, setResult] = useState<{
     id: string;
     key: string;
@@ -32,16 +33,16 @@ export function usePreparedImage(
   useLayoutEffect(() => {
     const nextUrl = result?.image?.url ?? null;
     if (usingPlan && nextUrl && ownedUrl.current !== nextUrl)
-      platform.retainUrl?.(nextUrl);
+      resources.retainUrl?.(nextUrl);
     if (ownedUrl.current && ownedUrl.current !== nextUrl)
-      platform.releaseUrl(ownedUrl.current);
+      resources.releaseUrl(ownedUrl.current);
     ownedUrl.current = nextUrl;
-  }, [result?.image?.url, usingPlan]);
+  }, [result?.image?.url, usingPlan, resources]);
   useEffect(
     () => () => {
-      if (ownedUrl.current) platform.releaseUrl(ownedUrl.current);
+      if (ownedUrl.current) resources.releaseUrl(ownedUrl.current);
     },
-    [],
+    [resources],
   );
   const generation = useImageGeneration(documentId);
   const key = `${documentId}:${slideId}:${elementId}:${assetId}:${planKey ?? generation}:${profile?.width}:${profile?.height}`;
@@ -49,14 +50,14 @@ export function usePreparedImage(
   useEffect(() => {
     // A gesture keeps the displayed variant, including when an older request
     // finishes in flight. On release, resolve the latest accepted geometry.
-    if (!enabled || !documentId || !platform.preparedImage || deferUpdates)
+    if (!enabled || !documentId || !resources.preparedImage || deferUpdates)
       return;
     if (usingPlan && !planImages) return;
     let live = true;
     const resolve = async () => {
       const image = usingPlan
         ? (planImages![elementId] ?? null)
-        : await platform.preparedImage!(
+        : await resources.preparedImage!(
             documentId,
             slideId,
             elementId,
@@ -69,7 +70,7 @@ export function usePreparedImage(
         try {
           await probe.decode();
         } catch {
-          if (!usingPlan) platform.releaseUrl(image.url);
+          if (!usingPlan) resources.releaseUrl(image.url);
           return null;
         }
       }
@@ -78,14 +79,14 @@ export function usePreparedImage(
     void resolve()
       .then((image) => {
         if (!live) {
-          if (image && !usingPlan) platform.releaseUrl(image.url);
+          if (image && !usingPlan) resources.releaseUrl(image.url);
           return;
         }
         // A readiness update or profile change may resolve to identical pixels.
         // Keep decoded pixels when a request resolves to the same variant.
         const current = displayedImage.current;
         if (image && current?.hash === image.hash) {
-          if (!usingPlan) platform.releaseUrl(image.url);
+          if (!usingPlan) resources.releaseUrl(image.url);
           setResult({
             id: identity,
             key,
@@ -119,8 +120,9 @@ export function usePreparedImage(
     deferUpdates,
     usingPlan,
     planImages,
+    resources,
   ]);
-  const available = enabled && documentId && platform.preparedImage;
+  const available = enabled && documentId && resources.preparedImage;
   return {
     image: !available
       ? null

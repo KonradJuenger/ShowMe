@@ -133,6 +133,7 @@ export type FileCommand =
   | "package"
   | "export-pdf"
   | "export-pptx"
+  | "export-html"
   | "prepare-close";
 export type CloseResult = "closed" | "canceled";
 
@@ -208,6 +209,11 @@ export interface Platform {
   chooseImageCacheFolder?(): Promise<MediaLibraryInfo | null>;
   resetImageCacheFolder?(): Promise<MediaLibraryInfo>;
   getImageCachingEnabled?(): Promise<boolean>;
+  getHtmlFontEmbedding?(): Promise<import("../export/html/types").HtmlFontEmbedding>;
+  setHtmlFontEmbedding?(mode: import("../export/html/types").HtmlFontEmbedding): Promise<void>;
+  onHtmlExportProgress?(callback: (progress: import("../export/html/types").HtmlExportProgress | null) => void): () => void;
+  getHtmlExportJpegQuality?(): Promise<number>;
+  setHtmlExportJpegQuality?(quality: number): Promise<void>;
   getImageCacheFormat?(): Promise<import("../core/presentationImages").ImageCacheFormat>;
   setImageCacheFormat?(format: import("../core/presentationImages").ImageCacheFormat): Promise<void>;
   getDeleteImageCacheOnClose?(): Promise<boolean>;
@@ -333,7 +339,7 @@ export interface Platform {
   packageDocument?(documentId: string): Promise<string | null>;
   exportPresentation?(
     documentId: string,
-    format: "pdf" | "pptx",
+    format: "pdf" | "pptx" | "html",
   ): Promise<{ warnings: import("../export/shared").ExportWarning[] } | null>;
   exportReady?(error: string | null): Promise<void>;
   packageMediaState?(

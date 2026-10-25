@@ -1,4 +1,4 @@
-import { platform } from "../platform";
+import type { RenderResources } from "../core/renderResources";
 import type { Element } from "../core/element";
 import { videoBounds } from "../core/video";
 
@@ -8,6 +8,7 @@ interface Player {
   url: string | null;
   owners: number;
   assetId: string;
+  resources: RenderResources;
 }
 const players = new Map<string, Player>();
 export function videoPlayerKey(
@@ -29,12 +30,20 @@ function discard(key: string, player: Player) {
   player.node.removeAttribute("src");
   player.node.load();
   player.node.remove();
-  if (player.url) platform.releaseUrl(player.url);
+  if (player.url) player.resources.releaseUrl(player.url);
   if (players.get(key) === player) players.delete(key);
 }
-export function acquireVideoPlayer(key: string, assetId: string) {
+export function acquireVideoPlayer(
+  key: string,
+  assetId: string,
+  resources: RenderResources,
+) {
   let player = players.get(key);
-  if (player && player.assetId !== assetId && !player.owners) {
+  if (
+    player &&
+    (player.assetId !== assetId || player.resources !== resources) &&
+    !player.owners
+  ) {
     discard(key, player);
     player = undefined;
   }
@@ -43,7 +52,7 @@ export function acquireVideoPlayer(key: string, assetId: string) {
     node.crossOrigin = "anonymous";
     node.playsInline = true;
     node.preload = "auto";
-    player = { node, url: null, owners: 0, assetId };
+    player = { node, url: null, owners: 0, assetId, resources };
     // A second concurrent surface must own its own player.
     if (!players.get(key)?.owners) players.set(key, player);
   }
@@ -68,21 +77,23 @@ export async function warmVideoPlayer(
   key: string,
   content: VideoContent,
   live: () => boolean,
+  resources: RenderResources,
 ) {
   const existing = players.get(key);
   if (
     existing?.assetId === content.assetId &&
+    existing.resources === resources &&
     (existing.owners || (existing.url && existing.node.readyState >= 2))
   )
     return;
-  const handle = acquireVideoPlayer(key, content.assetId);
+  const handle = acquireVideoPlayer(key, content.assetId, resources);
   const player = players.get(key)!;
   handle.release();
   try {
-    const url = await platform.assetUrl(content.assetId);
+    const url = await resources.assetUrl(content.assetId);
     if (!url) return;
     if (!live() || player.owners || players.get(key) !== player) {
-      platform.releaseUrl(url);
+      resources.releaseUrl(url);
       return;
     }
     player.url = url;
@@ -133,4 +144,10 @@ export function cancelVideoWarmup(
       !slidePrefixes.some((prefix) => key.startsWith(prefix))
     )
       discard(key, player);
+}
+
+/** Drop idle players before their provider revokes its URLs. */
+export function releasePreparedVideos(resources: RenderResources) {
+  for (const [key, player] of players)
+    if (player.resources === resources && !player.owners) discard(key, player);
 }

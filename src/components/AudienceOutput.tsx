@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { usePreparedSlideImages } from "./usePreparedSlideImages";
-import { flushEffectSurfaces } from "./effectRuntime";
+import { useAudienceReady } from "./useAudienceReady";
 import { presentationSpan } from "./presentationDiagnostics";
 import type { PresenterState } from "../platform/api";
 import { platform } from "../platform";
@@ -22,6 +22,8 @@ import { flushSync } from "react-dom";
 import { useAudienceImageProfile } from "./useAudienceImageProfile";
 import { audienceImageWindow } from "../core/audienceImageWindow";
 import type { ImageOutputProfile } from "../core/presentationImages";
+
+const sendReady = (command: Parameters<typeof platform.presentationCommand>[0]) => platform.presentationCommand(command);
 
 // Retain the actual players, rather than warming disposable video elements.
 // Bound the number of prepared slides even for very long presentations.
@@ -111,7 +113,7 @@ export function AudienceOutput() {
                 if (element.content?.type !== "video") continue;
                 const key = videoPlayerKey(deckId, record.value.id, element.id);
                 usefulPlayers.add(key);
-                await warmVideoPlayer(key, element.content, () => live);
+                await warmVideoPlayer(key, element.content, () => live, platform);
                 if (!live) return;
               }
             } catch {
@@ -232,43 +234,7 @@ function AudienceSlide({
     : transition.outgoing
       ? lastActiveState.current
       : null;
-  const sessionStartedAt = state?.startedAt;
-  const motionStartedAt = state?.motion?.startedAt ?? state?.slideStartedAt;
-  useEffect(() => {
-    if (
-      !waiting ||
-      !ready ||
-      sessionStartedAt === undefined ||
-      motionStartedAt === undefined
-    )
-      return;
-    let live = true;
-    let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => {
-        void (async () => {
-          if (root.current && !(await flushEffectSurfaces(root.current))) {
-            onError(new Error("Effect output is not ready for presentation"));
-            return;
-          }
-          if (live)
-            onPrepared(record.value.id);
-          if (live)
-            void platform
-              .presentationCommand({
-                type: "audience-ready",
-                slideId: record.value.id,
-                sessionStartedAt,
-                motionStartedAt,
-              })
-              .catch(onError);
-        })().catch(onError);
-      });
-    });
-    return () => {
-      live = false;
-      cancelAnimationFrame(frame);
-    };
-  }, [waiting, ready, sessionStartedAt, motionStartedAt, record, onError, onPrepared]);
+  useAudienceReady(root, record.value.id, state, !!waiting && ready, onPrepared, sendReady, onError);
   return (
     <div
       ref={root}

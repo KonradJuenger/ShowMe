@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
@@ -26,6 +26,24 @@ for (const url of assetUrls) {
   }
   const clean = url.split(/[?#]/, 1)[0].replace(/^\.\//, "");
   await access(path.join(dist, clean));
+}
+
+const htmlRuntime = path.join(root, "dist-html-export");
+const htmlRuntimeFiles = await readdir(htmlRuntime);
+const htmlRuntimeJs = htmlRuntimeFiles.filter((file) => file.endsWith(".js"));
+const htmlRuntimeCss = htmlRuntimeFiles.filter((file) => file.endsWith(".css"));
+if (htmlRuntimeJs.length !== 1) {
+  throw new Error(
+    `HTML export runtime must contain exactly one JavaScript bundle; found ${htmlRuntimeJs.length}`,
+  );
+}
+if (htmlRuntimeCss.length > 1) {
+  throw new Error(
+    `HTML export runtime must contain at most one CSS bundle; found ${htmlRuntimeCss.length}`,
+  );
+}
+if (/^\s*import\s/m.test(await readFile(path.join(htmlRuntime, htmlRuntimeJs[0]), "utf8"))) {
+  throw new Error("HTML export runtime must be a self-contained non-module bundle");
 }
 
 for (const file of [

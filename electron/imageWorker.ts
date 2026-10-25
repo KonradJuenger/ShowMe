@@ -10,6 +10,7 @@ export interface ImageWorkerRequest {
   width?: number;
   height?: number;
   format?: ImageCacheFormat;
+  jpegQuality?: number;
 }
 parentPort?.on(
   "message",
@@ -21,6 +22,7 @@ parentPort?.on(
     width,
     height,
     format,
+    jpegQuality,
   }: ImageWorkerRequest) => {
     void processPresentationImage(
       source,
@@ -30,6 +32,7 @@ parentPort?.on(
       width,
       height,
       format,
+      jpegQuality,
     ).then(
       (result) => parentPort?.postMessage({ result }),
       (error) =>

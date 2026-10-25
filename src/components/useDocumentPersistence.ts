@@ -70,11 +70,19 @@ export function useDocumentPersistence({
         } else if (command === "package") {
           await flush();
           await platform.packageDocument?.(deckId);
-        } else if (command === "export-pdf" || command === "export-pptx") {
+        } else if (
+          command === "export-pdf" ||
+          command === "export-pptx" ||
+          command === "export-html"
+        ) {
           await flush();
           const result = await platform.exportPresentation?.(
             deckId,
-            command === "export-pdf" ? "pdf" : "pptx",
+            command === "export-pdf"
+              ? "pdf"
+              : command === "export-pptx"
+                ? "pptx"
+                : "html",
           );
           if (result?.warnings.length)
             window.alert(formatExportWarnings(result.warnings));

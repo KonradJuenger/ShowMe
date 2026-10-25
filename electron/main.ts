@@ -63,12 +63,18 @@ import { mediaResponse } from "./mediaResponse";
 import path from "node:path";
 import { promises as fs, existsSync } from "node:fs";
 import { exportPowerPoint } from "./export/pptx";
+import { createHtmlExport } from "./export/html";
+import { HtmlTextOutlines } from "./export/textOutlines";
+import type { OutlineLayout, OutlineLayoutRequest } from "../src/export/html/textOutlines";
+import { HtmlExportImageCache } from "./export/imageCache";
+import { DEFAULT_HTML_FONT_EMBEDDING, type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../src/export/html/types";
 import {
   pdfSlides,
   type ExportDocument,
   type ExportWarning,
 } from "../src/export/shared";
 import { walkElements } from "../src/core/element";
+import { getPresentationSlideIds } from "../src/core/presentationSequence";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { DocumentStorage, atomicWrite } from "./storage";
@@ -1012,7 +1018,10 @@ async function packageDocument(documentId: string, beforePersist?: (destination:
 }
 
 let exportBusy = false;
-async function exportPresentation(documentId: string, format: "pdf" | "pptx") {
+async function exportPresentation(
+  documentId: string,
+  format: "pdf" | "pptx" | "html",
+) {
   if (exportBusy) throw new Error("An export is already in progress");
   exportBusy = true;
   try {
@@ -1024,12 +1033,12 @@ async function exportPresentation(documentId: string, format: "pdf" | "pptx") {
 
 async function performExportPresentation(
   documentId: string,
-  format: "pdf" | "pptx",
+  format: "pdf" | "pptx" | "html",
 ) {
   const id = idSchema.parse(documentId);
   if (id !== activeDocumentId)
     throw new Error("Only the current presentation can be exported");
-  const type = z.enum(["pdf", "pptx"]).parse(format);
+  const type = z.enum(["pdf", "pptx", "html"]).parse(format);
   if (collaboration.isGuest(id))
     throw new Error(
       "Collaboration guests cannot export the host presentation because media ownership is local to the host",
@@ -1043,17 +1052,101 @@ async function performExportPresentation(
   const document: ExportDocument = { deck, slides };
   if (type === "pdf" && pdfSlides(document).length === 0)
     throw new Error("There are no slides to export");
+  if (type === "html" && getPresentationSlideIds(deck).length === 0)
+    throw new Error("There are no visible slides to export");
+  const exportSpec =
+    type === "pdf"
+      ? { title: "Export as PDF", name: "PDF", extension: "pdf" }
+      : type === "pptx"
+        ? {
+            title: "Export as PowerPoint",
+            name: "PowerPoint",
+            extension: "pptx",
+          }
+        : {
+            title: "Export HTML",
+            name: "HTML",
+            extension: "html",
+          };
   const result = await dialog.showSaveDialog(editor!, {
-    title: type === "pdf" ? "Export as PDF" : "Export as PowerPoint",
-    defaultPath: `${deck.name.replace(/[<>:"/\\|?*]/g, "_")}.${type === "pdf" ? "pdf" : "pptx"}`,
+    title: exportSpec.title,
+    defaultPath: `${deck.name.replace(/[<>:"/\\|?*]/g, "_")}.${exportSpec.extension}`,
     filters: [
       {
-        name: type === "pdf" ? "PDF" : "PowerPoint",
-        extensions: [type === "pdf" ? "pdf" : "pptx"],
+        name: exportSpec.name,
+        extensions: [exportSpec.extension],
       },
     ],
   });
   if (result.canceled || !result.filePath) return null;
+  if (type === "html") {
+    const settings = await readSettings(app.getPath("userData"));
+    const report = (stage: HtmlExportProgress["stage"], completed: number, total: number) => {
+      if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", { documentId: id, stage, completed, total });
+    };
+    report("fonts", 0, 0);
+    let textWindow: BrowserWindow | undefined;
+    const layout = async (request: OutlineLayoutRequest): Promise<OutlineLayout> => {
+      if (!textWindow) {
+        textWindow = new BrowserWindow({ ...windowOptions(), show: false,
+          webPreferences: { ...windowOptions().webPreferences, backgroundThrottling: false } });
+        secure(textWindow);
+        exportWindow = textWindow;
+        const devUrl = process.env.SHOWME_DEV_URL;
+        if (devUrl && !app.isPackaged) await textWindow.loadURL(devUrl + "?slidePreview=1");
+        else await textWindow.loadFile(path.join(__dirname, "../dist/index.html"), { query: { slidePreview: "1" } });
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          textWindow.webContents.executeJavaScript(`window.layoutHtmlExportText(${JSON.stringify(request)})`),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Text layout timed out")), 15000); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    };
+    const outlines = (settings.htmlFontEmbedding ?? DEFAULT_HTML_FONT_EMBEDDING) === "svg"
+      ? new HtmlTextOutlines(currentStorage.assetRoot, layout) : undefined;
+    const images = new HtmlExportImageCache(
+      path.join(__dirname, "imageWorker.cjs"),
+      settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY,
+    );
+    try {
+      const exported = await createHtmlExport({
+        document,
+        runtimeVersion: app.getVersion(),
+        runtimeDirectory: path.join(__dirname, "../dist-html-export"),
+        resolveAsset: async (assetId) => {
+          try {
+            const source = await resolveOriginalAsset(
+              currentStorage,
+              id,
+              assetId,
+            );
+            await fs.access(source.file);
+            return source;
+          } catch {
+            return null;
+          }
+        },
+        managedFonts: async () => [],
+        prepareText: outlines ? element => outlines.prepare(element) : undefined,
+        onProgress: report,
+        prepareImage: (source, requirement) =>
+          images.prepare(source, requirement),
+      });
+      report("writing", 0, 1);
+      await atomicWrite(result.filePath, Buffer.from(exported.html, "utf8"));
+      report("complete", 1, 1);
+      return { warnings: exported.warnings };
+    } finally {
+      try { await Promise.all([images.dispose(), outlines?.dispose()]); }
+      finally {
+        exportWindow = null;
+        if (textWindow && !textWindow.isDestroyed()) textWindow.destroy();
+        if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", null);
+      }
+    }
+  }
   if (type === "pptx")
     return exportPowerPoint(
       document,
@@ -1900,6 +1993,27 @@ const operations: Record<string, (...args: any[]) => any> = {
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
   getImageCachingEnabled: () => imageCachingEnabled,
+  async getHtmlFontEmbedding() {
+    return (await readSettings(app.getPath("userData"))).htmlFontEmbedding ?? DEFAULT_HTML_FONT_EMBEDDING;
+  },
+  async setHtmlFontEmbedding(value: unknown) {
+    const mode = z.enum(["none", "svg"]).parse(value);
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.htmlFontEmbedding = mode;
+    await writeSettings(app.getPath("userData"), settings);
+  },
+  async getHtmlExportJpegQuality() {
+    const settings = await readSettings(app.getPath("userData"));
+    return settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY;
+  },
+  async setHtmlExportJpegQuality(value: unknown) {
+    const quality = z.number().int().min(1).max(100).parse(value);
+    const settings = await readSettings(app.getPath("userData"), {
+      requireExisting: true,
+    });
+    settings.htmlExportJpegQuality = quality;
+    await writeSettings(app.getPath("userData"), settings);
+  },
   getImageCacheFormat: () => imageCacheFormat,
   async setImageCacheFormat(value: unknown) {
     const format = z.enum(["png", "jpg"]).parse(value);
@@ -3004,6 +3118,10 @@ void app.whenReady().then(async () => {
               {
                 label: "PowerPoint...",
                 click: () => sendFileCommand("export-pptx"),
+              },
+              {
+                label: "Export HTML...",
+                click: () => sendFileCommand("export-html"),
               },
             ],
           },

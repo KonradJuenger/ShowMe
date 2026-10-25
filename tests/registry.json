@@ -1065,5 +1065,82 @@
     "created": "2026-10-24",
     "lastReviewed": "2026-10-24",
     "reason": "Two focused shipping-Electron smoke contracts launch the built ShowMe entrypoint with its production feature switches. Styled native content and backdrop GLSL must expose native capture APIs, cross SceneTexture, produce shader-sampled pixels and avoid diagnostics on every shipping platform/architecture."
+  },
+  {
+    "id": "html-export-unit",
+    "path": "tests/feature/html-export/html-export.test.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-25",
+    "reason": "Single-file assembly escaping; final HTML excludes hidden slides/layer content, notes, hidden layer metadata and unreachable effect source; removed-element Motion is pruned while visible effects/track groups and source document are preserved; external CSS/SVG and font diagnostics, composition-exact capture eligibility, lazy URLs and isolated posters"
+  },
+  {
+    "id": "html-export-browser",
+    "path": "tests/feature/html-export/html-export.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-24",
+    "lastReviewed": "2026-10-24",
+    "reason": "Freshly built offline file URL runtime starts automatically, recovers from blocked autoplay and executes canonical navigation, Motion, CSS, text worker, generated and direct-media GLSL, video and restart without network; delayed SVG decode holds initial clocks and input"
+  },
+  {
+    "id": "html-export-video-clips",
+    "path": "tests/feature/html-export/video-clips.test.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Real bundled-FFmpeg trim duration, identical-range reuse, source preservation, exported timing rebasing, temp cleanup after success/conversion/assembly failure, and safe rejection before oversized asset allocation"
+  },
+  {
+    "id": "html-export-native-video-clips",
+    "path": "tests/feature/html-export/video-clips-native.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Native HTML export with bundled video cropping and export-only JPEG sampling, quality default/persistence/validation, settings UI, disabled desktop caching and original asset/document preservation"
+  },
+  {
+    "id": "html-export-image-cache",
+    "path": "tests/feature/html-export/image-cache.test.ts",
+    "area": "html-export",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Export-only prepared JPEG quality and cache identity, source preservation, transparency/vector/animation preservation, sampled embedding and temporary cleanup"
+  },
+  {
+    "id": "html-export-font-svg-native",
+    "path": "tests/feature/html-export/font-svg-native.spec.ts",
+    "area": "html-export",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Native default SVG and none setting persistence, portable managed-font outlines, canonical text/source preservation, offline playback without fonts, progress popup and completion/cancel/write-failure cleanup"
+  },
+  {
+    "id": "html-export-text-outlines",
+    "path": "tests/feature/html-export/text-outlines.test.ts",
+    "area": "html-export",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Export snapshot SVG conversion preserves frame/Motion/Text Styles and sources; Effects/ancestor/CSS and missing-font fallback are explicit; progress counts track converted text and embedding"
   }
 ]

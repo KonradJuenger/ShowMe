@@ -1,5 +1,5 @@
 import type { Deck, Slide } from "../core/document";
-import type { Element } from "../core/element";
+import { resolveMediaFrame, type Element } from "../core/element";
 import { styleMayReadBackdrop } from "./compositionCapabilities";
 import {
   effectPlacement,
@@ -45,6 +45,57 @@ const sequence = (...items: Composition[]): Composition => ({
   kind: "sequence",
   items,
 });
+
+/** Exact qualification used by the renderer for browser-native image/video
+ * shader input. Keep export diagnostics on this same semantic path. */
+export function compositionIsOwnedMediaOnly(
+  operation: Composition,
+  element: Element,
+): boolean {
+  const content = element.content;
+  if (
+    !content ||
+    (content.type !== "image" && content.type !== "video") ||
+    element.children.length ||
+    element.geometry.type !== "rect" ||
+    element.appearance.radius !== 0 ||
+    element.appearance.fill ||
+    element.appearance.strokeWidth !== 0 ||
+    content.opacity !== 1
+  )
+    return false;
+  const media = resolveMediaFrame(element);
+  if (
+    !media ||
+    Math.abs(media.x) > 1e-6 ||
+    Math.abs(media.y) > 1e-6 ||
+    Math.abs(media.width - element.frame.width) > 1e-6 ||
+    Math.abs(media.height - element.frame.height) > 1e-6 ||
+    Math.abs(media.rotation) > 1e-6 ||
+    Math.abs(media.scaleX - 1) > 1e-6 ||
+    Math.abs(media.scaleY - 1) > 1e-6 ||
+    media.flipX ||
+    media.flipY
+  )
+    return false;
+  switch (operation.kind) {
+    case "source":
+      return true;
+    case "children":
+      return element.children.length === 0;
+    case "sequence":
+      return operation.items.every((item) =>
+        compositionIsOwnedMediaOnly(item, element),
+      );
+    case "clip":
+      return (
+        element.clipChildren &&
+        compositionIsOwnedMediaOnly(operation.input, element)
+      );
+    default:
+      return false;
+  }
+}
 
 /** Preserve v1 paint semantics, including upstream JS and the change of scope
  * at the first content-input shader. Later content wrappers contain the stroke

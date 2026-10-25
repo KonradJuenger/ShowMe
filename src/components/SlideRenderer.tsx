@@ -12,6 +12,7 @@ import { nativeOpacityPlan, type NativeOpacity } from "./nativeOpacity";
 import type { EffectResources } from "../core/effects";
 import {
   compileCompositionPlan,
+  compositionIsOwnedMediaOnly,
   type Composition,
   type CompositionPlan,
 } from "./compositionPlan";
@@ -41,6 +42,7 @@ import { locateElement, layerRoots } from "../core/scene";
 import { captureVideoPoster, videoPoster } from "../core/videoPoster";
 import { videoBounds } from "../core/video";
 import { useAssetUrl } from "./useAssetUrl";
+import { useRenderResources } from "./renderResources";
 import { useDisplayDensity } from "./useDisplayDensity";
 import { EffectRenderContext } from "./EffectRenderContext";
 import {
@@ -90,6 +92,7 @@ function VideoView({
   onSize: (size: { width: number; height: number }) => void;
   onError: () => void;
 }) {
+  const resources = useRenderResources();
   const video = useRef<HTMLVideoElement>(null);
   const videoHost = useRef<HTMLDivElement>(null);
   const contentRef = useRef(content);
@@ -100,14 +103,14 @@ function VideoView({
   const editorPreview = editorPlayback === "preview";
   useLayoutEffect(() => {
     if (!loadVideo || !videoHost.current) return;
-    const player = acquireVideoPlayer(playerKey, content.assetId);
+    const player = acquireVideoPlayer(playerKey, content.assetId, resources);
     video.current = player.node;
     videoHost.current.append(player.node);
     return () => {
       video.current = null;
       player.release();
     };
-  }, [playerKey, content.assetId, loadVideo]);
+  }, [playerKey, content.assetId, loadVideo, resources]);
   const editorInactive = editorPlayback === "inactive";
   const posterKey = `${content.assetId}:${content.startTime}`;
   const [poster, setPoster] = useState<{
@@ -117,19 +120,23 @@ function VideoView({
   const [presented, setPresented] = useState(false);
   const [ready, setReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
 
   useEffect(() => {
     // Reuse cached posters; playback and warmup capture missing frames below.
     let live = true;
-    void videoPoster(content.assetId, content.startTime, !loadVideo).then(
-      (url) => {
-        if (live) setPoster({ key: posterKey, url });
-      },
-    );
+    void videoPoster(
+      resources,
+      content.assetId,
+      content.startTime,
+      !loadVideo,
+    ).then((url) => {
+      if (live) setPoster({ key: posterKey, url });
+    });
     return () => {
       live = false;
     };
-  }, [content.assetId, content.startTime, posterKey, loadVideo]);
+  }, [content.assetId, content.startTime, posterKey, loadVideo, resources]);
 
   // Keep the prepared element and source when the upcoming slide becomes active.
   useEffect(() => {
@@ -138,6 +145,7 @@ function VideoView({
     setReady(false);
     setPresented(false);
     setIsPlaying(false);
+    setAutoplayBlocked(false);
     if (!loadVideo || !url) {
       node.pause();
       node.removeAttribute("src");
@@ -178,6 +186,7 @@ function VideoView({
           current.assetId,
           current.startTime,
           node,
+          resources,
         );
         if (url) {
           capturedStart = current.startTime;
@@ -234,7 +243,7 @@ function VideoView({
       node.removeEventListener("seeked", decoded);
       node.pause();
     };
-  }, [url, loadVideo, onSize]);
+  }, [url, loadVideo, onSize, resources]);
 
   useEffect(() => {
     const node = video.current;
@@ -251,7 +260,10 @@ function VideoView({
       return;
     }
     if (ready && contentRef.current.autoplay && editorPlayback !== "trim")
-      void node.play().catch(() => {});
+      void node.play().then(
+        () => setAutoplayBlocked(false),
+        () => setAutoplayBlocked(true),
+      );
   }, [activePlayback, loadVideo, ready, editorPlayback]);
 
   const previousTrim = useRef({
@@ -336,7 +348,10 @@ function VideoView({
       objectFit: "fill",
       visibility: activePlayback ? "visible" : "hidden",
     });
-    const play = () => setIsPlaying(true),
+    const play = () => {
+        setIsPlaying(true);
+        if (content.autoplay) setAutoplayBlocked(false);
+      },
       pause = () => setIsPlaying(false);
     const update = () => enforceEnd(node);
     const ended = () => {
@@ -372,7 +387,10 @@ function VideoView({
     (poster?.key === posterKey ? poster.url : null) ||
     (content.startTime === 0 ? previewUrl : null);
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div
+      data-media-loading={loadVideo && !ready ? "true" : undefined}
+      style={{ position: "relative", width: "100%", height: "100%" }}
+    >
       {(editorInactive || !presented || staticVideo) && posterUrl && (
         <img
           data-video-poster-time={content.startTime}
@@ -401,22 +419,25 @@ function VideoView({
       {loadVideo && (
         <div ref={videoHost} style={{ width: "100%", height: "100%" }} />
       )}
-      {presentation && !staticVideo && !content.autoplay && ready && (
-        <button
-          className="movie-click-to-play"
-          style={{ zIndex: 2 }}
-          aria-label={isPlaying ? "Pause video" : "Play video"}
-          onClick={(event) => {
-            event.stopPropagation();
-            const node = video.current;
-            if (!node) return;
-            if (node.paused) void node.play().catch(() => {});
-            else node.pause();
-          }}
-        >
-          {isPlaying ? "Ⅱ" : "▶"}
-        </button>
-      )}
+      {presentation &&
+        !staticVideo &&
+        ready &&
+        (!content.autoplay || autoplayBlocked) && (
+          <button
+            className="movie-click-to-play"
+            style={{ zIndex: 2 }}
+            aria-label={isPlaying ? "Pause video" : "Play video"}
+            onClick={(event) => {
+              event.stopPropagation();
+              const node = video.current;
+              if (!node) return;
+              if (node.paused) void node.play().catch(() => {});
+              else node.pause();
+            }}
+          >
+            {isPlaying ? "Ⅱ" : "▶"}
+          </button>
+        )}
     </div>
   );
 }
@@ -610,10 +631,7 @@ function MediaSurface({
       : intrinsic,
   );
   if (!checking && (failed || url === null)) return <MissingMediaPlaceholder />;
-  if (!frame)
-    return (
-      <div data-media-loading={content.type === "image" ? "true" : undefined} />
-    );
+  if (!frame) return <div data-media-loading="true" />;
 
   const style: CSSProperties = {
     position: "absolute",
@@ -630,9 +648,11 @@ function MediaSurface({
     <div
       data-showme-part="content"
       data-media-asset-id={content.assetId}
+      data-media-type={content.type}
       data-media-loading={
-        content.type === "image" &&
-        (url === undefined || checking || decodedUrl !== url)
+        url === undefined ||
+        checking ||
+        (content.type !== "video" && decodedUrl !== url)
           ? "true"
           : undefined
       }
@@ -858,46 +878,6 @@ const ElementView = memo(function ElementView({
     pointerEvents: "none",
   };
 
-  const ownedMediaOnly = (operation: Composition): boolean => {
-    const mediaContent = element.content;
-    if (
-      !mediaContent ||
-      (mediaContent.type !== "image" && mediaContent.type !== "video") ||
-      element.children.length ||
-      element.geometry.type !== "rect" ||
-      appearance.radius !== 0 ||
-      appearance.fill ||
-      appearance.strokeWidth !== 0 ||
-      mediaContent.opacity !== 1
-    )
-      return false;
-    const media = resolveMediaFrame(element);
-    if (
-      !media ||
-      Math.abs(media.x) > 1e-6 ||
-      Math.abs(media.y) > 1e-6 ||
-      Math.abs(media.width - frame.width) > 1e-6 ||
-      Math.abs(media.height - frame.height) > 1e-6 ||
-      Math.abs(media.rotation) > 1e-6 ||
-      Math.abs(media.scaleX - 1) > 1e-6 ||
-      Math.abs(media.scaleY - 1) > 1e-6 ||
-      media.flipX ||
-      media.flipY
-    )
-      return false;
-    switch (operation.kind) {
-      case "source":
-        return true;
-      case "children":
-        return element.children.length === 0;
-      case "sequence":
-        return operation.items.every(ownedMediaOnly);
-      case "clip":
-        return element.clipChildren && ownedMediaOnly(operation.input);
-      default:
-        return false;
-    }
-  };
   const lower = (operation: Composition, opacity?: string): ReactNode => {
     switch (operation.kind) {
       case "source":
@@ -927,7 +907,7 @@ const ElementView = memo(function ElementView({
           definition?.kind === "fragment-glsl" &&
           definition.input === "content" &&
           !!operation.input &&
-          ownedMediaOnly(operation.input);
+          compositionIsOwnedMediaOnly(operation.input, element);
         return surface(
           operation.effect,
           operation.input ? lower(operation.input) : undefined,

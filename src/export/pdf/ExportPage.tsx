@@ -74,7 +74,7 @@ export function ExportPage() {
           const preview = await platform
             .assetUrl(item.id, true)
             .catch(() => null);
-          if (item.video && !preview) await videoPoster(item.id, item.start);
+          if (item.video && !preview) await videoPoster(platform, item.id, item.start);
         }),
       );
       await platform.managedFonts?.(document.deck.id);

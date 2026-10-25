@@ -1,12 +1,24 @@
-import { platform } from "../platform";
+import type { RenderResources } from "./renderResources";
 
-const posters = new Map<string, Promise<string | null>>();
+const providers = new WeakMap<
+  RenderResources,
+  Map<string, Promise<string | null>>
+>();
+function postersFor(resources: RenderResources) {
+  let cache = providers.get(resources);
+  if (!cache) {
+    cache = new Map();
+    providers.set(resources, cache);
+  }
+  return cache;
+}
 
 async function capture(
+  resources: RenderResources,
   assetId: string,
   startTime: number,
 ): Promise<string | null> {
-  const url = await platform.assetUrl(assetId);
+  const url = await resources.assetUrl(assetId);
   if (!url) return null;
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
@@ -24,7 +36,7 @@ async function capture(
       };
       const render = () => {
         if (settled) return;
-        finish(captureVideoPoster(assetId, startTime, video));
+        finish(captureVideoPoster(assetId, startTime, video, resources));
       };
       const draw = () => {
         if ("requestVideoFrameCallback" in video) {
@@ -48,7 +60,7 @@ async function capture(
     video.pause();
     video.removeAttribute("src");
     video.load();
-    platform.releaseUrl(url);
+    resources.releaseUrl(url);
   }
 }
 
@@ -60,7 +72,9 @@ export function captureVideoPoster(
   assetId: string,
   startTime: number,
   video: HTMLVideoElement,
+  resources: RenderResources,
 ): string | null {
+  const posters = postersFor(resources);
   if (
     video.seeking ||
     video.readyState < 2 ||
@@ -88,15 +102,17 @@ export function captureVideoPoster(
 }
 
 export function videoPoster(
+  resources: RenderResources,
   assetId: string,
   startTime: number,
   captureMissing = true,
 ) {
+  const posters = postersFor(resources);
   const key = posterKey(assetId, startTime);
   let result = posters.get(key);
   if (!result && !captureMissing) return Promise.resolve(null);
   if (!result) {
-    result = capture(assetId, startTime).then((value) => {
+    result = capture(resources, assetId, startTime).then((value) => {
       if (!value && posters.get(key) === result) posters.delete(key);
       return value;
     });

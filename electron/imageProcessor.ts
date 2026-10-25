@@ -24,6 +24,7 @@ export async function processPresentationImage(
   targetWidth?: number,
   targetHeight?: number,
   preferredFormat: ImageCacheFormat = "png",
+  jpegQuality = 100,
 ): Promise<Omit<PreparedImage, "url"> | null> {
   if ((await fs.stat(source)).size > 256 * 1024 ** 2) return null;
   const bytes = await fs.readFile(source);
@@ -63,7 +64,11 @@ export async function processPresentationImage(
   pipeline = pipeline.withIccProfile("srgb");
   if (format === "jpg")
     await pipeline
-      .jpeg({ quality: 100, chromaSubsampling: "4:4:4", optimiseCoding: true })
+      .jpeg({
+        quality: jpegQuality,
+        chromaSubsampling: "4:4:4",
+        optimiseCoding: true,
+      })
       .toFile(output);
   else
     await pipeline.png({ compressionLevel: 3, palette: false }).toFile(output);
@@ -73,7 +78,7 @@ export async function processPresentationImage(
   return {
     assetId,
     hash: createHash("sha256")
-      .update(imageIdentity(assetId, width, height, format))
+      .update(imageIdentity(assetId, width, height, format, jpegQuality))
       .digest("hex"),
     size,
     sourceWidth,
@@ -81,6 +86,6 @@ export async function processPresentationImage(
     width,
     height,
     mime: imageMime(format),
-    recipe: imageRecipe(format),
+    recipe: imageRecipe(format, jpegQuality),
   };
 }

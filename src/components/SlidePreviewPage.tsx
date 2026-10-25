@@ -14,6 +14,7 @@ import { waitForSlideImages } from "./audienceImagePreparation";
 import { flushEffectSurfaces } from "./effectRuntime";
 import type { AgentPreviewWarning } from "../core/agentPreview";
 import { measureText } from "./editor/textLayout";
+import { layoutHtmlExportText } from "../export/html/textOutlines";
 import type { Element as SceneElement } from "../core/element";
 import {
   createTextElement,
@@ -94,6 +95,7 @@ function SampledPreviewSlide({
 
 declare global {
   interface Window {
+    layoutHtmlExportText?: typeof layoutHtmlExportText;
     prepareAgentMedia?: (asset: import("../core/assets").Asset) => Promise<{
       asset: import("../core/assets").Asset | null;
       preview: number[] | null;
@@ -127,6 +129,7 @@ declare global {
 
 /** Isolated native capture surface; visual semantics stay in shared renderers. */
 export function installSlidePreviewPage() {
+  window.layoutHtmlExportText = layoutHtmlExportText;
   const host = document.getElementById("root")!;
   document.body.style.margin = "0";
   const root = createRoot(host);
@@ -364,6 +367,7 @@ export function installSlidePreviewPage() {
         if (
           element.content?.type === "video" &&
           !(await videoPoster(
+            platform,
             element.content.assetId,
             element.content.startTime,
           ))

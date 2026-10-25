@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "npm run verify:typescript && tsc --noEmit && vite build && node scripts/build-electron.mjs",
+    "build": "npm run verify:typescript && tsc --noEmit && vite build && npm run build:html-runtime && node scripts/build-electron.mjs",
     "typecheck": "npm run verify:typescript && tsc --noEmit",
     "typecheck:ts6": "tsc6 --noEmit --stableTypeOrdering --noUncheckedSideEffectImports",
     "verify:typescript": "node scripts/verify-typescript.mjs",
@@ -33,10 +33,13 @@
     "test:deprecated": "node scripts/test-suite.mjs deprecated",
     "test:stats": "node scripts/test-suite.mjs stats",
     "test:audit": "node scripts/test-suite.mjs audit",
-    "benchmark:renderer": "node scripts/benchmark-renderer-workloads.mjs"
+    "benchmark:renderer": "node scripts/benchmark-renderer-workloads.mjs",
+    "build:html-runtime": "vite build --config vite.html-export.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
+    "ffmpeg-static": "5.3.0",
+    "fontkit": "^2.0.4",
     "motion": "^14.0.0",
     "pica": "^10.0.3",
     "pptxgenjs": "^4.0.1",
@@ -51,6 +54,7 @@
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "^1.55.0",
+    "@types/fontkit": "^2.0.9",
     "@types/node": "^24.13.5",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
@@ -79,6 +83,7 @@
     },
     "files": [
       "dist/**/*",
+      "dist-html-export/**/*",
       "dist-electron/**/*",
       "package.json",
       "LICENSE",
@@ -142,12 +147,14 @@
     },
     "asarUnpack": [
       "node_modules/sharp/**/*",
-      "node_modules/@img/**/*"
+      "node_modules/@img/**/*",
+      "node_modules/ffmpeg-static/**/*"
     ]
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "ffmpeg-static@5.3.0": true
   },
   "overrides": {
     "pptxgenjs": {
