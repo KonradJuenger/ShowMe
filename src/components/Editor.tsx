@@ -422,17 +422,23 @@ export function Editor({
     onError: reportError,
   });
 
+  const notesEditing = useSpeakerNotes({
+    controller,
+    onStatus: setLocalError,
+  });
+
+  const prepareSlideChange = useCallback(async () => {
+    await textEditing.exit();
+    await notesEditing.flush();
+    await controller.flush();
+  }, [controller, notesEditing, textEditing]);
+
   const persistence = useDocumentPersistence({
     deckId,
     snapshotRef: controller.snapshotRef,
     refreshProjection: controller.refreshProjection,
     onError: reportError,
-    flush: controller.flush,
-  });
-
-  const notesEditing = useSpeakerNotes({
-    controller,
-    onStatus: setLocalError,
+    flush: prepareSlideChange,
   });
 
   const presenter = usePresenterController();
@@ -670,12 +676,6 @@ export function Editor({
     },
     [reportError],
   );
-
-  const prepareSlideChange = useCallback(async () => {
-    await textEditing.exit();
-    await notesEditing.flush();
-    await controller.flush();
-  }, [controller, notesEditing, textEditing]);
 
   const activateSlide = useCallback(
     async (slideId: string) => {
@@ -1174,7 +1174,7 @@ export function Editor({
         deckName={deck.name}
         settingsOpen={settingsOpen}
         setSettingsOpen={setSettingsOpen}
-        flushTransactions={controller.flush}
+        flushTransactions={prepareSlideChange}
         onError={reportError}
         presentationSetup={
           <PresentationDisplaySetup

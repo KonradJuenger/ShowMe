@@ -436,8 +436,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
-    "reason": "Durable append, interrupted recovery, compaction failure safety and acceptance during background checkpoint construction"
+    "lastReviewed": "2026-10-25",
+    "reason": "Durable append, interrupted recovery, compaction failure safety and acceptance during background checkpoint construction; clean new/opened decks and save revision tracking"
   },
   {
     "id": "presenter-navigation",
@@ -1142,5 +1142,16 @@
     "created": "2026-10-25",
     "lastReviewed": "2026-10-25",
     "reason": "Export snapshot SVG conversion preserves frame/Motion/Text Styles and sources; Effects/ancestor/CSS and missing-font fallback are explicit; progress counts track converted text and embedding"
+  },
+  {
+    "id": "persistence-replacement",
+    "path": "tests/feature/persistence/replacement.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Untouched deck replacement without prompts; PowerPoint import save, cancellation and save-failure safety"
   }
 ]

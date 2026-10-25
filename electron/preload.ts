@@ -87,6 +87,7 @@ const methods = [
   "exportReady",
   "packageMediaState",
   "saveMediaAs",
+  "confirmDocumentReplacement",
   "requestClose",
   "libraryBrowser",
   "effectThumbnail",

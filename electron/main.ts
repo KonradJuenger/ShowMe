@@ -2489,6 +2489,24 @@ const operations: Record<string, (...args: any[]) => any> = {
     if (!result.canceled && result.filePath)
       await requireStorage().saveMediaAs(documentId, assetId, result.filePath);
   },
+  async confirmDocumentReplacement(documentId: string) {
+    const id = idSchema.parse(documentId);
+    if (collaboration.isGuest(id)) return true;
+    const summary = requireStorage().summary(id);
+    if (!summary.dirty) return true;
+    const result = await dialog.showMessageBox(editor!, {
+      type: "question",
+      buttons: ["Save", "Don't Save", "Cancel"],
+      defaultId: 0,
+      cancelId: 2,
+      title: "Unsaved changes",
+      message: `Do you want to save changes to ${summary.name}?`,
+    });
+    if (result.response === 2) return false;
+    if (result.response === 0) return !!(await saveDocument(id));
+    // Keep recovery until the replacement has opened successfully.
+    return true;
+  },
   async requestClose(documentId: string) {
     const id = idSchema.parse(documentId);
     if (collaboration.isGuest(id)) {

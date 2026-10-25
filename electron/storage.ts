@@ -416,8 +416,7 @@ export class DocumentStorage {
         ? documentNameFromFile(handle.filePath)
         : document.deck.name,
       location: entry.packagePath ?? handle.filePath ?? "",
-      dirty:
-        runtime.authority.dirty || (!entry.packagePath && !handle.filePath),
+      dirty: runtime.authority.dirty,
       untitled: !entry.packagePath && !handle.filePath,
     } satisfies DocumentSummary;
   }

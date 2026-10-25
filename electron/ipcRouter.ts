@@ -297,6 +297,7 @@ export function registerIpcRouter({
           "saveDocumentAs",
           "packageDocument",
           "saveMediaAs",
+          "confirmDocumentReplacement",
           "requestClose",
           "updateAsset",
           "storePreview",

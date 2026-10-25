@@ -221,6 +221,11 @@ export function PresentationMenu({
     void task().catch(onError);
   }
 
+  async function prepareReplacement() {
+    await flushTransactions();
+    return (await platform.confirmDocumentReplacement?.(deckId)) ?? true;
+  }
+
   const menu = open
     ? createPortal(
         <div
@@ -279,7 +284,7 @@ export function PresentationMenu({
                   title={document.location}
                   onClick={() =>
                     execute(async () => {
-                      await flushTransactions();
+                      if (!(await prepareReplacement())) return;
                       onPresentationOpened(
                         await platform.openRecentDocument(document.location),
                       );
@@ -589,7 +594,7 @@ export function PresentationMenu({
         <NewPresentationDialog
           onClose={() => setNewOpen(false)}
           onCreate={async (name) => {
-            await flushTransactions();
+            if (!(await prepareReplacement())) return;
             await onNewPresentation(name);
           }}
         />
@@ -608,7 +613,7 @@ export function PresentationMenu({
           setImportBusy(true);
           setImportError("");
           void (async () => {
-            await flushTransactions();
+            if (!(await prepareReplacement())) return;
             const { importPowerPointPresentation } =
               await import("./importPowerPointPresentation");
             const result = await importPowerPointPresentation(file);
