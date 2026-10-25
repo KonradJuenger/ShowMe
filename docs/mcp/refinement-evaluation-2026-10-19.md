@@ -1,6 +1,6 @@
 # MCP refinement implementation and evaluation — 2026-10-19
 
-Implemented the [refinement plan](refinement-plan-2026-10-19.md) on the existing local branch, preserving the prior uncommitted discovery implementation. Server **1.10.0**, discovery contract **3**; native document/SME/SMP/Effect formats remain public v1. No branch, commit, push or PR was created.
+Implemented the refinement work described below on the existing local branch, preserving the prior uncommitted discovery implementation. Server **1.10.0**, discovery contract **3**; native document/SME/SMP/Effect formats remain public v1. No branch, commit, push or PR was created.
 
 ## Changes and boundaries
 

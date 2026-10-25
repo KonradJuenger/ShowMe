@@ -62,7 +62,7 @@ These are observations from one Windows workload, not comparable benchmarks or i
 
 Earlier failing native attempts are retained in `test-results-mcp-friction-native`, `…-native-corrected`, `…-video-package` and `…-package-diagnostic`. They exposed missing isolated-runtime asset-read authorization and the incomplete first package-option plumbing (native lock questions still opened, followed by `DELIVERY_BUSY`). The fixes authorize only scoped asset/font reads for the isolated runtime, keep catalog writes in main, and route both explicit package choices. The corrected native PNG/SVG path passed; the video/package path then passed including fresh-library assets, notes removal and focused-edit switch refusal. The isolated 17-declaration sweep passed afterward.
 
-Full/release suites, installers, macOS, repeated benchmarks and live audience smoothness measurement were not run. No commit/integration was authorized, so the audience-navigation commit gate was not triggered. All evaluation app instances are closed. See `FRICTION_IMPLEMENTATION_HANDOFF_2026-10-18.md` for actionable remaining work.
+Full/release suites, installers, macOS, repeated benchmarks and live audience smoothness measurement were not run. No commit/integration was authorized, so the audience-navigation commit gate was not triggered. All evaluation app instances are closed. See [current setup and limitations](LOCAL_SETUP.md) for maintained guidance.
 
 ## Final completion note
 

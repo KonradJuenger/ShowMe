@@ -6,6 +6,20 @@ import { setSlideNotes } from "../../../src/core/editorCommands";
 import { storedDocument, storageAt } from "../../helpers/storage";
 import { RecoveryJournal } from "../../../electron/storage/recoveryJournal";
 
+it("untitled and opened decks are clean until an accepted edit and become clean after saving", async () => {
+  const { root, storage, session, id } = await storedDocument();
+  expect(storage.summary(id)).toMatchObject({ dirty: false, untitled: true });
+  session.apply(setSlideNotes(session.snapshot!, "Edited"));
+  await session.flush();
+  expect(storage.summary(id).dirty).toBe(true);
+  const file = path.join(root, "Clean.sme");
+  await storage.saveDocument(id, file);
+  expect(storage.summary(id)).toMatchObject({ dirty: false, untitled: false });
+  const other = await storageAt(root, "other");
+  const opened = await other.openDocument(file);
+  expect(opened.dirty).toBe(false);
+});
+
 it("recovery rejects unsupported checkpoint and metadata versions", async () => {
   const { root, session, id, runtime } = await storedDocument();
   session.apply(setSlideNotes(session.snapshot!, "Accepted v1 journal"));

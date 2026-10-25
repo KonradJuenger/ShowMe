@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import path from "node:path";
 import { open, stat } from "node:fs/promises";
 import {
@@ -8,6 +8,10 @@ import {
 } from "../../../electron/packageArchive";
 import { hashFile } from "../../../electron/storage/io";
 import { storedDocument } from "../../helpers/storage";
+
+// Archive I/O shares the host disk with the rest of the full suite. This is an
+// integrity and bounded-memory contract, not a five-second disk benchmark.
+vi.setConfig({ testTimeout: 30000 });
 
 it("streams a generated 128 MiB media archive with verified cold extraction", async () => {
   const { root } = await storedDocument();

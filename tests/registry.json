@@ -29,7 +29,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-18",
-    "lastReviewed": "2026-10-19",
+    "lastReviewed": "2026-10-25",
     "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery; template editing/ownership, direct shared text styles, native slide recipes, named effect resources and explicit expanded batch admission; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; batched compact discovery preserves canonical schemas, selectors, relevant semantics and measured payload budget; compact advertised transport versus strict admission, sparse replay/resource receipts, measured partial/complete native operation overflow and deliberate splits"
   },
   {
@@ -40,7 +40,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-19",
+    "lastReviewed": "2026-10-25",
     "reason": "Real SDK stdio client covers Settings opt-in, context/inspection, deck creation, frame-based text editing, production PNG previews, creative authoring discovery, production GLSL/CSS/text-JS validation, deck CSS/classes, native Effect-parameter Motion, revocation, crash/restart, exact revision recovery and separate guarded user/agent history. Native workspace create/open/close/import, template rendering and scoped CSS supports.; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; native Settings clipboard verifies Codex TOML, generic MCP JSON and VS Code JSON; held second native media decoder verifies revocation receipts and no third import; real SDK compact protocol/operation/Effect discovery, structured-text consistency and scoped source verified; compact advertised operation bodies retain nested fields and strict invalid-call diagnostics, protocol capabilities replace static context"
   },
   {
@@ -238,8 +238,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-11",
-    "reason": "Bounds declared and actual PPTX expansion, XML work, source image pixels and effect worker source"
+    "lastReviewed": "2026-10-25",
+    "reason": "Bounds declared and actual PPTX expansion, XML work, source image pixels and effect worker source; text worker dispatch is separately bounded, execution remains limited to 500ms, duplicate start acknowledgments cannot extend the deadline and later requests preserve the failure cause"
   },
   {
     "id": "persistence-package-streaming",
@@ -249,7 +249,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-10-25",
     "reason": "Streaming large media archive cold extraction, bounded entry count, path validation and CRC corruption rejection"
   },
   {
@@ -436,8 +436,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
-    "reason": "Durable append, interrupted recovery, compaction failure safety and acceptance during background checkpoint construction"
+    "lastReviewed": "2026-10-25",
+    "reason": "Durable append, interrupted recovery, compaction failure safety and acceptance during background checkpoint construction; clean new/opened decks and save revision tracking"
   },
   {
     "id": "presenter-navigation",
@@ -480,7 +480,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-15",
+    "lastReviewed": "2026-10-25",
     "reason": "Production preload/IPC uses one ShowMe root with visible ShowMe Library/, recursive .sme scanning, explicit root switching, external native .sme rejection, open-native root-change blocking and explicit portable .smp Save As anywhere; startup clean cutover ignores legacy folder settings, persists only showMeRootPath, creates ShowMe Library/ and leaves legacy files untouched; unsafe candidate Library directories are rejected before storage/settings change, leaving the previous root usable; live Explorer-style copies and removals update the mounted Media panel through production IPC; typed font IPC and experimental LAN collaboration controls remain covered"
   },
   {
@@ -491,7 +491,7 @@
     "status": "active",
     "runtime": "packaged",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-09",
+    "lastReviewed": "2026-10-25",
     "reason": "Packaged payload launches production renderer and preload"
   },
   {
@@ -513,7 +513,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-11",
+    "lastReviewed": "2026-10-25",
     "reason": "Editor error diagnostics copy their complete text through the platform or browser clipboard by pointer and keyboard, retaining errors when copying fails"
   },
   {
@@ -535,7 +535,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-13",
+    "lastReviewed": "2026-10-25",
     "reason": "Effect authoring, copied AI contract without request placeholders and interval-completion explanation; sidebar numeric drafts commit with Enter/blur, cancel with Escape, restore empty input and extend slider ranges; Click Timeline and Studio Text Scramble activation/completion, all-placement bypass, shader/text stacks and copying displayed errors by mouse or keyboard"
   },
   {
@@ -634,7 +634,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-13",
+    "lastReviewed": "2026-10-25",
     "reason": "Production text/CSS/GLSL typed context delivery, logical click context, deterministic slide-context uniforms and authoring/sidebar native values"
   },
   {
@@ -755,7 +755,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-10-25",
     "reason": "Native PDF IPC and browser print render shaders at explicit 300 DPI independent of DPR, preserving physical page size and document revision"
   },
   {
@@ -788,7 +788,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-13",
+    "lastReviewed": "2026-10-25",
     "reason": "Native screen inventory and IPC, selected audience cache profile and assignment lock through start/end, measured audience pixels and audience-only preparation authorization"
   },
   {
@@ -810,7 +810,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-17",
+    "lastReviewed": "2026-10-25",
     "reason": "Metadata-only startup reconciles stale cached inventories with copied files; media inventory notifications refresh unrelated arrivals without invalidating documents; lazy byte verification, watcher disposal, idle scans and single-pass imports remain covered; unified native Library filtering hides internal font resources from the visible Media surface while retaining the internal font category, and covers filename-encoded cleanup protection; Trash selections are excluded from folder organization; cached native Library pagination avoids repeated filesystem walks; partial protection failures expose the immediate mixed filesystem state; malformed Effect files do not block unrelated Trash restoration; previously enriched inventory stays untrusted after managed bytes change and verified resolution rejects it without document changes"
   },
   {
@@ -909,7 +909,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-17",
+    "lastReviewed": "2026-10-25",
     "reason": "Native thumbnails reuse audience image variants without extra image generation while canonical capture preserves custom effects and target output dimensions; native format settings persist across restart, studio URLs serve matching encodings and transparent images remain PNG; opening a cold file caches all slides including hidden slides and later navigation keeps readiness green without new image jobs; closing the editor destroys active effect previews and queued/admission-waiting thumbnails cannot recreate windows or keep the app alive"
   },
   {
@@ -949,12 +949,25 @@
     "id": "effects-execution-graph",
     "path": "tests/feature/effects/execution-graph.test.ts",
     "area": "effects",
+    "tier": "deprecated",
+    "status": "deprecated",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-25",
+    "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership; per-context texture ownership, alternating consumers without upload thrashing, restored context uploads and capture-to-immutable-pixel replacement",
+    "deprecationReason": "Deleted obsolete EffectGraph scheduler tests: the scheduler has no production consumers. Retained production pixel-source contracts moved to effects-pixel-sources.",
+    "removeAfter": "2026-11-24"
+  },
+  {
+    "id": "effects-pixel-sources",
+    "path": "tests/feature/effects/effect-sources.test.ts",
+    "area": "effects",
     "tier": "feature",
     "status": "active",
     "runtime": "unit",
-    "created": "2026-10-13",
-    "lastReviewed": "2026-10-24",
-    "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership; per-context texture ownership, alternating consumers without upload thrashing, restored context uploads and capture-to-immutable-pixel replacement"
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Production EffectSources leases share invalidation, release sources after the last consumer, preserve per-context uploads across restoration, and replace capture machinery with immutable pixels"
   },
   {
     "id": "editor-agent-closing",
@@ -975,8 +988,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-21",
-    "lastReviewed": "2026-10-23",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure. Exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points. Semantic composition and explicit scene-input ordering remain covered after deleting the unused selectable CSS compositor."
+    "lastReviewed": "2026-10-25",
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure. Exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points. Semantic composition and explicit scene-input ordering remain covered after deleting the unused selectable CSS compositor.; parent/child acyclicity is checked directly against production dependency edges instead of the unused EffectGraph scheduler"
   },
   {
     "id": "effects-native-composition",
@@ -1041,7 +1054,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-23",
-    "lastReviewed": "2026-10-23",
+    "lastReviewed": "2026-10-25",
     "reason": "Painted-pixel continuity across image/shader-backed Presence entrance, exit, nested groups, overlaps and backward seeks; injected disappearance and missing blur must be detected. Electron presentation subscription acknowledges every fixture state and detects hidden elements, missing blur, blank shader layers, alpha jumps and stale output. Acknowledged capture is not a claim of full-rate display coverage. Also covers natural-rate sampled presentation continuity with explicit capture gaps, capture-free native frame pacing, captured seek latency, bounded overlap error, and a moving VP9 video plus JS text."
   },
   {
@@ -1142,5 +1155,16 @@
     "created": "2026-10-25",
     "lastReviewed": "2026-10-25",
     "reason": "Export snapshot SVG conversion preserves frame/Motion/Text Styles and sources; Effects/ancestor/CSS and missing-font fallback are explicit; progress counts track converted text and embedding"
+  },
+  {
+    "id": "persistence-replacement",
+    "path": "tests/feature/persistence/replacement.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Untouched deck replacement without prompts; PowerPoint import save, cancellation and save-failure safety"
   }
 ]

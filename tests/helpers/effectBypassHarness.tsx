@@ -1,3 +1,4 @@
+import { readPresentedPixel, readWebGlPixel } from "./webglPixels";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { SlideRenderer } from "../../src/components/SlideRenderer";
@@ -181,7 +182,7 @@ export async function checkEffectBypass() {
         const node = host.querySelector<HTMLElement>('[data-effect-id="b"]')!;
         const canvas = node.querySelector<HTMLCanvasElement>(":scope > canvas");
         const pixel = canvas
-          ? Array.from(canvas.getContext("2d")!.getImageData(0, 0, 1, 1).data)
+          ? readPresentedPixel(canvas, 0, 0)
           : null;
         const firstCanvas = host.querySelector<HTMLCanvasElement>(
           '[data-effect-id="a"] > canvas',
@@ -196,6 +197,7 @@ export async function checkEffectBypass() {
           started: node.dataset.effectStarted,
           opacity: getComputedStyle(node).opacity,
           pixel,
+          canvasVisibility: canvas?.style.visibility,
           sourceOpacity: node.querySelector<HTMLElement>(
             ":scope > [data-effect-source]",
           )?.style.opacity,
@@ -210,9 +212,7 @@ export async function checkEffectBypass() {
           t: node.style.getPropertyValue("--t"),
           p: node.style.getPropertyValue("--p"),
           firstPixel: firstCanvas
-            ? Array.from(
-                firstCanvas.getContext("2d")!.getImageData(0, 0, 1, 1).data,
-              )
+            ? readWebGlPixel(firstCanvas, 0, 0)
             : null,
           error: node.dataset.effectError,
         };

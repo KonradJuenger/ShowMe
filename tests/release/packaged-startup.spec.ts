@@ -33,6 +33,7 @@ test("packaged desktop launches its production renderer and native preload", asy
         value !== undefined,
     ),
   ) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: root });
   const app = await electron.launch({
     executablePath,
     args: [`--user-data-dir=${root}`],

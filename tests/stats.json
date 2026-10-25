@@ -1,9 +1,9 @@
 {
-  "activeTests": 700,
-  "activeGroups": 104,
+  "activeTests": 701,
+  "activeGroups": 105,
   "byTier": {
     "core": 15,
-    "feature": 653,
+    "feature": 654,
     "extended": 29,
     "release": 3,
     "deprecated": 0
@@ -12,20 +12,27 @@
     "desktop": 1,
     "document": 12,
     "editor": 232,
-    "effects": 199,
+    "effects": 191,
     "html-export": 7,
-    "media": 82,
+    "media": 83,
     "motion": 46,
-    "persistence": 84,
+    "persistence": 92,
     "presenter": 37
   },
   "byRuntime": {
-    "unit": 523,
-    "browser": 131,
+    "unit": 517,
+    "browser": 138,
     "electron": 45,
     "packaged": 1
   },
-  "deprecatedCount": 0,
+  "deprecatedCount": 1,
   "quarantinedCount": 0,
-  "deprecatedRecords": []
+  "deprecatedRecords": [
+    {
+      "id": "effects-execution-graph",
+      "reason": "Deleted obsolete EffectGraph scheduler tests: the scheduler has no production consumers. Retained production pixel-source contracts moved to effects-pixel-sources.",
+      "removeAfter": "2026-11-24",
+      "executableTests": 0
+    }
+  ]
 }

@@ -10,4 +10,11 @@ const include: string[] = process.env.SHOWME_TEST_FILES
           entry.runtime === "unit",
       )
       .map((entry) => entry.path);
-export default defineConfig({ test: { include } });
+export default defineConfig({
+  test: {
+    include,
+    // Storage tests share the host disk and create native workers. Avoid
+    // saturating it with one process per file on high-core-count machines.
+    maxWorkers: 8,
+  },
+});

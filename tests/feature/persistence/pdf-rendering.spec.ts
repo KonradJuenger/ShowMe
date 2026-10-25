@@ -15,6 +15,7 @@ test("native PDF uses explicit shader pixels at both display densities and prese
       ([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined,
     ),
   ) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder });
   const app = await electron.launch({
     args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`],
     env,

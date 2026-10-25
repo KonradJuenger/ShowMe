@@ -72,7 +72,7 @@ it("canonical discovery exports every operation and validated examples in bounde
   expect(discovered.sort()).toEqual([...variants].sort());
   expect(
     buildAgentAuthoringGuide("workspace", { detail: "compact" }),
-  ).toHaveProperty("schema.anyOf");
+  ).toHaveProperty("schema.oneOf");
   const compact = buildAgentAuthoringGuide("background-shader", {
     detail: "compact",
   });

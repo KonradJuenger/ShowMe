@@ -108,7 +108,24 @@ try {
       );
       if (runtime === "unit")
         run(`${root}/node_modules/vitest/vitest.mjs`, ["run"], env);
-      else
+      else if (runtime === "electron") {
+        // Each native group owns Electron processes and may host a Vite server.
+        // Do not retain compiler/automation state across unrelated native groups.
+        for (const entry of entries) {
+          console.log(`\nNative group: ${entry.id}`);
+          run(
+            `${root}/node_modules/@playwright/test/cli.js`,
+            [
+              "test",
+              "--config",
+              "playwright.electron.config.ts",
+              "--output",
+              `test-results-electron/${entry.id}`,
+            ],
+            { SHOWME_TEST_FILES: JSON.stringify([entry.path]) },
+          );
+        }
+      } else
         run(
           `${root}/node_modules/@playwright/test/cli.js`,
           [

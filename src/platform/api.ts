@@ -346,6 +346,7 @@ export interface Platform {
     documentId: string,
   ): Promise<{ packaged: boolean; locked: boolean }>;
   saveMediaAs?(documentId: string, assetId: string): Promise<void>;
+  confirmDocumentReplacement?(documentId: string): Promise<boolean>;
   requestClose?(documentId: string): Promise<CloseResult>;
   readSlideTransfer(files: File[]): Promise<unknown | null>;
   startSlideDrag(bundle: unknown): boolean;

@@ -24,6 +24,7 @@ const stateSchema = z.object({
   presentationReady: z.boolean().optional(),
   motionSlides: z
     .record(
+      z.string(),
       z.array(
         z.object({ id: idSchema, duration: z.number().nonnegative() }).strict(),
       ),

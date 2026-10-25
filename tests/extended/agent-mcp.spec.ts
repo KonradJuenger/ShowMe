@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { newPresentationDocument } from "../../src/core/document";
 import { createTextElement } from "../../src/core/text";
 import { readyEditor } from "../helpers/startup";
@@ -98,8 +99,21 @@ async function launch(user: string, file: string) {
   }
 }
 async function close(app: ElectronApplication | undefined) {
-  await app?.evaluate(({ app }) => app.exit(0)).catch(() => {});
+  const process = app?.process();
+  const exited = process && process.exitCode === null && process.signalCode === null
+    ? once(process, "close")
+    : Promise.resolve();
+  await app?.evaluate(({ dialog }) => {
+    const show = dialog.showMessageBox.bind(dialog);
+    dialog.showMessageBox = ((...args: any[]) => {
+      const options = args.at(-1);
+      return options.title === "Unsaved changes"
+        ? Promise.resolve({ response: 1, checkboxChecked: false })
+        : show(...args as Parameters<typeof show>);
+    }) as typeof dialog.showMessageBox;
+  }).catch(() => {});
   await app?.close().catch(() => {});
+  await exited;
 }
 async function settings(page: Page) {
   await page

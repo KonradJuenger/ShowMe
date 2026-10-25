@@ -11,6 +11,7 @@ playwright-report*/
 *.log
 /.agenttmp/
 /.codex/
+/.impeccable/
 /artifacts/
 /.scratch/
 /.cache/

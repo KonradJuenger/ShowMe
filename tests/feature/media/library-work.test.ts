@@ -10,7 +10,6 @@ import {
   isManagedFilenameProtected,
 } from "../../../electron/mediaLibrary";
 import { restoreLibraryAsset } from "../../../electron/libraryLifecycle";
-import { setLibraryProtection } from "../../../electron/libraryProtection";
 import { organizationalLibraryCategory } from "../../../src/core/libraryBrowser";
 import { expect, it, vi } from "vitest";
 import { mkdir, readdir, writeFile } from "node:fs/promises";

@@ -164,6 +164,12 @@ details and pending evaluation.
 
 ## Development
 
+[CONTRIBUTING.md](CONTRIBUTING.md) covers setup, bug reports and contributions.
+[SECURITY.md](SECURITY.md) describes security reporting and trust boundaries.
+[Release readiness](docs/PUBLIC_RELEASE_READINESS.md) records the release assessment
+and outstanding work. [Documentation](docs/README.md) separates current entry points
+from engineering records.
+
 [AGENTS.md](AGENTS.md) describes the development workflow.
 [tests/README.md](tests/README.md) describes the test groups and how to run them.
 [Are we slow yet?](areweslowyet.md) tracks audience rendering benchmarks by commit.
