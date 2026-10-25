@@ -870,6 +870,13 @@ export const browser: Platform = {
       return documentSummary(snapshot.document);
     });
   },
+  async confirmDocumentReplacement(documentId) {
+    const runtime = await browserRuntime(documentId);
+    if (!runtime.authority.dirty) return true;
+    if (window.confirm(`Save changes to ${runtime.authority.document.deck.name}?`))
+      return !!(await browser.saveDocument!(documentId));
+    return window.confirm("Continue without saving changes?");
+  },
   async closeDocument(documentId) {
     const pending = browserRuntimes.get(documentId);
     if (pending) await pending;
