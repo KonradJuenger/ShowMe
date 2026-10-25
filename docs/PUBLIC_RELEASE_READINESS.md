@@ -46,6 +46,10 @@ complete security audit or review of every code path.
   and their source maps. Both are shipping entry points that were previously omitted.
 - Removed an unused test import; lint now reports no warnings.
 - Added contribution instructions, security reporting guidance and documentation navigation.
+- Removed five superseded, unreferenced planning/scratch documents and the unused
+  `docs/images/assets.png` and `docs/images/effects.png` screenshots. Current setup,
+  architecture, implementation findings and benchmark evidence remain available;
+  deleted development plans remain recoverable through Git history.
 
 ## Release blockers and follow-up
 
