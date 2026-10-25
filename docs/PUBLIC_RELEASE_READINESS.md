@@ -6,8 +6,8 @@ PR #24 against `chatgpt/save-replacement-guard`.
 
 ## Decision
 
-The code and verification blockers identified during cleanup are resolved. All 709
-active declarations passed on Windows across the full development suite and release
+The code and verification blockers identified during cleanup are resolved. At `d8e143c`, all 709 then-active
+declarations passed on Windows across the full development suite and release
 checks. The source PR is ready for review; cross-platform binary certification is
 separate from source merge readiness.
 
@@ -59,7 +59,7 @@ was replaced. Public version 1 remains the compatibility baseline.
 - The release watcher test waits for SVG preview decoding before external deletion,
   avoiding a Windows unlink racing the active thumbnail read.
 
-## Verification
+## Release verification at d8e143c
 
 - `npm run test:full`: passed, 706 declarations: 525 unit, 138 browser and 43
   Electron tests. Includes the production build and both audience-navigation
@@ -78,6 +78,26 @@ was replaced. Public version 1 remains the compatibility baseline.
 There are no skips, quarantines, deprecated groups or test retries. Earlier diagnostic
 runs exposed the issues above; the final full run passed after the fixes. Workload
 assertions are correctness checks, not comparable performance measurements.
+
+## Subsequent unused-file cleanup
+
+A production entry-point traversal identified `src/components/effectGraph.ts` as
+unreachable from every renderer, Electron, worker, export and MCP entry. Only tests
+imported it. Removed the class and its eight obsolete scheduler declarations. The
+three production EffectSources contracts moved to `effect-sources.test.ts`; the
+composition dependency contract now asserts the production plan directly.
+
+Removed nine superseded MCP plans/research/handoff files and two stale local-tool
+configuration files. Replaced the long mixed-era MCP README with a current index,
+updated retained evaluation links and ignored regenerated `.impeccable/` settings.
+Runtime modules, benchmark evidence, required fixtures and license notices remain.
+
+The registry now has 701 active declarations in 105 groups and one deprecated
+metadata record for the replaced test file, scheduled for removal on 2026-11-24.
+Focused effect-source, composition and renderer-architecture tests passed (23/23),
+as did typecheck, registry/stats audit, lint, diff and deleted-link checks. The full
+suite and packaging were not repeated for unreachable code and documentation removal;
+passing results for unchanged runtime paths above are retained.
 
 ## Distribution and administration
 

@@ -46,4 +46,4 @@ At review time no Electron process remained running; the saved presentation is c
 
 ## Continuation — reusable authoring and fresh modern deck
 
-The six follow-up MCP improvements and a separate modern-theme evaluation are recorded in [modern-authoring-evaluation-2026-10-18.md](modern-authoring-evaluation-2026-10-18.md). That report supersedes the pending verification notes above for the combined implementation. Concrete next-instance tasks and observed friction are in [NEXT_INSTANCE_HANDOFF.md](NEXT_INSTANCE_HANDOFF.md). The original deck remains preserved.
+The six follow-up MCP improvements and a separate modern-theme evaluation are recorded in [modern-authoring-evaluation-2026-10-18.md](modern-authoring-evaluation-2026-10-18.md). That report supersedes the pending verification notes above for the combined implementation. Later implementation findings are recorded in [editorial-signal-evaluation-2026-10-18.md](editorial-signal-evaluation-2026-10-18.md). The original deck remains preserved.

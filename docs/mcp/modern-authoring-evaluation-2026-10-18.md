@@ -6,7 +6,7 @@ Implemented the six requested MCP improvements and authored a separate eight-sli
 
 The presentation is closed. Cold reopen retained eight slides, three native templates (two authored and one unused default), twelve text styles (ten authored and two defaults), the imported editor screenshot and native effects. Final media/effect previews returned no warnings. Native reopen starts a fresh epoch at revision/savedRevision 0; this is normal and does not mean edits were lost.
 
-Next implementation instructions: [NEXT_INSTANCE_HANDOFF.md](NEXT_INSTANCE_HANDOFF.md). This report records the experiment; that handoff identifies unresolved work and acceptance criteria.
+This report records the experiment. Later implementation and verification are recorded in [editorial-signal-evaluation-2026-10-18.md](editorial-signal-evaluation-2026-10-18.md).
 
 ## Implemented surfaces
 

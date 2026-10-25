@@ -949,12 +949,25 @@
     "id": "effects-execution-graph",
     "path": "tests/feature/effects/execution-graph.test.ts",
     "area": "effects",
+    "tier": "deprecated",
+    "status": "deprecated",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-25",
+    "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership; per-context texture ownership, alternating consumers without upload thrashing, restored context uploads and capture-to-immutable-pixel replacement",
+    "deprecationReason": "Deleted obsolete EffectGraph scheduler tests: the scheduler has no production consumers. Retained production pixel-source contracts moved to effects-pixel-sources.",
+    "removeAfter": "2026-11-24"
+  },
+  {
+    "id": "effects-pixel-sources",
+    "path": "tests/feature/effects/effect-sources.test.ts",
+    "area": "effects",
     "tier": "feature",
     "status": "active",
     "runtime": "unit",
-    "created": "2026-10-13",
-    "lastReviewed": "2026-10-24",
-    "reason": "Shared in-flight dependencies, independent terminals, retained dirty generations, dependency edge changes, teardown during pending work, cycle rejection and reference-counted pixel source ownership; per-context texture ownership, alternating consumers without upload thrashing, restored context uploads and capture-to-immutable-pixel replacement"
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Production EffectSources leases share invalidation, release sources after the last consumer, preserve per-context uploads across restoration, and replace capture machinery with immutable pixels"
   },
   {
     "id": "editor-agent-closing",
@@ -975,8 +988,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-21",
-    "lastReviewed": "2026-10-23",
-    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure. Exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points. Semantic composition and explicit scene-input ordering remain covered after deleting the unused selectable CSS compositor."
+    "lastReviewed": "2026-10-25",
+    "reason": "Derived v1 paint order, content scope, upstream text stages, explicit input identities, backdrop entry semantics, recursive prefix projection, acyclic parent/child dependencies, editing bypass and linear retained structure. Exact SceneSurfaceRef identity distinguishes element-entry and effect-entry paint points. Semantic composition and explicit scene-input ordering remain covered after deleting the unused selectable CSS compositor.; parent/child acyclicity is checked directly against production dependency edges instead of the unused EffectGraph scheduler"
   },
   {
     "id": "effects-native-composition",

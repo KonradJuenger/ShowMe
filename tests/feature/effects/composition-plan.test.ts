@@ -14,7 +14,6 @@ import {
   type EffectDefinition,
 } from "../../../src/core/effects";
 import type { Element } from "../../../src/core/element";
-import { EffectGraph } from "../../../src/components/effectGraph";
 
 const shape = (id: string) => createBasicShape(id, "rectangle", { x: 0, y: 0 });
 function fixture(children: Element[]) {
@@ -260,7 +259,7 @@ it("nested prefixes include earlier siblings and unfinished ancestors without la
   expect(JSON.stringify(f.slide)).toBe(before);
 });
 
-it("outer content effects consume child results without introducing a dependency on their own completed group", async () => {
+it("outer content effects consume child results without introducing a dependency on their own completed group", () => {
   const parent = shape("parent"),
     first = shape("first"),
     lens = shape("lens");
@@ -270,23 +269,11 @@ it("outer content effects consume child results without introducing a dependency
   f.add(first, "first", "generated", "background");
   f.add(lens, "lens", "backdrop");
   const plan = f.compile();
-  const refs = [
-    ref("parent", "filter"),
-    ref("first", "first"),
-    ref("lens", "lens"),
-  ];
-  const graph = new EffectGraph<string>(),
-    executed: string[] = [];
-  const key = (r: EffectRef) => JSON.stringify([r.elementId, r.effectId]);
-  for (const r of refs)
-    graph.register(key(r), () => {
-      executed.push(r.effectId);
-    });
-  graph.compile((k) =>
-    plan.dependencies(refs.find((r) => key(r) === k)!).map(key),
-  );
-  await graph.flush(key(refs[0]));
-  expect(executed).toEqual(["first", "lens", "filter"]);
+  expect(plan.dependencies(ref("parent", "filter"))).toEqual([
+    ref("first", "first"), ref("lens", "lens"),
+  ]);
+  expect(plan.dependencies(ref("lens", "lens"))).toEqual([ref("first", "first")]);
+  expect(plan.dependencies(ref("first", "first"))).toEqual([]);
 });
 
 it("editing bypasses only the edited element's content pipeline and keeps descendant effects", () => {
