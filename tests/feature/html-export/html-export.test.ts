@@ -11,6 +11,7 @@ import {
 import { newEffectInstance } from "../../../src/core/effects";
 import { blankEffect } from "../../../src/core/effectAuthoring";
 import { captureVideoPoster, videoPoster } from "../../../src/core/videoPoster";
+import { slideSchema } from "../../../src/core/document";
 
 let runtimeDirectory: string;
 beforeAll(async () => {
@@ -224,7 +225,7 @@ it("isolates video posters with identical asset IDs between resource providers",
   }
 });
 
-it("omits hidden slides and notes while resolving assets only from visible layers", async () => {
+it("omits hidden slides, layer content, notes and unreachable effects from the distributed HTML", async () => {
   const document = htmlExportFixture();
   const [first, hidden] = document.slides;
   first.notes = "private speaker notes";
@@ -233,13 +234,76 @@ it("omits hidden slides and notes while resolving assets only from visible layer
   document.deck.layers.push({
     ...document.deck.layers[0],
     id: "hidden-layer",
+    name: "PRIVATE_HIDDEN_LAYER",
     hidden: true,
   });
+  const hiddenText = structuredClone(first.nodes[0].children[0]);
+  hiddenText.id = "private-hidden-text";
+  if (hiddenText.content?.type !== "text") throw Error("text fixture");
+  hiddenText.content.text = "PRIVATE_HIDDEN_TEXT";
+  const privateEffect = {
+    ...blankEffect("css-js"),
+    source: "/* PRIVATE_HIDDEN_EFFECT_SOURCE */",
+  };
+  hiddenText.effects = [
+    newEffectInstance("private", privateEffect, "content"),
+    newEffectInstance("css", first.effectResources!.css, "content"),
+  ];
+  first.effectResources!.private = privateEffect;
+  first.effectResources!.unused = {
+    ...blankEffect("css-js"),
+    source: "/* PRIVATE_EFFECT_SOURCE */",
+  };
+  const hiddenMedia = structuredClone(hidden.nodes[0].children[0]);
+  if (hiddenMedia.content?.type !== "image") throw Error("image fixture");
+  hiddenMedia.content.filename = "PRIVATE_HIDDEN_FILENAME.png";
+  hiddenMedia.content.assetId = "PRIVATE_HIDDEN_ASSET";
   first.nodes.push({
     type: "layer",
     id: "hidden-layer",
-    children: [structuredClone(hidden.nodes[0].children[0])],
+    children: [hiddenText, hiddenMedia],
   });
+  const stage = first.motion!.stages[1],
+    visibleTrack = stage.tracks[0];
+  stage.tracks.push({
+    ...structuredClone(visibleTrack),
+    id: "private-track",
+    elementId: hiddenText.id,
+    keyframes: visibleTrack.keyframes.map((keyframe, index) => ({
+      ...keyframe,
+      id: `private-key-${index}`,
+    })),
+  });
+  stage.blocks = [
+    {
+      id: "private-block",
+      label: "PRIVATE_MOTION_LABEL",
+      members: [
+        {
+          trackId: "private-track",
+          fromKeyframeId: "private-key-0",
+          toKeyframeId: "private-key-1",
+        },
+      ],
+    },
+    {
+      id: "visible-block",
+      label: "Visible motion",
+      members: [
+        {
+          trackId: visibleTrack.id,
+          fromKeyframeId: visibleTrack.keyframes[0].id,
+          toKeyframeId: visibleTrack.keyframes[1].id,
+        },
+        {
+          trackId: "private-track",
+          fromKeyframeId: "private-key-0",
+          toKeyframeId: "private-key-1",
+        },
+      ],
+    },
+  ];
+  const before = structuredClone(document);
   const resolveAsset = vi.fn(async () => null);
   const { html, warnings } = await createHtmlExport({
     document,
@@ -253,10 +317,35 @@ it("omits hidden slides and notes while resolving assets only from visible layer
   expect(Object.keys(payload.document.deck.slideMeta)).toEqual([first.id]);
   expect(payload.document.slides).toHaveLength(1);
   expect(payload.document.slides[0].notes).toBe("");
+  expect(payload.document.deck.layers.map((layer) => layer.id)).not.toContain(
+    "hidden-layer",
+  );
+  const exported = payload.document.slides[0];
+  expect(exported.nodes.map((root) => root.id)).toEqual([first.nodes[0].id]);
+  expect(exported.effectResources).toEqual({
+    css: first.effectResources!.css,
+    js: first.effectResources!.js,
+  });
+  expect(exported.motion!.stages.map((stage) => stage.id)).toEqual(
+    first.motion!.stages.map((stage) => stage.id),
+  );
+  expect(exported.motion!.stages[1].tracks).toEqual([visibleTrack]);
+  expect(exported.motion!.stages[1].blocks).toEqual([
+    { ...stage.blocks[1], members: [stage.blocks[1].members[0]] },
+  ]);
+  expect(slideSchema.safeParse(exported).success).toBe(true);
+  expect(document).toEqual(before);
   expect(resolveAsset).not.toHaveBeenCalled();
   expect(warnings.some((w) => w.code === "missing-media")).toBe(false);
   expect(html).not.toContain("private speaker notes");
   expect(html).not.toContain("hidden notes");
+  expect(html).not.toContain("PRIVATE_HIDDEN_TEXT");
+  expect(html).not.toContain("PRIVATE_EFFECT_SOURCE");
+  expect(html).not.toContain("PRIVATE_HIDDEN_EFFECT_SOURCE");
+  expect(html).not.toContain("PRIVATE_HIDDEN_FILENAME");
+  expect(html).not.toContain("PRIVATE_HIDDEN_ASSET");
+  expect(html).not.toContain("PRIVATE_HIDDEN_LAYER");
+  expect(html).not.toContain("PRIVATE_MOTION_LABEL");
 });
 
 it("embeds visible CSS font variants and identifies blocked external CSS and SVG resources", async () => {

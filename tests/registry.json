@@ -1075,7 +1075,7 @@
     "runtime": "unit",
     "created": "2026-10-24",
     "lastReviewed": "2026-10-25",
-    "reason": "Single-file assembly escaping, hidden-slide/note privacy and visible-layer resources, external CSS/SVG diagnostics, CSS and exact font variants, nonfatal font installation, composition-exact SceneTexture eligibility, lazy URL ownership and isolated video posters"
+    "reason": "Single-file assembly escaping; final HTML excludes hidden slides/layer content, notes, hidden layer metadata and unreachable effect source; removed-element Motion is pruned while visible effects/track groups and source document are preserved; external CSS/SVG and font diagnostics, composition-exact capture eligibility, lazy URLs and isolated posters"
   },
   {
     "id": "html-export-browser",

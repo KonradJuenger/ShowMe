@@ -278,3 +278,23 @@ Remove-Item Env:SHOWME_HTML_TEST_EXECUTABLE
 ~~~
 
 PASS: 1/1 in the packaged Windows executable, including native font parsing/layout, SVG output, Settings, progress popup, cancellation/failure cleanup and offline playback.
+
+## Hidden-content distribution fix (2026-10-25)
+
+The portable snapshot now removes hidden layer roots and their layer metadata, rather than only excluding their media bytes. Each exported slide retains only effect definitions referenced by its remaining element tree. Shared effects used by visible content are retained. The existing Motion filtering helper removes tracks, blocks and block members for omitted elements while retaining click stages and visible Motion. Source documents remain unchanged.
+
+The revised privacy regression checks the final HTML for PRIVATE_HIDDEN_TEXT, PRIVATE_EFFECT_SOURCE, hidden-only effect source, filenames, asset identifiers, layer names and Motion labels. It also checks preservation of visible/shared effects, visible track groups, click-stage identities, source immutability and validity of the remaining slide.
+
+~~~powershell
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/html-export.test.ts","tests/feature/html-export/text-outlines.test.ts","tests/feature/html-export/image-cache.test.ts","tests/feature/html-export/video-clips.test.ts"]'
+npx vitest run
+Remove-Item Env:SHOWME_TEST_FILES
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/html-export.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-html-privacy
+Remove-Item Env:SHOWME_TEST_FILES
+npm run typecheck
+npm run test:stats
+npm run test:audit
+~~~
+
+PASS: 20 unit declarations, 2 HTML browser declarations, typecheck and registry audit. Test composition is unchanged by this fix. No main integration, full suite or packaged build was performed for this localized serialization change.

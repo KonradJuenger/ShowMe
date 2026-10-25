@@ -30,6 +30,7 @@ import {
 } from "../../src/components/compositionPlan";
 import { nativeOpacityPlan } from "../../src/components/nativeOpacity";
 import { getPresentationSlideIds } from "../../src/core/presentationSequence";
+import { filterMotion } from "../../src/core/motion";
 
 export interface HtmlAssetSource {
   file: string;
@@ -485,6 +486,7 @@ function portableDocumentSnapshot(
   return {
     deck: {
       ...document.deck,
+      layers: document.deck.layers.filter((layer) => !layer.hidden),
       slideIds: ids,
       slideMeta: Object.fromEntries(
         ids.map((id) => [id, document.deck.slideMeta[id]]),
@@ -492,7 +494,33 @@ function portableDocumentSnapshot(
     },
     slides: document.slides
       .filter((slide) => slideIds.has(slide.id))
-      .map((slide) => ({ ...slide, notes: "" })),
+      .map((slide) => {
+        const nodes = visibleLayerNodes(document, slide);
+        const elements = walkElements(nodes.flatMap((root) => root.children));
+        const resources = new Set(
+          elements.flatMap((element) =>
+            (element.effects ?? []).map((effect) => effect.resourceId),
+          ),
+        );
+        return {
+          ...slide,
+          notes: "",
+          nodes,
+          ...(slide.effectResources && {
+            effectResources: Object.fromEntries(
+              Object.entries(slide.effectResources).filter(([id]) =>
+                resources.has(id),
+              ),
+            ),
+          }),
+          ...(slide.motion && {
+            motion: filterMotion(
+              slide.motion,
+              new Set(elements.map((element) => element.id)),
+            ),
+          }),
+        };
+      }),
   };
 }
 
