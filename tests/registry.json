@@ -1087,5 +1087,27 @@
     "created": "2026-10-24",
     "lastReviewed": "2026-10-24",
     "reason": "Freshly built offline file URL runtime starts automatically, recovers from blocked autoplay and executes canonical navigation, Motion, CSS, text worker, generated and direct-media GLSL, video and restart without network; delayed SVG decode holds initial clocks and input"
+  },
+  {
+    "id": "html-export-video-clips",
+    "path": "tests/feature/html-export/video-clips.test.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Real bundled-FFmpeg trim duration, identical-range reuse, source preservation, exported timing rebasing, temp cleanup after success/conversion/assembly failure, and safe rejection before oversized asset allocation"
+  },
+  {
+    "id": "html-export-native-video-clips",
+    "path": "tests/feature/html-export/video-clips-native.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Native IPC HTML export runs the bundled FFmpeg, embeds a cropped clip, preserves accepted document timing and original Library bytes, and plays the result offline; the same contract can exercise the unpacked packaged executable"
   }
 ]

@@ -274,7 +274,8 @@ it("embeds visible CSS font variants and identifies blocked external CSS and SVG
     document,
     runtimeDirectory,
     runtimeVersion: "test",
-    resolveAsset: async () => ({ file, mime: "image/svg+xml" }),
+    resolveAsset: async (id) =>
+      id === "video" ? null : { file, mime: "image/svg+xml" },
     managedFonts: async () => [
       {
         family: "CSS Fixture",

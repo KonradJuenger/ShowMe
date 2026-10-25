@@ -1,5 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { constants as bufferLimits } from "node:buffer";
+import { TemporaryVideoClips } from "./videoClips";
 import type { SystemFontFamily } from "../../src/platform/api";
 import type { ExportDocument, ExportWarning } from "../../src/export/shared";
 import {
@@ -473,15 +475,65 @@ function portableDocumentSnapshot(
   };
 }
 
-export async function createHtmlExport({
-  document,
-  runtimeVersion,
-  runtimeDirectory,
-  resolveAsset,
-  managedFonts,
-}: HtmlExportInput) {
+export async function createHtmlExport(input: HtmlExportInput) {
+  const clips = new TemporaryVideoClips();
+  try {
+    return await assembleHtmlExport(input, clips);
+  } finally {
+    await clips.dispose();
+  }
+}
+
+async function assembleHtmlExport(
+  {
+    document,
+    runtimeVersion,
+    runtimeDirectory,
+    resolveAsset,
+    managedFonts,
+  }: HtmlExportInput,
+  clips: TemporaryVideoClips,
+) {
+  document = structuredClone(document);
   const slideIds = new Set(getPresentationSlideIds(document.deck));
   if (!slideIds.size) throw new Error("There are no visible slides to export");
+  const runtime = await runtimeAssets(runtimeDirectory);
+  const sources = new Map<string, Promise<HtmlAssetSource | null>>();
+  const resource = (id: string) => {
+    let source = sources.get(id);
+    if (!source) {
+      source = resolveAsset(id).catch(() => null);
+      sources.set(id, source);
+    }
+    return source;
+  };
+  for (const slide of document.slides) {
+    if (!slideIds.has(slide.id)) continue;
+    for (const element of visibleElements(document, slide)) {
+      const content = element.content;
+      if (
+        content?.type !== "video" ||
+        (content.startTime === 0 && content.endTime === null)
+      )
+        continue;
+      const source = await resource(content.assetId);
+      if (!source) continue;
+      const clip = await clips.prepare(
+        content.assetId,
+        source,
+        content.startTime,
+        content.endTime,
+      );
+      sources.set(clip.id, Promise.resolve(clip));
+      const duration =
+        content.endTime === null
+          ? null
+          : Math.max(0.05, content.endTime - content.startTime);
+      content.assetId = clip.id;
+      content.startTime = 0;
+      content.endTime = duration;
+    }
+  }
 
   const warnings: ExportWarning[] = [
     ...sceneTextureWarnings(document, slideIds),
@@ -504,8 +556,9 @@ export async function createHtmlExport({
   }
 
   const assets: HtmlEmbeddedAsset[] = [];
+  let assetCharacters = 0;
   for (const [assetId, occurrences] of assetOccurrences) {
-    const source = await resolveAsset(assetId).catch(() => null);
+    const source = await resource(assetId);
     if (!source) {
       for (const occurrence of occurrences)
         warnings.push({
@@ -516,6 +569,14 @@ export async function createHtmlExport({
         });
       continue;
     }
+    assetCharacters += 4 * Math.ceil((await fs.stat(source.file)).size / 3);
+    if (
+      assetCharacters + runtime.javascript.length + runtime.css.length + 8192 >
+      bufferLimits.MAX_STRING_LENGTH
+    )
+      throw new Error(
+        "The HTML export is too large to assemble safely. Shorten its video ranges or split the presentation before exporting.",
+      );
     const bytes = await fs.readFile(source.file);
     if (source.mime === "image/svg+xml") {
       const reference = externalSvgUrl(bytes.toString("utf8"));
@@ -550,7 +611,6 @@ export async function createHtmlExport({
   }
   const selectedFonts = selectFonts(document, slideIds, managedFontFamilies);
   warnings.push(...selectedFonts.warnings);
-  const runtime = await runtimeAssets(runtimeDirectory);
   const payload: HtmlExportPayload = {
     kind: "showme-html-export",
     formatVersion: HTML_EXPORT_FORMAT_VERSION,
@@ -561,6 +621,30 @@ export async function createHtmlExport({
     fonts: selectedFonts.fonts,
     warnings,
   };
+  const skeleton = {
+    ...payload,
+    assets: assets.map((asset) => ({ ...asset, data: "" })),
+    fonts: payload.fonts.map((family) => ({
+      ...family,
+      sources: family.sources.map((source) => ({ ...source, data: "" })),
+    })),
+  };
+  const characters =
+    embeddedJson(skeleton).length +
+    assetCharacters +
+    payload.fonts.reduce(
+      (total, family) =>
+        total +
+        family.sources.reduce((sum, source) => sum + source.data.length, 0),
+      0,
+    );
+  if (
+    characters + runtime.javascript.length + runtime.css.length + 8192 >
+    bufferLimits.MAX_STRING_LENGTH
+  )
+    throw new Error(
+      "The HTML export is too large to assemble safely. Shorten its video ranges or split the presentation before exporting.",
+    );
   const encodedPayload = embeddedJson(payload);
   const title = escapeHtml(document.deck.name);
   const html = `<!doctype html>

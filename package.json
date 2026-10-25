@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
+    "ffmpeg-static": "5.3.0",
     "motion": "^14.0.0",
     "pica": "^10.0.3",
     "pptxgenjs": "^4.0.1",
@@ -144,12 +145,14 @@
     },
     "asarUnpack": [
       "node_modules/sharp/**/*",
-      "node_modules/@img/**/*"
+      "node_modules/@img/**/*",
+      "node_modules/ffmpeg-static/**/*"
     ]
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "ffmpeg-static@5.3.0": true
   },
   "overrides": {
     "pptxgenjs": {

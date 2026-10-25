@@ -29,6 +29,29 @@ Verification of the reconciled candidate (2026-10-25):
 - Native PDF: `$env:SHOWME_TESTING='1'; $env:SHOWME_TEST_ROOT_SELECTION=(Resolve-Path test-results-html-export-merge-native-root).Path; $env:SHOWME_TEST_FILES='["tests/feature/persistence/pdf-rendering.spec.ts"]'; npx playwright test --config playwright.config.ts --output test-results-html-export-merge-pdf`: PASS, 1/1. The isolated root was created beforehand and all environment variables were removed afterward.
 - Conflict/diff review: no conflict markers or whitespace errors; CI configuration still matches main. No full/release suite or repeated benchmark was run for this reconciliation. Prior packaging, media/font probes and WebKit limitations below remain historical observations rather than newly repeated coverage.
 
+## Temporary video clips (2026-10-25)
+
+HTML export now creates private `showme-html-video-*` temporary directories for videos with saved trim bounds. Bundled FFmpeg seeks accurately while transcoding to H.264/AAC MP4 at the source resolution (CRF 18, veryfast); these are high-quality export derivatives, not bit-identical copies. Matching source/range requests share one clip. Different ranges get separate content-addressed assets. Untrimmed sources remain untouched.
+
+Only a cloned export snapshot receives the derived asset IDs and zero-based clip times. The editor document, original media, transforms, loop/mute/volume settings and canonical renderer stay unchanged. The directory is removed in a finally block after assembly, including conversion and assembly errors; the single HTML contains the clip bytes and has no dependency on those temporary files. FFmpeg remains external to the Electron JS bundle and its executable is unpacked from app.asar. Normal exports need no separate system installation.
+
+The exporter also checks media sizes before reading an asset that would exceed the V8 string capacity, and checks the complete payload size before serialization. Oversized exports report an actionable error instead of attempting an impossible giant string. This is a capacity guard rather than a general streaming-format redesign.
+
+Verification for this follow-up:
+
+- `npm run typecheck`, `npm run lint`: PASS; only the existing unrelated library-work.test.ts warning remains.
+- `npm test`: PASS, 15 core tests.
+- `$env:SHOWME_TEST_FILES='["tests/feature/html-export/video-clips.test.ts","tests/feature/html-export/html-export.test.ts"]'; npx vitest run`: PASS, 14 tests. New contracts cover duration/first-frame selection, repeated and open-ended ranges, source preservation, snapshot rebasing, success/failure cleanup and rejection before oversized asset allocation.
+- `npm run test:stats`, `npm run test:audit`: PASS, 693 active declarations / 101 groups.
+- `npm run build`, `npm run verify:build`, `npx electron-builder --dir --publish never`: PASS on Windows x64.
+- `$env:SHOWME_TEST_FILES='["tests/feature/presenter/audience-navigation.spec.ts","tests/feature/html-export/html-export.spec.ts"]'; npx playwright test --config playwright.config.ts --output test-results-html-video-final`: PASS, 4/4, including both audience-navigation gate declarations.
+- `$env:SHOWME_TEST_FILES='["tests/feature/html-export/video-clips-native.spec.ts"]'; npx playwright test --config playwright.config.ts --output test-results-html-video-native`: PASS, 1/1. The native IPC path imports a real fixture, exports it, checks that Library bytes and accepted document times are unchanged, then plays the cropped HTML video offline.
+- The same native declaration with `SHOWME_HTML_TEST_EXECUTABLE` pointing to `release/win-unpacked/ShowMe.exe` and output `test-results-html-video-packaged`: PASS, 1/1, verifying the bundled executable from the packaged layout. Environment selections were removed after each invocation.
+
+A local 30-slide real-world deck that exceeded the old string limit exported successfully in about 47 seconds. Its four source videos totaled 503,744,418 bytes; export clips totaled 36,969,984 bytes and the single HTML was 229,914,929 bytes. Hashes of the deck and four original videos were unchanged, and no new temporary clip directory remained. Read-only Library lookup also found the nested image assets that the earlier shallow size estimate missed.
+
+The real file opened offline in Chromium, and all four videos decoded and played with rebased times and the expected approximately 5.14 / 27.56 / 9.31 / 26.46-second container durations. There were no page errors or HTTP(S) requests. Existing Aptos/Indivisible font-not-embedded warnings remain. The generated private verification HTML is ignored under `test-results-html-export-real-clips` and is not committed. Full/release suites, macOS packaging, and Firefox/WebKit playback were not repeated for this follow-up.
+
 ## Architecture retained
 
 One accepted presentation snapshot plus referenced original media, available managed fonts and a frozen prebuilt browser runtime becomes one HTML file. The native export still reads the current DocumentRuntime snapshot and resolves templates through the canonical model. No authority, persistence path, renderer or historical schema was added.
