@@ -185,3 +185,49 @@ DOM/backdrop SceneTexture remains deliberately unsupported in ordinary browsers.
 The exported payload is still base64 JSON parsed at startup. Removing its DOM node reduces one avoidable retained copy, but large/long-deck peak memory is not exhaustively characterized. The existing three-second preview-null retry remains; inspection and runs showed no repeated video decoding from that retry, so no new poster-storage or capability abstraction was introduced.
 
 No full/release suite, installer, macOS build, signed package or comprehensive codec matrix was run. Frozen runtime versioning, offline single-file behavior and the current document compatibility baseline are retained. Human review should focus on representative real decks and the documented browser/capture boundaries before any later integration into main.
+
+## Export-only JPEG preparation follow-up (2026-10-25)
+
+HTML export uses the existing presentation sampling planner, ImageVariantCache and processing worker in an export-owned temporary directory. Opaque static images are sampled for the deck's native output size (including existing Motion, frame and crop requirements), encoded as JPEG and embedded with content-addressed IDs. Transparent/high-bit-depth images retain PNG; SVG and animated media retain their original format. The cloned export snapshot retains source intrinsic geometry. Original files, accepted document state, desktop cache settings and default Q100 desktop cache identities remain unchanged.
+
+Settings → HTML export → JPEG quality accepts integers 1–100 and defaults to 90. The value persists independently of the desktop image cache format/enabled settings. Quality participates in JPEG cache identities. Temporary image files are removed after assembly/write success or failure; native export still uses the previous temporary video clipping path.
+
+Validation commands for this follow-up:
+
+~~~powershell
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/image-cache.test.ts","tests/feature/html-export/html-export.test.ts","tests/feature/html-export/video-clips.test.ts","tests/feature/media/retained-images.test.ts","tests/feature/media/image-sampling.test.ts"]'
+npx vitest run
+Remove-Item Env:SHOWME_TEST_FILES
+~~~
+
+PASS: 34/34. Covers selected JPEG quality/identity and reuse, original bytes, transparent/vector/animated media, export-only sampling and snapshot preservation, cleanup, existing cache contracts and video clipping.
+
+~~~powershell
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/video-clips-native.spec.ts","tests/feature/html-export/html-export.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-html-jpg
+Remove-Item Env:SHOWME_TEST_FILES
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/video-clips-native.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-html-jpg-native
+Remove-Item Env:SHOWME_TEST_FILES
+~~~
+
+The combined run passed both HTML browser declarations and both audience-navigation declarations (dense rendering stress and late-image navigation). Its native fixture initially lacked explicit prepared image dimensions; after correcting the fixture, the focused native run passed 1/1. That native test exercises the Settings control, default 90, persisted 75, invalid-value rejection, unchanged desktop cache format, export with desktop caching disabled, exact Q75 encoded bytes, cropped-video offline playback, and accepted document/source preservation. No product behavior was changed to accommodate the fixture correction.
+
+- `npm run typecheck`, `npm run build`, `npm run verify:build`: pass.
+- `npm run lint`: pass with the existing unused setLibraryProtection warning in library-work.test.ts.
+- `npm run test:stats`, `npm run test:audit`: pass, 696 active declarations in 102 groups.
+- `npx electron-builder --dir --publish never`: pass on Windows x64.
+
+~~~powershell
+$env:SHOWME_HTML_TEST_EXECUTABLE=(Resolve-Path release/win-unpacked/ShowMe.exe).Path
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/video-clips-native.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-html-jpg-packaged
+Remove-Item Env:SHOWME_TEST_FILES
+Remove-Item Env:SHOWME_HTML_TEST_EXECUTABLE
+~~~
+
+PASS: 1/1 with the packaged executable, including the export-only quality setting and exact Q75 JPEG bytes.
+
+Private local verification re-exported the same 30-slide real deck at quality 90: 51 prepared JPEG variants, 11,455,454 embedded image bytes, 65,159,222-byte HTML (previous full-image export: 229,914,929 bytes). Four cropped videos still total 36,969,984 bytes. Export completed in about 59 seconds; original deck/video hashes stayed unchanged and no new temporary image/video folder remained. The resulting file opened offline in Chromium; all four videos played with their trimmed durations and no browser errors or HTTP(S) requests. These are single exploratory observations, not comparative audience-performance benchmarks. Scripts and private artifacts remain ignored under .scratch and test-results-html-export-real-jpg.
+
+The full/release suite, macOS and other browser checks were not repeated for this follow-up. Existing font/capture/browser limitations above still apply.

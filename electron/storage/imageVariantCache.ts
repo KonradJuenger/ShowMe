@@ -98,6 +98,7 @@ export class ImageVariantCache {
     private readonly retainedRoot?: () => string | null,
     private readonly retentionEnabled: () => boolean = () => true,
     private readonly preferredFormat: () => ImageCacheFormat = () => "png",
+    private readonly jpegQuality: () => number = () => 100,
   ) {
     this.processors = new ImageProcessorPool(workerFile);
   }
@@ -117,10 +118,10 @@ export class ImageVariantCache {
     hashSchema.parse(image.hash);
     if (
       !["image/png", "image/jpeg"].includes(image.mime) ||
-      image.recipe !== imageRecipe(imageExtension(image.mime)) ||
+      image.recipe !== imageRecipe(imageExtension(image.mime), this.jpegQuality()) ||
       image.hash !==
         createHash("sha256")
-          .update(imageIdentity(image.assetId, image.width, image.height, imageExtension(image.mime)))
+          .update(imageIdentity(image.assetId, image.width, image.height, imageExtension(image.mime), this.jpegQuality()))
           .digest("hex") ||
       !canPrepareImage(
         image.sourceWidth,
@@ -162,6 +163,7 @@ export class ImageVariantCache {
     const swapped = (metadata.orientation ?? 1) >= 5;
     const sourceWidth = swapped ? metadata.height : metadata.width;
     const sourceHeight = swapped ? metadata.width : metadata.height;
+    const jpegQuality = this.jpegQuality();
     let format = this.preferredFormat();
     if (format === "jpg" && metadata.depth === "ushort") format = "png";
     if (format === "jpg" && metadata.hasAlpha) {
@@ -188,7 +190,7 @@ export class ImageVariantCache {
       ":" +
       targetWidth +
       ":" +
-      targetHeight + ":" + format;
+      targetHeight + ":" + imageRecipe(format, jpegQuality);
     const prior = this.pending.get(key);
     const demand = Math.max(this.demands.get(key) ?? 0, priority);
     this.demands.set(key, demand);
@@ -206,6 +208,7 @@ export class ImageVariantCache {
       targetHeight,
       key,
       format,
+      jpegQuality,
     ).finally(() => {
       this.pending.delete(key);
       this.demands.delete(key);
@@ -223,6 +226,7 @@ export class ImageVariantCache {
     targetHeight?: number,
     key = "",
     format: ImageCacheFormat = "png",
+    jpegQuality = 100,
   ) {
     if (this.unsupportedSources.has(source)) return null;
     const metadata = await this.sourceMetadata(source);
@@ -248,7 +252,7 @@ export class ImageVariantCache {
       throw new Error("Invalid image dimensions");
     if (!canPrepareImage(sourceWidth, sourceHeight, width, height)) return null;
     const hash = createHash("sha256")
-      .update(imageIdentity(assetId, width, height, format))
+      .update(imageIdentity(assetId, width, height, format, jpegQuality))
       .digest("hex");
     const image: PreparedImage = {
       assetId,
@@ -258,7 +262,7 @@ export class ImageVariantCache {
       sourceHeight,
       width,
       height,
-      recipe: imageRecipe(format),
+      recipe: imageRecipe(format, jpegQuality),
       mime: imageMime(format),
       url: "studio://presentation-image/" + hash + "." + format,
     };
@@ -284,6 +288,7 @@ export class ImageVariantCache {
             width,
             height,
             format,
+            jpegQuality,
           });
         },
         {

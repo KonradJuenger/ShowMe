@@ -64,6 +64,8 @@ import path from "node:path";
 import { promises as fs, existsSync } from "node:fs";
 import { exportPowerPoint } from "./export/pptx";
 import { createHtmlExport } from "./export/html";
+import { HtmlExportImageCache } from "./export/imageCache";
+import { DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../src/export/html/types";
 import {
   pdfSlides,
   type ExportDocument,
@@ -1076,30 +1078,38 @@ async function performExportPresentation(
   });
   if (result.canceled || !result.filePath) return null;
   if (type === "html") {
-    const exported = await createHtmlExport({
-      document,
-      runtimeVersion: app.getVersion(),
-      runtimeDirectory: path.join(__dirname, "../dist-html-export"),
-      resolveAsset: async (assetId) => {
-        try {
-          const source = await resolveOriginalAsset(
-            currentStorage,
-            id,
-            assetId,
-          );
-          await fs.access(source.file);
-          return source;
-        } catch {
-          return null;
-        }
-      },
-      managedFonts: () => currentStorage.managedFonts(id),
-    });
-    await atomicWrite(
-      result.filePath,
-      Buffer.from(exported.html, "utf8"),
+    const settings = await readSettings(app.getPath("userData"));
+    const images = new HtmlExportImageCache(
+      path.join(__dirname, "imageWorker.cjs"),
+      settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY,
     );
-    return { warnings: exported.warnings };
+    try {
+      const exported = await createHtmlExport({
+        document,
+        runtimeVersion: app.getVersion(),
+        runtimeDirectory: path.join(__dirname, "../dist-html-export"),
+        resolveAsset: async (assetId) => {
+          try {
+            const source = await resolveOriginalAsset(
+              currentStorage,
+              id,
+              assetId,
+            );
+            await fs.access(source.file);
+            return source;
+          } catch {
+            return null;
+          }
+        },
+        managedFonts: () => currentStorage.managedFonts(id),
+        prepareImage: (source, requirement) =>
+          images.prepare(source, requirement),
+      });
+      await atomicWrite(result.filePath, Buffer.from(exported.html, "utf8"));
+      return { warnings: exported.warnings };
+    } finally {
+      await images.dispose();
+    }
   }
   if (type === "pptx")
     return exportPowerPoint(
@@ -1947,6 +1957,18 @@ const operations: Record<string, (...args: any[]) => any> = {
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
   getImageCachingEnabled: () => imageCachingEnabled,
+  async getHtmlExportJpegQuality() {
+    const settings = await readSettings(app.getPath("userData"));
+    return settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY;
+  },
+  async setHtmlExportJpegQuality(value: unknown) {
+    const quality = z.number().int().min(1).max(100).parse(value);
+    const settings = await readSettings(app.getPath("userData"), {
+      requireExisting: true,
+    });
+    settings.htmlExportJpegQuality = quality;
+    await writeSettings(app.getPath("userData"), settings);
+  },
   getImageCacheFormat: () => imageCacheFormat,
   async setImageCacheFormat(value: unknown) {
     const format = z.enum(["png", "jpg"]).parse(value);

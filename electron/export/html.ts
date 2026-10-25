@@ -2,6 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { constants as bufferLimits } from "node:buffer";
 import { TemporaryVideoClips } from "./videoClips";
+import { hashFile } from "../storage/io";
+import {
+  planPresentationImages,
+  type ImageRequirement,
+} from "../../src/core/presentationImages";
 import type { SystemFontFamily } from "../../src/platform/api";
 import type { ExportDocument, ExportWarning } from "../../src/export/shared";
 import {
@@ -34,6 +39,12 @@ export interface HtmlExportInput {
   runtimeVersion: string;
   runtimeDirectory: string;
   resolveAsset(id: string): Promise<HtmlAssetSource | null>;
+  prepareImage?(
+    source: HtmlAssetSource,
+    requirement: ImageRequirement,
+  ): Promise<
+    (HtmlAssetSource & { sourceWidth: number; sourceHeight: number }) | null
+  >;
   managedFonts(): Promise<SystemFontFamily[]>;
 }
 
@@ -490,6 +501,7 @@ async function assembleHtmlExport(
     runtimeVersion,
     runtimeDirectory,
     resolveAsset,
+    prepareImage,
     managedFonts,
   }: HtmlExportInput,
   clips: TemporaryVideoClips,
@@ -532,6 +544,46 @@ async function assembleHtmlExport(
       content.assetId = clip.id;
       content.startTime = 0;
       content.endTime = duration;
+    }
+  }
+
+  if (prepareImage) {
+    const elements = new Map(
+      document.slides.map((slide) => [
+        slide.id,
+        new Map(
+          visibleElements(document, slide).map((element) => [
+            element.id,
+            element,
+          ]),
+        ),
+      ]),
+    );
+    for (const requirement of planPresentationImages(
+      document.deck,
+      document.slides,
+      {
+        width: document.deck.width,
+        height: document.deck.height,
+      },
+    )) {
+      const source = await resource(requirement.assetId);
+      if (!source) continue;
+      const prepared = await prepareImage(source, requirement);
+      if (!prepared) continue;
+      const id = await hashFile(prepared.file);
+      sources.set(id, Promise.resolve(prepared));
+      for (const instance of requirement.instances) {
+        const content = elements
+          .get(instance.slideId)
+          ?.get(instance.elementId)?.content;
+        if (content?.type !== "image") continue;
+        content.assetId = id;
+        if (content.transform.rule !== "free") {
+          content.transform.intrinsicWidth ??= prepared.sourceWidth;
+          content.transform.intrinsicHeight ??= prepared.sourceHeight;
+        }
+      }
     }
   }
 

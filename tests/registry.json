@@ -1108,6 +1108,17 @@
     "runtime": "electron",
     "created": "2026-10-25",
     "lastReviewed": "2026-10-25",
-    "reason": "Native IPC HTML export runs the bundled FFmpeg, embeds a cropped clip, preserves accepted document timing and original Library bytes, and plays the result offline; the same contract can exercise the unpacked packaged executable"
+    "reason": "Native HTML export with bundled video cropping and export-only JPEG sampling, quality default/persistence/validation, settings UI, disabled desktop caching and original asset/document preservation"
+  },
+  {
+    "id": "html-export-image-cache",
+    "path": "tests/feature/html-export/image-cache.test.ts",
+    "area": "html-export",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-25",
+    "lastReviewed": "2026-10-25",
+    "reason": "Export-only prepared JPEG quality and cache identity, source preservation, transparency/vector/animation preservation, sampled embedding and temporary cleanup"
   }
 ]

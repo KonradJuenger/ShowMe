@@ -267,6 +267,7 @@
 }
 
 .settings-dialog-body button,
+.settings-dialog-body input[type="number"],
 .settings-dialog-body select {
   min-height: 32px;
   max-width: 100%;
@@ -277,6 +278,10 @@
   color: var(--km-text-primary);
   font: inherit;
   font-size: 12px;
+}
+
+.settings-dialog-body input[type="number"] {
+  width: 76px;
 }
 
 .settings-dialog-body button:hover:not(:disabled) {

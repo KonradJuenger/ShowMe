@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import "./PresentationMenu.css";
 import { MaterialIcon } from "./MaterialIcon";
 import { platform } from "../platform";
+import { DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../export/html/types";
 import { formatExportWarnings } from "../export/shared";
 import { LibraryStorageSettings } from "./LibraryStorageSettings";
 import { NewPresentationDialog } from "./NewPresentationDialog";
@@ -49,6 +50,13 @@ export function PresentationMenu({
   const settingsRef = useRef<HTMLElement>(null);
   const [imageCaching, setImageCaching] = useState(true);
   const [imageCacheFormat, setImageCacheFormat] = useState<ImageCacheFormat>("png");
+  const [htmlQuality, setHtmlQuality] = useState(
+    DEFAULT_HTML_EXPORT_JPEG_QUALITY,
+  );
+  const [htmlQualityDraft, setHtmlQualityDraft] = useState(
+    String(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
+  );
+  const [htmlQualityBusy, setHtmlQualityBusy] = useState(false);
   const [deleteCacheOnClose, setDeleteCacheOnClose] = useState(true);
   const [cacheFolder, setCacheFolder] = useState<MediaLibraryInfo | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
@@ -136,14 +144,17 @@ export function PresentationMenu({
       platform.getDeleteImageCacheOnClose?.() ?? Promise.resolve(true),
       platform.getImageCacheFolder?.() ?? Promise.resolve(null),
       platform.getImageCacheFormat?.() ?? Promise.resolve<ImageCacheFormat>("png"),
+      platform.getHtmlExportJpegQuality?.() ?? Promise.resolve(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
     ])
-      .then(([info, enabled, deleteOnClose, folder, format]) => {
+      .then(([info, enabled, deleteOnClose, folder, format, quality]) => {
         if (live) {
           setMediaLibrary(info);
           setImageCaching(enabled);
           setDeleteCacheOnClose(deleteOnClose);
           setCacheFolder(folder);
           setImageCacheFormat(format);
+          setHtmlQuality(quality);
+          setHtmlQualityDraft(String(quality));
         }
       })
       .catch(onError)
@@ -396,7 +407,7 @@ export function PresentationMenu({
             <header className="settings-dialog-header">
               <div>
                 <h2 id="settings-dialog-title">Settings</h2>
-                <p>Library storage, collaboration, and image caching.</p>
+                <p>Library storage, collaboration, image caching, and HTML export.</p>
               </div>
               <button
                 type="button"
@@ -454,6 +465,51 @@ export function PresentationMenu({
                 </>}
                 {cacheMessage && <p role="status">{cacheMessage}</p>}
               </div>
+              {platform.setHtmlExportJpegQuality && (
+                <div className="settings-section">
+                  <h3>HTML export</h3>
+                  <label>
+                    JPEG quality{" "}
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      aria-label="HTML export JPEG quality"
+                      value={htmlQualityDraft}
+                      disabled={settingsBusy || htmlQualityBusy}
+                      onChange={(event) =>
+                        setHtmlQualityDraft(event.target.value)
+                      }
+                      onBlur={() => {
+                        const quality = Number(htmlQualityDraft);
+                        if (
+                          !Number.isInteger(quality) ||
+                          quality < 1 ||
+                          quality > 100
+                        ) {
+                          setHtmlQualityDraft(String(htmlQuality));
+                          return;
+                        }
+                        if (quality === htmlQuality) return;
+                        setHtmlQualityBusy(true);
+                        void platform.setHtmlExportJpegQuality!(quality)
+                          .then(() => setHtmlQuality(quality))
+                          .catch((error) => {
+                            setHtmlQualityDraft(String(htmlQuality));
+                            onError(error);
+                          })
+                          .finally(() => setHtmlQualityBusy(false));
+                      }}
+                    />
+                  </label>
+                  <p>
+                    1–100, default 90. Applies only to prepared images in HTML
+                    exports. Transparent and high bit depth images stay PNG;
+                    animated images and SVGs keep their original format.
+                  </p>
+                </div>
+              )}
               <LibraryStorageSettings />
               {!platform.getLibraryLifecycle && (<div className="settings-section">
                 <div className="settings-section-heading">

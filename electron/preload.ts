@@ -30,6 +30,8 @@ const methods = [
   "resetImageCacheFolder",
   "clearPresentationImages",
   "getImageCachingEnabled",
+  "getHtmlExportJpegQuality",
+  "setHtmlExportJpegQuality",
   "getImageCacheFormat",
   "setImageCacheFormat",
   "getDeleteImageCacheOnClose",

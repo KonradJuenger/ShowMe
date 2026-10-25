@@ -8,6 +8,7 @@ const appSettingsSchema = z.object({
   mcpEditingEnabled: z.boolean().optional(),
   storageWarningSeen: z.boolean().optional(),
   imageCachingEnabled: z.boolean().optional(),
+  htmlExportJpegQuality: z.number().int().min(1).max(100).optional(),
   imageCacheFormat: z.enum(["png", "jpg"]).optional(),
   deleteImageCacheOnClose: z.boolean().optional(),
   imageCachePath: z.string().nullable().optional(),

@@ -1,5 +1,7 @@
 import type { ExportDocument, ExportWarning } from "../shared";
 
+export const DEFAULT_HTML_EXPORT_JPEG_QUALITY = 90;
+
 export const HTML_EXPORT_FORMAT_VERSION = 1 as const;
 
 export interface HtmlEmbeddedAsset {

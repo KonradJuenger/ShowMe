@@ -7,8 +7,8 @@ export const JPEG_IMAGE_RECIPE = "jpeg-q100-444-lanczos3-tiled-source-sdr-v1";
 export type ImageCacheFormat = "png" | "jpg";
 export type PreparedImageMime = "image/png" | "image/jpeg";
 
-export function imageRecipe(format: ImageCacheFormat) {
-  return format === "jpg" ? JPEG_IMAGE_RECIPE : IMAGE_RECIPE;
+export function imageRecipe(format: ImageCacheFormat, jpegQuality = 100) {
+  return format === "jpg" ? `jpeg-q${jpegQuality}-444-lanczos3-tiled-source-sdr-v1` : IMAGE_RECIPE;
 }
 
 export function imageMime(format: ImageCacheFormat): PreparedImageMime {
@@ -295,6 +295,6 @@ export function imageDimensions(
     height: Math.max(1, Math.ceil(sourceHeight * ratio)),
   };
 }
-export function imageIdentity(assetId: string, width: number, height: number, format: ImageCacheFormat = "png") {
-  return `${imageRecipe(format)}:${assetId}:${width}x${height}`;
+export function imageIdentity(assetId: string, width: number, height: number, format: ImageCacheFormat = "png", jpegQuality = 100) {
+  return `${imageRecipe(format, jpegQuality)}:${assetId}:${width}x${height}`;
 }
