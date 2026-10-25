@@ -1,120 +1,101 @@
 # Public release readiness
 
-Assessment date: 2026-10-25. Starting revision: `55ea598`.
-Cleanup branch: `release/public-cleanup`, based on the checked-out
-`chatgpt/save-replacement-guard` branch to retain its save/replacement fixes.
+Assessment date: 2026-10-25. Cleanup branch: `release/public-cleanup`.
+The branch retains the save/replacement work from `55ea598` and is reviewed in
+PR #24 against `chatgpt/save-replacement-guard`.
 
 ## Decision
 
-The source cleanup is suitable for review, but this candidate is **not yet a
-verified public binary release**. The remaining dependency advisory and failing
-verification below need resolution before making that claim.
+The code and verification blockers identified during cleanup are resolved. All 709
+active declarations passed on Windows across the full development suite and release
+checks. The source PR is ready for review; cross-platform binary certification is
+separate from source merge readiness.
 
-## Scope and findings
+## Scope
 
-Reviewed the tracked source inventory, package/build configuration, GitHub workflows,
-public documentation, Electron window permissions, document authority entry points,
-and current test registry. This is an engineering readiness assessment, not a
-complete security audit or review of every code path.
+Reviewed tracked files, dependency/build configuration, manual GitHub workflows,
+public documentation, Electron permissions, document authority entry points and
+active test coverage. This is an engineering readiness assessment, not an exhaustive
+security audit. No document format, persistence path, editor UI or runtime architecture
+was replaced. Public version 1 remains the compatibility baseline.
 
-- The application has an established document authority and semantic operation
-  model. Cleanup preserves version 1 storage/protocols and the current persistence
-  path; no runtime, schema or UI redesign is included.
-- Electron windows enable sandboxing and context isolation, disable Node integration,
-  deny new windows and prevent renderer navigation. MCP and collaboration retain
-  their documented opt-in/trusted-local boundaries.
-- Generated builds, dependencies, reports, environment files and user presentations
-  are already ignored. The tracked-file inventory contains no generated distribution
-  or dependency trees. A limited text scan found no common private-key/token markers
-  or user-home paths; Git history and external secret scanning were not audited.
-- `electron/main.ts`, `src/core/agentMutation.ts` and editor components carry substantial
-  orchestration complexity. Future extraction should follow actual responsibility
-  boundaries and focused tests. File size alone does not justify a release refactor.
-- Engineering handoffs and evaluation records remain useful history. A documentation
-  index now distinguishes them from maintained user/contributor entry points.
-- Automatic CI remains paused as required by project policy. Manual build and desktop
-  verification workflows exist; local results remain authoritative.
+## Cleanup and resolved blockers
 
-## Cleanup implemented
+- Updated compatible dependencies, then migrated the remaining Zod dependency to
+  4.6.7. `npm audit` and `npm audit --omit=dev` now report zero vulnerabilities.
+  The migration adds the explicit presenter record key schema and replaces a
+  synthetic Zod refinement context with supported validation. MCP discovery now
+  reflects Zod's discriminated-union `oneOf` schema output.
+- Required image-worker and MCP bundles and their maps in build verification.
+  Missing-bundle checks were exercised separately and correctly rejected each case.
+- Removed an unused import, five superseded planning/scratch documents and two unused
+  screenshots (1,273 lines removed). Current architecture, setup, implementation
+  findings, benchmark evidence and license notices remain. Removed plans are in Git history.
+- Added repository/issue metadata, contributor instructions, security reporting
+  guidance and a documentation index. `private: true` prevents accidental npm publication.
+- Updated shader tests to sample current GPU framebuffers or presented bitmaps.
+  Bypassed Effects retain hidden bitmaps: coverage verifies hidden output, restored
+  source visibility, preceding shader pixels and the unchanged active-stage pixels.
+  Direct surface tests now provide their owned GPU chains. Renderer-only harnesses
+  use the static harness page instead of racing the editor's asynchronous startup.
+- Updated clipboard failure injection to the clipboard API actually used by the UI,
+  and aligned timing-copy expectations with current Effect timing behavior.
+- Native fixtures select an isolated ShowMe root and use its shared Library. Restart
+  testing takes an accepted discard before relaunch rather than creating an unintended
+  recovery dialog. MCP fixture shutdown now follows graceful app close and waits for
+  the process to exit before deleting its Windows files. No test retries were added.
+- Capped Vitest at eight concurrent workers to avoid saturating the shared host disk
+  with dozens of native/storage test processes. The 128 MiB archive integrity test
+  has an explicit I/O timeout; archive size, byte-integrity and corruption checks remain.
+- Fixed text-worker watchdog accounting: dispatch is separately bounded, the
+  worker acknowledges execution start, and both a renderer watchdog and worker-side
+  elapsed-time check retain the 500 ms code-execution limit. Original failures stay
+  actionable instead of becoming a generic unavailable error. A deterministic test
+  verifies delayed dispatch, execution termination and duplicate acknowledgments.
+- Electron groups now run once each in separate Playwright processes, with distinct
+  artifact directories. This removes the demonstrated cross-file automation/compiler
+  interference that stalled capture checks in combined runs. The original native
+  capture fixtures, samples, tolerances and timeouts are retained.
+- The release watcher test waits for SVG preview decoding before external deletion,
+  avoiding a Windows unlink racing the active thumbnail read.
 
-- Updated compatible locked dependencies, including Electron 44.9.3, Vite 8.3.5
-  and Vitest 5.0.5; raised their manifest minimums. The dependency audit decreased
-  from seven affected packages to one without forcing a major-version migration.
-- Added repository/homepage/issue metadata while retaining `private: true` to prevent
-  accidental npm publication of the desktop application.
-- Extended build verification to require the image worker and local MCP bundles
-  and their source maps. Both are shipping entry points that were previously omitted.
-- Removed an unused test import; lint now reports no warnings.
-- Added contribution instructions, security reporting guidance and documentation navigation.
-- Removed five superseded, unreferenced planning/scratch documents and the unused
-  `docs/images/assets.png` and `docs/images/effects.png` screenshots. Current setup,
-  architecture, implementation findings and benchmark evidence remain available;
-  deleted development plans remain recoverable through Git history.
+## Verification
 
-## Release blockers and follow-up
+- `npm run test:full`: passed, 706 declarations: 525 unit, 138 browser and 43
+  Electron tests. Includes the production build and both audience-navigation
+  declarations (dense rendering stress and late-image navigation).
+- `npx playwright test --config playwright.electron.config.ts`: passed, both
+  release-tier desktop IPC/startup declarations.
+- `npx electron-builder --win nsis portable --x64 --publish never`: passed with
+  `CSC_IDENTITY_AUTO_DISCOVERY=false`; generated the Windows installer and portable app.
+- `npx playwright test --config playwright.packaged.config.ts`: passed, one
+  packaged production-renderer/preload startup declaration.
+- `npm run typecheck`, `npm run lint`, `npm run verify:build`,
+  `npm run test:stats`, `npm run test:audit`, `git diff --check` and release
+  documentation link validation passed. Registry: 709 declarations / 105 groups.
+- `npm audit` and `npm audit --omit=dev`: zero vulnerabilities.
 
-1. **Zod advisory:** both `npm audit` and `npm audit --omit=dev` still report one high
-   severity advisory in Zod 3.25.76:
-   [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5).
-   The reported patched line starts at 4.6.6. ShowMe uses Zod throughout document,
-   operation, IPC and MCP admission schemas. A migration must preserve accepted
-   version 1 values, defaults, optional fields and rejection behavior. Follow the
-   [upstream migration guide](https://zod.dev/v4/changelog) and verify the storage,
-   collaboration and MCP boundaries; do not use `npm audit fix --force` as a substitute.
-2. **Verification failures:** the broad test run is not green. See results below.
-   Failures are recorded rather than hidden with retries, weakened assertions or
-   removed registrations. Baseline attribution has not been established.
-3. **Distribution verification:** Windows installer/portable smoke and macOS native
-   builds, signing/notarization and installation checks remain outstanding. Current
-   workflows intentionally produce unsigned Windows and ad-hoc-signed macOS builds.
-   No release, tag, binary publication or push was performed by this cleanup.
-4. **Security intake:** repository administrators should enable private vulnerability
-   reporting before advertising it as available. The security policy describes the
-   fallback and makes no unverified claim about repository settings.
+There are no skips, quarantines, deprecated groups or test retries. Earlier diagnostic
+runs exposed the issues above; the final full run passed after the fixes. Workload
+assertions are correctness checks, not comparable performance measurements.
 
-## Local verification
+## Distribution and administration
 
-- `npm run typecheck`: passed before dependency updates; `npm run build` passed
-  afterward and includes the same compiler check.
-- `npm run lint`: passed without warnings after cleanup.
-- `npm run build`: passed for renderer, standalone HTML runtime and Electron entries.
-- `npm run verify:build`: passed. A temporary local removal of each new required
-  bundle separately confirmed verification rejects it; files were restored and
-  verification passed again.
-- `npm run test:audit`: passed, 708 active declarations in 105 groups. No test
-  declarations or registry composition were changed.
-- `npm test`: passed, 15 tests.
-- `npm run test:full`: failed in the unit phase: 523/524 passed across 65 groups.
-  `library-work.test.ts` expected no extra directory reads between cached list pages
-  but observed 40 reads versus 24. An isolated invocation with
-  `SHOWME_TEST_FILES=["tests/feature/media/library-work.test.ts"] npx vitest run`
-  passed all 15 tests. This does not establish the broad-run failure as resolved.
-- `npx playwright test --config playwright.config.ts`, with the registry-selected
-  browser files: 130/138 passed. Eight failures: clipboard failure feedback in
-  `editor/errors.spec.ts`; six declarations in `effects/authoring.spec.ts` (five
-  canvas sampling failures and outdated timing guidance); and an unavailable
-  `setTiming` test hook in `effects/typed-context.spec.ts`. Failed artifacts remain
-  under ignored `test-results-browser/` for diagnosis.
-- Both declarations in `tests/feature/presenter/audience-navigation.spec.ts` passed
-  in that browser run: the dense rendering stress contract and late-image navigation.
-  This was a correctness run with other runtime work in parallel, not a comparable
-  performance benchmark.
-- `npx playwright test --config playwright.electron.config.ts`, with the
-  registry-selected Electron files: 35/43 passed. Eight failures: an `EBUSY`
-  temporary Session Storage cleanup in `extended/agent-mcp.spec.ts`; an unavailable
-  text effect in `effects/native-continuity.spec.ts`; three first-window timeouts
-  and a missing preview-window reference in `media/preview-electron.spec.ts`;
-  and first-window timeouts in `persistence/pdf-rendering.spec.ts` and
-  `presenter/displays-electron.spec.ts`. Startup timeouts did not exercise the
-  subsequent rendering assertions. Artifacts remain in ignored `test-results-electron/`.
-- `git diff --check` and relative-link validation for the release documentation passed.
+Source review and merge readiness do not certify a signed public binary release.
+macOS builds, installation and notarization need verification on macOS. Windows
+builds are unsigned; the configured macOS builds use ad-hoc signing. No release,
+tag, installer publication or integration into `main` is performed by this cleanup.
+Automatic CI remains paused; local verification is authoritative.
 
-The full command stops at the first failing runtime. To evaluate the remaining
-groups, select active core/feature/extended entries from `tests/registry.json` by
-runtime, set `SHOWME_TEST_FILES` to their JSON path array, and run
-`npx playwright test --config playwright.config.ts` for browser or
-`npx playwright test --config playwright.electron.config.ts` for Electron.
+GitHub private vulnerability reporting was checked and is currently disabled.
+`SECURITY.md` describes the available fallback without promising a private channel
+or response time. Enabling a dedicated private intake remains repository administration.
 
-Release-only packaging checks (`npm run test:release`) and macOS verification were
-not run. This branch does not integrate into or commit on `main`; the audience gate
-is still required before any later rendering-affecting integration into `main`.
+Electron windows retain sandboxing, context isolation, disabled Node integration,
+blocked renderer navigation and denied new windows. Experimental LAN collaboration
+remains trusted-local and unencrypted; local MCP and agent editing remain opt-in.
+A limited tracked-text scan found no common private-key/token markers or home paths;
+Git history and external secret scanning were not audited.
+
+Any later rendering-affecting integration into `main` must satisfy the audience
+navigation gate against the exact integration candidate based on the latest `main`.

@@ -74,7 +74,7 @@ test("closing the editor destroys effect thumbnails and prevents queued previews
 test("opening a cold presentation caches every slide before navigation and keeps readiness green on later slides", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-open-images-"));
   const userData = path.join(folder, "user");
-  const storage = new DocumentStorage(path.join(userData, "assets"), path.join(folder, "fixture-cache"), "keep-all");
+  const storage = new DocumentStorage(path.join(folder, "ShowMe Library"), path.join(folder, "fixture-cache"), "keep-all");
   await storage.init();
   const model = newPresentationDocument("Cold presentation");
   const first = model.slides[model.deck.slideIds[0]], meta = model.deck.slideMeta[first.id];
@@ -95,6 +95,7 @@ test("opening a cold presentation caches every slide before navigation and keeps
   const file = path.join(folder, "Cold presentation.sme");
   await writeFile(file, JSON.stringify(model));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined)) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder });
   const app = await electron.launch({ args: [path.resolve("."), file, `--user-data-dir=${userData}`], env });
   try {
     const page = await app.firstWindow();
@@ -133,6 +134,7 @@ test("opening a cold presentation caches every slide before navigation and keeps
 test("native cache format persists and serves opaque JPG while preserving transparent PNG", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-native-format-"));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined)) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder });
   const args = [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`];
   let app = await electron.launch({ args, env });
   try {
@@ -160,8 +162,12 @@ test("native cache format persists and serves opaque JPG while preserving transp
     const pixels = await sharp(Buffer.from(png)).raw().toBuffer();
     expect(pixels[3]).toBeGreaterThan(0);
     expect(pixels[3]).toBeLessThan(255);
-    await app.evaluate(({ app }) => app.exit(0));
-    await app.close().catch(() => {});
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+    });
+    const closed = app.waitForEvent("close");
+    await page.evaluate(() => window.desktop!.requestClose!(document.querySelector("[data-editor]")!.getAttribute("data-document-id")!)).catch(() => {});
+    await closed;
     const { readFile } = await import("node:fs/promises");
     expect(JSON.parse(await readFile(path.join(folder, "user", "settings.json"), "utf8")).imageCacheFormat).toBe("jpg");
     app = await electron.launch({ args, env });
@@ -177,6 +183,7 @@ test("native cache format persists and serves opaque JPG while preserving transp
 test("native image thumbnails reuse audience variants without generating thumbnail image derivatives", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-image-preview-"));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined)) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder });
   const app = await electron.launch({ args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`], env });
   try {
     const page = await app.firstWindow();
@@ -302,10 +309,8 @@ test("native rail composition captures canonical custom CSS pixels, excludes edi
     expect([...decoded.data.subarray(center, center + 4)]).toEqual([
       0, 255, 0, 255,
     ]);
-    const preview = app
-      .windows()
-      .find((window) => window.url().includes("slidePreview=1"))!;
-    await expect(preview.locator(".slide-renderer")).toHaveCount(0);
+    for (const preview of app.windows().filter((window) => window.url().includes("slidePreview=1")))
+      await expect(preview.locator(".slide-renderer")).toHaveCount(0);
     expect(
       await page.evaluate(
         (id) => window.desktop!.documentProjection!(id),

@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import sharp from "sharp";
 import path from "node:path";
@@ -85,4 +85,47 @@ it("rejects excessive image pixels before raster processing and effect source be
   expect(() => createTextEffectRunner("x".repeat(100001))).toThrow(
     "source exceeds",
   );
+});
+
+it("text worker dispatch latency does not consume its execution budget and failures retain their cause", async () => {
+  class ControlledWorker {
+    static instance: ControlledWorker;
+    onmessage?: (event: { data: Record<string, unknown> }) => void;
+    onerror?: (event: ErrorEvent) => void;
+    postMessage = vi.fn();
+    terminate = vi.fn();
+    constructor() { ControlledWorker.instance = this; }
+  }
+  vi.useFakeTimers();
+  vi.stubGlobal("Worker", ControlledWorker);
+  const runner = createTextEffectRunner("function render({text}) { return text; }");
+  const worker = ControlledWorker.instance;
+  const input = { text: "Hello", t: 0, p: 0, duration: 1, parameters: {} };
+  try {
+    worker!.onmessage!({ data: { ready: true } });
+    const first = runner.render(input);
+    const firstId = worker!.postMessage.mock.calls[0][0].id;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(worker!.terminate).not.toHaveBeenCalled();
+    worker!.onmessage!({ data: { started: firstId } });
+    await vi.advanceTimersByTimeAsync(400);
+    worker!.onmessage!({ data: { id: firstId, text: "Hello" } });
+    await expect(first).resolves.toBe("Hello");
+
+    const second = runner.render(input);
+    const rejection = expect(second).rejects.toThrow("execution budget");
+    const secondId = worker!.postMessage.mock.calls[1][0].id;
+    worker!.onmessage!({ data: { started: secondId } });
+    await vi.advanceTimersByTimeAsync(400);
+    // A duplicate acknowledgment cannot extend the execution deadline.
+    worker!.onmessage!({ data: { started: secondId } });
+    await vi.advanceTimersByTimeAsync(101);
+    await rejection;
+    expect(worker!.terminate).toHaveBeenCalledTimes(1);
+    await expect(runner.render(input)).rejects.toThrow("execution budget");
+  } finally {
+    runner.dispose();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
 });

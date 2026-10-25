@@ -56,7 +56,7 @@
     "sharp": "^0.35.5",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1",
-    "zod": "^3.25.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -4,7 +4,7 @@ import { readyEditor } from "../../helpers/startup";
 test("production multi-state scramble reconstructs forward and backward clicks and preview", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/tests/helpers/effects-harness.html");
   await page.evaluate(async () => {
     const path = "/tests/helpers/typedContextHarness.tsx";
     const module: typeof import("../../helpers/typedContextHarness") =
@@ -65,7 +65,7 @@ test("production multi-state scramble reconstructs forward and backward clicks a
 test("typed JS and CSS delivery retains native values and safely serializes strings", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/tests/helpers/effects-harness.html");
   const results = await page.evaluate(async () => {
     const path = "/tests/helpers/typedContextHarness.tsx";
     const module: typeof import("../../helpers/typedContextHarness") =
@@ -90,7 +90,7 @@ test("typed JS and CSS delivery retains native values and safely serializes stri
 test("step-only code updates immediately without continuous redraw", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/tests/helpers/effects-harness.html");
   const results = await page.evaluate(async () => {
     const path = "/tests/helpers/typedContextHarness.tsx";
     const module: typeof import("../../helpers/typedContextHarness") =
@@ -231,11 +231,11 @@ test("Boolean/Text authoring and sidebar values reset and save with native types
 test("GLSL and CSS receive logical step context while float parameters remain numeric", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/tests/helpers/effects-harness.html");
   const sampled = await page.evaluate(async () => {
     const runtimePath = "/src/components/effectRuntime.ts",
       corePath = "/src/core/effects.ts";
-    const { mountEffectSurface, effectSurface } = (await import(
+    const { mountEffectSurface, effectSurface, createShaderChain } = (await import(
       /* @vite-ignore */ runtimePath
     )) as typeof import("../../../src/components/effectRuntime");
     const {
@@ -270,6 +270,13 @@ test("GLSL and CSS receive logical step context while float parameters remain nu
       definition,
       newEffectInstance("shader", definition, "overlay"),
       { width: 4, height: 4 },
+      undefined,
+      undefined,
+      undefined,
+      Object.assign(createShaderChain(), { canvas }),
+      false,
+      false,
+      true,
     );
     const timing = effectTiming(undefined, 2, 500, "e", "i", {
       slideTime: 0.5,
@@ -284,9 +291,9 @@ test("GLSL and CSS receive logical step context while float parameters remain nu
     });
     effectSurface(node)!.setTiming(timing);
     await effectSurface(node)!.flush();
-    const pixel = Array.from(
-      canvas.getContext("2d")!.getImageData(0, 0, 1, 1).data,
-    );
+    const pixelPath = "/tests/helpers/webglPixels.ts";
+    const { readWebGlPixel } = await import(/* @vite-ignore */ pixelPath);
+    const pixel = readWebGlPixel(canvas, 0, 0);
     unmount();
     const css = {
       ...definition,

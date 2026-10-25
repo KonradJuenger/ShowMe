@@ -111,15 +111,23 @@ test("production preload and IPC create and save a native current-format file", 
       managedFilename("copied.svg", copiedId),
     );
     await expect(
-      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+      page.getByRole("button", { name: "Select copied.svg", exact: true }),
     ).toHaveCount(0);
     await writeFile(copiedFile, copiedBytes);
     await expect(
-      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+      page.getByRole("button", { name: "Select copied.svg", exact: true }),
     ).toBeVisible();
+    // The row appears before its async preview read completes. Delete only
+    // after that read, so this tests filesystem observation rather than a
+    // Windows unlink racing an active thumbnail reader.
+    const copiedPreview = page.getByRole("button", {
+      name: "Select copied.svg", exact: true,
+    }).locator("img");
+    await expect(copiedPreview).toHaveCount(1);
+    await copiedPreview.evaluate((image: HTMLImageElement) => image.decode());
     await rm(copiedFile);
     await expect(
-      page.getByRole("button", { name: "Insert copied.svg", exact: true }),
+      page.getByRole("button", { name: "Select copied.svg", exact: true }),
     ).toHaveCount(0);
     const element = createMediaElement("path-check-image", {
       ...asset,

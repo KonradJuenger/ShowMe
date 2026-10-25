@@ -43,3 +43,12 @@ export function readWebGlPixels(canvas: HTMLCanvasElement) {
   );
   return pixels;
 }
+
+/** Sample bitmaprenderer output without requesting an incompatible 2D context. */
+export function readPresentedPixel(canvas: HTMLCanvasElement, x: number, y: number) {
+  effectSurface(canvas.parentElement!)?.materialize();
+  const probe = new OffscreenCanvas(1, 1);
+  const context = probe.getContext("2d")!;
+  context.drawImage(canvas, x, y, 1, 1, 0, 0, 1, 1);
+  return Array.from(context.getImageData(0, 0, 1, 1).data);
+}
