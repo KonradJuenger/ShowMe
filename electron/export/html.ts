@@ -21,7 +21,9 @@ import {
   type FontUsage,
 } from "../../src/core/fonts";
 import { resolveTextTypography } from "../../src/core/textTypography";
-import { walkElements } from "../../src/core/element";
+import { walkElements, type Element } from "../../src/core/element";
+import type { TextElement } from "../../src/core/text";
+import type { HtmlExportProgress } from "../../src/export/html/types";
 import {
   compileCompositionPlan,
   compositionIsOwnedMediaOnly,
@@ -46,6 +48,14 @@ export interface HtmlExportInput {
     (HtmlAssetSource & { sourceWidth: number; sourceHeight: number }) | null
   >;
   managedFonts(): Promise<SystemFontFamily[]>;
+  prepareText?(
+    element: TextElement,
+  ): Promise<HtmlAssetSource & { id: string; local: TextElement["frame"] }>;
+  onProgress?(
+    stage: HtmlExportProgress["stage"],
+    completed: number,
+    total: number,
+  ): void;
 }
 
 function escapeHtml(value: string) {
@@ -502,6 +512,8 @@ async function assembleHtmlExport(
     runtimeDirectory,
     resolveAsset,
     prepareImage,
+    prepareText,
+    onProgress = () => {},
     managedFonts,
   }: HtmlExportInput,
   clips: TemporaryVideoClips,
@@ -519,6 +531,83 @@ async function assembleHtmlExport(
     }
     return source;
   };
+  const textWarnings: ExportWarning[] = [];
+  if (prepareText) {
+    const texts: Array<{
+      slideId: string;
+      element: Element;
+      blocked: boolean;
+    }> = [];
+    const visit = (
+      slideId: string,
+      elements: ReturnType<typeof visibleElements>,
+      blocked: boolean,
+    ) => {
+      for (const element of elements) {
+        const unsafe =
+          blocked || !!element.effects?.some((effect) => effect.enabled);
+        if (element.content?.type === "text")
+          texts.push({ slideId, element, blocked: unsafe });
+        visit(slideId, element.children, unsafe);
+      }
+    };
+    for (const slide of document.slides)
+      if (slideIds.has(slide.id))
+        visit(
+          slide.id,
+          visibleLayerNodes(document, slide).flatMap((root) => root.children),
+          !!document.deck.stylesheet?.trim(),
+        );
+    onProgress("fonts", 0, texts.length);
+    for (const [index, { slideId, element, blocked }] of texts.entries()) {
+      if (element.content?.type !== "text") continue;
+      try {
+        if (blocked)
+          throw Error(
+            "Text with Effects or deck CSS stays live in this prototype",
+          );
+        const typography = resolveTextTypography(
+          document.deck,
+          element.content,
+        );
+        const prepared = await prepareText({
+          ...element,
+          content: {
+            ...element.content,
+            format: { kind: "local", typography },
+          },
+        });
+        sources.set(prepared.id, Promise.resolve(prepared));
+        element.content = {
+          type: "svg",
+          assetId: prepared.id,
+          filename: "outlined-text.svg",
+          mediaType: "image",
+          opacity: 1,
+          lockAspect: false,
+          transform: { rule: "free", local: prepared.local },
+        };
+      } catch (cause) {
+        textWarnings.push({
+          slideId,
+          elementId: element.id,
+          code: "text-svg-unavailable",
+          message: `Text stayed live and needs its font on the viewing computer: ${cause instanceof Error ? cause.message : String(cause)}`,
+        });
+      }
+      onProgress("fonts", index + 1, texts.length);
+    }
+  } else onProgress("fonts", 0, 0);
+  const videoElements = document.slides
+    .filter((slide) => slideIds.has(slide.id))
+    .flatMap((slide) => visibleElements(document, slide));
+  const trimmedVideos = videoElements.filter(
+    (element) =>
+      element.content?.type === "video" &&
+      (element.content.startTime !== 0 || element.content.endTime !== null),
+  );
+  let completedVideos = 0;
+  onProgress("videos", 0, trimmedVideos.length);
   for (const slide of document.slides) {
     if (!slideIds.has(slide.id)) continue;
     for (const element of visibleElements(document, slide)) {
@@ -544,6 +633,7 @@ async function assembleHtmlExport(
       content.assetId = clip.id;
       content.startTime = 0;
       content.endTime = duration;
+      onProgress("videos", ++completedVideos, trimmedVideos.length);
     }
   }
 
@@ -559,14 +649,17 @@ async function assembleHtmlExport(
         ),
       ]),
     );
-    for (const requirement of planPresentationImages(
+    const requirements = planPresentationImages(
       document.deck,
       document.slides,
       {
         width: document.deck.width,
         height: document.deck.height,
       },
-    )) {
+    );
+    onProgress("images", 0, requirements.length);
+    for (const [index, requirement] of requirements.entries()) {
+      onProgress("images", index, requirements.length);
       const source = await resource(requirement.assetId);
       if (!source) continue;
       const prepared = await prepareImage(source, requirement);
@@ -585,9 +678,11 @@ async function assembleHtmlExport(
         }
       }
     }
+    onProgress("images", requirements.length, requirements.length);
   }
 
   const warnings: ExportWarning[] = [
+    ...textWarnings,
     ...sceneTextureWarnings(document, slideIds),
     ...externalCssWarnings(document, slideIds),
     ...browserCapabilityWarnings(document, slideIds),
@@ -609,7 +704,10 @@ async function assembleHtmlExport(
 
   const assets: HtmlEmbeddedAsset[] = [];
   let assetCharacters = 0;
+  let completedAssets = 0;
+  onProgress("embedding", 0, assetOccurrences.size);
   for (const [assetId, occurrences] of assetOccurrences) {
+    onProgress("embedding", completedAssets++, assetOccurrences.size);
     const source = await resource(assetId);
     if (!source) {
       for (const occurrence of occurrences)
@@ -646,6 +744,7 @@ async function assembleHtmlExport(
       data: bytes.toString("base64"),
     });
   }
+  onProgress("embedding", assetOccurrences.size, assetOccurrences.size);
 
   let managedFontFamilies: SystemFontFamily[] = [];
   try {

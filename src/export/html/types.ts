@@ -1,6 +1,15 @@
 import type { ExportDocument, ExportWarning } from "../shared";
 
 export const DEFAULT_HTML_EXPORT_JPEG_QUALITY = 90;
+export type HtmlFontEmbedding = "none" | "svg";
+export const DEFAULT_HTML_FONT_EMBEDDING: HtmlFontEmbedding = "svg";
+
+export interface HtmlExportProgress {
+  documentId: string;
+  stage: "fonts" | "videos" | "images" | "embedding" | "writing" | "complete";
+  completed: number;
+  total: number;
+}
 
 export const HTML_EXPORT_FORMAT_VERSION = 1 as const;
 

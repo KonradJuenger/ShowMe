@@ -30,6 +30,8 @@ const methods = [
   "resetImageCacheFolder",
   "clearPresentationImages",
   "getImageCachingEnabled",
+  "getHtmlFontEmbedding",
+  "setHtmlFontEmbedding",
   "getHtmlExportJpegQuality",
   "setHtmlExportJpegQuality",
   "getImageCacheFormat",
@@ -173,6 +175,11 @@ contextBridge.exposeInMainWorld("desktop", {
     const listener = () => cb();
     ipcRenderer.on("font-inventory-changed", listener);
     return () => ipcRenderer.removeListener("font-inventory-changed", listener);
+  },
+  onHtmlExportProgress: (cb: (status: unknown) => void) => {
+    const listener = (_: unknown, status: unknown) => cb(status);
+    ipcRenderer.on("html-export-progress", listener);
+    return () => ipcRenderer.removeListener("html-export-progress", listener);
   },
   onImageReadiness: (cb: (status: unknown) => void) => {
     const listener = (_: unknown, status: unknown) => cb(status);

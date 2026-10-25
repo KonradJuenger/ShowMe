@@ -6,6 +6,7 @@ export const slidePreviewEntryPoints = [
   "measureAgentTextBatch",
   "validateAgentEffect",
   "prepareAgentMedia",
+  "layoutHtmlExportText",
 ] as const;
 
 declare global {

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import "./PresentationMenu.css";
 import { MaterialIcon } from "./MaterialIcon";
 import { platform } from "../platform";
-import { DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../export/html/types";
+import { DEFAULT_HTML_FONT_EMBEDDING, type HtmlFontEmbedding, type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../export/html/types";
 import { formatExportWarnings } from "../export/shared";
 import { LibraryStorageSettings } from "./LibraryStorageSettings";
 import { NewPresentationDialog } from "./NewPresentationDialog";
@@ -56,6 +56,10 @@ export function PresentationMenu({
   const [htmlQualityDraft, setHtmlQualityDraft] = useState(
     String(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
   );
+  const [fontEmbedding, setFontEmbedding] = useState<HtmlFontEmbedding>(DEFAULT_HTML_FONT_EMBEDDING);
+  const [fontBusy, setFontBusy] = useState(false);
+  const [htmlProgress, setHtmlProgress] = useState<HtmlExportProgress | null>(null);
+  const htmlProgressDialog = useRef<HTMLDialogElement>(null);
   const [htmlQualityBusy, setHtmlQualityBusy] = useState(false);
   const [deleteCacheOnClose, setDeleteCacheOnClose] = useState(true);
   const [cacheFolder, setCacheFolder] = useState<MediaLibraryInfo | null>(null);
@@ -75,6 +79,14 @@ export function PresentationMenu({
   const importProgress = useRef<HTMLDialogElement>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [importError, setImportError] = useState("");
+  useEffect(() => platform.onHtmlExportProgress?.(progress => {
+    if (progress === null || progress.documentId === deckId) setHtmlProgress(progress);
+  }), [deckId]);
+  useEffect(() => {
+    const dialog = htmlProgressDialog.current;
+    if (htmlProgress && !dialog?.open) dialog?.showModal();
+    else if (!htmlProgress) dialog?.close();
+  }, [htmlProgress]);
   useEffect(() => {
     if (importBusy) importProgress.current?.showModal();
     else importProgress.current?.close();
@@ -145,8 +157,9 @@ export function PresentationMenu({
       platform.getImageCacheFolder?.() ?? Promise.resolve(null),
       platform.getImageCacheFormat?.() ?? Promise.resolve<ImageCacheFormat>("png"),
       platform.getHtmlExportJpegQuality?.() ?? Promise.resolve(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
+      platform.getHtmlFontEmbedding?.() ?? Promise.resolve(DEFAULT_HTML_FONT_EMBEDDING),
     ])
-      .then(([info, enabled, deleteOnClose, folder, format, quality]) => {
+      .then(([info, enabled, deleteOnClose, folder, format, quality, embedding]) => {
         if (live) {
           setMediaLibrary(info);
           setImageCaching(enabled);
@@ -154,6 +167,7 @@ export function PresentationMenu({
           setCacheFolder(folder);
           setImageCacheFormat(format);
           setHtmlQuality(quality);
+          setFontEmbedding(embedding);
           setHtmlQualityDraft(String(quality));
         }
       })
@@ -340,10 +354,9 @@ export function PresentationMenu({
                 onClick={() =>
                   execute(async () => {
                     await flushTransactions();
-                    const result = await platform.exportPresentation?.(
-                      deckId,
-                      "html",
-                    );
+                    let result;
+                    try { result = await platform.exportPresentation?.(deckId, "html"); }
+                    finally { setHtmlProgress(null); buttonRef.current?.focus(); }
                     if (result?.warnings.length)
                       window.alert(formatExportWarnings(result.warnings));
                   })
@@ -468,6 +481,17 @@ export function PresentationMenu({
               {platform.setHtmlExportJpegQuality && (
                 <div className="settings-section">
                   <h3>HTML export</h3>
+                  {platform.setHtmlFontEmbedding && <label>Font embedding{ " " }
+                    <select aria-label="HTML export font embedding" value={fontEmbedding} disabled={settingsBusy || fontBusy} onChange={event => {
+                      const mode = event.target.value as HtmlFontEmbedding;
+                      setFontBusy(true);
+                      void platform.setHtmlFontEmbedding!(mode).then(() => setFontEmbedding(mode)).catch(onError).finally(() => setFontBusy(false));
+                    }}>
+                      <option value="none">None</option>
+                      <option value="svg">SVG</option>
+                    </select>
+                  </label>}
+                  <p>{fontEmbedding === "svg" ? "Static text becomes SVG outlines. Text with Effects stays live and is reported after export." : "No fonts are included. Text uses fonts installed on the viewing computer."}</p>
                   <label>
                     JPEG quality{" "}
                     <input
@@ -620,7 +644,20 @@ export function PresentationMenu({
       >
         <p role="status">Importing PowerPoint…</p>
       </dialog>
+      <dialog ref={htmlProgressDialog} className="new-presentation-dialog html-export-progress" aria-labelledby="html-export-progress-title" onCancel={event => event.preventDefault()}>
+        <h2 id="html-export-progress-title">Exporting HTML</h2>
+        {htmlProgress && <>
+          <p role="status">{{ fonts: "Preparing text…", videos: "Trimming videos…", images: "Preparing images…", embedding: "Embedding media…", writing: "Saving HTML…", complete: "Export complete" }[htmlProgress.stage]}</p>
+          <progress aria-label="HTML export progress" max={100} value={htmlProgressValue(htmlProgress)} />
+          <div className="html-export-progress-detail"><span>{htmlProgress.total > 0 ? `${htmlProgress.completed} / ${htmlProgress.total}` : "Preparing…"}</span><span>{Math.floor(htmlProgressValue(htmlProgress))}%</span></div>
+        </>}
+      </dialog>
       {settings}
     </>
   );
+}
+
+function htmlProgressValue(progress: HtmlExportProgress) {
+  const [start, end] = { fonts: [0, 15], videos: [15, 55], images: [55, 80], embedding: [80, 95], writing: [95, 99], complete: [100, 100] }[progress.stage];
+  return start + (end - start) * (progress.total > 0 ? Math.min(1, progress.completed / progress.total) : 0);
 }

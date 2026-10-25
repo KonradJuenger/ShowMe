@@ -64,8 +64,10 @@ import path from "node:path";
 import { promises as fs, existsSync } from "node:fs";
 import { exportPowerPoint } from "./export/pptx";
 import { createHtmlExport } from "./export/html";
+import { HtmlTextOutlines } from "./export/textOutlines";
+import type { OutlineLayout, OutlineLayoutRequest } from "../src/export/html/textOutlines";
 import { HtmlExportImageCache } from "./export/imageCache";
-import { DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../src/export/html/types";
+import { DEFAULT_HTML_FONT_EMBEDDING, type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../src/export/html/types";
 import {
   pdfSlides,
   type ExportDocument,
@@ -1079,6 +1081,31 @@ async function performExportPresentation(
   if (result.canceled || !result.filePath) return null;
   if (type === "html") {
     const settings = await readSettings(app.getPath("userData"));
+    const report = (stage: HtmlExportProgress["stage"], completed: number, total: number) => {
+      if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", { documentId: id, stage, completed, total });
+    };
+    report("fonts", 0, 0);
+    let textWindow: BrowserWindow | undefined;
+    const layout = async (request: OutlineLayoutRequest): Promise<OutlineLayout> => {
+      if (!textWindow) {
+        textWindow = new BrowserWindow({ ...windowOptions(), show: false,
+          webPreferences: { ...windowOptions().webPreferences, backgroundThrottling: false } });
+        secure(textWindow);
+        exportWindow = textWindow;
+        const devUrl = process.env.SHOWME_DEV_URL;
+        if (devUrl && !app.isPackaged) await textWindow.loadURL(devUrl + "?slidePreview=1");
+        else await textWindow.loadFile(path.join(__dirname, "../dist/index.html"), { query: { slidePreview: "1" } });
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          textWindow.webContents.executeJavaScript(`window.layoutHtmlExportText(${JSON.stringify(request)})`),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Text layout timed out")), 15000); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    };
+    const outlines = (settings.htmlFontEmbedding ?? DEFAULT_HTML_FONT_EMBEDDING) === "svg"
+      ? new HtmlTextOutlines(currentStorage.assetRoot, layout) : undefined;
     const images = new HtmlExportImageCache(
       path.join(__dirname, "imageWorker.cjs"),
       settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY,
@@ -1101,14 +1128,23 @@ async function performExportPresentation(
             return null;
           }
         },
-        managedFonts: () => currentStorage.managedFonts(id),
+        managedFonts: async () => [],
+        prepareText: outlines ? element => outlines.prepare(element) : undefined,
+        onProgress: report,
         prepareImage: (source, requirement) =>
           images.prepare(source, requirement),
       });
+      report("writing", 0, 1);
       await atomicWrite(result.filePath, Buffer.from(exported.html, "utf8"));
+      report("complete", 1, 1);
       return { warnings: exported.warnings };
     } finally {
-      await images.dispose();
+      try { await Promise.all([images.dispose(), outlines?.dispose()]); }
+      finally {
+        exportWindow = null;
+        if (textWindow && !textWindow.isDestroyed()) textWindow.destroy();
+        if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", null);
+      }
     }
   }
   if (type === "pptx")
@@ -1957,6 +1993,15 @@ const operations: Record<string, (...args: any[]) => any> = {
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
   getImageCachingEnabled: () => imageCachingEnabled,
+  async getHtmlFontEmbedding() {
+    return (await readSettings(app.getPath("userData"))).htmlFontEmbedding ?? DEFAULT_HTML_FONT_EMBEDDING;
+  },
+  async setHtmlFontEmbedding(value: unknown) {
+    const mode = z.enum(["none", "svg"]).parse(value);
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.htmlFontEmbedding = mode;
+    await writeSettings(app.getPath("userData"), settings);
+  },
   async getHtmlExportJpegQuality() {
     const settings = await readSettings(app.getPath("userData"));
     return settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY;

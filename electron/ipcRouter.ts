@@ -279,6 +279,8 @@ export function registerIpcRouter({
           "setMcpEnabled",
           "setMcpEditingEnabled",
           "setImageCacheFormat",
+          "setHtmlFontEmbedding",
+          "setHtmlExportJpegQuality",
           "setDeleteImageCacheOnClose",
           "setImageCachingEnabled",
           "setLibraryLifecycleMode",

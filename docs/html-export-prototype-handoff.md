@@ -231,3 +231,50 @@ PASS: 1/1 with the packaged executable, including the export-only quality settin
 Private local verification re-exported the same 30-slide real deck at quality 90: 51 prepared JPEG variants, 11,455,454 embedded image bytes, 65,159,222-byte HTML (previous full-image export: 229,914,929 bytes). Four cropped videos still total 36,969,984 bytes. Export completed in about 59 seconds; original deck/video hashes stayed unchanged and no new temporary image/video folder remained. The resulting file opened offline in Chromium; all four videos played with their trimmed durations and no browser errors or HTTP(S) requests. These are single exploratory observations, not comparative audience-performance benchmarks. Scripts and private artifacts remain ignored under .scratch and test-results-html-export-real-jpg.
 
 The full/release suite, macOS and other browser checks were not repeated for this follow-up. Existing font/capture/browser limitations above still apply.
+
+## SVG text and export progress prototype (2026-10-25)
+
+Settings → HTML export → Font embedding offers None and SVG, default SVG. None includes no font files and preserves live text. SVG resolves managed/system font files, measures line breaks and baselines on the existing native preview surface using editor measurement styles, and uses Fontkit glyph outlines to create temporary SVG assets. Only the export snapshot changes from text to SVG media; frames, hierarchy, Motion and accepted document state stay intact. Generated SVG bounds include overflowing ink. Neither mode includes font binaries in native HTML exports. The frozen HTML payload still uses its existing document/media types and version.
+
+This first prototype leaves text live and emits per-object compatibility warnings when conversion is unavailable. This includes Effects on the object or its ancestors, deck CSS, missing font files/glyphs, synthetic styling, font collections, colour fonts, bidirectional text/tab stops, or shaping that does not match measured browser advances. SVG text is an image and loses native text selection/accessibility. Live text effects are retained rather than flattened. No editor/presenter text renderer or persistent document schema was added.
+
+A modal progress bar starts after the save dialog accepts an output path. Native events report text preparation, video trimming, image preparation, embedding and writing, with real completed/total item counts. Percentage ranges are weighted by stage, not elapsed-time estimates. Success and errors close the popup; save-dialog cancellation never opens it. All text/image/video temporary derivatives are removed on completion or failure. SVG preparation uses an isolated preview window, which is destroyed afterward.
+
+Validation:
+
+~~~powershell
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/text-outlines.test.ts","tests/feature/html-export/image-cache.test.ts","tests/feature/html-export/html-export.test.ts","tests/feature/html-export/video-clips.test.ts"]'
+npx vitest run
+Remove-Item Env:SHOWME_TEST_FILES
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/font-svg-native.spec.ts","tests/feature/html-export/video-clips-native.spec.ts","tests/feature/html-export/html-export.spec.ts","tests/feature/presenter/audience-navigation.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-html-svg-final
+Remove-Item Env:SHOWME_TEST_FILES
+~~~
+
+PASS: 20 unit declarations and 6 browser/Electron declarations, including both audience-navigation declarations. After refining wrapped-line alignment to use the browser's original line origins, the focused native SVG test was repeated against the final build:
+
+~~~powershell
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/font-svg-native.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-html-svg-native-final
+Remove-Item Env:SHOWME_TEST_FILES
+~~~
+
+PASS: 1/1. The native fixture uses an unmodified OFL Abel font in an isolated managed library without installing it on the host. It checks default/persisted settings, None, SVG paths without font files, original document/source preservation, offline rendering, progress events/popup, save cancellation, write failure and temporary cleanup. Settings, popup and offline SVG screenshots were visually inspected. Fontkit stays native; the shared SlideRenderer and frozen HTML runtime bundle are unchanged.
+
+- `npm run typecheck`, `npm run build`, `npm run verify:build`: pass.
+- `npm run lint`: pass with the existing unused setLibraryProtection warning.
+- `npm run test:stats`, `npm run test:audit`: pass, 700 declarations in 104 groups.
+- Impeccable detector on PresentationMenu.tsx/CSS: no findings. React hooks/subscription cleanup, modal/progress accessibility and lazy preview loading reviewed.
+- `npx electron-builder --dir --publish never`: pass on Windows x64.
+
+The private real-deck probe completed with existing media optimizations and no changed original hashes or leaked temporary directories. The current resolver could not obtain Aptos or Indivisible font files on this host, so its 19 text objects remained live with explicit warnings; this run does not establish SVG font portability for that deck. No substitute font was silently outlined. Private probe scripts/artifacts remain ignored. Full/release suites, macOS and additional browser runs were not repeated.
+
+~~~powershell
+$env:SHOWME_HTML_TEST_EXECUTABLE=(Resolve-Path release/win-unpacked/ShowMe.exe).Path
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/font-svg-native.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-html-svg-packaged
+Remove-Item Env:SHOWME_TEST_FILES
+Remove-Item Env:SHOWME_HTML_TEST_EXECUTABLE
+~~~
+
+PASS: 1/1 in the packaged Windows executable, including native font parsing/layout, SVG output, Settings, progress popup, cancellation/failure cleanup and offline playback.
