@@ -48,7 +48,6 @@ The shader example refracts a portrait, then clears the distortion over 0.7 seco
 
 ![The shader distortion fades away while the text stays clear](docs/images/showme-shader.gif)
 
-See [playback controls, shader details and image credits](examples/README.md).
 
 ## Files, assets and sharing
 
