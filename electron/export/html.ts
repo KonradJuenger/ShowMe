@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { constants as bufferLimits } from "node:buffer";
+import { preparePageText } from "./prepareText";
 import { TemporaryVideoClips } from "./videoClips";
 import { hashFile } from "../storage/io";
 import {
@@ -21,7 +22,7 @@ import {
   type FontUsage,
 } from "../../src/core/fonts";
 import { resolveTextTypography } from "../../src/core/textTypography";
-import { walkElements, type Element } from "../../src/core/element";
+import { walkElements } from "../../src/core/element";
 import type { TextElement } from "../../src/core/text";
 import type { HtmlExportProgress } from "../../src/export/html/types";
 import {
@@ -442,6 +443,29 @@ function selectFonts(
   return { fonts: selected, warnings };
 }
 
+export function htmlFontUsages(document: ExportDocument) {
+  const ids = new Set(getPresentationSlideIds(document.deck));
+  const usages = collectUsedFontUsages(
+    document.slides
+      .filter((slide) => ids.has(slide.id))
+      .map((slide) => ({
+        ...slide,
+        nodes: visibleLayerNodes(document, slide),
+      })),
+    document.deck,
+  );
+  for (const reference of cssFontReferences(document, ids))
+    if (
+      !usages.some(
+        (usage) =>
+          usage.family.toLocaleLowerCase() ===
+          reference.family.toLocaleLowerCase(),
+      )
+    )
+      usages.push({ family: reference.family, weight: 400, italic: false });
+  return usages;
+}
+
 async function runtimeAssets(runtimeDirectory: string) {
   const entries = await fs.readdir(runtimeDirectory);
   const javascript = entries.filter((entry) => entry.endsWith(".js"));
@@ -561,70 +585,20 @@ async function assembleHtmlExport(
   };
   const textWarnings: ExportWarning[] = [];
   if (prepareText) {
-    const texts: Array<{
-      slideId: string;
-      element: Element;
-      blocked: boolean;
-    }> = [];
-    const visit = (
-      slideId: string,
-      elements: ReturnType<typeof visibleElements>,
-      blocked: boolean,
-    ) => {
-      for (const element of elements) {
-        const unsafe =
-          blocked || !!element.effects?.some((effect) => effect.enabled);
-        if (element.content?.type === "text")
-          texts.push({ slideId, element, blocked: unsafe });
-        visit(slideId, element.children, unsafe);
-      }
-    };
-    for (const slide of document.slides)
-      if (slideIds.has(slide.id))
-        visit(
-          slide.id,
-          visibleLayerNodes(document, slide).flatMap((root) => root.children),
-          !!document.deck.stylesheet?.trim(),
-        );
-    onProgress("fonts", 0, texts.length);
-    for (const [index, { slideId, element, blocked }] of texts.entries()) {
-      if (element.content?.type !== "text") continue;
-      try {
-        if (blocked)
-          throw Error(
-            "Text with Effects or deck CSS stays live in this prototype",
-          );
-        const typography = resolveTextTypography(
-          document.deck,
-          element.content,
-        );
-        const prepared = await prepareText({
-          ...element,
-          content: {
-            ...element.content,
-            format: { kind: "local", typography },
-          },
-        });
-        sources.set(prepared.id, Promise.resolve(prepared));
-        element.content = {
-          type: "svg",
-          assetId: prepared.id,
-          filename: "outlined-text.svg",
-          mediaType: "image",
-          opacity: 1,
-          lockAspect: false,
-          transform: { rule: "free", local: prepared.local },
-        };
-      } catch (cause) {
-        textWarnings.push({
-          slideId,
-          elementId: element.id,
-          code: "text-svg-unavailable",
-          message: `Text stayed live and needs its font on the viewing computer: ${cause instanceof Error ? cause.message : String(cause)}`,
-        });
-      }
-      onProgress("fonts", index + 1, texts.length);
-    }
+    const prepared = await preparePageText(
+      document.deck,
+      document.slides
+        .filter((slide) => slideIds.has(slide.id))
+        .map((slide) => ({
+          ...slide,
+          nodes: visibleLayerNodes(document, slide),
+        })),
+      prepareText,
+      (completed, total) => onProgress("fonts", completed, total),
+    );
+    textWarnings.push(...prepared.warnings);
+    for (const [id, source] of prepared.assets)
+      sources.set(id, Promise.resolve(source));
   } else onProgress("fonts", 0, 0);
   const videoElements = document.slides
     .filter((slide) => slideIds.has(slide.id))

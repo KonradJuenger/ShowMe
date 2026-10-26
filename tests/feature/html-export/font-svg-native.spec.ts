@@ -55,33 +55,33 @@ test("native SVG font export preserves static text without font files and report
     const editor = await app.firstWindow();
     await readyEditor(editor);
     expect(
-      await editor.evaluate(() => window.desktop!.getHtmlFontEmbedding!()),
+      await editor.evaluate(() => window.desktop!.getExportFontEmbedding!()),
     ).toBe("svg");
     await editor
       .getByRole("button", { name: "Presentation menu", exact: true })
       .click();
     await editor.getByRole("menuitem", { name: "Settings…" }).click();
     const select = editor.getByRole("combobox", {
-      name: "HTML export font embedding",
+      name: "Export font embedding",
     });
     await expect(select).toHaveValue("svg");
     await select.selectOption("none");
     await expect
       .poll(() =>
-        editor.evaluate(() => window.desktop!.getHtmlFontEmbedding!()),
+        editor.evaluate(() => window.desktop!.getExportFontEmbedding!()),
       )
       .toBe("none");
     await select.selectOption("svg");
     await expect
       .poll(() =>
-        editor.evaluate(() => window.desktop!.getHtmlFontEmbedding!()),
+        editor.evaluate(() => window.desktop!.getExportFontEmbedding!()),
       )
       .toBe("svg");
     await editor.screenshot({ path: info.outputPath("settings.png") });
     await editor.getByRole("button", { name: "Close settings" }).click();
     await expect(
       editor.evaluate(() =>
-        window.desktop!.setHtmlFontEmbedding!("invalid" as "none"),
+        window.desktop!.setExportFontEmbedding!("invalid" as "none"),
       ),
     ).rejects.toThrow();
     const text = createTextElement("outline-text");
@@ -200,7 +200,7 @@ test("native SVG font export preserves static text without font files and report
     );
     expect(await page.evaluate(() => document.fonts.size)).toBe(0);
     await page.screenshot({ path: info.outputPath("offline-svg.png") });
-    await editor.evaluate(() => window.desktop!.setHtmlFontEmbedding!("none"));
+    await editor.evaluate(() => window.desktop!.setExportFontEmbedding!("none"));
     const none = path.join(directory, "none.html");
     await app.evaluate(({ dialog }, file) => {
       dialog.showSaveDialog = (async () => ({
@@ -233,7 +233,7 @@ test("native SVG font export preserves static text without font files and report
           path.join(directory, "profile", "settings.json"),
           "utf8",
         ),
-      ).htmlFontEmbedding,
+      ).exportFontEmbedding,
     ).toBe("none");
     await app.evaluate(({ dialog }) => {
       dialog.showSaveDialog = (async () => ({
@@ -248,7 +248,7 @@ test("native SVG font export preserves static text without font files and report
       ),
     ).toBeNull();
     await expect(popup).not.toBeVisible();
-    await editor.evaluate(() => window.desktop!.setHtmlFontEmbedding!("svg"));
+    await editor.evaluate(() => window.desktop!.setExportFontEmbedding!("svg"));
     await app.evaluate(({ dialog }, file) => {
       dialog.showSaveDialog = (async () => ({
         canceled: false,

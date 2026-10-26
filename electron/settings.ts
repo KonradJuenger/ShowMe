@@ -8,7 +8,7 @@ const appSettingsSchema = z.object({
   mcpEditingEnabled: z.boolean().optional(),
   storageWarningSeen: z.boolean().optional(),
   imageCachingEnabled: z.boolean().optional(),
-  htmlFontEmbedding: z.enum(["none", "svg"]).optional(),
+  exportFontEmbedding: z.enum(["none", "svg", "file"]).optional(),
   htmlExportJpegQuality: z.number().int().min(1).max(100).optional(),
   imageCacheFormat: z.enum(["png", "jpg"]).optional(),
   deleteImageCacheOnClose: z.boolean().optional(),
@@ -28,7 +28,15 @@ export async function readSettings(
 ): Promise<AppSettings> {
   try {
     const text = await fs.readFile(settingsFile(userDataPath), "utf8");
-    return appSettingsSchema.parse(JSON.parse(text));
+    const settings = JSON.parse(text);
+    // Rename the immediately preceding HTML-only preference to the shared export setting.
+    if (
+      settings.exportFontEmbedding === undefined &&
+      settings.htmlFontEmbedding !== undefined
+    )
+      settings.exportFontEmbedding = settings.htmlFontEmbedding;
+    delete settings.htmlFontEmbedding;
+    return appSettingsSchema.parse(settings);
   } catch (error) {
     if (!requireExisting && (error as NodeJS.ErrnoException).code === "ENOENT")
       return {};

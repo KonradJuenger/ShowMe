@@ -209,8 +209,8 @@ export interface Platform {
   chooseImageCacheFolder?(): Promise<MediaLibraryInfo | null>;
   resetImageCacheFolder?(): Promise<MediaLibraryInfo>;
   getImageCachingEnabled?(): Promise<boolean>;
-  getHtmlFontEmbedding?(): Promise<import("../export/html/types").HtmlFontEmbedding>;
-  setHtmlFontEmbedding?(mode: import("../export/html/types").HtmlFontEmbedding): Promise<void>;
+  getExportFontEmbedding?(): Promise<import("../export/fontEmbedding").FontEmbedding>;
+  setExportFontEmbedding?(mode: import("../export/fontEmbedding").FontEmbedding): Promise<void>;
   onHtmlExportProgress?(callback: (progress: import("../export/html/types").HtmlExportProgress | null) => void): () => void;
   getHtmlExportJpegQuality?(): Promise<number>;
   setHtmlExportJpegQuality?(quality: number): Promise<void>;

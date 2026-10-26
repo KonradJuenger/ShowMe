@@ -63,11 +63,14 @@ import { mediaResponse } from "./mediaResponse";
 import path from "node:path";
 import { promises as fs, existsSync } from "node:fs";
 import { exportPowerPoint } from "./export/pptx";
-import { createHtmlExport } from "./export/html";
-import { HtmlTextOutlines } from "./export/textOutlines";
-import type { OutlineLayout, OutlineLayoutRequest } from "../src/export/html/textOutlines";
+import { createHtmlExport, htmlFontUsages } from "./export/html";
+import { ExportTextOutlines } from "./export/textOutlines";
+import { ExportTextLayoutSurface } from "./export/textLayoutSurface";
+import { preparePackageText } from "./export/prepareText";
+import { DEFAULT_FONT_EMBEDDING } from "../src/export/fontEmbedding";
+import { fontFamiliesFromFaces } from "./fontIntegration";
 import { HtmlExportImageCache } from "./export/imageCache";
-import { DEFAULT_HTML_FONT_EMBEDDING, type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../src/export/html/types";
+import { type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../src/export/html/types";
 import {
   pdfSlides,
   type ExportDocument,
@@ -994,7 +997,7 @@ async function packageDocument(documentId: string, beforePersist?: (destination:
     requireStorage().isPackaged(id).locked,
   );
   if (locked === null) return null;
-  if (!options) await explainStorageAndFonts(id, true);
+  if (!options) await explainStorageAndFonts(id, false);
   const notes = options ? { response: 0, checkboxChecked: options.speakerNotes === "remove" } : await dialog.showMessageBox(editor!, {
     type: "question",
     title: "Share packaged presentation",
@@ -1008,13 +1011,37 @@ async function packageDocument(documentId: string, beforePersist?: (destination:
     checkboxChecked: false,
   });
   if (notes.response !== 0) return null;
-  return requireStorage().packageDocument(
-    id,
-    file,
-    locked,
-    notes.checkboxChecked,
-    beforePersist,
-  );
+  const mode = (await readSettings(app.getPath("userData"))).exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING;
+  if (mode === "file" && !await confirmFontFileExport()) return null;
+  const storage = requireStorage(), surface = new ExportTextLayoutSurface();
+  const outlines = mode === "svg" ? new ExportTextOutlines(
+    async usage => (await storage.exportFontFaces(id, [usage])).resolved[0] ?? null,
+    request => surface.layout(request),
+  ) : undefined;
+  let warnings: ExportWarning[] = [];
+  try {
+    const destination = await storage.packageDocument(id, file, locked, notes.checkboxChecked, beforePersist, {
+      fontEmbedding: mode,
+      prepareDocument: outlines ? async document => {
+        const prepared = await preparePackageText(document, element => outlines.prepare(element));
+        warnings = prepared.warnings;
+        return prepared.assets;
+      } : undefined,
+    });
+    if (warnings.length) await dialog.showMessageBox(editor!, { type: "warning", message: "Package created with font warnings",
+      detail: warnings.map(warning => warning.message).join("\n"), buttons: ["OK"] });
+    return destination;
+  } finally { surface.dispose(); await outlines?.dispose(); }
+
+}
+
+async function confirmFontFileExport() {
+  const result = await dialog.showMessageBox(editor!, {
+    type: "warning", title: "Embed font files", message: "You must have a license to embed and share these font files.",
+    detail: "Font files will be included in the exported file. Make sure your license permits this use. ShowMe does not check font licenses or embedding permission flags.",
+    buttons: ["Export with font files", "Cancel"], defaultId: 0, cancelId: 1,
+  });
+  return result.response === 0;
 }
 
 let exportBusy = false;
@@ -1081,31 +1108,17 @@ async function performExportPresentation(
   if (result.canceled || !result.filePath) return null;
   if (type === "html") {
     const settings = await readSettings(app.getPath("userData"));
+    if ((settings.exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING) === "file" && !await confirmFontFileExport()) return null;
     const report = (stage: HtmlExportProgress["stage"], completed: number, total: number) => {
       if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", { documentId: id, stage, completed, total });
     };
     report("fonts", 0, 0);
-    let textWindow: BrowserWindow | undefined;
-    const layout = async (request: OutlineLayoutRequest): Promise<OutlineLayout> => {
-      if (!textWindow) {
-        textWindow = new BrowserWindow({ ...windowOptions(), show: false,
-          webPreferences: { ...windowOptions().webPreferences, backgroundThrottling: false } });
-        secure(textWindow);
-        exportWindow = textWindow;
-        const devUrl = process.env.SHOWME_DEV_URL;
-        if (devUrl && !app.isPackaged) await textWindow.loadURL(devUrl + "?slidePreview=1");
-        else await textWindow.loadFile(path.join(__dirname, "../dist/index.html"), { query: { slidePreview: "1" } });
-      }
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        return await Promise.race([
-          textWindow.webContents.executeJavaScript(`window.layoutHtmlExportText(${JSON.stringify(request)})`),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Text layout timed out")), 15000); }),
-        ]);
-      } finally { clearTimeout(timer); }
-    };
-    const outlines = (settings.htmlFontEmbedding ?? DEFAULT_HTML_FONT_EMBEDDING) === "svg"
-      ? new HtmlTextOutlines(currentStorage.assetRoot, layout) : undefined;
+    const textSurface = new ExportTextLayoutSurface();
+    const fontMode = settings.exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING;
+    const outlines = fontMode === "svg" ? new ExportTextOutlines(
+      async usage => (await currentStorage.exportFontFaces(id, [usage])).resolved[0] ?? null,
+      request => textSurface.layout(request),
+    ) : undefined;
     const images = new HtmlExportImageCache(
       path.join(__dirname, "imageWorker.cjs"),
       settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY,
@@ -1128,7 +1141,7 @@ async function performExportPresentation(
             return null;
           }
         },
-        managedFonts: async () => [],
+        managedFonts: fontMode === "file" ? async () => fontFamiliesFromFaces((await currentStorage.exportFontFaces(id, htmlFontUsages(document))).resolved) : async () => [],
         prepareText: outlines ? element => outlines.prepare(element) : undefined,
         onProgress: report,
         prepareImage: (source, requirement) =>
@@ -1141,8 +1154,7 @@ async function performExportPresentation(
     } finally {
       try { await Promise.all([images.dispose(), outlines?.dispose()]); }
       finally {
-        exportWindow = null;
-        if (textWindow && !textWindow.isDestroyed()) textWindow.destroy();
+        textSurface.dispose();
         if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", null);
       }
     }
@@ -1993,13 +2005,13 @@ const operations: Record<string, (...args: any[]) => any> = {
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
   getImageCachingEnabled: () => imageCachingEnabled,
-  async getHtmlFontEmbedding() {
-    return (await readSettings(app.getPath("userData"))).htmlFontEmbedding ?? DEFAULT_HTML_FONT_EMBEDDING;
+  async getExportFontEmbedding() {
+    return (await readSettings(app.getPath("userData"))).exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING;
   },
-  async setHtmlFontEmbedding(value: unknown) {
-    const mode = z.enum(["none", "svg"]).parse(value);
+  async setExportFontEmbedding(value: unknown) {
+    const mode = z.enum(["none", "svg", "file"]).parse(value);
     const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
-    settings.htmlFontEmbedding = mode;
+    settings.exportFontEmbedding = mode;
     await writeSettings(app.getPath("userData"), settings);
   },
   async getHtmlExportJpegQuality() {

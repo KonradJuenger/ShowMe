@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import "./PresentationMenu.css";
 import { MaterialIcon } from "./MaterialIcon";
 import { platform } from "../platform";
-import { DEFAULT_HTML_FONT_EMBEDDING, type HtmlFontEmbedding, type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../export/html/types";
+import { type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../export/html/types";
+import { DEFAULT_FONT_EMBEDDING, type FontEmbedding } from "../export/fontEmbedding";
 import { formatExportWarnings } from "../export/shared";
 import { LibraryStorageSettings } from "./LibraryStorageSettings";
 import { NewPresentationDialog } from "./NewPresentationDialog";
@@ -56,7 +57,7 @@ export function PresentationMenu({
   const [htmlQualityDraft, setHtmlQualityDraft] = useState(
     String(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
   );
-  const [fontEmbedding, setFontEmbedding] = useState<HtmlFontEmbedding>(DEFAULT_HTML_FONT_EMBEDDING);
+  const [fontEmbedding, setFontEmbedding] = useState<FontEmbedding>(DEFAULT_FONT_EMBEDDING);
   const [fontBusy, setFontBusy] = useState(false);
   const [htmlProgress, setHtmlProgress] = useState<HtmlExportProgress | null>(null);
   const htmlProgressDialog = useRef<HTMLDialogElement>(null);
@@ -157,7 +158,7 @@ export function PresentationMenu({
       platform.getImageCacheFolder?.() ?? Promise.resolve(null),
       platform.getImageCacheFormat?.() ?? Promise.resolve<ImageCacheFormat>("png"),
       platform.getHtmlExportJpegQuality?.() ?? Promise.resolve(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
-      platform.getHtmlFontEmbedding?.() ?? Promise.resolve(DEFAULT_HTML_FONT_EMBEDDING),
+      platform.getExportFontEmbedding?.() ?? Promise.resolve(DEFAULT_FONT_EMBEDDING),
     ])
       .then(([info, enabled, deleteOnClose, folder, format, quality, embedding]) => {
         if (live) {
@@ -483,20 +484,25 @@ export function PresentationMenu({
                 </>}
                 {cacheMessage && <p role="status">{cacheMessage}</p>}
               </div>
+              {platform.setExportFontEmbedding && <div className="settings-section">
+                <h3>Export fonts</h3>
+                <p>Applies to HTML and ShowMe Package (.smp) exports.</p>
+                <label>Font embedding{" "}
+                  <select aria-label="Export font embedding" value={fontEmbedding} disabled={settingsBusy || fontBusy} onChange={event => {
+                    const mode = event.target.value as FontEmbedding;
+                    setFontBusy(true);
+                    void platform.setExportFontEmbedding!(mode).then(() => setFontEmbedding(mode)).catch(onError).finally(() => setFontBusy(false));
+                  }}>
+                    <option value="none">None</option>
+                    <option value="svg">SVG</option>
+                    <option value="file">Font file</option>
+                  </select>
+                </label>
+                <p>{fontEmbedding === "svg" ? "Static text becomes SVG outlines. Text with Effects stays live and is reported after export." : fontEmbedding === "file" ? "Includes complete font files and keeps text editable and animated. You must have a license to embed and share the fonts." : "No fonts are included. Text uses fonts installed on the receiving computer."}</p>
+              </div>}
               {platform.setHtmlExportJpegQuality && (
                 <div className="settings-section">
                   <h3>HTML export</h3>
-                  {platform.setHtmlFontEmbedding && <label>Font embedding{ " " }
-                    <select aria-label="HTML export font embedding" value={fontEmbedding} disabled={settingsBusy || fontBusy} onChange={event => {
-                      const mode = event.target.value as HtmlFontEmbedding;
-                      setFontBusy(true);
-                      void platform.setHtmlFontEmbedding!(mode).then(() => setFontEmbedding(mode)).catch(onError).finally(() => setFontBusy(false));
-                    }}>
-                      <option value="none">None</option>
-                      <option value="svg">SVG</option>
-                    </select>
-                  </label>}
-                  <p>{fontEmbedding === "svg" ? "Static text becomes SVG outlines. Text with Effects stays live and is reported after export." : "No fonts are included. Text uses fonts installed on the viewing computer."}</p>
                   <label>
                     JPEG quality{" "}
                     <input

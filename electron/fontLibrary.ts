@@ -460,7 +460,7 @@ export async function resolveFontUsages(
       unresolved.push(usage);
     }
   }
-  const native = await resolveSystemFontUsages(unresolved);
+  const native = unresolved.length ? await resolveSystemFontUsages(unresolved) : { resolved: [], missing: [] };
   return {
     resolved: [...resolved, ...native.resolved],
     missing: native.missing,
