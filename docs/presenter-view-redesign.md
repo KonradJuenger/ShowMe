@@ -15,7 +15,7 @@ We are not copying Keynote pixel-for-pixel. We are adopting its mental model bec
 - navigation is simple and keyboard-first
 - secondary functions do not compete with the presentation itself
 
-For now there is **one fixed presenter layout**. Do not add presenter-layout customization, draggable panels, presets, visibility toggles or configuration UI.
+There is **one presenter layout**, with a draggable divider to adjust the space for speaker notes and a control to collapse or restore them. Decks without speaker notes start with that panel collapsed. Do not add layout presets or independently movable panels.
 
 Apple's current Keynote presenter display exposes current slide, next slide, presenter notes, a ready-to-advance indicator, clock/timer and slide navigation. Keynote also changes readiness while transitions/builds are active. That basic model is the reference.
 
@@ -46,7 +46,7 @@ Left:
 - slide position, e.g. `7 / 24`
 
 Center/right:
-- elapsed presentation time as whole minutes from start, e.g. `12 min`
+- elapsed time from the first explicit Advance, rounded to the nearest quarter minute, e.g. `1 ¼ min`; reserve the fraction slot at whole minutes so the display stays aligned
 - actual wall clock time, e.g. `20:29`
 
 Do not add a product title, "Presenter Console" heading or other chrome.
@@ -79,7 +79,7 @@ Target proportion:
 - current: about 60-65%
 - next: about 35-40%
 
-The labels `Current` and `Next` should be small and visually quiet.
+The previews need no visible `Current` or `Next` labels; retain accessible names.
 
 ### Notes region
 
@@ -94,6 +94,8 @@ Reasons:
 - lets the presenter's eye move vertically: slides -> notes -> controls
 
 Notes should:
+- use black text on a light medium-grey surface
+- use the available panel height without a separate line-height cap
 - use a large readable default size
 - scroll independently
 - provide simple A- / A+ controls
@@ -227,7 +229,7 @@ Revise:
 Do not add yet:
 
 - customizable presenter layouts
-- draggable/resizable presenter panels
+- independently movable presenter panels (the notes divider is supported)
 - presenter presets
 - remote/phone presenter
 - laser pointer or drawing tools

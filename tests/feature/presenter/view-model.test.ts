@@ -1,12 +1,177 @@
 import { describe, expect, it } from "vitest";
-import { derivePresenterView } from "../../../src/components/presenterViewModel";
+import {
+  derivePresenterView,
+  derivePresenterPreview,
+  formatPresenterElapsedMinutes,
+} from "../../../src/components/presenterViewModel";
+import { newPresentationDocument } from "../../../src/core/document";
+import {
+  addPresence,
+  sampleElementPresence,
+  defaultPresenceTransition,
+} from "../../../src/core/presence";
+import { sampleEffectClocks } from "../../../src/core/effectClocks";
 import type { PresenterState } from "../../../src/platform/api";
 
 const NOW = 10_000;
 
-function state(
-  patch: Partial<PresenterState> = {},
-): PresenterState {
+it("rounds elapsed minutes to the nearest quarter, including whole-minute rollover", () => {
+  expect(formatPresenterElapsedMinutes(0)).toBe("0");
+  expect(formatPresenterElapsedMinutes(7_499)).toBe("0");
+  expect(formatPresenterElapsedMinutes(7_500)).toBe("0 ¼");
+  expect(formatPresenterElapsedMinutes(30_000)).toBe("0 ½");
+  expect(formatPresenterElapsedMinutes(45_000)).toBe("0 ¾");
+  expect(formatPresenterElapsedMinutes(60_000)).toBe("1");
+  expect(formatPresenterElapsedMinutes(67_500)).toBe("1 ¼");
+  expect(formatPresenterElapsedMinutes(82_500)).toBe("1 ½");
+  expect(formatPresenterElapsedMinutes(97_500)).toBe("1 ¾");
+  expect(formatPresenterElapsedMinutes(112_500)).toBe("2");
+  expect(formatPresenterElapsedMinutes(3_615_000)).toBe("60 ¼");
+});
+
+function previewFixture() {
+  const model = newPresentationDocument("Presenter snapshot");
+  const slide = model.slides[model.deck.slideIds[0]];
+  let motion = addPresence(
+    {
+      stages: [
+        { id: "enter", tracks: [] },
+        { id: "reveal", tracks: [] },
+      ],
+    },
+    0,
+    ["title"],
+    {
+      ...defaultPresenceTransition("move", "Up"),
+      durationMs: 800,
+      distance: 36,
+    },
+  );
+  motion.stages[0].blocks![0].presenceSchedule!.startOffsetMs = 200;
+  motion.stages[0].blocks![0].presenceSchedule!.end = { mode: "next-click" };
+  motion = addPresence(motion, 1, ["detail"], {
+    ...defaultPresenceTransition("fade"),
+    durationMs: 600,
+  });
+  slide.motion = motion;
+  const transport = state({
+    startedAt: 1000,
+    slideStartedAt: 3000,
+    stepStartedAt: 3000,
+    motionStageStartedOffsets: [0],
+    motion: {
+      stageId: "enter",
+      stageIndex: 0,
+      time: 0,
+      startedAt: 3000,
+      running: true,
+    },
+  });
+  return { slide, transport };
+}
+
+it("presenter snapshot completes delayed entrances without revealing future clicks", () => {
+  const { slide, transport } = previewFixture();
+  const original = structuredClone(transport);
+  for (const patch of [
+    {},
+    { pausedAt: 3100 },
+    { awaitingAudience: true, presentationReady: false },
+  ]) {
+    const preview = derivePresenterPreview({ ...transport, ...patch }, slide);
+    expect(preview.motionState).toMatchObject({
+      stageIndex: 0,
+      time: 1000,
+      running: false,
+    });
+    const clocks = sampleEffectClocks(preview.effectClock!, NOW);
+    expect(clocks).toMatchObject({
+      slideTime: 1,
+      stepTime: 1,
+      presentationTime: 3,
+    });
+    expect(
+      sampleElementPresence(
+        slide.motion,
+        "title",
+        0,
+        preview.motionState!.time,
+        clocks,
+      ).phase,
+    ).toBe("present");
+    expect(
+      sampleElementPresence(
+        slide.motion,
+        "detail",
+        0,
+        preview.motionState!.time,
+        clocks,
+      ).present,
+    ).toBe(false);
+  }
+  expect(transport).toEqual(original);
+});
+
+it("presenter snapshot follows reached clicks and freezes clocks at their endpoint", () => {
+  const { slide, transport } = previewFixture();
+  const preview = derivePresenterPreview(
+    {
+      ...transport,
+      stepStartedAt: 8000,
+      motionStageStartedOffsets: [0, 5000],
+      motion: {
+        stageId: "reveal",
+        stageIndex: 1,
+        time: 0,
+        startedAt: 8000,
+        running: true,
+      },
+    },
+    slide,
+  );
+  expect(preview.motionState).toMatchObject({
+    stageIndex: 1,
+    time: 600,
+    running: false,
+  });
+  const clocks = sampleEffectClocks(preview.effectClock!, NOW);
+  expect(clocks).toMatchObject({ stepTime: 0.6, slideTime: 5.6 });
+  expect(sampleEffectClocks(preview.effectClock!, NOW + 60_000)).toEqual(
+    clocks,
+  );
+  expect(
+    sampleElementPresence(slide.motion, "detail", 1, 600, clocks).phase,
+  ).toBe("present");
+  expect(
+    sampleElementPresence(slide.motion, "title", 1, 600, clocks).present,
+  ).toBe(false);
+});
+
+it("presenter snapshot preserves the pre-entry state and supports slides without motion", () => {
+  const { slide, transport } = previewFixture();
+  const before = derivePresenterPreview(
+    {
+      ...transport,
+      motion: { ...transport.motion!, stageIndex: -1, running: false },
+    },
+    slide,
+  );
+  expect(before.motionState).toMatchObject({
+    stageIndex: -1,
+    time: 0,
+    running: false,
+  });
+  expect(sampleElementPresence(slide.motion, "title", -1, 0).present).toBe(
+    false,
+  );
+  expect(derivePresenterPreview(state(), slide).motionState).toBeUndefined();
+  expect(derivePresenterPreview(null, null)).toEqual({
+    motionState: undefined,
+    effectClock: undefined,
+  });
+});
+
+function state(patch: Partial<PresenterState> = {}): PresenterState {
   return {
     deckId: "deck",
     slideIds: ["one", "two"],

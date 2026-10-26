@@ -2,7 +2,7 @@ import {
   presentationShortcut,
   type PresentationCommand,
 } from "../core/presentationSession";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ImageOutputProfile } from "../core/presentationImages";
 import type { Deck, Slide } from "../core/document";
 import { platform } from "../platform";
@@ -13,6 +13,7 @@ import type {
 import type { PresenterState } from "../platform/api";
 import { usePresentationState } from "./usePresentationState";
 import { slideCacheFor, type CachedSlide } from "./slideCache";
+import { derivePresenterPreview, presenterElapsedTime } from "./presenterViewModel";
 
 export function formatPresenterTime(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -21,6 +22,7 @@ export function formatPresenterTime(ms: number) {
 
 export function usePresenterController(keyboard = false) {
   const [notesBySlide, setNotesBySlide] = useState<Record<string, string>>({});
+  const [notesAvailability, setNotesAvailability] = useState<{ documentId: string; hasNotes: boolean } | null>(null);
   const [error, setError] = useState("");
   const onError = useCallback((error: unknown) => setError(String(error)), []);
   const state = usePresentationState(onError);
@@ -44,8 +46,19 @@ export function usePresenterController(keyboard = false) {
   const [clock, setClock] = useState(Date.now);
   const contentRevision = useRef<number | undefined>(undefined);
   const deckId = state?.deckId;
+  const notesSlideId = state?.slideIds[0];
   const slideId =
     state && state.index !== null ? state.slideIds[state.index] : undefined;
+
+  useEffect(() => {
+    if (!deckId || !notesSlideId) return;
+    let live = true;
+    // Read only the derived deck-wide flag; do not fill the bounded slide cache.
+    void platform.documentProjection!(deckId, notesSlideId).then(projection => {
+      if (live) setNotesAvailability({ documentId: deckId, hasNotes: projection.hasSpeakerNotes === true });
+    }).catch(onError);
+    return () => { live = false; };
+  }, [deckId, notesSlideId, state?.contentRevision, notesBySlide, onError]);
 
   useEffect(() => {
     setNotesBySlide({});
@@ -194,9 +207,12 @@ export function usePresenterController(keyboard = false) {
   const next = nextRecord && nextRecord.value.id === nextId ? nextRecord : null;
   const deck: Deck | null = currentRecord?.deck ?? next?.deck ?? null;
   const slide: Slide | null = currentRecord?.value ?? null;
+  const preview = useMemo(() => derivePresenterPreview(state, slide), [state, slide]);
 
   return {
     state,
+    preview,
+    hasSpeakerNotes: notesAvailability?.documentId === deckId && notesAvailability?.hasNotes === true,
     notes: slideId ? (notesBySlide[slideId] ?? slide?.notes ?? "") : "",
     deck,
     nextSlide: next?.value ?? null,
@@ -210,6 +226,6 @@ export function usePresenterController(keyboard = false) {
     start,
     error,
     slide,
-    elapsed: state?.startedAt ? Math.max(0, clock - state.startedAt) : 0,
+    elapsed: presenterElapsedTime(state, clock),
   };
 }

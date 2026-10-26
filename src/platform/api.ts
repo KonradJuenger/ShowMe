@@ -95,6 +95,8 @@ export interface PresenterState {
   black?: boolean;
   restartToken?: number;
   startedAt?: number;
+  /** Speaker elapsed timer starts on the first explicit Advance, independently of Effect clocks. */
+  elapsedStartedAt?: number;
   slideStartedAt?: number;
   stepStartedAt?: number;
   /** Logical slide-time offsets in ms at which Motion click stages were entered. */

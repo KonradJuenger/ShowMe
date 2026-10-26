@@ -33,7 +33,18 @@ export function PresentationControls({
         <span className="presenter-advance-label">Advance</span>
         <span className="presenter-advance-detail">{view.advanceDetail}</span>
         <span className="presenter-advance-arrow" aria-hidden="true">
-          →
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 12h16m-7-7 7 7-7 7" />
+          </svg>
         </span>
       </button>
 

@@ -1,4 +1,3 @@
-import { presenterEffectClockOrigins } from "../../core/effectClocks";
 import type { EffectClockOrigins } from "../../core/effectClocks";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Deck, Slide } from "../../core/document";
@@ -102,8 +101,8 @@ export function EditorPresenterDock({
             <Preview
               slide={slide}
               deck={deck}
-              motionState={state?.motion}
-              effectClock={presenterEffectClockOrigins(state)}
+              motionState={controller.preview.motionState}
+              effectClock={controller.preview.effectClock}
               label="Current slide"
               imageProfile={controller.audienceProfile}
             />

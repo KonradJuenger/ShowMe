@@ -45,9 +45,10 @@ overrides. Templates define slide structure used by multiple slides.
 
 The presenter console shows the current slide, next slide, speaker notes,
 elapsed time and playback controls. Audience output can be assigned to a
-connected screen.
+connected screen. Speaker notes can be resized or collapsed, and the elapsed
+timer starts with the first Advance action.
 
-![Presenter console with current and next slides, speaker notes and navigation](docs/images/presenter.png)
+![Presenter console with current and next slides, resizable speaker notes and the Advance control](docs/images/presenter.png)
 
 ## Files and export
 

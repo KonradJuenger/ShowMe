@@ -11,7 +11,7 @@ import {
   PRESENTATION_FILE_VERSION,
   type PresentationDocument,
 } from "./document";
-import type { DocumentProjection } from "./documentProjection";
+import { documentHasSpeakerNotes, type DocumentProjection } from "./documentProjection";
 import type {
   DocumentTransaction,
   AcceptedTransaction,
@@ -122,6 +122,7 @@ export class DocumentRuntime implements EditorTransport {
       epoch: snapshot.epoch,
       revision: snapshot.revision,
       savedRevision: snapshot.savedRevision,
+      hasSpeakerNotes: documentHasSpeakerNotes(snapshot.document),
       deck: structuredClone(snapshot.document.deck),
       slide: structuredClone(slide),
       templates: structuredClone(snapshot.document.templates),
@@ -144,6 +145,7 @@ export class DocumentRuntime implements EditorTransport {
       epoch: snapshot.epoch,
       revision: snapshot.revision,
       savedRevision: snapshot.savedRevision,
+      hasSpeakerNotes: documentHasSpeakerNotes(snapshot.document),
       deck: structuredClone(snapshot.document.deck),
       slide: structuredClone(slide),
       templates: template ? { [templateId]: structuredClone(template) } : {},

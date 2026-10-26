@@ -1,13 +1,44 @@
 import { motionTime, type MotionStageTiming } from "../core/motionPlayback";
 import type { PresenterState } from "../platform/api";
+import type { Slide } from "../core/document";
+import { stageDuration } from "../core/motionModel";
+import { presenterEffectClockOrigins } from "../core/effectClocks";
+
+export function presenterElapsedTime(state: PresenterState | null, now: number) {
+  return state?.elapsedStartedAt === undefined ? 0 : Math.max(0, now - state.elapsedStartedAt);
+}
+
+export function formatPresenterElapsedMinutes(elapsedMs: number) {
+  const quarters = Math.round(Math.max(0, elapsedMs) / 15_000);
+  const minutes = Math.floor(quarters / 4);
+  const fraction = ["", "¼", "½", "¾"][quarters % 4];
+  return fraction ? `${minutes} ${fraction}` : String(minutes);
+}
+
+/** A monitor samples the reached click step's endpoint, never its live clock.
+ * Keep later click gates closed and leave the audience transport untouched. */
+export function derivePresenterPreview(
+  state: PresenterState | null,
+  slide: Slide | null,
+) {
+  const effectClock = presenterEffectClockOrigins(state);
+  const motion = state?.motion;
+  if (!motion || !slide) return { motionState: motion, effectClock };
+  const stage = slide.motion?.stages[motion.stageIndex];
+  const time = stage ? stageDuration(stage) : 0;
+  const at = (effectClock?.stepStartedAt ?? motion.startedAt) + time;
+  return {
+    motionState: { ...motion, time, running: false },
+    effectClock: effectClock && {
+      ...effectClock,
+      pausedAt: at,
+      localPausedAt: at,
+    },
+  };
+}
 
 export type PresenterReadiness =
-  | "ready"
-  | "animating"
-  | "paused"
-  | "black"
-  | "preparing"
-  | "empty";
+  "ready" | "animating" | "paused" | "black" | "preparing" | "empty";
 
 export interface PresenterViewModel {
   slidePosition: number;

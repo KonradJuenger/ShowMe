@@ -149,6 +149,7 @@ export function startSession(
     {
       ...input,
       startedAt: now,
+      elapsedStartedAt: undefined,
       slideStartedAt: now,
       stepStartedAt: now,
       pausedAt: undefined,
@@ -188,6 +189,8 @@ export function applyPresentationCommand(
   command: PresentationCommand,
   now = Date.now(),
 ): PresenterState {
+  if (command.type === "next" && state.index !== null && state.elapsedStartedAt === undefined)
+    state = { ...state, elapsedStartedAt: now };
   if (command.type === "toggle-pause") {
     if (state.pausedAt !== undefined) {
       const paused = Math.max(0, now - state.pausedAt);

@@ -38,6 +38,7 @@ const stateSchema = z.object({
   black: z.boolean().optional(),
   restartToken: z.number().int().nonnegative().optional(),
   startedAt: z.number().finite().optional(),
+  elapsedStartedAt: z.number().finite().optional(),
   slideStartedAt: z.number().finite().optional(),
   stepStartedAt: z.number().finite().optional(),
   motionStageStartedOffsets: z
