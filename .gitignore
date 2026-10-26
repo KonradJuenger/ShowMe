@@ -30,4 +30,5 @@ Thumbs.db
 !.vscode/settings.json
 *.sme
 *.smp
+!/examples/showme.smp
 *.showme-slide-transfer
