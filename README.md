@@ -1,86 +1,85 @@
 # ShowMe
 
-ShowMe is an open-source presentation editor for macOS and Windows. It runs
-locally and stores presentations and media on your computer. It does not require
-an account, a cloud service or a subscription.
+ShowMe creates and presents slides. It runs locally on macOS and Windows, with
+your presentations and assets on your own computer. No account or subscription.
 
-It has a shared media library, a visual slide editor, an animation timeline and
-a presenter view. CSS, JavaScript and GLSL effects are also supported.
+![ShowMe editing a slide, with typography controls visible](docs/images/product/editor.png)
 
-![ShowMe editor with slide list, geometric shapes and element properties](docs/images/editor.png)
+## Why it exists
 
-## Shared media library
+ShowMe uses a single asset library based on the filesystem. You can browse and
+retrieve the media files directly. Presentations share images and videos instead of
+keeping a separate copy of everything in every file.
 
-Images and videos are stored in a central local library and can be used in
-multiple presentations. Imports are checked by content, so identical assets
-already in the library are reused across presentations that share it.
+It also isn't Keynote (it works on Windows), and it isn't PowerPoint (it works
+at all).
 
-The library supports folders, previews and dragging media onto slides. Unused
-assets can be moved to Trash, and assets can be protected from cleanup.
+## What it does
 
-## Slide editing
+- Images, SVGs and video
+- Media frames: Fit, Fill or Free positioning; video trimming, looping and sound
+- Shared local asset library: folders, previews, duplicate detection, ordinary files
+- Layers, groups, snapping, guides and rulers
+- Slide templates and shared Text Styles
+- Animation timeline: keyframes, easing, click-driven entrances and exits
+- CSS on elements
+- JavaScript text effects
+- GLSL shaders: dynamic backgrounds, distortion and overlays
+- Effect editor with live preview and reusable effects
+- Presenter console: notes, next slide, timer and separate audience screen
+- Portable `.smp` files with all used assets included
+- PowerPoint import and export; PDF export
+- Single-file HTML export, including assets and an offline player
+- Local MCP for AI agents (experimental)
+- LAN collaboration (experimental)
 
-Text, images, video and frames are arranged on a canvas. Editing tools include
-layers, groups, snapping, guides and rulers. Media can fit or fill a frame, or
-be positioned freely within it. Video controls include looping and muting.
+## See it in slides
 
-Presentations support sections, slide transfer and custom slide dimensions.
+- [ShowMe feature presentation, as standalone HTML](docs/showme.html): download
+  the file and open it in a browser. Assets and the player are included.
+- [Editable ShowMe deck](examples/showme.smp): the same presentation, with its
+  assets packed into the file.
 
-## Animation and timeline
+![Title slide of the ShowMe feature presentation](docs/images/showme-cover.jpg)
 
-Motion library provides element animation with keyframes and easing. The Click Timeline
-organizes actions into steps advanced during a presentation. It also controls
-when objects appear and disappear. Slide transitions are supported.
+Twelve slides about ShowMe, with editor, asset library and Click Timeline
+screenshots, click-driven animation, a JavaScript text effect and live shaders.
+The shader example refracts a portrait, then clears the distortion over 0.7 seconds.
 
-![Motion controls and three staged animation blocks in Click Timeline](docs/images/motion.png)
+![The shader distortion fades away while the text stays clear](docs/images/showme-shader.gif)
 
-## Text Styles and Templates
+See [playback controls, shader details and image credits](examples/README.md).
 
-Text Styles define shared typography within a presentation, with local
-overrides. Templates define slide structure used by multiple slides.
+## Files, assets and sharing
 
-![Selected text with Heading+ style and typography controls](docs/images/text-styles.png)
+Choose a ShowMe root folder for your work. The `ShowMe Library/` folder inside it
+holds shared assets. Keep managed presentations below that root so library
+cleanup can find which assets they use.
 
-## Presenter console
+| Format | What it is for |
+| --- | --- |
+| `.sme` | A presentation that references assets in your local ShowMe Library. |
+| `.smp` | A portable presentation with its used assets packed into the file. |
+| `.html` | A standalone presentation and player you can open in a browser, offline. |
+| `.pptx` | Moving slides to or from PowerPoint. |
+| `.pdf` | Static pages. |
 
-The presenter console shows the current slide, next slide, speaker notes,
-elapsed time and playback controls. Audience output can be assigned to a
-connected screen. Speaker notes can be resized or collapsed, and the elapsed
-timer starts with the first Advance action.
+PowerPoint conversion has limits. ShowMe Motion, appearance timing and slide
+transitions do not survive PowerPoint export, and custom browser effects do not
+all translate. Check the result before handing it to someone.
 
-![Presenter console with current and next slides, resizable speaker notes and the Advance control](docs/images/presenter.png)
+Fonts need attention when moving files. Export settings let you leave fonts out,
+turn text into SVG outlines, or include font files where your license permits it.
+Outlines preserve appearance but turn exported text into graphics. Without
+embedded fonts or outlines, another computer may substitute a font.
 
-## Files and export
+Local recovery keeps a record of edits after an interrupted session. Back up your
+ShowMe root as you would any other folder of work.
 
-Presentations can be created, edited and presented offline. You choose where
-the ShowMe folder is stored and how to back it up or synchronize it.
+## Install and run
 
-- Managed `.sme` presentations reference the shared media library. Keep them
-  below the ShowMe root so library cleanup can find their asset references.
-- Portable `.smp` packages contain a presentation and its media for transfer to
-  another computer.
-
-ShowMe can import and export PowerPoint files and export PDF. PowerPoint export
-does not preserve ShowMe Motion, object appearance timing or slide transitions,
-and has limitations for custom browser styling.
-
-Fonts are normally not embedded in ShowMe packages. Typography may differ on
-another computer if the same fonts are unavailable.
-
-Local recovery records edits for recovery after an interrupted session.
-
-## Web effects
-
-Elements can use CSS, JavaScript and GLSL fragment shaders. Effects have a live
-preview and can be saved in the library for reuse. They can run continuously,
-follow Click Timeline progress, or use both.
-
-![Effect Editor with fragment shader code and its live visual preview](docs/images/effect-editor.png)
-
-## Installation
-
-This is a source release. There are currently no official binaries or installers.
-Use Node.js 24 or 26, as specified in `package.json`.
+This is a source release; there are currently no official installers. Use
+Node.js 24 or 26.
 
 ```bash
 git clone https://github.com/KonradJuenger/ShowMe.git
@@ -89,92 +88,47 @@ npm ci
 npm run desktop
 ```
 
-`npm run desktop` builds the app and launches Electron. For browser development with Vite, run `npm run dev`.
+`npm run desktop` builds and launches the Electron app. `npm run dev` starts the
+browser development version; `npm run build` builds without launching.
 
-To build the renderer and Electron application without launching:
+To make a downloadable app, run `npm run package` on the target platform, or use
+**Actions → Build binaries → Run workflow** on GitHub. The workflow builds Mac
+Intel and Apple Silicon DMG/ZIP files and Windows installer/portable EXEs.
+Artifacts stay available for 30 days; the workflow does not publish a release.
+Mac builds are ad-hoc signed, not notarized, and Windows builds are unsigned.
+macOS may require **System Settings → Privacy & Security → Open Anyway** on first
+launch.
 
-```bash
-npm run build
-```
+## Experimental bits
 
-## Build downloadable apps
+### Collaboration
 
-The **Build binaries** GitHub Actions workflow packages Mac Intel (`x64`),
-Mac Apple Silicon (`arm64`), and Windows (`x64`) apps on native runners.
-Open **Actions → Build binaries → Run workflow** in your GitHub repository
-and select the branch to build. After it finishes, download the matching artifact
-from the workflow run's **Artifacts** section. Each file is a separate download,
-without an extra ZIP wrapper, and its filename includes the version and architecture.
+LAN collaboration synchronizes presentation edits. It does not transfer the
+library files. Sync the complete ShowMe root separately, for example with
+Syncthing, and select each computer's local copy. Absolute paths can differ.
+Missing assets appear as placeholders until their files arrive.
 
-- Each Mac architecture has a separate DMG and ZIP. Open the DMG and drag ShowMe into Applications.
-- Windows has a separate installer EXE and portable EXE.
+Use a trusted local network: the collaboration connection is not encrypted.
 
-These builds use the version in `package.json` (currently `0.1.0`); all platforms
-share that version. To set a new version, run
-`npm version 0.1.1 --no-git-tag-version` and commit both package files before building.
+### MCP
 
-Mac builds are ad-hoc signed and not notarized. On first launch, macOS may require
-**System Settings → Privacy & Security → Open Anyway**. Windows builds are unsigned.
-The workflow retains downloads for 30 days and does not publish a GitHub Release.
-The separate **Desktop verification** workflow runs the full release checks.
+ShowMe has a local MCP server. In **Settings → MCP · Experimental**, enable it
+and copy the configuration for your client. Node.js 24 or 26 is required.
 
-## Collaboration
+Agents can inspect the open presentation, measure text and preview slides. Turn
+on **Allow agent editing** to let them create slides, import assets, apply effects
+and save or package through the editor. Agent edits have separate undo history.
+Both switches are off by default. Guest editing in collaboration is not supported.
 
-LAN collaboration is experimental. It is intended for trusted local networks and the connection is not encrypted.
+[MCP setup and supported operations](docs/mcp/LOCAL_SETUP.md) has the details.
 
-Collaboration synchronizes presentation edits, not filesystem contents. Sync the complete ShowMe root, including `ShowMe Library/` and every `.sme` presentation that uses it, for example with Syncthing. Each computer selects its local copy of that same root; absolute paths can differ. Keep native presentations anywhere below the root so Library cleanup scans the complete set. Missing media is shown as a placeholder and updates when the asset becomes available locally.
+## Development and license
 
-## Local MCP integration
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and contributions,
+[tests/README.md](tests/README.md) for local checks, and
+[docs/README.md](docs/README.md) for the rest of the documentation.
+[SECURITY.md](SECURITY.md) covers security reporting;
+[release readiness](docs/PUBLIC_RELEASE_READINESS.md) tracks outstanding work.
 
-ShowMe includes an experimental local MCP server for agents running on your computer.
-Open **Settings → MCP · Experimental**, enable MCP, then use **Copy for Codex (TOML)**,
-**Copy for MCP clients (JSON)** or **Copy for VS Code (JSON)** to connect a stdio
-MCP host. Each action copies a complete server entry for that format. Node.js 24 or 26
-is required; restart or reconnect the host after configuration changes.
-
-Server 1.10 exposes eight tools: `showme.workspace`, `showme.context`,
-`showme.authoring`, `showme.inspect`, `showme.measure_text`, `showme.apply`,
-`showme.deliver` and `showme.preview`. Agents can inspect accepted unsaved state,
-measure text with production fonts, capture sampled production slide PNGs and,
-with **Allow agent editing** enabled, create/open presentations, import managed assets,
-author content and save/package through the editor's existing document authority.
-
-The semantic authoring surface includes slides, layers, text and Text Styles,
-shapes, Frames, hierarchy, alignment/distribution, managed image/SVG/video assets,
-media crop/frame controls, transitions, deck CSS, Effects, Motion and Presence.
-Persistent geometry stays parent-local, and previews use ShowMe's production renderer.
-Media insertion accepts existing ShowMe-managed asset IDs, rather than file paths
-or raw bytes. `showme.workspace` can import files through native pickers or supplied
-paths inside the user-selected ShowMe root. Imports use production raster/SVG/video
-preparation and report partial results when interrupted.
-
-Edits use a separate Agent history so human Ctrl+Z remains independent. Both MCP and
-agent editing are off by default. Editing currently requires a locally owned document;
-collaboration guest writes and arbitrary filesystem access remain outside the MCP boundary.
-ShowMe does not connect to external MCP services.
-
-Protocol discovery contains static capabilities; context reports live state. Selected
-operation schemas remain exact, and full server-side validation still runs behind the
-compact advertised apply schema. Measured schema/response byte reductions do not
-establish model-token savings; fresh-host token and cache behavior remain unverified.
-
-See [local MCP setup and supported operations](docs/mcp/LOCAL_SETUP.md) for connection,
-retry and recovery instructions, [the authoring capability matrix](docs/mcp/AUTHORING_CAPABILITY_MATRIX.md)
-for editor parity, and [MCP development status](docs/mcp/README.md) for implementation
-details and pending evaluation.
-
-## Development
-
-[CONTRIBUTING.md](CONTRIBUTING.md) covers setup, bug reports and contributions.
-[SECURITY.md](SECURITY.md) describes security reporting and trust boundaries.
-[Release readiness](docs/PUBLIC_RELEASE_READINESS.md) records the release assessment
-and outstanding work. [Documentation](docs/README.md) separates current entry points
-from engineering records.
-
-[AGENTS.md](AGENTS.md) describes the development workflow.
-[tests/README.md](tests/README.md) describes the test groups and how to run them.
-[Are we slow yet?](areweslowyet.md) tracks audience rendering benchmarks by commit.
-
-## License
-
-[AGPL-3.0-or-later](LICENSE).
+ShowMe is licensed under [AGPL-3.0-or-later](LICENSE). Third-party example photos
+have their own terms, listed with the [example credits](examples/README.md).
