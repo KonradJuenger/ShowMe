@@ -1143,7 +1143,7 @@
     "runtime": "electron",
     "created": "2026-10-25",
     "lastReviewed": "2026-10-26",
-    "reason": "Native default SVG and none setting persistence, portable managed-font outlines, canonical text/source preservation, offline playback without fonts, progress popup and completion/cancel/write-failure cleanup"
+    "reason": "Native default None and explicit SVG setting persistence, portable managed-font outlines, canonical text/source preservation, offline playback without fonts, progress popup and completion/cancel/write-failure cleanup"
   },
   {
     "id": "html-export-text-outlines",
@@ -1187,6 +1187,17 @@
     "runtime": "electron",
     "created": "2026-10-26",
     "lastReviewed": "2026-10-26",
-    "reason": "Shared None/SVG/Font file settings drive both HTML and SMP, native license reminder/cancel, live generated text offline with full font bytes, SMP binary fonts and SVG fallback, source revision preservation and temporary cleanup"
+    "reason": "Shared None/SVG/Font file settings drive both HTML and SMP, native license reminder/cancel, live generated text offline with full font bytes, SMP binary fonts and SVG fallback, source revision preservation and temporary cleanup; CSS-only family regular/bold-italic files pass the actual HTML/SMP resolver and the 700 italic face renders offline"
+  },
+  {
+    "id": "persistence-css-export-fonts",
+    "path": "tests/feature/persistence/css-export-fonts.test.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-26",
+    "lastReviewed": "2026-10-26",
+    "reason": "Real regular/bold-italic font files traverse CSS family requests, native export font resolution, font-family serialization and HTML selection; SMP includes deck/template Effect/text-JS CSS-only families and document-owned variants after reopening"
   }
 ]

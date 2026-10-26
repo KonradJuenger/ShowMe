@@ -56,7 +56,7 @@ test("native SVG font export preserves static text without font files and report
     await readyEditor(editor);
     expect(
       await editor.evaluate(() => window.desktop!.getExportFontEmbedding!()),
-    ).toBe("svg");
+    ).toBe("none");
     await editor
       .getByRole("button", { name: "Presentation menu", exact: true })
       .click();
@@ -64,7 +64,7 @@ test("native SVG font export preserves static text without font files and report
     const select = editor.getByRole("combobox", {
       name: "Export font embedding",
     });
-    await expect(select).toHaveValue("svg");
+    await expect(select).toHaveValue("none");
     await select.selectOption("none");
     await expect
       .poll(() =>

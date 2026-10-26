@@ -31,6 +31,10 @@ import {
 } from "../../src/components/compositionPlan";
 import { nativeOpacityPlan } from "../../src/components/nativeOpacity";
 import { getPresentationSlideIds } from "../../src/core/presentationSequence";
+import {
+  collectExportFontRequests,
+  cssFontReferences,
+} from "../../src/export/fontUsage";
 import { filterMotion } from "../../src/core/motion";
 
 export interface HtmlAssetSource {
@@ -180,89 +184,6 @@ function externalCssWarnings(document: ExportDocument, slideIds: Set<string>) {
   return warnings;
 }
 
-type CssFontReference = {
-  family: string;
-  slideId: string;
-  elementId?: string;
-};
-
-const genericCssFonts = new Set([
-  "serif",
-  "sans-serif",
-  "monospace",
-  "cursive",
-  "fantasy",
-  "system-ui",
-  "ui-serif",
-  "ui-sans-serif",
-  "ui-monospace",
-  "ui-rounded",
-  "emoji",
-  "math",
-  "fangsong",
-  "inherit",
-  "initial",
-  "unset",
-  "revert",
-  "revert-layer",
-]);
-
-function fontFamiliesFromCss(source: string | undefined) {
-  if (!source) return [];
-  const families: string[] = [];
-  for (const match of source.matchAll(/font-family\s*:\s*([^;{}]+)/gi)) {
-    for (const raw of match[1].split(",")) {
-      const family = raw
-        .replace(/!important\s*$/i, "")
-        .trim()
-        .replace(/^(['"])(.*)\1$/, "$2")
-        .trim();
-      if (
-        family &&
-        !family.includes("var(") &&
-        !genericCssFonts.has(family.toLowerCase())
-      )
-        families.push(family);
-    }
-  }
-  return families;
-}
-
-function cssFontReferences(
-  document: ExportDocument,
-  slideIds: Set<string>,
-): CssFontReference[] {
-  const references: CssFontReference[] = [];
-  const firstSlide =
-    document.deck.slideIds.find((id) => slideIds.has(id)) ?? "unknown";
-  for (const family of fontFamiliesFromCss(document.deck.stylesheet))
-    references.push({ family, slideId: firstSlide });
-  for (const slide of document.slides) {
-    if (!slideIds.has(slide.id)) continue;
-    const resources = slide.effectResources ?? {};
-    for (const element of visibleElements(document, slide)) {
-      for (const instance of element.effects ?? []) {
-        if (!instance.enabled) continue;
-        const effect = resources[instance.resourceId];
-        if (!effect) continue;
-        const source =
-          effect.kind === "css"
-            ? effect.source
-            : effect.kind === "text-js"
-              ? effect.styleSource
-              : undefined;
-        for (const family of fontFamiliesFromCss(source))
-          references.push({
-            family,
-            slideId: slide.id,
-            elementId: element.id,
-          });
-      }
-    }
-  }
-  return references;
-}
-
 function sceneTextureWarnings(document: ExportDocument, slideIds: Set<string>) {
   const warnings: ExportWarning[] = [];
   for (const slide of document.slides) {
@@ -355,7 +276,15 @@ function selectFonts(
       nodes: visibleLayerNodes(document, slide),
     }));
   const usages = collectUsedFontUsages(visibleSlides, document.deck);
-  const cssReferences = cssFontReferences(document, slideIds);
+  const cssReferences = cssFontReferences(
+    document.deck,
+    document.slides
+      .filter((slide) => slideIds.has(slide.id))
+      .map((slide) => ({
+        ...slide,
+        nodes: visibleLayerNodes(document, slide),
+      })),
+  );
   const selected: HtmlEmbeddedFontFamily[] = [];
   const bundled: FontUsage[] = [];
   for (const family of families) {
@@ -445,25 +374,15 @@ function selectFonts(
 
 export function htmlFontUsages(document: ExportDocument) {
   const ids = new Set(getPresentationSlideIds(document.deck));
-  const usages = collectUsedFontUsages(
+  return collectExportFontRequests(
+    document.deck,
     document.slides
       .filter((slide) => ids.has(slide.id))
       .map((slide) => ({
         ...slide,
         nodes: visibleLayerNodes(document, slide),
       })),
-    document.deck,
   );
-  for (const reference of cssFontReferences(document, ids))
-    if (
-      !usages.some(
-        (usage) =>
-          usage.family.toLocaleLowerCase() ===
-          reference.family.toLocaleLowerCase(),
-      )
-    )
-      usages.push({ family: reference.family, weight: 400, italic: false });
-  return usages;
 }
 
 async function runtimeAssets(runtimeDirectory: string) {
