@@ -4,6 +4,98 @@ import os from "node:os";
 import path from "node:path";
 import { readyEditor } from "../../helpers/startup";
 
+test("desktop presenter reads deck-wide notes through session-scoped projections", async () => {
+  const folder = await mkdtemp(
+    path.join(os.tmpdir(), "showme-presenter-notes-"),
+  );
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined,
+    ),
+  ) as Record<string, string>;
+  Object.assign(env, {
+    SHOWME_TESTING: "1",
+    SHOWME_TEST_ROOT_SELECTION: folder,
+  });
+  const app = await electron.launch({
+    args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`],
+    env,
+  });
+  try {
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({
+        response: 1,
+        checkboxChecked: false,
+      });
+    });
+    const editor = await app.firstWindow();
+    await readyEditor(editor);
+    await editor
+      .getByRole("button", { name: "Add slide", exact: true })
+      .click();
+    await editor.evaluate(async () => {
+      const desktop = window.desktop!;
+      const documentId = document
+        .querySelector("[data-editor]")!
+        .getAttribute("data-document-id")!;
+      const projection = await desktop.documentProjection!(documentId);
+      const slideId = projection.deck.slideIds[1];
+      const leases = await desktop.documentAcquireLeases!(documentId, [
+        { kind: "notes", slideId },
+      ]);
+      if (leases.denied) throw new Error("Notes lease denied");
+      await desktop.documentCommit!(documentId, {
+        documentId,
+        transactionId: crypto.randomUUID(),
+        epoch: projection.epoch,
+        baseRevision: projection.revision,
+        leaseTokens: leases.grants.map((grant) => grant.token),
+        operations: [
+          {
+            type: "slide.notes.set",
+            slideId,
+            notes: "Notes on another slide.",
+          },
+        ],
+      });
+      await desktop.documentReleaseLeases!(
+        documentId,
+        leases.grants.map((grant) => grant.token),
+      );
+    });
+    await editor.getByRole("button", { name: "Present", exact: true }).click();
+    await expect
+      .poll(() =>
+        app.windows().some((page) => page.url().includes("present=console")),
+      )
+      .toBe(true);
+    const presenter = app
+      .windows()
+      .find((page) => page.url().includes("present=console"))!;
+    await presenter.getByLabel("Jump to slide").selectOption("0");
+    await expect(
+      presenter.getByRole("region", { name: "Presenter notes" }),
+    ).toBeVisible();
+    await expect(presenter.locator(".presenter-notes")).toHaveText(
+      "No notes for this slide.",
+    );
+    const available = await presenter.evaluate(async () => {
+      const state = (await window.desktop!.getPresentation())!;
+      return (
+        await window.desktop!.documentProjection!(
+          state.deckId,
+          state.slideIds[0],
+        )
+      ).hasSpeakerNotes;
+    });
+    expect(available).toBe(true);
+    await expect(presenter.getByRole("alert")).toHaveCount(0);
+  } finally {
+    await app.close().catch(() => {});
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 test("desktop IPC prepares the selected audience resolution and rejects screen reassignment during presentation", async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "showme-screens-"));
   const env = Object.fromEntries(
@@ -11,7 +103,10 @@ test("desktop IPC prepares the selected audience resolution and rejects screen r
       ([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined,
     ),
   ) as Record<string, string>;
-  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder });
+  Object.assign(env, {
+    SHOWME_TESTING: "1",
+    SHOWME_TEST_ROOT_SELECTION: folder,
+  });
   const app = await electron.launch({
     args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`],
     env,
@@ -83,7 +178,9 @@ test("desktop IPC prepares the selected audience resolution and rejects screen r
       try {
         await window.desktop!.prepareAudience!(state!.deckId);
         return null;
-      } catch (error) { return String(error); }
+      } catch (error) {
+        return String(error);
+      }
     });
     expect(denied).toBeTruthy();
     await expect(

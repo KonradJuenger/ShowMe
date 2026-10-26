@@ -1,7 +1,7 @@
 import { editTextStyleDeck, editTextStylePage } from "./textStyles";
 import { templateEditorPage } from "./templates";
 import type { EditorSnapshot } from "./editorCommands";
-import { deckSchema, type Deck, type Slide } from "./document";
+import { deckSchema, type Deck, type Slide, type PresentationDocument } from "./document";
 import {
   applyDocumentOperationToSlide,
   syncLayerRoots,
@@ -14,6 +14,12 @@ export interface DocumentProjection extends EditorSnapshot {
   epoch: string;
   revision: number;
   savedRevision: number;
+  /** Derived from all document slides, without loading them into the presenter. */
+  hasSpeakerNotes?: boolean;
+}
+
+export function documentHasSpeakerNotes(document: PresentationDocument) {
+  return document.deck.slideIds.some(id => Boolean(document.slides[id]?.notes.trim()));
 }
 
 function insertAfterId(

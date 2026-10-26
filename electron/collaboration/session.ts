@@ -1,4 +1,5 @@
 import { editablePage } from "../../src/core/templates";
+import { documentHasSpeakerNotes } from "../../src/core/documentProjection";
 import net, { type Socket } from "node:net";
 import { listenLines, write } from "./transport";
 import { randomUUID } from "node:crypto";
@@ -181,6 +182,7 @@ export class CollaborationService {
       epoch: this.replica.epoch,
       revision: this.replica.revision,
       savedRevision: this.replica.revision,
+      hasSpeakerNotes: documentHasSpeakerNotes(document),
       deck: structuredClone(document.deck),
       slide: structuredClone(slide),
       templates: structuredClone(document.templates),

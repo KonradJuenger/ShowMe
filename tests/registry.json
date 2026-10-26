@@ -447,8 +447,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-09",
-    "reason": "Navigation and blackout preserve position"
+    "lastReviewed": "2026-10-26",
+    "reason": "Navigation and blackout preserve position; speaker elapsed timer waits for explicit Advance, including Motion steps, remains independent of Effect clocks, and resets only for a new session"
   },
   {
     "id": "media-package",
@@ -777,8 +777,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Screen-map dragging, keyboard assignment, default reset, focus and setup lock; presenter resizing reuses decoded rasters while audience sampling upgrades exactly with display resolution, independent of presenter raster size; real browser popup shutdown restores editor preparation resolution"
+    "lastReviewed": "2026-10-26",
+    "reason": "Screen-map dragging, keyboard assignment, default reset, focus and setup lock; presenter resizing reuses decoded rasters while audience sampling upgrades exactly with display resolution, independent of presenter raster size; real browser popup shutdown restores editor preparation resolution; speaker notes fill their panel, resize by pointer and keyboard, collapse/restore their previous size and scroll without presentation navigation; clicking either slide preview follows Motion steps and keyboard activation advances exactly once; deck-wide notes availability defaults empty decks to collapsed, treats whitespace as empty, and preserves manual layout choices"
   },
   {
     "id": "presenter-display-setup-electron",
@@ -788,8 +788,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-25",
-    "reason": "Native screen inventory and IPC, selected audience cache profile and assignment lock through start/end, measured audience pixels and audience-only preparation authorization"
+    "lastReviewed": "2026-10-26",
+    "reason": "Native screen inventory and IPC, selected audience cache profile and assignment lock through start/end, measured audience pixels and audience-only preparation authorization; desktop console reads deck-wide notes through authorized session-scoped projections"
   },
   {
     "id": "editor-operation-work",
@@ -1199,5 +1199,16 @@
     "created": "2026-10-26",
     "lastReviewed": "2026-10-26",
     "reason": "Real regular/bold-italic font files traverse CSS family requests, native export font resolution, font-family serialization and HTML selection; SMP includes deck/template Effect/text-JS CSS-only families and document-owned variants after reopening"
+  },
+  {
+    "id": "presenter-view-model",
+    "path": "tests/feature/presenter/view-model.test.ts",
+    "area": "presenter",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-13",
+    "lastReviewed": "2026-10-26",
+    "reason": "Presenter readiness, explicit Advance semantics, Motion stage boundaries, Previous eligibility, pause/black/preparing priority and no-visible-slide handling; static current-step endpoint snapshots complete delayed entrances, preserve future click gates and freeze Effect clocks without changing audience transport; elapsed minutes round to nearest quarter with whole-minute rollover"
   }
 ]
