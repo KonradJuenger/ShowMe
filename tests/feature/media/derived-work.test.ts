@@ -8,6 +8,132 @@ import { createBasicShape } from "../../../src/core/elementFactory";
 import { createMediaElement } from "../../../src/core/media";
 import { ImagePreparationCoordinator } from "../../../src/core/imagePreparationCoordinator";
 import { DocumentRuntime } from "../../../src/core/documentRuntime";
+import { ImageWorkQueue, imageWorkerConcurrency } from "../../../src/core/imageWorkQueue";
+import { nativeImageConcurrency } from "../../../electron/imageProcessorPool";
+
+it("native image admission stays below libuv capacity and lets foreground work overtake waiting background jobs", async () => {
+  expect(nativeImageConcurrency).toBe(2);
+  const queue = new ImageWorkQueue(nativeImageConcurrency);
+  const releases: Array<() => void> = [], order: string[] = [];
+  const active = Array.from({ length: 2 }, () => queue.run(1, () => new Promise<void>(resolve => { releases.push(resolve); })));
+  await vi.waitFor(() => expect(releases).toHaveLength(2));
+  const background = queue.run(1, async () => { order.push("background"); });
+  const foreground = queue.run(1, async () => { order.push("foreground"); }, { priority: 3 });
+  try {
+    releases.shift()!();
+    await foreground;
+    expect(order[0]).toBe("foreground");
+  } finally {
+    for (const release of releases) release();
+    await Promise.all([...active, foreground, background]);
+  }
+});
+
+it("image worker sizing reserves CPU headroom and bounds admitted jobs with a safe minimum and fallback", async () => {
+  expect(imageWorkerConcurrency(20)).toBe(15);
+  expect(imageWorkerConcurrency(8)).toBe(6);
+  expect(imageWorkerConcurrency(4)).toBe(2);
+  expect(imageWorkerConcurrency(2)).toBe(1);
+  expect(imageWorkerConcurrency(1)).toBe(1);
+  expect(imageWorkerConcurrency(undefined)).toBe(2);
+  expect(imageWorkerConcurrency(NaN)).toBe(2);
+  expect(imageWorkerConcurrency(Infinity)).toBe(2);
+  const queue = new ImageWorkQueue(imageWorkerConcurrency(20));
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  let started = 0, active = 0, peak = 0;
+  const jobs = Array.from({ length: 16 }, () => queue.run(1, async () => {
+    started++;
+    peak = Math.max(peak, ++active);
+    await hold;
+    active--;
+  }));
+  try {
+    await vi.waitFor(() => expect(started).toBe(15));
+  } finally {
+    release();
+    await Promise.all(jobs);
+  }
+  expect(peak).toBe(15);
+});
+
+it("visible image demand overtakes queued background work without exceeding the memory budget", async () => {
+  const queue = new ImageWorkQueue(imageWorkerConcurrency(20));
+  const order: string[] = [];
+  let finishFirst!: () => void;
+  let finishVisible!: () => void;
+  const first = queue.run(
+    512 * 1024 * 1024,
+    () =>
+      new Promise<void>((resolve) => {
+        order.push("first");
+        finishFirst = resolve;
+      }),
+  );
+  await vi.waitFor(() => expect(order).toEqual(["first"]));
+  const background = queue.run(1, async () => {
+    order.push("background");
+  });
+  const visible = queue.run(
+    512 * 1024 * 1024,
+    () =>
+      new Promise<void>((resolve) => {
+        order.push("visible");
+        finishVisible = resolve;
+      }),
+    { priority: 2, key: "visible" },
+  );
+  finishFirst();
+  await vi.waitFor(() => expect(order).toEqual(["first", "visible"]));
+  finishVisible();
+  await Promise.all([first, background, visible]);
+  expect(order).toEqual(["first", "visible", "background"]);
+});
+
+it("foreground requests promote an already queued image and preserve FIFO among equal priorities", async () => {
+  const queue = new ImageWorkQueue();
+  const order: string[] = [];
+  let finish!: () => void;
+  const active = queue.run(
+    512 * 1024 * 1024,
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  const older = queue.run(1, async () => {
+    order.push("older");
+  });
+  const promoted = queue.run(
+    1,
+    async () => {
+      order.push("promoted");
+    },
+    { priority: 0, key: "image" },
+  );
+  const newer = queue.run(1, async () => {
+    order.push("newer");
+  });
+  queue.setPriorities(new Map([["image", 2]]));
+  finish();
+  await Promise.all([active, older, promoted, newer]);
+  expect(order).toEqual(["promoted", "older", "newer"]);
+});
+
+it("leaving a slide demotes its queued images so later slides cannot accumulate a foreground backlog", async () => {
+  const queue = new ImageWorkQueue();
+  const order: string[] = [];
+  let finish!: () => void;
+  const active = queue.run(512 * 1024 * 1024, () => new Promise<void>((resolve) => { finish = resolve; }));
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  const old = queue.run(1, async () => { order.push("old slide"); }, { priority: 2, key: "old" });
+  const current = queue.run(1, async () => { order.push("current slide"); }, { priority: 2, key: "current" });
+  queue.setPriorities(new Map([["old", 0], ["current", 2]]));
+  finish();
+  await Promise.all([active, old, current]);
+  expect(order).toEqual(["current slide", "old slide"]);
+});
 
 it("plain rectangle movement omits media and dependencies while unknown operations invalidate broadly", () => {
   const document = newPresentationDocument("Impact");
@@ -72,7 +198,7 @@ it("plain rectangle movement omits media and dependencies while unknown operatio
   });
 });
 
-it("100-slide image preparation loads bounded demand and replans only affected demanded slides", async () => {
+it("100-slide image preparation completes the whole deck, deduplicates shared pixels and replans only affected slides", async () => {
   const document = newPresentationDocument("Demand"),
     base = document.slides[document.deck.slideIds[0]];
   const image = createMediaElement("image", {
@@ -132,14 +258,37 @@ it("100-slide image preparation loads bounded demand and replans only affected d
   await vi.waitFor(() =>
     expect(coordinator.status(document.documentId)?.state).toBe("ready"),
   );
-  expect(loads).toEqual([["s0", "s1"]]);
+  expect(loads).toEqual([document.deck.slideIds]);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(coordinator.image(document.documentId, "s99", image.id)).not.toBeNull();
   document.slides.s1.nodes[0].children[0].frame.width += 100;
   revision++;
   await coordinator.reconcile(document.documentId, false, ["s1"]);
   await vi.waitFor(() =>
     expect(coordinator.status(document.documentId)?.state).toBe("ready"),
   );
-  expect(loads).toEqual([["s0", "s1"], ["s1"]]);
+  expect(loads).toEqual([document.deck.slideIds, ["s1"]]);
+  const prepared = prepare.mock.calls.length;
+  coordinator.prioritize(document.documentId, "s1");
+  await vi.waitFor(() => {
+    expect(coordinator.status(document.documentId)?.state).toBe("ready");
+    expect(loads).toEqual([document.deck.slideIds, ["s1"]]);
+  });
+  // The new slide shares the existing variant. Navigation must retain both
+  // ready pixels and accepted requirement plans for overlapping slides.
+  expect(prepare).toHaveBeenCalledTimes(prepared);
+  expect(coordinator.image(document.documentId, "s2", image.id)).not.toBeNull();
+  coordinator.prioritize(document.documentId, "s0");
+  await vi.waitFor(() =>
+    expect(coordinator.status(document.documentId)?.total).toBe(2),
+  );
+  expect(prepare).toHaveBeenCalledTimes(prepared);
+  expect(loads).toEqual([document.deck.slideIds, ["s1"]]);
+  await coordinator.reconcile(document.documentId, true);
+  await vi.waitFor(() =>
+    expect(coordinator.status(document.documentId)?.state).toBe("ready"),
+  );
+  expect(prepare.mock.calls.length).toBeGreaterThan(prepared);
   const work = prepare.mock.calls.length;
   coordinator.advanceRevision(document.documentId, ++revision);
   await coordinator.reconcile(document.documentId);

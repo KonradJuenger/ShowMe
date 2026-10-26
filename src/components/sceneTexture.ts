@@ -1,0 +1,70 @@
+import type { Deck, Slide } from "../core/document";
+import type { Element } from "../core/element";
+import type { EffectResources } from "../core/effects";
+import {
+  createCapturedSceneTextureProvider,
+  capturedSceneTextureDiagnostics,
+  capturedSceneTextureTextureBytes,
+} from "./sceneTextureCapture";
+
+export type SceneTextureRequest =
+  | {
+      kind: "element";
+      elementId: string;
+      effectId: string;
+    }
+  | {
+      kind: "backdrop";
+      elementId: string;
+      effectId: string;
+    };
+
+export type SceneTextureSampling = {
+  width: number;
+  height: number;
+  logicalWidth: number;
+  logicalHeight: number;
+};
+
+/** Rendered scene pixels exposed without leaking the capture backend. */
+export interface SceneTexture {
+  readonly revision: number;
+  bind(gl: WebGL2RenderingContext): void;
+}
+
+export interface SceneTextureProvider {
+  prepare(sampling: SceneTextureSampling): void | Promise<void>;
+  acquire(sampling: SceneTextureSampling): SceneTexture | Promise<SceneTexture>;
+  invalidate(): void;
+  dispose(): void;
+}
+
+/** Renderer-owned capture context, created only for explicit pixel consumers.
+ * Consumers of SceneTexture never see raster/canvas/DOM-capture details. */
+export type SceneTextureContext = {
+  effectNode: HTMLElement;
+  owner: HTMLElement;
+  inputRoot: HTMLElement;
+  element: Element;
+  resources(): EffectResources;
+  scene?: () => { slide: Slide; deck: Deck };
+  refined: boolean;
+  flushEffect(node: HTMLElement): void | Promise<void>;
+  materializeEffect(node: HTMLElement): void;
+  invalidate(): void;
+};
+
+export function createSceneTextureProvider(
+  request: SceneTextureRequest,
+  context: SceneTextureContext,
+): SceneTextureProvider {
+  return createCapturedSceneTextureProvider(request, context);
+}
+
+export function sceneTextureTextureBytes() {
+  return capturedSceneTextureTextureBytes();
+}
+
+export function sceneTextureDiagnostics() {
+  return capturedSceneTextureDiagnostics();
+}

@@ -154,16 +154,14 @@ test("Motion sampling and backdrop inputs use the same transformed output detail
   );
 });
 
-test("shader allocation failure restores original content and context recreation repaints output", async ({
+test("shader allocation failure is explicit and context recreation repaints direct output", async ({
   page,
 }) => {
   await mount(page);
   const failed = await page.evaluate(() =>
     (window as unknown as SampleWindow).sampling.allocationFailure(),
   );
-  expect(failed.error).toContain("Cannot allocate");
-  expect(failed.hidden).toBe("hidden");
-  expect(failed.originalOpacity).not.toBe("0");
+  expect(failed.error).toContain("GPU bitmap presentation is unavailable");
   const recovered = await page.evaluate(() =>
     (window as unknown as SampleWindow).sampling.loseContext(),
   );
@@ -177,28 +175,49 @@ test("shader allocation failure restores original content and context recreation
   );
 });
 
-test("shader time alone reuses the source while unregistered subtree mutations mark it dirty", async ({ page }) => {
+test("shader time alone reuses the source while unregistered subtree mutations mark it dirty", async ({
+  page,
+}) => {
   await mount(page);
   const result = await page.evaluate(async () => {
-    const rasterPath = "/src/components/elementRaster.ts", runtimePath = "/src/components/effectRuntime.ts";
-    const { rasterSourceDiagnostics }: typeof import("../../../src/components/elementRaster") = await import(/* @vite-ignore */ rasterPath);
-    const { effectSurface }: typeof import("../../../src/components/effectRuntime") = await import(/* @vite-ignore */ runtimePath);
+    const rasterPath = "/src/components/sceneTexture.ts",
+      runtimePath = "/src/components/effectRuntime.ts";
+    const {
+      sceneTextureDiagnostics,
+    }: typeof import("../../../src/components/sceneTexture") = await import(
+      /* @vite-ignore */ rasterPath
+    );
+    const {
+      effectSurface,
+    }: typeof import("../../../src/components/effectRuntime") = await import(
+      /* @vite-ignore */ runtimePath
+    );
     const surface = document.querySelector<HTMLElement>("[data-effect-id]")!;
     await document.fonts.ready;
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
     await effectSurface(surface)!.flush();
-    const before = rasterSourceDiagnostics().scans;
+    const before = sceneTextureDiagnostics().captures;
     for (let time = 1; time <= 10; time++) {
       effectSurface(surface)!.setTiming({ progress: 0.5, time, duration: 10 });
       await effectSurface(surface)!.flush();
     }
-    const afterTime = rasterSourceDiagnostics().scans;
-    surface.querySelector("[data-effect-source]")!.append(document.createTextNode("custom source mutation"));
-    await new Promise<void>(resolve => queueMicrotask(resolve));
+    const afterTime = sceneTextureDiagnostics().captures;
+    surface
+      .querySelector("[data-effect-source]")!
+      .append(document.createTextNode("custom source mutation"));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     await effectSurface(surface)!.flush();
-    return { before, afterTime, afterMutation: rasterSourceDiagnostics().scans };
+    return {
+      before,
+      afterTime,
+      afterMutation: sceneTextureDiagnostics().captures,
+    };
   });
   expect(result.afterTime).toBe(result.before);
   expect(result.afterMutation).toBeGreaterThan(result.afterTime);
-  await page.evaluate(() => (window as unknown as SampleWindow).sampling.dispose());
+  await page.evaluate(() =>
+    (window as unknown as SampleWindow).sampling.dispose(),
+  );
 });

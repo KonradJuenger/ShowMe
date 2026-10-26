@@ -105,6 +105,52 @@ export function extractSingleGlslFence(value: string) {
   return fences[0][2].replace(/\r?\n$/, "");
 }
 
+/** Runtime facts shared by the editor prompt and bounded MCP guides. */
+export function effectRuntimeContract(definition: EffectDefinition) {
+  const shader = definition.kind === "fragment-glsl";
+  return {
+    environment: shader
+      ? shaderPromptEnvironment(effectAffects(definition))
+      : cssTextPromptEnvironment(effectAffects(definition)),
+    timing: {
+      inputs: shader
+        ? "uniform float u_t;\nuniform float u_p;"
+        : "CSS --t/--p; text-JS t/p.",
+      time: "t is elapsed seconds relative to Start, frozen by Stop and multiplied by Speed. Presentation start anchors to playback; Slide start resets on activation/re-entry; Click start anchors to the click plus offset; before that origin t stays 0 and the Effect is bypassed. Speed scales delivered t only, never the shared clocks or interval duration. Use native clocks, not timers/render loops.",
+      progress:
+        "NORMALIZED EFFECT INTERVAL: p follows the unscaled Start-to-Stop After duration, with easing. Before any Start p=0 and the Effect is bypassed. After duration p=1; Stop None supplies p=1 once Start occurs. For Next click, Click N and Slide end, p stays 0 while waiting and jumps to 1 at that event. Do not derive p from time or hard-code the interval duration.",
+      lifecycle:
+        "Start activates this Effect and defines its time origin, Stop completes/freezes its interval, Speed scales delivered t only. After Stop the Effect stays applied, not hidden. Presence separately controls Element lifecycle. Delays use the native click timeline; there are no separate click-position or delay fields in the Effect setup.",
+      reference: shader
+        ? "Optional uniforms: float u_presentationTime, u_slideTime, u_stepTime, u_stepIndex. All clocks are unscaled seconds; stepIndex is 0 at slide entry, then the reached click index (including empty clicks), resetting on activation. stepTime measures time since the current step. Declare each needed uniform once with its exact type."
+        : "CSS --t/--p and JS t/p are Effect clocks. Unscaled reference clocks: CSS --presentationTime, --slideTime, --stepTime and --stepIndex; JS presentationTime, slideTime, stepTime, stepIndex. stepIndex=0 at entry then the reached click index, resetting on activation; stepTime is seconds since that step. Use steps for visuals, never navigation/scheduling.",
+    },
+    ...(shader ? { slideContext: shaderSlideContext } : {}),
+    parameters: shader
+      ? "Top-level custom uniform float name becomes a numeric control. Annotate defaults/ranges: uniform float strength; // @param 12 [0, 60]. Bounds are optional; unannotated floats default to 0. Built-ins are reserved. Preserve existing keys; encode parameter metadata in source, not a separate list."
+      : "Declare parameters explicitly as number, boolean or string with stable keys, labels and typed defaults; optional bounds apply to numbers. Only numbers are Motion-animatable. JS receives parameters.key; CSS receives --key. Strings are limited to 4096 characters. Preserve existing keys/types/ranges; timing names are reserved.",
+    restrictions: effectRuntimeRestrictions(shader),
+  };
+}
+
+const shaderSlideContext = `uniform float u_slideIndex;
+uniform float u_slideCount;
+uniform float u_slideSeed;
+uniform float u_previousSlideIndex;
+uniform float u_previousSlideSeed;
+
+Slide index is zero-based; seeds are deterministic 0..1 values. Previous context follows the actual prior activation, including backward navigation and jumps; on first entry previous=current. Use the seeds to derive deterministic per-slide configurations and u_slideTime to blend from previous to current. Do not derive slide identity from elapsed time or retain cross-slide state.`;
+
+function effectRuntimeRestrictions(shader: boolean) {
+  return (
+    "Self-contained code only: no files, network, imports, libraries, external textures, shader includes or additional render passes. " +
+    (shader
+      ? "No JavaScript or WebGL setup; declare built-ins once with their exact types. "
+      : "No DOM, network/fetch, Electron bridge, files, storage or timers; text functions cannot manipulate Elements. ") +
+    "Keep work bounded at different sizes; preserve transparency unless intentionally changing opacity."
+  );
+}
+
 /** Export the complete authoring environment without requiring repository access. */
 export function buildEffectAuthoringPrompt(
   definition: EffectDefinition,
@@ -133,8 +179,6 @@ export function buildEffectAuthoringPrompt(
     text: "Text",
   };
   const speed = definition.speed ?? 1;
-  const t = shader ? "u_t" : "t (JS) / --t (CSS)",
-    p = shader ? "u_p" : "p (JS) / --p (CSS)";
   const explanation = {
     pixels:
       "This fragment shader receives rendered pixels of one Element before this Effect as a texture. Transform those pixels and return a new RGBA color for every output pixel.",
@@ -234,38 +278,16 @@ ${shader ? shaderPromptEnvironment(affects) : cssTextPromptEnvironment(affects)}
 TIMING MODEL
 
 ${shader ? "uniform float u_t;\nuniform float u_p;" : "CSS custom properties: --t, --p. Optional JS inputs: t, p."}
-
-${t} = EFFECT TIME
-Elapsed Effect seconds relative to Start, frozen by Stop, multiplied by Speed. Start Presentation start anchors t=0 at presentation playback start, even if the Effect first appears on a later slide. Start Slide start anchors t=0 at each slide activation/re-entry. Start Click anchors t=0 at the configured timeline click plus its Start offset; before that origin t stays 0 and this Effect is bypassed.
-Current speed ${speed}x means one elapsed Effect second advances time by ${speed} seconds. Speed scales this Effect's delivered value, never the shared presentation clock. Consume the supplied value; do not create timers or render loops.
-Explicit advanced reference clocks u_presentationTime, u_slideTime and u_stepTime (JS presentationTime, slideTime, stepTime; CSS --presentationTime, --slideTime, --stepTime) remain unscaled and independent. stepTime measures seconds since entering the current logical slide step (including Slide start). Use them only when the requested visual intentionally needs a global/reference clock independent of normal Effect time.
-${shader ? "uniform float u_stepIndex; pairs with u_stepTime." : "JS stepIndex pairs with stepTime; CSS --stepIndex pairs with --stepTime."}
-stepIndex is read-only integer presentation context: 0 = Slide start, 1 = Click 1, 2 = Click 2, including empty clicks. It resets on slide activation/re-entry. Inserting/removing earlier Clicks changes later numeric indexes; it is not a stable semantic event ID. Use stepIndex/stepTime to derive visuals reacting to multiple steps, never presentation navigation or scheduling. stepIndex alone is event-driven and does not require continuous redraw. Start bypass still applies. For a multi-state text transition use Start Slide / Stop None, stepIndex to select authored string states and stepTime / a duration parameter to derive the transition; t/p still describe one Effect interval.
-${shader ? `SLIDE CONTEXT
-
-uniform float u_slideIndex;
-uniform float u_slideCount;
-uniform float u_slideSeed;
-uniform float u_previousSlideIndex;
-uniform float u_previousSlideSeed;
-
-These values are read-only presentation context. slideIndex is the zero-based index in the visible presentation sequence and slideCount is its size. slideSeed is a deterministic 0..1 value derived from the current slide identity. previousSlideIndex / previousSlideSeed describe the slide activation the presenter actually came from, including backward navigation and jumps. On initial presentation entry they equal the current slide, so an Effect does not invent a transition from an unrelated state.
-Use the seeds to derive deterministic per-slide configurations and u_slideTime to blend from the previous configuration toward the current one. Do not store cross-slide state inside the shader and do not derive slide identity from elapsed presentation time.` : ""}
-Do not normalize time to 0..1 unless intentionally creating a repeating cycle. For example, ${shader ? "sin(u_t * 2.0)" : "Math.sin(t * 2) in JS"} is continuous oscillation; ${shader ? "fract(u_t / 4.0)" : "(t % 4) / 4 in JS"} is a repeating four-second cycle.
-
-${p} = NORMALIZED EFFECT INTERVAL
-Normalized progress 0..1 is automatically derived from the same Start → Stop After-duration interval, with optional easing (linear by default). Before Start p=0; after the duration p=1. For Next click, Click N and Slide end, p stays 0 while waiting and jumps to 1 when the actual event is reached. Stop None supplies p=1 once Start occurs. Before any Start p=0 and the Effect is bypassed. Shortening or lengthening the block changes the interval duration. Speed scales only delivered t, never p or Stop duration. Do not derive p from time in Effect code and do not hard-code a transition duration.
-Use t for continuous procedural motion, Presence for Element enter/exit lifecycle, and numeric Effect parameters for independently animated visual controls. There is one interval, no independently timed progress phase. Stop freezes t while the Effect remains applied.
-
-TIME CONTROL
-Start activates this Effect and defines its time origin, Stop completes/freezes its interval, Speed scales delivered t only. Stop None is unbounded. Slide end freezes when the slide leaves. Next click and Click N freeze at the event's reached value. After duration freezes at the known duration measured after the Start offset. Start/Stop is available in the Effect Editor Timing section from creation and in the Effects sidepanel. Reusable defaults are saved with the Effect without deck-specific click IDs. Dragging its block in the Click Timeline changes the start click and delay; there are no separate click-position or delay fields in the Effect setup. Before Start this Effect is bypassed, preserving its incoming input and earlier Effects. After Stop it stays applied in its final/frozen state; stopping time does not hide or bypass it. Presence separately controls Element lifecycle. active remains the applied-state input, not a time gate. Normalized p follows the unscaled block interval; Speed scales t only. Event-based Stops (Next click, Click N, Slide end) use discrete completion p=0 while waiting and p=1 when reached, without interpolation or easing. Do not add p to time-only generators merely because their time is controlled.
+Current speed ${speed}x means one elapsed Effect second advances time by ${speed} seconds.
+${Object.values(effectRuntimeContract(definition).timing).join("\n\n")}
+${shader ? shaderSlideContext : ""}
+Use t for continuous motion and p for finite progress. Do not normalize time unless intentionally creating a repeating cycle.
 
 ${parameterGuidance}
 
 RUNTIME RESTRICTIONS
 
-The Effect must be self-contained. No external textures, files, network requests, shader includes, external resources, packages, imports, unsupported WebGL extensions or additional render passes. ${shader ? "No JavaScript or WebGL setup code. Declare built-in uniforms using the exact provided types, once; do not redefine their meaning or conflict with their names." : "No DOM, network/fetch, Electron bridge, files, storage, external resources or imports. The text function cannot manipulate Elements or start its own timers."}
-Avoid unnecessarily expensive loops and operations: an Effect may run continuously on large Elements. Behave sensibly at different sizes and aspect ratios. Preserve transparency unless the requested visual intentionally changes it. Use the public t/p inputs for time and interval progress.
+${effectRuntimeRestrictions(shader)}
 
 ${currentCode}
 
@@ -309,7 +331,7 @@ function cssTextPromptEnvironment(affects: EffectAffects) {
 
 SCOPED CSS
 
-Use :scope { ... } to style only this Effect's wrapper. Only :scope and @keyframes rules are supported; descendant/global selectors and other at-rules are unavailable. ShowMe privately scopes keyframe names. CSS animations are paused and sampled by finite progress, not autonomous browser playback; do not rely on CSS transitions or browser animation clocks.
+Use :scope { ... } to style only this Effect's wrapper. Only :scope, @keyframes and nested @supports rules are supported; selectors inside @supports must also be :scope. Descendant/global selectors and other at-rules are unavailable. ShowMe privately scopes keyframe names. CSS animations are paused and sampled by finite progress, not autonomous browser playback; do not rely on CSS transitions or browser animation clocks.
 --t exposes continuous seconds; --p exposes interval completion. Declared parameters become CSS custom properties named --key: numbers are numeric tokens, booleans are 1/0, and strings are escaped quoted CSS string tokens. Reference them with var(--key), using calc() when numeric values need units (for example calc(var(--strength) * 1px)). CSS does not use GLSL uniforms. A minimal identity style is :scope { }.
 
 ${

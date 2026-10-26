@@ -1,7 +1,6 @@
 import { EFFECT_SCHEDULE_VERSION } from "../core/motionModel";
 import { EffectTimeControls } from "./EffectTimeControls";
-import { createTextEffectRunner } from "./textEffectRunner";
-import { shaderProgram, compileEffectCss } from "./effectRuntime";
+import { assertEffectDefinitionValid } from "./effectValidation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -262,35 +261,12 @@ function EffectEditorDraft({
     setError("");
   }
   async function validateCode(parsed: EffectDefinition) {
-    if (parsed.kind === "fragment-glsl") shaderProgram(parsed.source);
-    if (parsed.kind === "css")
-      compileEffectCss(parsed.source, "studio-validation");
-    if (parsed.kind === "text-js") {
-      if (parsed.styleSource)
-        compileEffectCss(parsed.styleSource, "studio-validation");
-      const runner = createTextEffectRunner(parsed.source);
-      try {
-        await runner.render({
-          text:
-            element?.content?.type === "text"
-              ? element.content.text
-              : "SCRAMBLE REVEAL",
-          t: 0,
-          p: 0.5,
-          duration: 1,
-          slideTime: 0,
-          presentationTime: 0,
-          stepTime: 0,
-          stepIndex: 0,
-          active: true,
-          parameters: Object.fromEntries(
-            parsed.parameters.map((p) => [p.key, p.default]),
-          ),
-        });
-      } finally {
-        runner.dispose();
-      }
-    }
+    await assertEffectDefinitionValid(parsed, {
+      sampleText:
+        element?.content?.type === "text"
+          ? element.content.text
+          : "SCRAMBLE REVEAL",
+    });
   }
   useEffect(() => {
     let cancelled = false;

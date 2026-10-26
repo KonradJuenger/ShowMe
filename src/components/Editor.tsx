@@ -19,6 +19,7 @@ import {
 } from "react";
 import { findElement, getChildren, resolveEditableScope } from "../core/scene";
 import { isMediaContent } from "../core/media";
+import { assetSchema } from "../core/assets";
 import { defaultDragSnapSettings } from "../core/dragSnapping";
 import {
   frameCssTransform,
@@ -49,6 +50,7 @@ import { AssetLibrary } from "./AssetLibrary";
 import type { CanvasSelection } from "./editorCanvasCoordinator";
 import { SlideRenderer } from "./SlideRenderer";
 import { useEditorSession } from "./useEditorSession";
+import { useAgentContextPublisher } from "./useAgentContextPublisher";
 import { useDocumentPersistence } from "./useDocumentPersistence";
 import {
   EditorSlideOverview,
@@ -56,7 +58,6 @@ import {
   type SlideRailRow,
 } from "./editor/EditorSlideRail";
 import { EditorToolbar } from "./editor/EditorToolbar";
-import { DisplacedPresentationNotice } from "./DisplacedPresentationNotice";
 import { useSelectionActions } from "./editor/useSelectionActions";
 import { useLayerActions } from "./editor/useLayerActions";
 import {
@@ -188,6 +189,11 @@ function EditorSlideThumbnail({
     : "";
   const cached =
     composed?.key === previewKey ? composed.url : slidePreview(previewKey);
+  const lastThumbnail = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (cached) lastThumbnail.current = cached;
+  }, [cached]);
+  const displayedThumbnail = cached ?? lastThumbnail.current ?? composed?.url;
   useEffect(() => {
     const loaded = () => setFontRevision((value) => value + 1);
     document.fonts.addEventListener("loadingdone", loaded);
@@ -238,6 +244,10 @@ function EditorSlideThumbnail({
           Math.ceil(current.height * density),
         );
         if (url && live) {
+          const image = new Image();
+          image.src = url;
+          await image.decode();
+          if (!live) return;
           storeSlidePreview(previewKey, url);
           setComposed({ key: previewKey, url });
         }
@@ -272,9 +282,9 @@ function EditorSlideThumbnail({
         background: "#fff",
       }}
     >
-      {cached ? (
+      {displayedThumbnail ? (
         <img
-          src={cached}
+          src={displayedThumbnail}
           alt=""
           draggable={false}
           style={{ display: "block", width: "100%", height: "100%" }}
@@ -412,17 +422,23 @@ export function Editor({
     onError: reportError,
   });
 
+  const notesEditing = useSpeakerNotes({
+    controller,
+    onStatus: setLocalError,
+  });
+
+  const prepareSlideChange = useCallback(async () => {
+    await textEditing.exit();
+    await notesEditing.flush();
+    await controller.flush();
+  }, [controller, notesEditing, textEditing]);
+
   const persistence = useDocumentPersistence({
     deckId,
     snapshotRef: controller.snapshotRef,
     refreshProjection: controller.refreshProjection,
     onError: reportError,
-    flush: controller.flush,
-  });
-
-  const notesEditing = useSpeakerNotes({
-    controller,
-    onStatus: setLocalError,
+    flush: prepareSlideChange,
   });
 
   const presenter = usePresenterController();
@@ -436,6 +452,7 @@ export function Editor({
       setSelection({ elementIds: [elementId], scopeId: parentId }),
   );
   const flushSpeakerNotes = notesEditing.flush;
+  useAgentContextPublisher(controller, selection, motionWorkspace, play);
   useEffect(() => {
     if (motionWorkspace.open && notesOpen) {
       setNotesOpen(false);
@@ -659,12 +676,6 @@ export function Editor({
     },
     [reportError],
   );
-
-  const prepareSlideChange = useCallback(async () => {
-    await textEditing.exit();
-    await notesEditing.flush();
-    await controller.flush();
-  }, [controller, notesEditing, textEditing]);
 
   const activateSlide = useCallback(
     async (slideId: string) => {
@@ -1156,13 +1167,6 @@ export function Editor({
         onError={reportError}
       />
 
-      <DisplacedPresentationNotice
-        documentId={deckId}
-        settingsOpen={settingsOpen}
-        onMove={persistence.moveToPresentationsFolder}
-        onSavePortable={persistence.savePortable}
-        onError={reportError}
-      />
       <EditorToolbar
         onNewPresentation={onNewPresentation}
         onPresentationOpened={onPresentationOpened}
@@ -1170,7 +1174,7 @@ export function Editor({
         deckName={deck.name}
         settingsOpen={settingsOpen}
         setSettingsOpen={setSettingsOpen}
-        flushTransactions={controller.flush}
+        flushTransactions={prepareSlideChange}
         onError={reportError}
         presentationSetup={
           <PresentationDisplaySetup
@@ -1276,15 +1280,73 @@ export function Editor({
           className="stage"
           data-testid="stage"
           onDragOver={(event) => {
-            if (event.dataTransfer.types.includes("Files"))
+            if (
+              event.dataTransfer.types.includes("Files") ||
+              event.dataTransfer.types.includes("application/show-me-asset") ||
+              event.dataTransfer.types.includes(
+                "application/show-me-library-entry",
+              )
+            ) {
               event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+            }
           }}
           onDrop={(event) => {
             const files = Array.from(event.dataTransfer.files);
-            if (!files.length) return;
+            const assetPayload = event.dataTransfer.getData(
+              "application/show-me-asset",
+            );
+            const libraryPayload = event.dataTransfer.getData(
+              "application/show-me-library-entry",
+            );
+            if (!files.length && !assetPayload && !libraryPayload) return;
             event.preventDefault();
             event.stopPropagation();
-            void mediaActions.importFiles(files).catch(reportError);
+
+            const rect = stage.current?.getBoundingClientRect();
+            const current = controller.snapshotRef.current;
+            const insertionPoint = rect
+              ? {
+                  x:
+                    (current?.deck.width ?? 1920) / 2 +
+                    (event.clientX -
+                      (rect.left + rect.width / 2) -
+                      pan.x) /
+                      Math.max(scale, 1e-9),
+                  y:
+                    (current?.deck.height ?? 1080) / 2 +
+                    (event.clientY -
+                      (rect.top + rect.height / 2) -
+                      pan.y) /
+                      Math.max(scale, 1e-9),
+                }
+              : getInsertionWorldPoint();
+
+            if (assetPayload) {
+              void (async () => {
+                const draggedAsset = assetSchema.parse(JSON.parse(assetPayload));
+                const asset = await platform.getAsset(draggedAsset.id);
+                await mediaActions.insertAsset(asset, insertionPoint);
+              })().catch(reportError);
+              return;
+            }
+            if (libraryPayload && platform.libraryBrowser) {
+              void (async () => {
+                const value = JSON.parse(libraryPayload) as { path?: unknown };
+                if (typeof value.path !== "string")
+                  throw new Error("Invalid Library drag payload");
+                const result = await platform.libraryBrowser!({
+                  type: "import",
+                  path: value.path,
+                });
+                if (!result.asset)
+                  throw new Error("Library item cannot be inserted");
+                await mediaActions.insertAsset(result.asset, insertionPoint);
+              })().catch(reportError);
+              return;
+            }
+            if (files.length)
+              void mediaActions.importFiles(files).catch(reportError);
           }}
           onPointerDownCapture={beginPan}
           onPointerMove={updatePan}
@@ -1338,6 +1400,7 @@ export function Editor({
             </div>
           )}
           <EditorCanvasSurface
+            visualPlayback={presenter.state?.index != null ? "static" : "live"}
             controller={motionWorkspace.editingController}
             motionSourceSlide={
               motionWorkspace.editingController !== controller
@@ -1801,6 +1864,12 @@ export function Editor({
                 : fileInput.current?.click()
             }
             onInsert={(asset) => void mediaActions.insertAsset(asset)}
+            onApplyEffect={(definition) =>
+              void structuralActions.applyEffect(
+                definition,
+                motionWorkspace.open ? motionWorkspace.active : 0,
+              )
+            }
           />
         }
         onReplaceMedia={() => {

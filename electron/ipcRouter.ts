@@ -43,6 +43,7 @@ interface IpcRouterDependencies {
   getEditor: () => BrowserWindow | null;
   getExportWindow: () => BrowserWindow | null;
   getPreviewWindow: () => BrowserWindow | null;
+  getAgentRuntimeWindow?: () => BrowserWindow | null;
   getPreviewDocumentId: () => string | null;
   getAudienceWindow: () => BrowserWindow | null;
   getPresenterConsole: () => BrowserWindow | null;
@@ -56,6 +57,7 @@ export function registerIpcRouter({
   getEditor,
   getExportWindow,
   getPreviewWindow,
+  getAgentRuntimeWindow,
   getPreviewDocumentId,
   getAudienceWindow,
   getPresenterConsole,
@@ -152,16 +154,20 @@ export function registerIpcRouter({
       const state = getPresentationState();
       const activeDocumentId = getActiveDocumentId();
       const preview = getPreviewWindow();
-      const isPreview = preview && event.sender.id === preview.webContents.id;
-      const isEditor = editor && event.sender.id === editor.webContents.id;
+      const agentRuntime = getAgentRuntimeWindow?.();
+      const isAgentRuntime = !!agentRuntime && !agentRuntime.isDestroyed() && event.sender.id === agentRuntime.webContents.id;
+      const isPreview = preview && !preview.isDestroyed() && event.sender.id === preview.webContents.id;
+      const isEditor = editor && !editor.isDestroyed() && event.sender.id === editor.webContents.id;
       const isExport =
-        exportWindow && event.sender.id === exportWindow.webContents.id;
+        exportWindow && !exportWindow.isDestroyed() && event.sender.id === exportWindow.webContents.id;
       const isAudience =
-        presenter && event.sender.id === presenter.webContents.id;
+        presenter && !presenter.isDestroyed() && event.sender.id === presenter.webContents.id;
       const isConsole =
-        presenterConsole && event.sender.id === presenterConsole.webContents.id;
+        presenterConsole && !presenterConsole.isDestroyed() && event.sender.id === presenterConsole.webContents.id;
       const readMethods = [
         "preparedImage",
+        "preparedSlideImages",
+        "audienceImageProfile",
         "imageReadiness",
         "documentProjection",
         "managedFonts",
@@ -171,12 +177,15 @@ export function registerIpcRouter({
       ];
       const audienceMethods = [
         ...readMethods,
+        "prepareAudience",
         "presentationCommand",
         "closePresentation",
         "fullscreen",
       ];
       const presenterMethods = [
         "preparedImage",
+        "preparedSlideImages",
+        "audienceImageProfile",
         "imageReadiness",
         "documentProjection",
         "managedFonts",
@@ -194,8 +203,9 @@ export function registerIpcRouter({
         "fullscreen",
       ];
       if (
-        (!isEditor && !isAudience && !isConsole && !isExport && !isPreview) ||
-        (isPreview && !["assetUrl", "managedFonts", "preparedImage"].includes(method)) ||
+        (!isEditor && !isAudience && !isConsole && !isExport && !isPreview && !isAgentRuntime) ||
+        (isAgentRuntime && !["assetUrl", "managedFonts"].includes(method)) ||
+        (isPreview && !["assetUrl", "managedFonts", "preparedImage", "preparedSlideImages"].includes(method)) ||
         (isExport &&
           !["documentProjection", "assetUrl", "managedFonts", "exportReady"].includes(
             method,
@@ -222,12 +232,12 @@ export function registerIpcRouter({
         throw new Error("The host owns presentation files during collaboration");
       if (
         (isAudience || isConsole) &&
-        ["thumbnail", "documentProjection", "preparedImage", "imageReadiness"].includes(method)
+        ["thumbnail", "documentProjection", "preparedImage", "preparedSlideImages", "imageReadiness", "audienceImageProfile", "prepareAudience"].includes(method)
       ) {
         if (
           !state ||
           args[0] !== state.deckId ||
-          (method === "documentProjection" && !state.slideIds.includes(String(args[1])))
+          (["documentProjection", "preparedSlideImages", "preparedImage"].includes(method) && !state.slideIds.includes(String(args[1])))
         )
           throw new Error("Outside presentation session");
       }
@@ -246,7 +256,8 @@ export function registerIpcRouter({
           throw new Error("Outside font document scope");
         args[0] = requested ?? scope ?? undefined;
       }
-      if (isPreview && method === "preparedImage" && args[0] !== getPreviewDocumentId()) throw new Error("Outside preview document");
+      if (isPreview && ["preparedImage", "preparedSlideImages"].includes(method) && args[0] !== getPreviewDocumentId()) throw new Error("Outside preview document");
+      if (method === "prepareAudience" && !isAudience) throw new Error("Unauthorized audience preparation");
       if (isAudience && method === "documentProjection") {
         return Promise.resolve(operation(...args)).then(
           (projection: import("../src/core/documentProjection").DocumentProjection) =>
@@ -254,13 +265,27 @@ export function registerIpcRouter({
         );
       }
 
+      // Read-only Library browsing and previews must not hold the save queue.
+      if (
+        method === "libraryBrowser" &&
+        ["list", "trash", "preview", "reveal"].includes(args[0]?.type)
+      )
+        return operation(...args);
+
       if (
         [
           "createDocument",
           "openDocumentFile",
+          "setMcpEnabled",
+          "setMcpEditingEnabled",
+          "setImageCacheFormat",
+          "setExportFontEmbedding",
+          "setHtmlExportJpegQuality",
+          "setDeleteImageCacheOnClose",
+          "setImageCachingEnabled",
           "setLibraryLifecycleMode",
-          "moveDocumentToPresentationsFolder",
-          "saveDocumentAsPortable",
+          "libraryBrowser",
+          "effectLibrary",
           "scanLibrary",
           "emptyOldLibraryTrash",
           "recoverUntitled",
@@ -272,6 +297,7 @@ export function registerIpcRouter({
           "saveDocumentAs",
           "packageDocument",
           "saveMediaAs",
+          "confirmDocumentReplacement",
           "requestClose",
           "updateAsset",
           "storePreview",
@@ -279,13 +305,10 @@ export function registerIpcRouter({
           "importAssets",
           "importDroppedPaths",
           "importAssetData",
-          "chooseMediaLibrary",
-          "choosePresentationsFolder",
-          "resetPresentationsFolder",
+          "chooseShowMeRoot",
           "chooseImageCacheFolder",
           "resetImageCacheFolder",
           "clearPresentationImages",
-          "resetMediaLibrary",
         ].includes(method)
       ) {
         const result = queue.then(() => operation(...args));

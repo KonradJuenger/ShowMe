@@ -72,9 +72,9 @@ export async function exerciseVideoWarmup() {
   slide.nodes[0].children = [element];
   const key = pool.videoPlayerKey(model.documentId, slide.id, element.id);
   document.body.replaceChildren();
-  await pool.warmVideoPlayer(key, element.content, () => true);
+  await pool.warmVideoPlayer(key, element.content, () => true, platform);
   const unrelated = document.querySelectorAll(".slide-renderer").length;
-  const warmed = pool.acquireVideoPlayer(key, element.content.assetId),
+  const warmed = pool.acquireVideoPlayer(key, element.content.assetId, platform),
     player = warmed.node;
   const readyBefore = player.readyState;
   if (readyBefore < 2)

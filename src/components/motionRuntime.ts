@@ -8,7 +8,13 @@ import {
 } from "motion";
 import type { Slide } from "../core/document";
 import { presentationSpan } from "./presentationDiagnostics";
-import { walkElements } from "../core/element";
+import {
+  IDENTITY,
+  localMatrix,
+  multiply,
+  walkElements,
+  type Matrix,
+} from "../core/element";
 import {
   motionPropertyDescriptor,
   unavailable,
@@ -20,7 +26,7 @@ import {
   motionElement,
 } from "../core/motion";
 import { stageDuration } from "../core/motionModel";
-import { effectSurface, flushEffectSurfaces } from "./effectRuntime";
+import { bindEffectSurfaceFlusher, effectSurface } from "./effectRuntime";
 import {
   numericEffectParameters,
   effectTiming,
@@ -28,6 +34,20 @@ import {
   type EffectClocks,
 } from "../core/effects";
 import { motionTime, type MotionPlaybackState } from "../core/motionPlayback";
+
+/** A completed semantic sample. The renderer consumes it without another clock
+ * or a readback of Motion's DOM writes. Frames remain in document coordinates. */
+export type MotionVisualSample = {
+  elementId: string;
+  frame: import("../core/element").Element["frame"];
+  opacity: number;
+  present: boolean;
+};
+export interface MotionRenderSink {
+  ownsOpacity?(elementId: string): boolean;
+  apply(samples: readonly MotionVisualSample[]): void;
+  reset(): void;
+}
 
 /** Compile ordinary ShowMe tracks. Delayed first keys are hard cuts, not tweens
  * from the entering state. Pad each property to the stage's common clock. */
@@ -82,6 +102,7 @@ export function createMotionRuntime(
   slide: Slide,
   stageIndex: number,
   clocks?: () => EffectClocks,
+  renderer?: MotionRenderSink,
 ) {
   const finish = presentationSpan("motion-runtime-create", slide.id, {
     stageIndex,
@@ -89,6 +110,36 @@ export function createMotionRuntime(
   const elements = new Map(
     walkElements(slide.nodes.flatMap((r) => r.children)).map((e) => [e.id, e]),
   );
+  const parents = new Map<string, string | null>();
+  const indexParents = (
+    children: readonly import("../core/element").Element[],
+    parentId: string | null,
+  ) =>
+    children.forEach((child) => {
+      parents.set(child.id, parentId);
+      indexParents(child.children, child.id);
+    });
+  slide.nodes.forEach((root) => indexParents(root.children, null));
+  const semanticWorldTransform = (
+    id: string,
+    overlay: ReturnType<typeof resolveMotion>,
+  ) => {
+    const chain: string[] = [];
+    for (let current: string | null | undefined = id; current;) {
+      chain.push(current);
+      current = parents.get(current);
+    }
+    let matrix: Matrix = IDENTITY;
+    for (const elementId of chain.reverse()) {
+      const element = elements.get(elementId);
+      if (!element) continue;
+      matrix = multiply(
+        matrix,
+        localMatrix(motionElement(element, overlay).frame),
+      );
+    }
+    return new DOMMatrix([...matrix]);
+  };
   const nodes = new Map(
     Array.from(root.querySelectorAll<HTMLElement>("[data-element-id]")).map(
       (n) => [n.dataset.elementId!, n],
@@ -111,8 +162,17 @@ export function createMotionRuntime(
     string,
     {
       node: HTMLElement;
+      visual: HTMLElement;
+      renderedAlpha: boolean;
+      originalVisualOpacity: string;
       values: Record<string, MotionValue<number>>;
-      original: { transform: string; opacity: string; willChange: string };
+      original: {
+        transform: string;
+        opacity: string;
+        willChange: string;
+        alphaProperty?: string;
+        alpha: string;
+      };
       detach: () => void;
     }
   >();
@@ -134,35 +194,46 @@ export function createMotionRuntime(
       inert: boolean;
     }
   >();
-  const snapshot = (id: string, overlay: ReturnType<typeof resolveMotion>) => {
-    const element = elements.get(id)!;
-    const { frame: f, appearance } = presenceElement(
-      motionElement(element, overlay),
-      sampleElementPresence(
-        slide.motion,
-        id,
-        stageIndex,
-        localTime,
-        clocks?.(),
-      ),
+  const visualSample = (
+    id: string,
+    overlay: ReturnType<typeof resolveMotion>,
+  ): MotionVisualSample => {
+    const presence = sampleElementPresence(
+      slide.motion,
+      id,
+      stageIndex,
+      localTime,
+      clocks?.(),
+    );
+    const element = presenceElement(
+      motionElement(elements.get(id)!, overlay),
+      presence,
     );
     return {
-      x: f.x - element.frame.x,
-      y: f.y - element.frame.y,
+      elementId: id,
+      frame: element.frame,
+      opacity: element.appearance.opacity,
+      present: presence.present,
+    };
+  };
+  const valuesFor = ({ elementId, frame: f, opacity }: MotionVisualSample) => {
+    const base = elements.get(elementId)!.frame;
+    return {
+      x: f.x - base.x,
+      y: f.y - base.y,
       rotate: f.rotation,
       scaleX: (f.flipX ? -1 : 1) * f.scaleX,
       scaleY: (f.flipY ? -1 : 1) * f.scaleY,
-      opacity: appearance.opacity,
+      opacity,
     };
   };
   for (const id of new Set([...Object.keys(initial), ...presenceIds])) {
     const node = nodes.get(id);
     if (!node || !elements.has(id)) continue;
     const values = Object.fromEntries(
-      Object.entries(snapshot(id, initial)).map(([key, value]) => [
-        key,
-        motionValue(value),
-      ]),
+      Object.entries(valuesFor(visualSample(id, initial))).map(
+        ([key, value]) => [key, motionValue(value)],
+      ),
     );
     visibility.set(id, {
       visibility: node.style.visibility,
@@ -174,14 +245,46 @@ export function createMotionRuntime(
       transform: node.style.transform,
       opacity: node.style.opacity,
       willChange: node.style.willChange,
+      alphaProperty: node.dataset.nativeOpacity,
+      alpha: node.dataset.nativeOpacity
+        ? node.style.getPropertyValue(node.dataset.nativeOpacity)
+        : "",
     };
     if (compiled.some((track) => track.elementId === id))
-      node.style.willChange = "transform, opacity";
-    const detach = styleEffect(node, values);
+      node.style.willChange = "transform";
+    const visual =
+      node.querySelector<HTMLElement>(":scope > [data-composition-visual]") ??
+      node;
+    const originalVisualOpacity = visual.style.opacity;
+    const renderedAlpha = renderer?.ownsOpacity?.(id) ?? false;
+    const { opacity, ...transport } = values;
+    const detachTransport = styleEffect(
+      node,
+      original.alphaProperty
+        ? { ...transport, [original.alphaProperty]: values.opacity }
+        : visual === node && !renderedAlpha
+          ? values
+          : transport,
+    );
+    const detachAlpha =
+      visual === node ? () => {} : styleEffect(visual, { opacity });
+    const detach = () => {
+      detachTransport();
+      detachAlpha();
+    };
     styleEffect.flush(node);
-    bindings.set(id, { node, values, original, detach });
+    if (visual !== node) styleEffect.flush(visual);
+    bindings.set(id, {
+      node,
+      visual,
+      renderedAlpha,
+      originalVisualOpacity,
+      values,
+      original,
+      detach,
+    });
   }
-  const controls = Array.from(bindings, ([id, binding]) => {
+  const controls = Array.from(bindings).flatMap(([id, binding]) => {
     const targets: Record<string, number[]> = {};
     const transitions: StyleTransitions = {};
     for (const track of compiled.filter(
@@ -209,10 +312,20 @@ export function createMotionRuntime(
         autoplay: false,
       };
     }
+    const alpha = targets.opacity;
+    if ((binding.visual !== binding.node || binding.renderedAlpha) && alpha) {
+      delete targets.opacity;
+      return [
+        animate(binding.values.opacity, alpha, transitions.opacity),
+        ...(Object.keys(targets).length
+          ? [animate(binding.node, targets, transitions)]
+          : []),
+      ];
+    }
     return Object.keys(targets).length
-      ? animate(binding.node, targets, transitions)
-      : null;
-  }).filter((control) => control !== null);
+      ? [animate(binding.node, targets, transitions)]
+      : [];
+  });
   const effectBindings = Array.from(
     root.querySelectorAll<HTMLElement>("[data-effect-id]"),
   ).flatMap((node) => {
@@ -252,10 +365,13 @@ export function createMotionRuntime(
     });
     return [{ element, instance, surface, values }];
   });
+  const flushBoundEffects = bindEffectSurfaceFlusher(root);
   const clock = motionValue(0);
   // Effects-only stages still have the same presentation clock.
   const detachClock = clock.on("change", (time) => {
-    effectBindings.forEach(({ element, instance, surface }) =>
+    const overlay = resolveMotion(slide, stageIndex, time);
+    effectBindings.forEach(({ element, instance, surface }) => {
+      surface.setTransport(semanticWorldTransform(element.id, overlay));
       surface.setTiming(
         effectTiming(
           slide.motion,
@@ -266,8 +382,8 @@ export function createMotionRuntime(
           clocks?.(),
           slide.effectResources?.[instance.resourceId]?.timeControl,
         ),
-      ),
-    );
+      );
+    });
   });
   if (duration && (!controls.length || effectBindings.length))
     controls.push(
@@ -280,16 +396,13 @@ export function createMotionRuntime(
   const materialize = (time: number, presenceOnly = false) => {
     localTime = time;
     const overlay = resolveMotion(slide, stageIndex, time);
+    const samples: MotionVisualSample[] = [];
     bindings.forEach((binding, id) => {
+      if (presenceOnly && !presenceIds.has(id) && !renderer) return;
+      const sample = visualSample(id, overlay);
+      if (renderer) samples.push(sample);
       if (presenceOnly && !presenceIds.has(id)) return;
       if (presenceIds.has(id)) {
-        const sample = sampleElementPresence(
-          slide.motion,
-          id,
-          stageIndex,
-          time,
-          clocks?.(),
-        );
         binding.node.style.visibility = sample.present
           ? visibility.get(id)!.visibility
           : "hidden";
@@ -303,11 +416,16 @@ export function createMotionRuntime(
         if (binding.node.dataset.presentationAbsent !== String(!sample.present))
           binding.node.dataset.presentationAbsent = String(!sample.present);
       }
-      Object.entries(snapshot(id, overlay)).forEach(([name, value]) =>
+      Object.entries(valuesFor(sample)).forEach(([name, value]) =>
         binding.values[name].set(value),
       );
       styleEffect.flush(binding.node);
+      if (binding.visual !== binding.node) styleEffect.flush(binding.visual);
     });
+    renderer?.apply(samples);
+    effectBindings.forEach(({ element, surface }) =>
+      surface.setTransport(semanticWorldTransform(element.id, overlay)),
+    );
     if (presenceOnly) return;
     effectBindings.forEach(({ element, instance, surface, values }) => {
       if (
@@ -342,7 +460,7 @@ export function createMotionRuntime(
         ),
       );
     });
-    void flushEffectSurfaces(root);
+    void flushBoundEffects();
   };
   finish();
   return {
@@ -373,7 +491,7 @@ export function createMotionRuntime(
         state.time + (state.running ? Math.max(0, now - state.startedAt) : 0);
       materialize(sampleTime);
       cancelAnimationFrame(presenceFrame);
-      if (presenceIds.size && state.running) {
+      if ((presenceIds.size || renderer) && state.running) {
         const tick = () => {
           materialize(
             state.time + Math.max(0, Date.now() - state.startedAt),
@@ -414,21 +532,30 @@ export function createMotionRuntime(
       });
       detachClock();
       clock.destroy();
-      bindings.forEach(({ node, values, original, detach }) => {
-        detach();
-        Object.values(values).forEach((value) => value.destroy());
-        node.style.transform = original.transform;
-        node.style.opacity = original.opacity;
-        node.style.willChange = original.willChange;
-        const saved = visibility.get(node.dataset.elementId!);
-        if (saved) {
-          node.style.visibility = saved.visibility;
-          node.style.pointerEvents = saved.pointerEvents;
-          node.style.contentVisibility = saved.contentVisibility;
-          node.inert = saved.inert;
-        }
-        delete node.dataset.presentationAbsent;
-      });
+      bindings.forEach(
+        ({ node, visual, originalVisualOpacity, values, original, detach }) => {
+          detach();
+          Object.values(values).forEach((value) => value.destroy());
+          node.style.transform = original.transform;
+          node.style.opacity = original.opacity;
+          if (original.alphaProperty) {
+            if (original.alpha)
+              node.style.setProperty(original.alphaProperty, original.alpha);
+            else node.style.removeProperty(original.alphaProperty);
+          }
+          node.style.willChange = original.willChange;
+          if (visual !== node) visual.style.opacity = originalVisualOpacity;
+          const saved = visibility.get(node.dataset.elementId!);
+          if (saved) {
+            node.style.visibility = saved.visibility;
+            node.style.pointerEvents = saved.pointerEvents;
+            node.style.contentVisibility = saved.contentVisibility;
+            node.inert = saved.inert;
+          }
+          delete node.dataset.presentationAbsent;
+        },
+      );
+      renderer?.reset();
     },
   };
 }

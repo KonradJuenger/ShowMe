@@ -7,17 +7,40 @@ import { readFile } from "node:fs/promises";
 import {
   LibraryIndex,
   importManagedFile,
+  isManagedFilenameProtected,
 } from "../../../electron/mediaLibrary";
 import { restoreLibraryAsset } from "../../../electron/libraryLifecycle";
+import { organizationalLibraryCategory } from "../../../src/core/libraryBrowser";
 import { expect, it, vi } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { storedDocument } from "../../helpers/storage";
 import { libraryIndex, managedFilename } from "../../../electron/mediaLibrary";
 import { createMediaElement } from "../../../src/core/media";
 import { insertElements } from "../../../src/core/editorCommands";
+import { StorageMedia } from "../../../electron/storage/media";
 import type { Asset } from "../../../src/core/assets";
+import { NativeLibraryBrowser } from "../../../electron/libraryBrowser";
+import { EffectLibraryStorage } from "../../../electron/effectLibrary";
+import { blankEffect } from "../../../src/core/effectAuthoring";
+import sharp from "sharp";
+
+it("enriched inventory remains untrusted after its managed image bytes change", async () => {
+  const { storage, runtime } = await storedDocument();
+  const original = await sharp({ create: { width: 8, height: 8, channels: 3, background: "red" } }).png().toBuffer();
+  const asset = await storage.importAssetData("enriched.png", original);
+  await storage.updateAsset({ ...asset, width: 8, height: 8 });
+  await expect(storage.asset(asset.id)).resolves.toMatchObject({ width: 8, height: 8 });
+  const file = storage.assetPath(asset.id);
+  const replacement = await sharp({ create: { width: 8, height: 8, channels: 3, background: "blue" } }).png().toBuffer();
+  await writeFile(file, replacement);
+  await libraryIndex(storage.assetRoot)!.refresh();
+  expect(await storage.libraryAssetMetadata(asset.id)).toMatchObject({ id: asset.id, width: 8, height: 8 });
+  await expect(storage.asset(asset.id)).rejects.toThrow("Asset not found");
+  expect(runtime.authority.revision).toBe(0);
+  expect(runtime.authority.document.slides[runtime.authority.document.deck.slideIds[0]].nodes[0].children).toEqual([]);
+});
 
 it("warm asset lookup and listing reuse inventory without directory enumeration", async () => {
   const { storage } = await storedDocument();
@@ -136,11 +159,16 @@ it("cold inventory persists metadata but still verifies content at consumption",
     path.join(root, "inventory-cache"),
   );
   await cold.ready();
+  const changed = vi.fn();
+  const unsubscribe = cold.subscribe(changed);
   expect(cold.diagnostics().hashedBytes).toBe(0);
   expect(await cold.verify(id)).toBe(file);
   expect(cold.diagnostics().hashedBytes).toBe(bytes.length);
+  expect(changed).not.toHaveBeenCalled();
   await writeFile(file, Buffer.alloc(1024, 22));
   expect(await cold.verify(id)).toBeNull();
+  expect(changed).toHaveBeenCalled();
+  unsubscribe();
   cold.dispose();
 });
 
@@ -209,8 +237,10 @@ it("a referenced missing Library asset invalidates the open document when it arr
 
 it("an unrelated Library arrival does not invalidate an open document", async () => {
   const { storage } = await storedDocument(),
-    changed = vi.fn();
+    changed = vi.fn(),
+    inventoryChanged = vi.fn();
   storage.onResourcesChanged = changed;
+  storage.onMediaInventoryChanged = inventoryChanged;
   const bytes = Buffer.from("unused"),
     id = createHash("sha256").update(bytes).digest("hex");
   await writeFile(
@@ -219,4 +249,370 @@ it("an unrelated Library arrival does not invalidate an open document", async ()
   );
   await libraryIndex(storage.assetRoot)!.refresh();
   expect(changed).not.toHaveBeenCalled();
+  expect(inventoryChanged).toHaveBeenCalled();
+  expect(
+    (await storage.listAssets("", 0, 100)).items.map((item) => item.id),
+  ).toContain(id);
+});
+
+it("startup reconciles files copied into a Library after its inventory was cached", async () => {
+  const { root } = await storedDocument();
+  const assetRoot = path.join(root, "copied-library"),
+    cacheRoot = path.join(root, "copied-cache"),
+    bytes = Buffer.from("copied while ShowMe was closed"),
+    id = createHash("sha256").update(bytes).digest("hex"),
+    staleId = "a".repeat(64);
+  await mkdir(path.join(assetRoot, "images"), { recursive: true });
+  await mkdir(path.join(cacheRoot, "library-index"), { recursive: true });
+  await writeFile(
+    path.join(assetRoot, "images", managedFilename("copied.png", id)),
+    bytes,
+  );
+  await writeFile(
+    path.join(
+      cacheRoot,
+      "library-index",
+      createHash("sha256").update(assetRoot).digest("hex") + ".json",
+    ),
+    JSON.stringify({
+      version: 1,
+      root: assetRoot,
+      files: [
+        {
+          id: staleId,
+          file: "images/" + managedFilename("missing.png", staleId),
+          signature: "stale",
+        },
+      ],
+    }),
+  );
+  const media = new StorageMedia(assetRoot, cacheRoot);
+  try {
+    await media.init();
+    const listed = await media.listAssets("", 0, 100);
+    expect(listed.items.map((item) => item.id)).toEqual([id]);
+    expect(libraryIndex(assetRoot)!.diagnostics().hashedBytes).toBe(0);
+  } finally {
+    media.dispose();
+  }
+});
+
+
+it("unified native Library view derives cleanup protection from managed filenames", async () => {
+  const { storage, root } = await storedDocument();
+  const imageSource = path.join(root, "protected.png");
+  const videoSource = path.join(root, "clip.mp4");
+  await writeFile(imageSource, Buffer.from("protected-image"));
+  await writeFile(videoSource, Buffer.from("video"));
+  const image = await storage.importFile(imageSource, "album");
+  const video = await storage.importFile(videoSource, "clips");
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (id) => storage.libraryAssetMetadata(id),
+    (file, folder) => storage.importFile(file, folder),
+    async () => undefined,
+    () => {},
+  );
+
+  await browser.run({
+    type: "protect",
+    path: "images/album",
+    protected: true,
+  });
+
+  const directoryReads = vi.spyOn(nodeFs.promises, "readdir");
+  const all = await browser.run({
+    type: "list",
+    category: "all",
+    folder: "",
+    query: "",
+    all: true,
+    offset: 0,
+    limit: 100,
+  });
+  const readsAfterFirstPage = directoryReads.mock.calls.length;
+  await browser.run({
+    type: "list",
+    category: "all",
+    folder: "",
+    query: "",
+    all: true,
+    offset: 1,
+    limit: 1,
+  });
+  expect(directoryReads.mock.calls.length).toBe(readsAfterFirstPage);
+  expect(all.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        category: "images",
+        asset: expect.objectContaining({ id: image.id }),
+        protection: "self",
+      }),
+      expect.objectContaining({
+        category: "video",
+        asset: expect.objectContaining({ id: video.id }),
+        protection: undefined,
+      }),
+    ]),
+  );
+
+  const protectedImagePath = path.join(
+    storage.assetRoot,
+    "images",
+    "album",
+    managedFilename("protected.png", image.id, true),
+  );
+  await expect(nodeFs.promises.access(protectedImagePath)).resolves.toBeUndefined();
+
+  const images = await browser.run({
+    type: "list",
+    category: "images",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(images.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: "images/album",
+        kind: "folder",
+        protection: "self",
+      }),
+    ]),
+  );
+  directoryReads.mockRestore();
+  browser.dispose();
+});
+
+it("unified Media Library hides fonts while the internal font category remains available", async () => {
+  const { storage } = await storedDocument();
+  const bytes = Buffer.from("managed font payload");
+  const id = createHash("sha256").update(bytes).digest("hex");
+  const name = managedFilename("InternalFont.ttf", id);
+  await writeFile(path.join(storage.assetRoot, "fonts", name), bytes);
+  await libraryIndex(storage.assetRoot)!.refresh();
+
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (assetId) => storage.libraryAssetMetadata(assetId),
+    (file, folder) => storage.importFile(file, folder),
+    async () => undefined,
+    () => {},
+  );
+  const visible = await browser.run({
+    type: "list",
+    category: "all",
+    folder: "",
+    query: "",
+    all: true,
+    offset: 0,
+    limit: 100,
+  });
+  expect(visible.entries.some((entry) => entry.category === "fonts")).toBe(
+    false,
+  );
+  expect(visible.folders.some((folder) => folder.startsWith("fonts/"))).toBe(
+    false,
+  );
+
+  const internal = await browser.run({
+    type: "list",
+    category: "fonts",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(internal.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: `fonts/${name}`,
+        category: "fonts",
+        managed: true,
+      }),
+    ]),
+  );
+  browser.dispose();
+});
+
+it("restoring one Effect ignores unrelated malformed Effect files", async () => {
+  const { storage } = await storedDocument();
+  const effectsRoot = path.join(storage.assetRoot, "Effects");
+  const effects = new EffectLibraryStorage(effectsRoot);
+  const created = await effects.run({
+    type: "save",
+    definition: { ...blankEffect("shader"), name: "Recover Me" },
+  });
+  const asset = created.entries[0].asset;
+  await effects.run({
+    type: "delete",
+    id: asset.id,
+    revision: asset.revision,
+  });
+  await writeFile(path.join(effectsRoot, "broken.txt"), "{ definitely invalid");
+
+  const trashRoot = path.join(storage.assetRoot, "Trash", "assets");
+  const [trashFolder] = await readdir(trashRoot);
+  const trashDirectory = path.join(trashRoot, trashFolder);
+  const trashFiles = await readdir(trashDirectory);
+  const effectFile = trashFiles.find((name) => name !== "item.json");
+  expect(effectFile).toBeTruthy();
+
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (id) => storage.libraryAssetMetadata(id),
+    (file, folder) => storage.importFile(file, folder),
+    async () => undefined,
+    () => {},
+  );
+  const beforeRestore = await browser.run({
+    type: "list",
+    category: "Effects",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(beforeRestore.entries.some((entry) => entry.name === "Recover Me")).toBe(
+    false,
+  );
+  await browser.run({
+    type: "restore",
+    path: `Trash/assets/${trashFolder}/${effectFile!}`,
+  });
+  const afterRestore = await browser.run({
+    type: "list",
+    category: "Effects",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(afterRestore.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "Recover Me", category: "Effects" }),
+    ]),
+  );
+  expect((await readdir(effectsRoot)).some((name) => name !== "broken.txt")).toBe(
+    true,
+  );
+  expect(await readFile(path.join(effectsRoot, "broken.txt"), "utf8")).toContain(
+    "definitely invalid",
+  );
+  browser.dispose();
+});
+
+
+it("Trash selections never qualify for Library folder organization", () => {
+  const trash = {
+    path: "Trash/assets/one/photo__aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+    name: "photo.png",
+    kind: "trash" as const,
+    category: "images" as const,
+    managed: true,
+  };
+  const normal = {
+    path: "images/photo__bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+    name: "photo.png",
+    kind: "file" as const,
+    category: "images" as const,
+    managed: true,
+  };
+  expect(organizationalLibraryCategory([trash, { ...trash, path: "Trash/assets/two/other.png" }])).toBeUndefined();
+  expect(organizationalLibraryCategory([normal, { ...normal, path: "images/other.png" }])).toBe("images");
+  expect(organizationalLibraryCategory([normal, trash])).toBeUndefined();
+});
+
+it("partial folder protection failure invalidates the browser and exposes the mixed filesystem state", async () => {
+  const { storage } = await storedDocument();
+  const folder = path.join(storage.assetRoot, "images", "keepers");
+  await mkdir(folder, { recursive: true });
+  const firstBytes = Buffer.from("first protected payload");
+  const secondBytes = Buffer.from("second protected payload");
+  const firstId = createHash("sha256").update(firstBytes).digest("hex");
+  const secondId = createHash("sha256").update(secondBytes).digest("hex");
+  const firstName = managedFilename("a.png", firstId);
+  const secondName = managedFilename("b.png", secondId);
+  const firstProtected = managedFilename("a.png", firstId, true);
+  const conflictingProtected = managedFilename("b.png", secondId, true);
+  await writeFile(path.join(folder, firstName), firstBytes);
+  await writeFile(path.join(folder, secondName), secondBytes);
+  await writeFile(
+    path.join(folder, conflictingProtected),
+    Buffer.from("external conflicting payload"),
+  );
+  await libraryIndex(storage.assetRoot)!.refresh();
+
+  const browser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (assetId) => storage.libraryAssetMetadata(assetId),
+    (file, target) => storage.importFile(file, target),
+    async () => undefined,
+    () => {},
+  );
+  await browser.run({
+    type: "list",
+    category: "images",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+
+  await expect(
+    browser.run({
+      type: "protect",
+      path: "images/keepers",
+      protected: true,
+    }),
+  ).rejects.toThrow("Conflicting managed asset protection filename");
+
+  const root = await browser.run({
+    type: "list",
+    category: "images",
+    folder: "",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(root.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: "images/keepers",
+        kind: "folder",
+        protection: "mixed",
+      }),
+    ]),
+  );
+
+  const contents = await browser.run({
+    type: "list",
+    category: "images",
+    folder: "keepers",
+    query: "",
+    all: false,
+    offset: 0,
+    limit: 100,
+  });
+  expect(contents.entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: `images/keepers/${firstProtected}`,
+        protection: "self",
+      }),
+      expect.objectContaining({
+        path: `images/keepers/${secondName}`,
+        protection: undefined,
+      }),
+    ]),
+  );
+  expect(isManagedFilenameProtected(firstProtected)).toBe(true);
+  browser.dispose();
 });

@@ -50,18 +50,6 @@ export function useDocumentPersistence({
     if (result) await refreshSavedProjection();
     return result ?? null;
   }, [deckId, flush, refreshSavedProjection]);
-  const moveToPresentationsFolder = useCallback(async () => {
-    await flush();
-    const result = await platform.moveDocumentToPresentationsFolder?.(deckId);
-    if (result) await refreshSavedProjection();
-    return result ?? null;
-  }, [deckId, flush, refreshSavedProjection]);
-  const savePortable = useCallback(async () => {
-    await flush();
-    const result = await platform.saveDocumentAsPortable?.(deckId);
-    if (result) await refreshSavedProjection();
-    return result ?? null;
-  }, [deckId, flush, refreshSavedProjection]);
 
   useEffect(() => {
     if (!platform.onFileCommand) return;
@@ -82,11 +70,19 @@ export function useDocumentPersistence({
         } else if (command === "package") {
           await flush();
           await platform.packageDocument?.(deckId);
-        } else if (command === "export-pdf" || command === "export-pptx") {
+        } else if (
+          command === "export-pdf" ||
+          command === "export-pptx" ||
+          command === "export-html"
+        ) {
           await flush();
           const result = await platform.exportPresentation?.(
             deckId,
-            command === "export-pdf" ? "pdf" : "pptx",
+            command === "export-pdf"
+              ? "pdf"
+              : command === "export-pptx"
+                ? "pptx"
+                : "html",
           );
           if (result?.warnings.length)
             window.alert(formatExportWarnings(result.warnings));
@@ -95,5 +91,5 @@ export function useDocumentPersistence({
     });
   }, [deckId, flush, onError, save, saveAs]);
 
-  return { save, saveAs, moveToPresentationsFolder, savePortable, flush };
+  return { save, saveAs, flush };
 }

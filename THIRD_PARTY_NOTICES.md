@@ -13,3 +13,11 @@ The Apache License 2.0 text is in `src/assets/material-icons/APACHE-2.0.txt`.
 Runtime and build dependencies are installed through `package.json` and
 `package-lock.json` and retain their upstream licenses. Local packaged builds
 include the dependency and Electron license notices supplied by those packages.
+
+## FFmpeg
+
+HTML export creates temporary video clips using the executable supplied by
+[ffmpeg-static](https://github.com/eugeneware/ffmpeg-static), distributed under
+GPL-3.0-or-later. Its package and binary license/build notices are retained in
+`node_modules/ffmpeg-static` in packaged applications. Upstream FFmpeg source
+and licensing information are available at [ffmpeg.org](https://ffmpeg.org/).

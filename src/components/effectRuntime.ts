@@ -1,6 +1,5 @@
+import { gpuGeneration as resourceGeneration } from "./gpuGeneration";
 import { createTextEffectRunner } from "./textEffectRunner";
-import { EffectGraph } from "./effectGraph";
-import { EffectSources } from "./effectSources";
 import { frame, cancelFrame } from "motion";
 import {
   affineSamplingDensity,
@@ -8,22 +7,22 @@ import {
   type RenderDensity,
   type ShaderCapabilities,
 } from "../core/renderProfile";
-import { elementWorldTransform } from "./elementDomTransform";
-import { resizeRasterCanvas } from "./canvasAllocation";
 import {
-  createElementRasterSource,
-  createBackdropRasterSource,
-  backdropPrefix,
-} from "./elementRaster";
-import { createDomRasterSource } from "./domRaster";
+  createSceneTextureProvider,
+  sceneTextureTextureBytes,
+  type SceneTextureProvider,
+  type SceneTexture,
+} from "./sceneTexture";
+import { flushCompositionOutputs } from "./compositionReadiness";
 import {
   allocateShaderOutput,
   disposeShaderOutput,
-  neutralShaderBridge,
+  presentShaderOutput,
   type ShaderOutput,
 } from "./shaderOutput";
 import type { Deck, Slide } from "../core/document";
 import type { Element } from "../core/element";
+import { getWorldMatrix } from "../core/scene";
 import type { EffectResources } from "../core/effects";
 import {
   consumedParameter,
@@ -31,7 +30,6 @@ import {
   cssEffectValue,
   type EffectParameterValue,
   effectParameters,
-  effectPlacement,
   shaderDiagnostics,
   type EffectDefinition,
   type ElementEffect,
@@ -42,20 +40,14 @@ export interface EffectSampling extends RenderDensity {
   retain?: boolean;
   envelope?: number;
 }
-function samplingRoot(node: HTMLElement, sampling: EffectSampling) {
-  return (
-    sampling.root ??
-    node.closest<HTMLElement>(".slide-renderer") ??
-    node.parentElement ??
-    node
-  );
-}
 type Surface = {
-  inputs(): HTMLElement[];
   materialize(): void;
+  setVisualSuspended(value: boolean): void;
+  refreshVisual(): void;
   gpuOutput(): ShaderOutput | null;
   setSampling(value: EffectSampling): void;
   prepareSampling(): void;
+  setTransport(matrix: DOMMatrixReadOnly): void;
   set(key: string, value: EffectParameterValue): void;
   setTiming(value: {
     time: number;
@@ -74,68 +66,20 @@ type Surface = {
     running?: boolean;
     progress?: number;
   }): void;
-  flush(cohort?: Map<HTMLElement, Promise<void>>): void | Promise<void>;
+  flush(): void | Promise<void>;
+  gpuContext(): WebGL2RenderingContext | null;
   reset(): void;
 };
 const surfaces = new WeakMap<HTMLElement, Surface>();
 const scheduled = new Map<HTMLElement, { prepare(): void; draw(): unknown }>();
-const shaderRedraws = new Set<() => void>();
 export type EffectExecutionMode = "naive" | "refined";
 let executionMode: EffectExecutionMode = "refined";
 /** Regression reference control. Production uses the refined renderer. */
 export function setEffectExecutionForTests(mode: EffectExecutionMode) {
   executionMode = mode;
 }
-type Raster =
-  | ReturnType<typeof createElementRasterSource>
-  | ReturnType<typeof createDomRasterSource>;
-type Coordinator = {
-  graph: EffectGraph<HTMLElement>;
-  sources: EffectSources<Raster>;
-  nodes: Set<HTMLElement>;
-  compiled: boolean;
-  observer: MutationObserver;
-};
-const coordinators = new WeakMap<HTMLElement, Coordinator>();
-const liveCoordinators = new Set<Coordinator>();
-function coordinatorFor(root: HTMLElement) {
-  let coordinator = coordinators.get(root);
-  if (!coordinator) {
-    const observer = new MutationObserver((records) => {
-      if (
-        records.some(
-          (record) =>
-            record.type === "childList" &&
-            [...record.addedNodes, ...record.removedNodes].some(
-              (node) => node instanceof HTMLElement,
-            ),
-        )
-      )
-        coordinator!.compiled = false;
-    });
-    coordinator = {
-      graph: new EffectGraph(),
-      sources: new EffectSources(),
-      nodes: new Set(),
-      compiled: false,
-      observer,
-    };
-    observer.observe(root, { childList: true, subtree: true });
-    coordinators.set(root, coordinator);
-    liveCoordinators.add(coordinator);
-  }
-  return coordinator;
-}
-function compileCoordinator(coordinator: Coordinator) {
-  if (coordinator.compiled) return;
-  coordinator.graph.compile((node) => surfaces.get(node)?.inputs() ?? []);
-  coordinator.compiled = true;
-}
 export function effectSourceTextureBytes() {
-  return [...liveCoordinators].reduce(
-    (sum, coordinator) => sum + coordinator.sources.textureBytes,
-    0,
-  );
+  return sceneTextureTextureBytes();
 }
 function dependencyOrder(a: HTMLElement, b: HTMLElement) {
   if (a.contains(b)) return 1;
@@ -151,28 +95,15 @@ function flushScheduled() {
   scheduled.clear();
   // Read all current transforms after Motion writes, before allocating/painting.
   work.forEach(([, value]) => value.prepare());
-  work.forEach(([node, value]) => {
-    const coordinator = nodeCoordinators.get(node);
-    if (coordinator) {
-      compileCoordinator(coordinator);
-      void coordinator.graph
-        .resolve(node, (input) => !!surfaces.get(input)?.gpuOutput())
-        .then(() => {
-          if (
-            nodeCoordinators.get(node) === coordinator &&
-            coordinator.graph.isDirty(node)
-          ) {
-            scheduled.set(node, value);
-            frame.postRender(flushScheduled);
-          }
-        })
-        .catch((error) => {
-          node.dataset.effectError = String(error);
-        });
-    } else value.draw();
-  });
+  const pending = work.map(([, value]) => value.draw());
+  void Promise.all(pending).then(() =>
+    flushCompositionOutputs(
+      work.map(
+        ([node]) => node.closest<HTMLElement>(".slide-renderer") ?? node,
+      ),
+    ),
+  );
 }
-const nodeCoordinators = new WeakMap<HTMLElement, Coordinator>();
 export function effectSurface(node: HTMLElement) {
   return surfaces.get(node);
 }
@@ -183,41 +114,159 @@ export async function flushEffectSurfaces(root: ParentNode) {
     root.querySelectorAll<HTMLElement>("[data-effect-id]"),
   ).sort(dependencyOrder);
   nodes.forEach((node) => surfaces.get(node)?.prepareSampling());
-  const cohorts = new Map<Coordinator, Map<HTMLElement, Promise<void>>>();
-  for (const node of nodes) {
-    const coordinator = nodeCoordinators.get(node);
-    if (coordinator && !cohorts.has(coordinator))
-      cohorts.set(coordinator, new Map());
-    await surfaces
-      .get(node)
-      ?.flush(coordinator ? cohorts.get(coordinator) : undefined);
-  }
-  return !Array.from(root.querySelectorAll('[data-effect-ready="false"]')).some(
-    (node) => !node.closest('[data-presentation-absent="true"]'),
+  for (const node of nodes) await surfaces.get(node)?.flush();
+  const compositionReady = await flushCompositionOutputs(
+    nodes.map((node) => node.closest<HTMLElement>(".slide-renderer") ?? node),
   );
+  return (
+    compositionReady &&
+    !Array.from(root.querySelectorAll('[data-effect-ready="false"]')).some(
+      (node) => !node.closest('[data-presentation-absent="true"]'),
+    )
+  );
+}
+
+/** Bind a mounted semantic tree once; Motion must not rediscover it per sample. */
+export function bindEffectSurfaceFlusher(root: HTMLElement) {
+  const nodes = Array.from(
+    root.querySelectorAll<HTMLElement>("[data-effect-id]"),
+  ).sort(dependencyOrder);
+  return async () => {
+    nodes.forEach((node) => surfaces.get(node)?.prepareSampling());
+    for (const node of nodes) await surfaces.get(node)?.flush();
+  };
 }
 
 const vertex = `#version 300 es
 in vec2 position;
 out vec2 v_uv;
 void main() { v_uv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }`;
-let gpu: {
-  canvas: HTMLCanvasElement;
+
+type ProgramBinding = {
+  uniforms: Map<string, WebGLUniformLocation | null>;
+  position: number;
+  vao: WebGLVertexArrayObject;
+};
+const programBindings = new WeakMap<WebGLProgram, ProgramBinding>();
+function deleteProgram(gl: WebGL2RenderingContext, program: WebGLProgram) {
+  const binding = programBindings.get(program);
+  if (binding) gl.deleteVertexArray(binding.vao);
+  programBindings.delete(program);
+  gl.deleteProgram(program);
+}
+type ShaderGpuState = {
+  canvas: OffscreenCanvas;
   gl: WebGL2RenderingContext;
   programs: Map<string, WebGLProgram>;
   buffer: WebGLBuffer;
   capabilities: ShaderCapabilities;
   textureSize: number;
   generation: number;
-} | null = null;
+};
+
+export type ShaderChain = {
+  slot?: number;
+  canvas: HTMLCanvasElement | null;
+  state: ShaderGpuState | null;
+  redraws: Set<() => void>;
+  presenter: ImageBitmapRenderingContext | null;
+  sources: Set<string>;
+  validation: boolean;
+  lost: boolean;
+};
+
+const shaderMetrics = {
+  contextsCreated: 0,
+  shaderCompilations: 0,
+  maxActiveContexts: 0,
+  canvas2dPresentationCopies: 0,
+  bitmapPresentations: 0,
+};
+const activeShaderChains = new Set<ShaderChain>();
 let gpuGeneration = 0;
-function sharedGpu() {
-  if (gpu && !gpu.gl.isContextLost()) return gpu;
-  const canvas = document.createElement("canvas");
+const sharedShaderCanvases: Array<OffscreenCanvas | null> = [null, null];
+const sharedShaderGpus: Array<ShaderGpuState | null> = [null, null];
+let preserveShaderBufferForTests = false;
+export function setShaderBufferPreservationForTests(value: boolean) {
+  preserveShaderBufferForTests = value;
+}
+
+export function createShaderChain(): ShaderChain {
+  return {
+    canvas: null,
+    state: null,
+    redraws: new Set(),
+    presenter: null,
+    sources: new Set(),
+    validation: false,
+    lost: false,
+  };
+}
+
+export function shaderRuntimeDiagnostics() {
+  return {
+    ...shaderMetrics,
+    activeChains: activeShaderChains.size,
+    activeContexts: new Set(
+      [...activeShaderChains]
+        .filter((c) => c.state && !c.state.gl.isContextLost())
+        .map((c) => c.state!.gl),
+    ).size,
+    residentContexts: sharedShaderGpus.filter(
+      (state) => state && !state.gl.isContextLost(),
+    ).length,
+  };
+}
+
+function shaderGpuCanvas(slot: number) {
+  if (sharedShaderCanvases[slot]) return sharedShaderCanvases[slot]!;
+  const canvas = new OffscreenCanvas(1, 1);
+  canvas.addEventListener("webglcontextlost", (event) => {
+    event.preventDefault();
+    sharedShaderGpus[slot] = null;
+    for (const chain of activeShaderChains) {
+      if ((chain.slot ?? 0) !== slot) continue;
+      chain.lost = true;
+      chain.state = null;
+    }
+    if (validationChain && (validationChain.slot ?? 0) === slot)
+      validationChain.state = null;
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    sharedShaderGpus[slot] = null;
+    for (const chain of activeShaderChains) {
+      if ((chain.slot ?? 0) !== slot) continue;
+      chain.lost = false;
+      chain.state = null;
+    }
+    // Static consumers may sample output from the restored cohort.
+    for (const chain of activeShaderChains)
+      chain.redraws.forEach((redraw) => redraw());
+  });
+  sharedShaderCanvases[slot] = canvas;
+  return canvas;
+}
+
+function shaderGpu(chain: ShaderChain) {
+  if (!chain.canvas) throw new Error("Shader output canvas is not mounted.");
+  chain.presenter ??= chain.canvas.getContext("bitmaprenderer");
+  if (!chain.presenter)
+    throw new Error(
+      "GPU bitmap presentation is unavailable; the original Element remains visible.",
+    );
+  if (!chain.validation) activeShaderChains.add(chain);
+  const slot = chain.slot ?? 0;
+  const sharedShaderGpu = sharedShaderGpus[slot];
+  if (sharedShaderGpu && !sharedShaderGpu.gl.isContextLost()) {
+    chain.state = sharedShaderGpu;
+    return sharedShaderGpu;
+  }
+  const canvas = shaderGpuCanvas(slot);
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
     antialias: false,
+    preserveDrawingBuffer: preserveShaderBufferForTests,
   });
   if (!gl)
     throw new Error(
@@ -231,7 +280,7 @@ function sharedGpu() {
     new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
     gl.STATIC_DRAW,
   );
-  const state = {
+  const state: ShaderGpuState = {
     canvas,
     gl,
     buffer,
@@ -249,20 +298,60 @@ function sharedGpu() {
     textureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
     generation: ++gpuGeneration,
   };
-  canvas.addEventListener("webglcontextlost", (event) => {
-    event.preventDefault();
-    state.programs.clear();
-    if (gpu === state) gpu = null;
-    shaderRedraws.forEach((redraw) => redraw());
-  });
-  gpu = state;
+  chain.state = state;
+  sharedShaderGpus[slot] = state;
+  shaderMetrics.contextsCreated++;
+  shaderMetrics.maxActiveContexts = Math.max(
+    shaderMetrics.maxActiveContexts,
+    sharedShaderGpus.filter(Boolean).length,
+  );
   return state;
 }
-export function shaderProgram(source: string) {
-  const state = sharedGpu(),
+
+function disposeShaderChain(chain: ShaderChain) {
+  const state = chain.state;
+  activeShaderChains.delete(chain);
+  if (state && !state.gl.isContextLost()) {
+    for (const source of chain.sources) {
+      if (
+        [...activeShaderChains].some(
+          (other) => other.state === state && other.sources.has(source),
+        )
+      )
+        continue;
+      const program = state.programs.get(source);
+      if (program) deleteProgram(state.gl, program);
+      state.programs.delete(source);
+    }
+    if (![...activeShaderChains].some((other) => other.state === state))
+      state.canvas.width = state.canvas.height = 1;
+  }
+  chain.presenter?.transferFromImageBitmap(null);
+  chain.state = null;
+  chain.redraws.clear();
+  chain.sources.clear();
+  chain.presenter = null;
+}
+
+let validationChain: ShaderChain | null = null;
+function validationShaderChain() {
+  if (!validationChain) {
+    validationChain = createShaderChain();
+    validationChain.validation = true;
+    validationChain.canvas = document.createElement("canvas");
+    validationChain.canvas.width = validationChain.canvas.height = 1;
+  }
+  return validationChain;
+}
+
+export function shaderProgram(source: string, chain = validationShaderChain()) {
+  const state = shaderGpu(chain),
     { gl, programs } = state;
   const cached = programs.get(source);
-  if (cached) return { ...state, program: cached };
+  if (cached) {
+    chain.sources.add(source);
+    return { ...state, program: cached, binding: programBindings.get(cached)! };
+  }
   const shaders: WebGLShader[] = [];
   let program: WebGLProgram | null = null;
   try {
@@ -286,12 +375,14 @@ export function shaderProgram(source: string) {
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS))
       throw new Error(gl.getProgramInfoLog(program) || "Shader linking failed");
+    const uniforms = new Map<string, WebGLUniformLocation | null>();
     for (
       let i = 0;
       i < (gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS) as number);
       i++
     ) {
       const uniform = gl.getActiveUniform(program, i)!;
+      uniforms.set(uniform.name, gl.getUniformLocation(program, uniform.name));
       if (uniform.name === "u_resolution" || uniform.name === "u_size") {
         if (uniform.type !== gl.FLOAT_VEC2)
           throw new Error(`${uniform.name} must be vec2`);
@@ -304,12 +395,32 @@ export function shaderProgram(source: string) {
         );
     }
     if (programs.size >= 32) {
-      const [key, old] = programs.entries().next().value!;
-      gl.deleteProgram(old);
-      programs.delete(key);
+      const unused = [...programs].find(
+        ([key]) =>
+          ![...activeShaderChains].some(
+            (owner) => owner.state?.gl === gl && owner.sources.has(key),
+          ),
+      );
+      if (unused) {
+        deleteProgram(gl, unused[1]);
+        programs.delete(unused[0]);
+      }
     }
+    const vao = gl.createVertexArray();
+    if (!vao) throw new Error("Cannot allocate shader vertex state");
+    const position = gl.getAttribLocation(program, "position");
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, state.buffer);
+    if (position >= 0) {
+      gl.enableVertexAttribArray(position);
+      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    }
+    const binding = { uniforms, position, vao };
+    programBindings.set(program, binding);
     programs.set(source, program);
-    return { ...state, program };
+    chain.sources.add(source);
+    shaderMetrics.shaderCompilations++;
+    return { ...state, program, binding };
   } catch (error) {
     if (program) gl.deleteProgram(program);
     throw error;
@@ -325,9 +436,14 @@ export function compileEffectCss(source: string, scope: string) {
   sheet.replaceSync(source);
   if (!sheet.cssRules.length) throw new Error("CSS must contain a :scope rule");
   const names = new Map<string, string>();
-  for (const rule of sheet.cssRules)
-    if (rule instanceof CSSKeyframesRule)
-      names.set(rule.name, `${scope}_${rule.name}`);
+  const collect = (rules: CSSRuleList) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSKeyframesRule)
+        names.set(rule.name, `${scope}_${rule.name}`);
+      else if (rule instanceof CSSSupportsRule) collect(rule.cssRules);
+    }
+  };
+  collect(sheet.cssRules);
   const declarations = (style: CSSStyleDeclaration) => {
     for (const property of ["animation", "animation-name"]) {
       let value = style.getPropertyValue(property);
@@ -345,20 +461,31 @@ export function compileEffectCss(source: string, scope: string) {
     style.setProperty("animation-play-state", "paused", "important");
     style.setProperty("transition", "none", "important");
   };
-  const output: string[] = [];
-  for (const rule of sheet.cssRules) {
-    if (rule instanceof CSSStyleRule) {
-      if (rule.selectorText !== ":scope")
-        throw new Error("CSS effects support :scope and @keyframes rules only");
-      declarations(rule.style);
-      output.push(`[data-effect-scope="${scope}"] { ${rule.style.cssText} }`);
-    } else if (rule instanceof CSSKeyframesRule) {
-      rule.name = names.get(rule.name)!;
-      output.push(rule.cssText);
-    } else
-      throw new Error("CSS effects support :scope and @keyframes rules only");
-  }
-  return output.join("\n");
+  const compile = (rules: CSSRuleList): string => {
+    const output: string[] = [];
+    for (const rule of rules) {
+      if (rule instanceof CSSStyleRule) {
+        if (rule.selectorText !== ":scope")
+          throw new Error(
+            "CSS effects support :scope and @keyframes rules only",
+          );
+        declarations(rule.style);
+        output.push(`[data-effect-scope="${scope}"] { ${rule.style.cssText} }`);
+      } else if (rule instanceof CSSKeyframesRule) {
+        rule.name = names.get(rule.name)!;
+        output.push(rule.cssText);
+      } else if (rule instanceof CSSSupportsRule)
+        output.push(
+          `@supports ${rule.conditionText} { ${compile(rule.cssRules)} }`,
+        );
+      else
+        throw new Error(
+          "CSS effects support :scope, @keyframes and scoped @supports rules only",
+        );
+    }
+    return output.join("\n");
+  };
+  return compile(sheet.cssRules);
 }
 
 /** Renderer-owned surfaces consume values, never advance presentation time. */
@@ -379,11 +506,13 @@ export function mountEffectSurface(
     y: devicePixelRatio || 1,
     mode: "live",
   },
+  shaderChain?: ShaderChain,
+  shaderIntermediate = false,
+  directShaderInput = false,
+  ownsShaderChain = false,
+  ownedMediaInput = false,
 ) {
   const refined = executionMode === "refined";
-  const useGpu = refined;
-  const sceneRoot = samplingRoot(node, initialSampling);
-  const coordinator = refined ? coordinatorFor(sceneRoot) : null;
   const dependencies = effectDependencies(definition);
   const cssSource = () =>
     (definition.kind === "css"
@@ -439,44 +568,34 @@ export function mountEffectSurface(
   let heldDensity = 0;
   let preparedSampling = false;
   let logicalSize = size;
-  let samplingGeometry = "";
+  let semanticTransform = (() => {
+    if (!content?.scene) return new DOMMatrix();
+    const matrix = getWorldMatrix(content.scene().slide, content.element.id);
+    return new DOMMatrix([...matrix]);
+  })();
+  let semanticTransformKey = semanticTransform.toString();
   const prepareSampling = () => {
     if (!live || definition.kind !== "fragment-glsl") return;
     try {
-      const owner = node.closest<HTMLElement>("[data-element-id]");
-      if (owner) {
-        const style = getComputedStyle(owner),
-          width = parseFloat(style.width),
-          height = parseFloat(style.height);
-        logicalSize =
-          Number.isFinite(width) &&
-          width > 0 &&
-          Number.isFinite(height) &&
-          height > 0
-            ? { width, height }
-            : size;
+      logicalSize = size;
+      // Arbitrary document CSS may author dimensions outside the semantic frame.
+      // Keep this discovery behind that explicit exceptional boundary.
+      if (content?.scene?.().deck.stylesheet?.trim()) {
+        const owner = node.closest<HTMLElement>("[data-element-id]");
+        if (owner) {
+          const style = getComputedStyle(owner);
+          logicalSize = {
+            width: parseFloat(style.width) || size.width,
+            height: parseFloat(style.height) || size.height,
+          };
+        }
       }
-      const root =
-        sampling.root ?? node.closest<HTMLElement>(".slide-renderer");
-      const matrix =
-        owner && root ? elementWorldTransform(owner, root) : new DOMMatrix();
       const next = Math.max(
-        affineSamplingDensity(sampling, matrix),
+        affineSamplingDensity(sampling, semanticTransform),
         sampling.envelope ?? 0,
       );
       if (!Number.isFinite(next))
         throw new Error("Invalid shader transform sampling");
-      const geometry = JSON.stringify([
-        logicalSize.width,
-        logicalSize.height,
-        next,
-        ...Array.from(matrix.toFloat64Array()),
-      ]);
-      if (refined && samplingGeometry !== geometry) {
-        samplingGeometry = geometry;
-        coordinator?.graph.invalidate(node);
-        raster?.markDirty();
-      }
       samplingDensity = next;
       if (sampling.retain) heldDensity = Math.max(heldDensity, next);
       else heldDensity = next;
@@ -514,34 +633,136 @@ export function mountEffectSurface(
   let lastTextInput = "";
   let lastShaderInput = "";
   let lastCssOutput = "";
-  let raster: Raster | null = null;
-  let createRaster: ((invalidate: () => void) => Raster) | null = null;
-  let needsDomRaster = () => false;
-  let sourceLease: ReturnType<EffectSources<Raster>["acquire"]> | null = null;
-  let leaseKey = "";
-  let rasterPending = false;
+  let inputPending = false;
+  let sceneTexture: SceneTextureProvider | null = null;
+  let sceneTextureFactory: (() => SceneTextureProvider) | null = null;
   let shaderOutput: ShaderOutput | null = null;
-  let rasterPrepared = false;
-  let rasterPreparedKey = "";
-  let texture: {
-    gl: WebGL2RenderingContext;
-    value: WebGLTexture;
-    revision: number;
-    width: number;
-    height: number;
-  } | null = null;
-  let observer: MutationObserver | null = null;
-  let sourceRoot: HTMLElement | null = null;
+  let sampleableOutput = shaderIntermediate;
   let sourceContent: HTMLElement | null = null;
+  let ownedMediaSources: Array<HTMLImageElement | HTMLVideoElement> = [];
   let sourceOpacity = "";
+  let ownedMediaTexture: {
+    gl: WebGL2RenderingContext;
+    texture: WebGLTexture;
+    source: HTMLImageElement | HTMLVideoElement;
+    key: string;
+    revision: number;
+    generation: number;
+  } | null = null;
+  let videoFrameId: number | null = null;
+  let videoFrameNode: HTMLVideoElement | null = null;
+  let ownedMediaChanged: ((event: Event) => void) | null = null;
+
+  const disposeOwnedMediaTexture = () => {
+    if (
+      ownedMediaTexture &&
+      ownedMediaTexture.generation === resourceGeneration(ownedMediaTexture.gl)
+    )
+      ownedMediaTexture.gl.deleteTexture(ownedMediaTexture.texture);
+    ownedMediaTexture = null;
+  };
+
+  const currentOwnedMedia = () => {
+    if (!sourceContent) return null;
+    const video = ownedMediaSources.find(
+      (source): source is HTMLVideoElement =>
+        source instanceof HTMLVideoElement,
+    );
+    if (
+      video &&
+      video.style.visibility !== "hidden" &&
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      video.videoWidth &&
+      video.videoHeight
+    )
+      return video;
+    return (
+      ownedMediaSources.find(
+        (image): image is HTMLImageElement =>
+          image instanceof HTMLImageElement &&
+          image.complete &&
+          image.naturalWidth > 0 &&
+          image.naturalHeight > 0,
+      ) ?? null
+    );
+  };
+
+  const resolveOwnedMediaTexture = (gl: WebGL2RenderingContext) => {
+    const source = currentOwnedMedia();
+    if (!source) return null;
+    const key =
+      source instanceof HTMLVideoElement
+        ? `${source.currentSrc || source.src}:${source.currentTime}:${source.videoWidth}x${source.videoHeight}`
+        : `${source.currentSrc || source.src}:${source.naturalWidth}x${source.naturalHeight}`;
+    if (
+      !ownedMediaTexture ||
+      ownedMediaTexture.gl !== gl ||
+      ownedMediaTexture.generation !== resourceGeneration(gl)
+    ) {
+      disposeOwnedMediaTexture();
+      const texture = gl.createTexture();
+      if (!texture) throw new Error("Cannot allocate owned media texture");
+      ownedMediaTexture = {
+        gl,
+        texture,
+        source,
+        key: "",
+        revision: 0,
+        generation: resourceGeneration(gl),
+      };
+    }
+    const state = ownedMediaTexture;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, state.texture);
+    if (state.source !== source || state.key !== key) {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        source,
+      );
+      if (gl.getError() !== gl.NO_ERROR)
+        throw new Error("Cannot upload owned media shader input");
+      state.source = source;
+      state.key = key;
+      state.revision++;
+    }
+    return {
+      kind:
+        source instanceof HTMLVideoElement
+          ? ("videoTexture" as const)
+          : ("imageTexture" as const),
+      texture: state.texture,
+      revision: state.revision,
+    };
+  };
+  const renderedSceneTexture = () => {
+    if (!sceneTexture && sceneTextureFactory)
+      sceneTexture = sceneTextureFactory();
+    return sceneTexture;
+  };
   const ownerAbsent = () => !!node.closest('[data-presentation-absent="true"]');
   const schedule = () => {
     if (live) {
-      coordinator?.graph.invalidate(node);
       if (ownerAbsent()) return;
       scheduled.set(node, { prepare: prepareSampling, draw });
       frame.postRender(flushScheduled);
     }
+  };
+  let visualSuspended = false;
+  let staticRefresh = true;
+  const restored = () => {
+    staticRefresh = true;
+    lastShaderInput = "";
+    schedule();
   };
   const publish = () => {
     node.dataset.effectRevision = String(
@@ -551,125 +772,53 @@ export function mountEffectSurface(
       new CustomEvent("showme-effect-output", { bubbles: true }),
     );
   };
-  const sourceChanged = () => {
-    raster?.markDirty();
-    schedule();
-  };
-  const outputChanged = (event: Event) => {
-    if (
-      event.target instanceof Node &&
-      event.target !== node &&
-      sourceRoot?.contains(event.target) &&
-      (!refined ||
-        definition.input !== "content" ||
-        !!sourceContent?.contains(event.target)) &&
-      (!refined ||
-        definition.input !== "backdrop" ||
-        inputDependencies().includes(event.target as HTMLElement))
-    )
-      sourceChanged();
-  };
-  const inputDependencies = () => {
-    const root =
-      definition.kind === "css"
-        ? node
-        : definition.input === "content"
-          ? sourceContent
-          : sourceRoot;
-    if (!root) return [];
-    const prefix =
-      definition.input === "backdrop" && content?.scene
-        ? backdropPrefix(
-            content.scene().slide,
-            content.scene().deck,
-            content.element.id,
-          )
-        : null;
-    const allowed = new Set<string>();
-    const collect = (elements: Element[]) =>
-      elements.forEach((element) => {
-        allowed.add(element.id);
-        collect(element.children);
-      });
-    if (prefix) collect(prefix.elements);
-    const candidates = Array.from(
-      root.querySelectorAll<HTMLElement>("[data-effect-id]"),
-    )
-      .filter((dependency) => {
-        if (dependency === node || dependency.contains(node)) return false;
-        const owner =
-          dependency.closest<HTMLElement>("[data-element-id]")?.dataset
-            .elementId;
-        return (
-          !prefix ||
-          (!!owner && allowed.has(owner) && !prefix.partial.has(owner))
-        );
-      })
-      .sort(dependencyOrder);
-    // The outer stage resolves its own inputs. Re-listing every descendant
-    // makes a deep stack repeatedly walk and wait on the same subtree.
-    return candidates.filter(
-      (candidate) =>
-        !candidates.some(
-          (other) => other !== candidate && other.contains(candidate),
-        ),
-    );
-  };
-  let domRevision = -1;
   const materialize = () => {
     if (
       !canvas ||
-      !shaderOutput ||
+      shaderIntermediate ||
       node.dataset.effectError ||
-      node.dataset.effectStarted === "false" ||
-      domRevision === shaderOutput.revision
+      node.dataset.effectStarted === "false"
     )
       return;
-    const state = sharedGpu();
-    if (state.gl !== shaderOutput.gl || state.gl.isContextLost()) return;
-    const { gl, canvas: source } = state;
-    if (source.width !== shaderOutput.width) source.width = shaderOutput.width;
-    if (source.height !== shaderOutput.height)
-      source.height = shaderOutput.height;
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.blitFramebuffer(
-      0,
-      0,
-      source.width,
-      source.height,
-      0,
-      0,
-      source.width,
-      source.height,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const context = resizeRasterCanvas(canvas, source.width, source.height);
-    context.clearRect(0, 0, source.width, source.height);
-    context.drawImage(source, 0, 0);
-    domRevision = shaderOutput.revision;
-    canvas.style.visibility = "visible";
-  };
-  const needsDomOutput = () => {
-    if (!refined) return true;
-    const source = node.parentElement;
-    const consumer = source?.parentElement;
+    if (shaderChain?.lost) return;
     if (
-      !source?.hasAttribute("data-effect-source") ||
-      !consumer?.dataset.effectId
-    )
-      return true;
-    const consumerSurface = surfaces.get(consumer);
-    return !(
-      consumerSurface &&
-      canvas &&
-      consumer.dataset.effectStarted !== "false" &&
-      !consumer.dataset.effectError &&
-      source.children.length === 1 &&
-      neutralShaderBridge(source, node, canvas, logicalSize)
-    );
+      !sampleableOutput ||
+      !shaderOutput ||
+      shaderOutput.generation !== resourceGeneration(shaderOutput.gl)
+    ) {
+      try {
+        const { gl } = shaderGpu(shaderChain!);
+        shaderOutput = allocateShaderOutput(
+          gl,
+          canvas.width,
+          canvas.height,
+          shaderOutput,
+        );
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, shaderOutput.texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+        // The visible bitmap owns the last presented pixels. Promote them only
+        // on an explicit sampling request, without advancing/re-running Effects.
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          canvas,
+        );
+        if (gl.getError() !== gl.NO_ERROR)
+          throw new Error("Cannot retain shader bitmap input");
+        shaderOutput.revision++;
+        sampleableOutput = true;
+      } catch (error) {
+        diagnose(error);
+        return;
+      }
+    }
+    canvas.style.visibility = "visible";
   };
   let style: HTMLStyleElement | null = null;
   // Identity belongs to this stage, never to its Element or earlier stages.
@@ -678,10 +827,7 @@ export function mountEffectSurface(
       ++sequence; // A pending worker must not repaint a backward seek.
       lastTextInput = "";
       lastShaderInput = "";
-      if (canvas) {
-        canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-        canvas.style.visibility = "hidden";
-      }
+      if (canvas) canvas.style.visibility = "hidden";
       if (output) output.style.visibility = "hidden";
       if (original && textInputHidden) original.style.opacity = originalOpacity;
       textInputHidden = false;
@@ -704,10 +850,15 @@ export function mountEffectSurface(
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     lastShaderInput = "";
   };
-  const draw = () => {
+  const draw = (_frame?: unknown, preparedSceneInput?: SceneTexture) => {
+    if (visualSuspended && !staticRefresh) return;
     // Element lifecycle gates visual work, independently of this Effect's clock.
     if (ownerAbsent()) return;
     if (!live) return;
+    if (shaderChain?.lost) {
+      node.dataset.effectReady = "false";
+      return;
+    }
     if (!timing.started) {
       bypass();
       return;
@@ -839,15 +990,16 @@ export function mountEffectSurface(
           node.style.setProperty(`--${key}`, String(value));
         node.style.setProperty("--duration", String(timing.duration));
       } else if (canvas) {
+        if (!shaderChain) throw new Error("Shader surface has no GPU chain.");
         const {
           gl,
-          canvas: source,
-          buffer,
+          canvas: gpuCanvas,
           program,
+          binding,
           capabilities,
           textureSize,
           generation,
-        } = shaderProgram(definition.source);
+        } = shaderProgram(definition.source, shaderChain);
         if (!preparedSampling) prepareSampling();
         preparedSampling = false;
         if (samplingDensity <= 0) {
@@ -871,230 +1023,158 @@ export function mountEffectSurface(
           node.dataset.effectSamplingWarning = `Shader requested ${allocation.requestedWidth} × ${allocation.requestedHeight}; GPU texture/viewport/renderbuffer limits reduced it to ${width} × ${height}.`;
         else delete node.dataset.effectSamplingWarning;
         const previousStage =
-          useGpu &&
-          definition.input === "content" &&
-          sourceContent?.children.length === 1
+          directShaderInput && sourceContent?.children.length === 1
             ? (sourceContent.firstElementChild as HTMLElement)
             : null;
-        const previousCanvas =
-          previousStage?.querySelector<HTMLCanvasElement>(":scope > canvas");
-        const previousInstance = content?.element.effects?.find(
-          (effect) => effect.id === previousStage?.dataset.effectId,
-        );
         const previousSurface = previousStage
           ? surfaces.get(previousStage)
           : undefined;
-        const canChain = !!(
-          previousStage &&
-          previousCanvas &&
-          sourceContent &&
-          previousSurface &&
-          previousInstance &&
-          content?.resources[previousInstance.resourceId]?.input ===
-            "content" &&
-          previousStage.dataset.effectStarted !== "false" &&
-          !previousStage.dataset.effectError &&
-          neutralShaderBridge(
-            sourceContent,
-            previousStage,
-            previousCanvas,
-            logicalSize,
-          )
-        );
+        const canChain = !!(directShaderInput && previousSurface);
         const gpuInput = canChain ? previousSurface!.gpuOutput() : null;
-        if (canChain && (!gpuInput || gpuInput.gl !== gl) && !rasterPending) {
-          rasterPending = true;
+        if (canChain && (!gpuInput || gpuInput.gl !== gl) && !inputPending) {
+          inputPending = true;
           node.dataset.effectReady = "false";
           pending = Promise.resolve(previousSurface!.flush())
             .then(() => {
-              rasterPending = false;
-              if (live) void draw();
+              inputPending = false;
+              if (!previousSurface!.gpuOutput())
+                throw new Error("Previous shader output is unavailable.");
+              if (live) return draw();
             })
             .catch((error) => {
-              rasterPending = false;
+              inputPending = false;
               if (live) diagnose(error);
             });
           return pending;
         }
-        if (rasterPending) {
+        if (inputPending) {
           return pending;
         }
-        if (refined && gpuInput && sourceLease) {
-          sourceLease.release();
-          sourceLease = null;
-          raster = null;
-          leaseKey = "";
-          rasterPrepared = false;
-        }
-        if (!gpuInput && createRaster && !rasterPending) {
-          const dom = needsDomRaster();
-          if (refined && coordinator) {
-            const key = `${definition.input === "backdrop" ? `backdrop:${content!.element.id}` : `content:${content!.element.id}:${instance.id}`}|${dom ? "dom" : "primitive"}|${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
-            if (key !== leaseKey) {
-              sourceLease?.release();
-              sourceLease = coordinator.sources.acquire(
-                key,
-                createRaster,
-                schedule,
-              );
-              raster = sourceLease.source;
-              leaseKey = key;
-              rasterPrepared = false;
-              lastShaderInput = "";
-            }
-          } else {
-            if (raster && "backend" in raster !== dom) {
-              raster.dispose();
-              raster = null;
-              rasterPrepared = false;
-              lastShaderInput = "";
-              if (texture) texture.revision = -1;
-            }
-            raster ??= createRaster(schedule);
-          }
-        }
-        const captureKey = `${width}x${height}|${logicalSize.width}x${logicalSize.height}`;
-        if (rasterPreparedKey !== captureKey) rasterPrepared = false;
-        if (!rasterPrepared && !gpuInput) {
-          const ready =
-            raster &&
-            ("backend" in raster
-              ? raster.update(
-                  width,
-                  height,
-                  logicalSize.width,
-                  logicalSize.height,
-                )
-              : raster.update(width, height));
-          if (ready instanceof Promise) {
-            rasterPending = true;
+        let sceneInput: SceneTexture | null = preparedSceneInput ?? null;
+        const renderedInput =
+          !gpuInput && !directShaderInput && !ownedMediaInput
+            ? renderedSceneTexture()
+            : null;
+        if (renderedInput && !inputPending && !sceneInput) {
+          const acquired = renderedInput.acquire({
+            width,
+            height,
+            logicalWidth: logicalSize.width,
+            logicalHeight: logicalSize.height,
+          });
+          if (acquired instanceof Promise) {
+            inputPending = true;
             node.dataset.effectReady = "false";
-            pending = ready
-              .then(() => {
-                rasterPending = false;
-                if (!live) return;
-                // Publish the completed snapshot even when a newer animation tick
-                // arrived during paint. Retrying before publication would starve
-                // continuously changing sources; the next update coalesces it.
-                rasterPrepared = true;
-                rasterPreparedKey = captureKey;
-                void draw();
-                if (raster && "isDirty" in raster && raster.isDirty) schedule();
+            pending = acquired
+              .then((texture) => {
+                inputPending = false;
+                // Present the completed capture even if an animated dependency
+                // invalidated the next generation while capture was pending.
+                if (live) return draw(undefined, texture);
               })
               .catch((error) => {
-                rasterPending = false;
+                inputPending = false;
                 if (live) diagnose(error);
               });
             return pending;
           }
+          sceneInput = acquired;
         }
-        rasterPrepared = false;
+        if (inputPending) return pending;
+        const ownedMedia = ownedMediaInput
+          ? resolveOwnedMediaTexture(gl)
+          : null;
+        if (ownedMediaInput && !ownedMedia) {
+          node.dataset.effectReady = "false";
+          return;
+        }
+        const resolvedInput = gpuInput
+          ? { kind: "shaderTexture" as const, output: gpuInput }
+          : ownedMedia
+            ? ownedMedia
+            : sceneInput
+              ? { kind: "sceneTexture" as const, texture: sceneInput }
+              : { kind: "none" as const };
         const signature = JSON.stringify([
           params,
           refined ? clockKey(timing) : timing,
           width,
           height,
-          raster?.revision,
-          gpuInput?.revision,
+          resolvedInput.kind,
+          resolvedInput.kind === "shaderTexture"
+            ? resolvedInput.output.revision
+            : resolvedInput.kind === "sceneTexture"
+              ? resolvedInput.texture.revision
+              : resolvedInput.kind === "imageTexture" ||
+                  resolvedInput.kind === "videoTexture"
+                ? resolvedInput.revision
+                : 0,
           generation,
         ]);
         if (signature === lastShaderInput) {
           node.dataset.effectReady = "true";
           return;
         }
-        if (source.width !== width || source.height !== height) {
-          source.width = width;
-          source.height = height;
+        if (!shaderIntermediate) {
+          if (canvas.width !== width) canvas.width = width;
+          if (canvas.height !== height) canvas.height = height;
+          const resized =
+            gpuCanvas.width !== width || gpuCanvas.height !== height;
+          if (gpuCanvas.width !== width) gpuCanvas.width = width;
+          if (gpuCanvas.height !== height) gpuCanvas.height = height;
           if (
-            gl.drawingBufferWidth !== width ||
-            gl.drawingBufferHeight !== height ||
-            gl.getError() !== gl.NO_ERROR
+            resized &&
+            (gl.drawingBufferWidth !== width ||
+              gl.drawingBufferHeight !== height ||
+              gl.getError() !== gl.NO_ERROR)
           )
             throw new Error(
-              `Cannot allocate ${width} × ${height} shader drawing buffer`,
+              `Cannot allocate ${width} × ${height} visible shader drawing buffer`,
             );
         }
-        const context = !refined
-          ? resizeRasterCanvas(canvas, width, height)
-          : null;
-        if (useGpu)
+        if (sampleableOutput) {
           shaderOutput = allocateShaderOutput(gl, width, height, shaderOutput);
-        gl.bindFramebuffer(
-          gl.FRAMEBUFFER,
-          useGpu ? shaderOutput!.framebuffer : null,
-        );
+          gl.bindFramebuffer(gl.FRAMEBUFFER, shaderOutput.framebuffer);
+        } else gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, width, height);
         gl.useProgram(program);
-        if (gpuInput) {
+        if (resolvedInput.kind === "shaderTexture") {
           gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, gpuInput.texture);
-          gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
+          gl.bindTexture(gl.TEXTURE_2D, resolvedInput.output.texture);
+          gl.uniform1i(binding.uniforms.get("u_input") ?? null, 0);
           node.dataset.effectSourceBackend = "gpu";
-          node.dataset.effectSourceRevision = String(gpuInput.revision);
-        } else if (raster) {
+          node.dataset.effectSourceRevision = String(
+            resolvedInput.output.revision,
+          );
+        } else if (
+          resolvedInput.kind === "imageTexture" ||
+          resolvedInput.kind === "videoTexture"
+        ) {
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, resolvedInput.texture);
+          gl.uniform1i(binding.uniforms.get("u_input") ?? null, 0);
           node.dataset.effectSourceBackend =
-            "backend" in raster ? raster.backend : "primitive";
-          if (refined && sourceLease) {
-            sourceLease.upload(gl);
-            node.dataset.effectSourceRevision = String(raster.revision);
-          } else {
-            if (!texture || texture.gl !== gl) {
-              if (texture) texture.gl.deleteTexture(texture.value);
-              const value = gl.createTexture();
-              if (!value)
-                throw new Error("Cannot allocate content shader texture");
-              texture = { gl, value, revision: -1, width: 0, height: 0 };
-            }
-            gl.activeTexture(gl.TEXTURE0);
-            gl.bindTexture(gl.TEXTURE_2D, texture.value);
-            if (texture.revision !== raster.revision) {
-              gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-              gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-              gl.texParameteri(
-                gl.TEXTURE_2D,
-                gl.TEXTURE_WRAP_S,
-                gl.CLAMP_TO_EDGE,
-              );
-              gl.texParameteri(
-                gl.TEXTURE_2D,
-                gl.TEXTURE_WRAP_T,
-                gl.CLAMP_TO_EDGE,
-              );
-              gl.texImage2D(
-                gl.TEXTURE_2D,
-                0,
-                gl.RGBA,
-                gl.RGBA,
-                gl.UNSIGNED_BYTE,
-                raster.canvas,
-              );
-              if (texture.width !== width || texture.height !== height) {
-                if (gl.getError() !== gl.NO_ERROR)
-                  throw new Error(
-                    `Cannot allocate ${width} × ${height} shader input texture`,
-                  );
-                texture.width = width;
-                texture.height = height;
-              }
-              texture.revision = raster.revision;
-              node.dataset.effectSourceRevision = String(raster.revision);
-            }
-          }
-          gl.uniform1i(gl.getUniformLocation(program, "u_input"), 0);
+            resolvedInput.kind === "videoTexture" ? "video" : "image";
+          node.dataset.effectSourceRevision = String(resolvedInput.revision);
+        } else if (resolvedInput.kind === "sceneTexture") {
+          resolvedInput.texture.bind(gl);
+          node.dataset.effectSourceBackend = "scene-texture";
+          node.dataset.effectSourceRevision = String(
+            resolvedInput.texture.revision,
+          );
+          gl.uniform1i(binding.uniforms.get("u_input") ?? null, 0);
+        } else {
+          node.dataset.effectSourceBackend = "none";
+          delete node.dataset.effectSourceRevision;
         }
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        const position = gl.getAttribLocation(program, "position");
-        gl.enableVertexAttribArray(position);
-        gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+        gl.bindVertexArray(binding.vao);
         gl.uniform2f(
-          gl.getUniformLocation(program, "u_resolution"),
+          binding.uniforms.get("u_resolution") ?? null,
           width,
           height,
         );
         gl.uniform2f(
-          gl.getUniformLocation(program, "u_size"),
+          binding.uniforms.get("u_size") ?? null,
           logicalSize.width,
           logicalSize.height,
         );
@@ -1115,44 +1195,34 @@ export function mountEffectSurface(
           ...params,
         }))
           if (typeof value === "number")
-            gl.uniform1f(gl.getUniformLocation(program, key), value);
+            gl.uniform1f(binding.uniforms.get(key) ?? null, value);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        if (useGpu && shaderOutput) {
-          shaderOutput.revision++;
-          if (!refined) {
-            gl.bindFramebuffer(gl.READ_FRAMEBUFFER, shaderOutput.framebuffer);
-            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-            gl.blitFramebuffer(
-              0,
-              0,
-              width,
-              height,
-              0,
-              0,
-              width,
-              height,
-              gl.COLOR_BUFFER_BIT,
-              gl.NEAREST,
-            );
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          }
-        }
-        if (refined) {
-          if (needsDomOutput()) materialize();
-          else {
-            canvas.width = canvas.height = 1;
-            domRevision = -1;
-          }
+        if (shaderOutput) shaderOutput.revision++;
+        if (shaderIntermediate) {
+          canvas.style.visibility = "hidden";
+          canvas.width = canvas.height = 1;
         } else {
-          context!.clearRect(0, 0, width, height);
-          context!.drawImage(source, 0, 0);
+          if (sampleableOutput && shaderOutput)
+            presentShaderOutput(shaderOutput);
+          const bitmap = gpuCanvas.transferToImageBitmap();
+          try {
+            shaderChain.presenter!.transferFromImageBitmap(bitmap);
+          } finally {
+            bitmap.close();
+          }
+          shaderMetrics.bitmapPresentations++;
+          canvas.style.visibility = "visible";
         }
-        canvas.style.visibility = "visible";
         if (sourceContent) sourceContent.style.opacity = "0";
         lastShaderInput = signature;
         publish();
+        if (visualSuspended) {
+          staticRefresh = false;
+          sceneTexture?.dispose();
+          sceneTexture = null;
+        }
       }
       if (node.dataset.effectError !== undefined) {
         delete node.dataset.effectError;
@@ -1167,29 +1237,21 @@ export function mountEffectSurface(
     live = false;
     cancelFrame(draw);
     scheduled.delete(node);
-    shaderRedraws.delete(schedule);
-    observer?.disconnect();
-    const root = sourceRoot;
-    root?.removeEventListener("load", sourceChanged, true);
-    root?.removeEventListener("loadeddata", sourceChanged, true);
-    root?.removeEventListener("seeked", sourceChanged, true);
-    root?.removeEventListener("timeupdate", sourceChanged, true);
-    root?.removeEventListener("showme-effect-output", outputChanged);
-    if (sourceLease) sourceLease.release();
-    else raster?.dispose();
-    if (coordinator) {
-      coordinator.graph.remove(node);
-      coordinator.nodes.delete(node);
-      coordinator.compiled = false;
-      nodeCoordinators.delete(node);
-      if (!coordinator.nodes.size) {
-        coordinator.observer.disconnect();
-        liveCoordinators.delete(coordinator);
-        coordinators.delete(sceneRoot);
-      }
+    sceneTexture?.dispose();
+    if (videoFrameNode && videoFrameId !== null)
+      videoFrameNode.cancelVideoFrameCallback?.(videoFrameId);
+    videoFrameNode = null;
+    videoFrameId = null;
+    if (sourceContent && ownedMediaChanged) {
+      sourceContent.removeEventListener("load", ownedMediaChanged, true);
+      sourceContent.removeEventListener("loadeddata", ownedMediaChanged, true);
+      sourceContent.removeEventListener("timeupdate", ownedMediaChanged, true);
     }
-    if (texture) texture.gl.deleteTexture(texture.value);
+    ownedMediaChanged = null;
+    disposeOwnedMediaTexture();
     if (shaderOutput) disposeShaderOutput(shaderOutput);
+    if (shaderChain) shaderChain.redraws.delete(restored);
+    if (ownsShaderChain && shaderChain) disposeShaderChain(shaderChain);
     if (sourceContent) sourceContent.style.opacity = sourceOpacity;
     surfaces.delete(node);
     runner?.dispose();
@@ -1222,8 +1284,6 @@ export function mountEffectSurface(
       output.style.visibility = "hidden";
       output.setAttribute("aria-hidden", "true");
       node.append(output);
-      sourceRoot = node;
-      sourceRoot.addEventListener("showme-effect-output", outputChanged);
       if (definition.styleSource) {
         const scope = `showme_effect_${++scopeId}`;
         output.dataset.effectScope = scope;
@@ -1243,283 +1303,95 @@ export function mountEffectSurface(
         (message) => !message.includes("unused by GLSL"),
       );
       if (diagnostics.length) throw new Error(diagnostics.join("; "));
-      shaderProgram(definition.source);
+      if (!shaderChain) throw new Error("Shader surface has no GPU chain.");
+      // Two bounded cohorts: generated output and pixel-input output.
+      shaderChain.slot ??= definition.input === "none" ? 0 : 1;
+      shaderProgram(definition.source, shaderChain);
       if (definition.input === "content" || definition.input === "backdrop") {
         if (!content)
           throw new Error(
-            "Pixel-input shaders require an Element raster source.",
+            "Pixel-input shaders require an owned or SceneTexture source.",
           );
         sourceContent =
           (Array.from(node.children).find(
-            (n) =>
-              n instanceof HTMLElement && n.hasAttribute("data-effect-source"),
+            (candidate) =>
+              candidate instanceof HTMLElement &&
+              candidate.hasAttribute("data-effect-source"),
           ) as HTMLElement | undefined) ?? null;
-        const root = node.closest<HTMLElement>("[data-element-id]");
-        if (!root || (definition.input === "content" && !sourceContent))
+        const owner = node.closest<HTMLElement>("[data-element-id]");
+        if (!owner || (definition.input === "content" && !sourceContent))
           throw new Error("Content shader source is not mounted yet.");
         sourceOpacity = sourceContent?.style.opacity ?? "";
-        sourceRoot =
-          definition.input === "backdrop"
-            ? root.closest<HTMLElement>(".slide-renderer")
-            : root;
-        if (!sourceRoot) throw new Error("Backdrop scene is not mounted yet.");
-        const context = {
-          root: sourceRoot,
-          typographySource: content.scene
-            ? () => content.scene!().deck
-            : undefined,
-          get resources() {
-            return content.scene
-              ? (content.scene().slide.effectResources ?? {})
-              : content.resources;
-          },
-          beforeEffect: instance.id,
-          flush: (dependency: HTMLElement) => {
-            void surfaces.get(dependency)?.flush();
-          },
-        };
-        const hasText = (elements: Element[]): boolean =>
-          elements.some(
-            (element) =>
-              element.content?.type === "text" || hasText(element.children),
+        if (ownedMediaInput && sourceContent) {
+          ownedMediaSources = Array.from(
+            sourceContent.querySelectorAll<HTMLImageElement | HTMLVideoElement>(
+              "video, img",
+            ),
           );
-        const hasDomEffects = (elements: Element[]): boolean =>
-          elements.some(
-            (element) =>
-              element.effects?.some(
-                (effect) =>
-                  effect.enabled &&
-                  context.resources[effect.resourceId] &&
-                  context.resources[effect.resourceId].kind !== "fragment-glsl",
-              ) || hasDomEffects(element.children),
-          );
-        let sampledSlide: Slide | undefined,
-          sampledResources: EffectResources | undefined;
-        let sampledStylesheet: string | undefined,
-          domInput = false,
-          sampled = false;
-        needsDomRaster = () => {
-          const scene = content.scene?.(),
-            resources = context.resources,
-            stylesheet = scene?.deck.stylesheet;
-          // Authority revisions provide immutable slide/resource identities.
-          // Routing must follow those revisions without remounting the lens.
-          if (
-            !sampled ||
-            scene?.slide !== sampledSlide ||
-            resources !== sampledResources ||
-            stylesheet !== sampledStylesheet
-          ) {
-            sampled = true;
-            sampledSlide = scene?.slide;
-            sampledResources = resources;
-            sampledStylesheet = stylesheet;
-            const inputElements =
-              definition.input === "backdrop" && scene
-                ? backdropPrefix(scene.slide, scene.deck, content.element.id)
-                    .elements
-                : [content.element];
-            domInput =
-              !!stylesheet ||
-              hasText(inputElements) ||
-              hasDomEffects(inputElements);
-          }
-          return domInput;
-        };
-        const createPrimitiveRaster = (invalidate: () => void) => {
-          if (definition.input === "backdrop") {
-            if (!content.scene)
-              throw new Error("Backdrop shaders require a slide scene.");
-            return createBackdropRasterSource(
-              content.element,
-              content.scene,
-              context,
-              invalidate,
-            );
-          }
-          return createElementRasterSource(
-            content.element,
-            context,
-            invalidate,
-          );
-        };
-        {
-          const inputRoot =
-            definition.input === "backdrop" ? sourceRoot : sourceContent!;
-          let allowed = new Set<string>(),
-            partial = new Set<string>();
-          const prefixElements = new Map<string, Element>();
-          const refreshPrefix = () => {
-            if (definition.input !== "backdrop" || !content.scene) return;
-            const { slide, deck } = content.scene();
-            const prefix = backdropPrefix(slide, deck, content.element.id);
-            partial = prefix.partial;
-            allowed = new Set<string>();
-            prefixElements.clear();
-            const visit = (elements: Element[]) =>
-              elements.forEach((element) => {
-                allowed.add(element.id);
-                prefixElements.set(element.id, element);
-                visit(element.children);
-              });
-            visit(prefix.elements);
-          };
-          const createNativeRaster = (invalidate: () => void) =>
-            createDomRasterSource(
-              () => {
-                refreshPrefix();
-                return inputRoot;
-              },
-              (candidate) => {
-                if (
-                  refined &&
-                  candidate !== inputRoot &&
-                  candidate.hasAttribute("data-effect-source") &&
-                  candidate.style.opacity === "0" &&
-                  !partial.has(
-                    candidate.closest<HTMLElement>("[data-element-id]")?.dataset
-                      .elementId ?? "",
-                  ) &&
-                  candidate.parentElement?.dataset.effectStarted === "true" &&
-                  !candidate.parentElement.dataset.effectError
-                )
-                  return false;
-                if (candidate.closest('[data-presentation-absent="true"]'))
-                  return false;
-                const owner =
-                  candidate.closest<HTMLElement>("[data-element-id]");
-                if (
-                  definition.input === "backdrop" &&
-                  owner &&
-                  !allowed.has(owner.dataset.elementId!)
-                )
-                  return false;
-                if (owner && partial.has(owner.dataset.elementId!)) {
-                  if (candidate.hasAttribute("data-element-stroke"))
-                    return false;
-                  const effectId =
-                    candidate.closest<HTMLElement>("[data-effect-id]")?.dataset
-                      .effectId;
-                  const instance = prefixElements
-                    .get(owner.dataset.elementId!)
-                    ?.effects?.find((effect) => effect.id === effectId);
-                  if (instance?.placement === "overlay") return false;
-                  if (
-                    candidate instanceof HTMLCanvasElement &&
-                    instance &&
-                    effectPlacement(
-                      context.resources[instance.resourceId],
-                      instance,
-                    ) === "content"
-                  )
-                    return false;
-                }
-                return true;
-              },
-              (original, clone) => {
-                // Shader source opacity is a display bypass, not source alpha.
-                if (
-                  original.hasAttribute("data-effect-source") &&
-                  (original === sourceContent ||
-                    partial.has(
-                      original.closest<HTMLElement>("[data-element-id]")
-                        ?.dataset.elementId ?? "",
-                    ))
-                )
-                  clone.style.setProperty("opacity", "1", "important");
-                if (original === inputRoot && definition.input === "backdrop") {
-                  // The capture viewport carries the world-to-frame transform.
-                  clone.style.setProperty("transform", "none", "important");
-                  clone.style.setProperty(
-                    "transform-origin",
-                    "0 0",
-                    "important",
-                  );
-                }
-              },
-              invalidate,
-              async () => {
-                refreshPrefix();
-                const dependencies = Array.from(
-                  inputRoot.querySelectorAll<HTMLElement>("[data-effect-id]"),
-                ).reverse();
-                for (const dependency of dependencies) {
-                  if (dependency === node || dependency.contains(node))
-                    continue;
-                  const owner =
-                    dependency.closest<HTMLElement>("[data-element-id]");
-                  if (
-                    definition.input === "backdrop" &&
-                    owner &&
-                    (!allowed.has(owner.dataset.elementId!) ||
-                      partial.has(owner.dataset.elementId!))
-                  )
-                    continue;
-                  const surface = surfaces.get(dependency);
-                  if (!refined) await surface?.flush();
-                  if (refined) {
-                    let hidden = false;
-                    for (
-                      let ancestor = dependency.parentElement;
-                      ancestor && ancestor !== inputRoot;
-                      ancestor = ancestor.parentElement
-                    ) {
-                      if (
-                        ancestor.hasAttribute("data-effect-source") &&
-                        ancestor.style.opacity === "0" &&
-                        !partial.has(
-                          ancestor.closest<HTMLElement>("[data-element-id]")
-                            ?.dataset.elementId ?? "",
-                        )
-                      ) {
-                        hidden = true;
-                        break;
-                      }
-                    }
-                    if (!hidden) surface?.materialize();
-                  }
-                }
-              },
-              () =>
-                definition.input === "backdrop"
-                  ? elementWorldTransform(root, inputRoot).inverse()
-                  : new DOMMatrix(),
-              refined,
-            );
-          createRaster = (invalidate) =>
-            needsDomRaster()
-              ? createNativeRaster(invalidate)
-              : createPrimitiveRaster(invalidate);
-        }
-        if (!refined && createRaster && !raster)
-          raster = createRaster(schedule);
-        observer = new MutationObserver((records) => {
-          if (
-            records.some(
-              (r) =>
-                r.type === "childList" ||
-                r.type === "characterData" ||
-                ((r.target instanceof HTMLElement ||
-                  r.target instanceof SVGElement) &&
-                  (definition.input === "backdrop" || r.target !== root) &&
-                  !r.target.dataset.effectId &&
-                  r.target.tagName !== "CANVAS" &&
-                  !r.attributeName?.startsWith("data-effect")),
+          ownedMediaChanged = (event) => {
+            const media = event.target;
+            if (
+              (media instanceof HTMLImageElement ||
+                media instanceof HTMLVideoElement) &&
+              !ownedMediaSources.includes(media)
             )
-          )
-            sourceChanged();
-        });
-        observer.observe(sourceRoot, {
-          subtree: true,
-          childList: true,
-          attributes: true,
-          characterData: true,
-        });
-        sourceRoot.addEventListener("load", sourceChanged, true);
-        sourceRoot.addEventListener("loadeddata", sourceChanged, true);
-        sourceRoot.addEventListener("seeked", sourceChanged, true);
-        sourceRoot.addEventListener("timeupdate", sourceChanged, true);
-        sourceRoot.addEventListener("showme-effect-output", outputChanged);
+              ownedMediaSources.push(media);
+            schedule();
+          };
+          sourceContent.addEventListener("load", ownedMediaChanged, true);
+          sourceContent.addEventListener("loadeddata", ownedMediaChanged, true);
+          const video = sourceContent.querySelector<HTMLVideoElement>("video");
+          if (video?.requestVideoFrameCallback) {
+            videoFrameNode = video;
+            const nextFrame = () => {
+              if (!live || !videoFrameNode) return;
+              schedule();
+              videoFrameId =
+                videoFrameNode.requestVideoFrameCallback(nextFrame);
+            };
+            videoFrameId = video.requestVideoFrameCallback(nextFrame);
+          } else
+            sourceContent.addEventListener(
+              "timeupdate",
+              ownedMediaChanged,
+              true,
+            );
+        }
+        if (
+          (!directShaderInput && !ownedMediaInput) ||
+          definition.input === "backdrop"
+        ) {
+          const inputRoot =
+            definition.input === "backdrop"
+              ? owner.closest<HTMLElement>(".slide-renderer")
+              : sourceContent;
+          if (!inputRoot)
+            throw new Error("SceneTexture source is not mounted yet.");
+          sceneTextureFactory = () =>
+            createSceneTextureProvider(
+              {
+                kind: definition.input === "backdrop" ? "backdrop" : "element",
+                elementId: content.element.id,
+                effectId: instance.id,
+              },
+              {
+                effectNode: node,
+                owner,
+                inputRoot,
+                element: content.element,
+                resources: () =>
+                  content.scene
+                    ? (content.scene().slide.effectResources ?? {})
+                    : content.resources,
+                scene: content.scene,
+                refined,
+                flushEffect: (dependency) => surfaces.get(dependency)?.flush(),
+                materializeEffect: (dependency) =>
+                  surfaces.get(dependency)?.materialize(),
+                invalidate: schedule,
+              },
+            );
+        }
       }
     }
   } catch (error) {
@@ -1527,8 +1399,19 @@ export function mountEffectSurface(
     return dispose;
   }
   const surface: Surface = {
-    inputs: inputDependencies,
     materialize,
+    refreshVisual() {
+      staticRefresh = true;
+      lastShaderInput = "";
+      sceneTexture?.invalidate();
+      schedule();
+    },
+    setVisualSuspended(value) {
+      if (visualSuspended === value) return;
+      visualSuspended = value;
+      staticRefresh = true;
+      schedule();
+    },
     gpuOutput() {
       return live &&
         node.dataset.effectStarted !== "false" &&
@@ -1538,6 +1421,8 @@ export function mountEffectSurface(
         : null;
     },
     setSampling(value) {
+      if (visualSuspended) lastShaderInput = "";
+      staticRefresh = true;
       sampling = value;
       heldDensity = 0;
       preparedSampling = false;
@@ -1546,6 +1431,23 @@ export function mountEffectSurface(
       schedule();
     },
     prepareSampling,
+    setTransport(matrix) {
+      const next = new DOMMatrix([
+        matrix.a,
+        matrix.b,
+        matrix.c,
+        matrix.d,
+        matrix.e,
+        matrix.f,
+      ]);
+      const key = next.toString();
+      if (key === semanticTransformKey) return;
+      semanticTransform = next;
+      semanticTransformKey = key;
+      preparedSampling = false;
+      if (definition.input === "backdrop") sceneTexture?.invalidate();
+      schedule();
+    },
     set(key, value) {
       if (values[key] === value) return;
       values[key] = value;
@@ -1594,7 +1496,7 @@ export function mountEffectSurface(
       }
       // The stage's variables are outside its captured subtree. Updating them
       // changes inherited paint without a mutation inside that source.
-      if (inheritedClockChanged) raster?.markDirty();
+      if (inheritedClockChanged) sceneTexture?.invalidate();
       if (!timing.started) bypass();
       if (
         refined &&
@@ -1602,28 +1504,20 @@ export function mountEffectSurface(
         previous === JSON.stringify(clockKey(timing))
       )
         return;
+      staticRefresh = true;
       schedule();
     },
-    async flush(cohort) {
+    async flush() {
       cancelFrame(draw);
       scheduled.delete(node);
       if (ownerAbsent()) return;
-      if (coordinator) {
-        compileCoordinator(coordinator);
-        await coordinator.graph.flush(node, cohort);
-        if (needsDomOutput()) {
-          try {
-            materialize();
-          } catch (error) {
-            diagnose(error);
-          }
-        }
-        return;
-      }
       void draw();
       // Await the frame requested by this call. Live video/animation can enqueue
       // another frame while it paints; chasing every replacement never settles.
       await pending;
+    },
+    gpuContext() {
+      return shaderChain?.state?.gl ?? null;
     },
     reset() {
       Object.assign(values, base);
@@ -1650,16 +1544,8 @@ export function mountEffectSurface(
     },
   };
   surfaces.set(node, surface);
-  if (coordinator) {
-    coordinator.nodes.add(node);
-    coordinator.graph.register(node, async () => {
-      void draw();
-      await pending;
-    });
-    coordinator.compiled = false;
-    nodeCoordinators.set(node, coordinator);
-  }
-  if (definition.kind === "fragment-glsl") shaderRedraws.add(schedule);
+  if (definition.kind === "fragment-glsl" && shaderChain)
+    shaderChain.redraws.add(restored);
   bypass();
   schedule();
   return dispose;

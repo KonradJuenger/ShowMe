@@ -24,6 +24,7 @@ const stateSchema = z.object({
   presentationReady: z.boolean().optional(),
   motionSlides: z
     .record(
+      z.string(),
       z.array(
         z.object({ id: idSchema, duration: z.number().nonnegative() }).strict(),
       ),
@@ -145,6 +146,10 @@ export class PresentationRuntime {
 
   get state() {
     return this.current;
+  }
+
+  async outputShown() {
+    await this.whenAudienceShown;
   }
 
   get assignment() {

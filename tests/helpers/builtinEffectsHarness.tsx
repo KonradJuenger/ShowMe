@@ -1,3 +1,4 @@
+import { readWebGlPixels } from "./webglPixels";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { SlideRenderer } from "../../src/components/SlideRenderer";
@@ -87,11 +88,7 @@ export async function checkBuiltinEffects() {
           return node.querySelector("[data-effect-text-output]")!.textContent;
         if (definition.kind === "css") return getComputedStyle(node).opacity;
         const canvas = node.querySelector("canvas")!;
-        return Array.from(
-          canvas
-            .getContext("2d")!
-            .getImageData(0, 0, canvas.width, canvas.height).data,
-        ).join(",");
+        return Array.from(readWebGlPixels(canvas)).join(",");
       };
       const start = await sample(0);
       const middle = await sample(1);

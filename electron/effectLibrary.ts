@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { hashManagedSource } from "./mediaLibrary";
+import { libraryPath, libraryMutationPath } from "./libraryFilesystem";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "./storage/io";
@@ -49,23 +52,19 @@ export class EffectLibraryStorage {
     return library;
   }
   private files = new Map<string, string>();
-  private async directory(folder: string) {
-    const resolved = path.resolve(this.root, folder);
-    const relative = path.relative(path.resolve(this.root), resolved);
-    if (relative.startsWith("..") || path.isAbsolute(relative))
-      throw new Error("Invalid Effects path");
-    // Check every ancestor before mkdir or write; a folder must not escape via a symlink.
-    let current = path.resolve(this.root);
-    for (const part of ["", ...folder.split("/").filter(Boolean)]) {
-      current = path.join(current, part);
+  private async directory(folder: string, create = false): Promise<string> {
+    const parent = path.dirname(this.root);
+    const relative = `${path.basename(this.root)}${folder ? "/" + folder : ""}`;
+    const resolved = libraryPath(parent, relative, create);
+    if (create) await fs.mkdir(resolved, { recursive: true });
+    else {
       try {
-        if ((await fs.lstat(current)).isSymbolicLink())
-          throw new Error("Unsafe Effects folder");
+        if (!(await fs.lstat(resolved)).isDirectory()) throw new Error("Invalid Effects folder");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        return this.directory(folder, true);
       }
     }
-    await fs.mkdir(resolved, { recursive: true });
     return resolved;
   }
   async run(raw: EffectLibraryRequest): Promise<EffectLibrary> {
@@ -107,11 +106,9 @@ export class EffectLibraryStorage {
           ? next.entries.find((e) => e.asset.id === request.id)!
           : next.entries.at(-1)!;
         const old = this.files.get(entry.asset.id);
-        const directory = await this.directory(entry.folder);
-        const destination = path.join(
-          directory,
-          libraryEffectFilename(entry.asset),
-        );
+        await this.directory(entry.folder, true);
+        const destination = libraryMutationPath(this.root,
+          `${entry.folder ? entry.folder + "/" : ""}${libraryEffectFilename(entry.asset)}`);
         if (old !== destination) {
           if (
             await fs.stat(destination).then(
@@ -133,9 +130,30 @@ export class EffectLibraryStorage {
           );
           if (old && old !== destination) await fs.rename(old, destination);
         }
-      } else if (request.type === "delete")
-        await fs.unlink(this.files.get(request.id)!);
-      else if (request.type === "folder") await this.directory(request.folder);
+      } else if (request.type === "delete") {
+        const source = this.files.get(request.id)!;
+        const root = path.dirname(this.root);
+        const relative = `Trash/assets/${randomUUID()}`;
+        const directory = libraryPath(root, relative, true);
+        await fs.mkdir(directory);
+        const metadata = {
+          version: 1,
+          kind: "effect",
+          hash: await hashManagedSource(source),
+          trashedAt: new Date().toISOString(),
+          originalRelativePath: path
+            .relative(root, source)
+            .split(path.sep)
+            .join("/"),
+          bytes: (await fs.stat(source)).size,
+        };
+        await this.write(
+          path.join(directory, "item.json"),
+          JSON.stringify(metadata, null, 2),
+        );
+        await fs.rename(source, path.join(directory, path.basename(source)));
+      } else if (request.type === "folder")
+        await this.directory(request.folder, true);
       return next;
     } finally {
       await lock.close();

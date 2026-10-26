@@ -2,11 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { PresentationDocument } from "../src/core/document";
-import {
-  fontUsageLabel,
-  collectUsedFontUsages,
-  type FontUsage,
-} from "../src/core/fonts";
+import type { SystemFontFamily } from "../src/platform/api";
+import { fontUsageLabel, type FontUsage } from "../src/core/fonts";
 import type { DocumentStorage } from "./storage";
 import { atomicWrite, hashFile } from "./storage/io";
 import {
@@ -14,13 +11,22 @@ import {
   readArchiveEntry,
   type ZipEntryInput,
 } from "./packageArchive";
-import { managedFilename } from "./mediaLibrary";
+import {
+  managedFilename,
+  assetIdFromFilename,
+  setManagedFilenameProtected,
+} from "./mediaLibrary";
 import {
   resolveFontUsages,
+  resolveFontFamilyVariants,
   saveResolvedFontToLibrary,
   managedFontsFromLibrary,
   type ResolvedFontFace,
 } from "./fontLibrary";
+import {
+  collectExportFontRequests,
+  type ExportFontRequest,
+} from "../src/export/fontUsage";
 
 const FONT_BYTES = 32 * 1024 ** 2;
 const TOTAL_FONT_BYTES = 128 * 1024 ** 2;
@@ -46,6 +52,93 @@ function sameUsage(a: FontUsage, b: FontUsage) {
     a.italic === b.italic
   );
 }
+export async function resolveExportFontUsages(
+  assetRoot: string,
+  requests: ExportFontRequest[],
+  resources?: PackageFontResources,
+) {
+  const familyRequests = requests.filter((request) => "allVariants" in request);
+  const familyKeys = new Set(
+    familyRequests.map((request) => request.family.toLocaleLowerCase()),
+  );
+  const usages = requests.filter(
+    (request): request is FontUsage =>
+      !("allVariants" in request) &&
+      !familyKeys.has(request.family.toLocaleLowerCase()),
+  );
+  const owned = usages.flatMap((usage) => {
+    const face = resources?.files.find((face) => sameUsage(face, usage));
+    return face ? [face] : [];
+  });
+  const remaining = usages.filter(
+    (usage) => !owned.some((face) => sameUsage(face, usage)),
+  );
+  const local = remaining.length
+    ? await resolveFontUsages(assetRoot, remaining)
+    : { resolved: [], missing: [] };
+  const variants = familyRequests.length
+    ? await resolveFontFamilyVariants(
+        assetRoot,
+        familyRequests.map((request) => request.family),
+      )
+    : [];
+  const candidates = [
+    ...owned,
+    ...(resources?.files.filter((face) =>
+      familyKeys.has(face.family.toLocaleLowerCase()),
+    ) ?? []),
+    ...local.resolved,
+    ...variants,
+  ];
+  const unique = new Map<string, ResolvedFontFace>();
+  for (const face of candidates) {
+    const key = JSON.stringify([
+      face.family.toLocaleLowerCase(),
+      face.weight,
+      face.italic,
+    ]);
+    if (!unique.has(key)) unique.set(key, face);
+  }
+  const missing: ExportFontRequest[] = [
+    ...local.missing,
+    ...familyRequests.filter(
+      (request) =>
+        !candidates.some(
+          (face) =>
+            face.family.toLocaleLowerCase() ===
+            request.family.toLocaleLowerCase(),
+        ),
+    ),
+  ];
+  return { resolved: [...unique.values()], missing };
+}
+
+export async function fontFamiliesFromFaces(faces: ResolvedFontFace[]) {
+  const families = new Map<string, SystemFontFamily>();
+  let total = 0;
+  for (const face of faces) {
+    const size = (await fs.stat(face.filePath)).size;
+    total += size;
+    if (size > FONT_BYTES || total > TOTAL_FONT_BYTES)
+      throw Error("Export fonts exceed size limit");
+    const data = await fs.readFile(face.filePath);
+    const family = families.get(face.family) ?? {
+      family: face.family,
+      weights: [],
+      sources: [],
+    };
+    family.weights = [...new Set([...family.weights, face.weight])];
+    family.sources!.push({
+      id: await hashFile(face.filePath),
+      weight: face.weight,
+      italic: face.italic,
+      data,
+    });
+    families.set(face.family, family);
+  }
+  return [...families.values()];
+}
+
 async function packageResolvedFonts(resolved: ResolvedFontFace[]) {
   const fonts: PackagedFont[] = [];
   const entries: ZipEntryInput[] = [];
@@ -58,7 +151,11 @@ async function packageResolvedFonts(resolved: ResolvedFontFace[]) {
       throw new Error("Package fonts exceed size limit");
     const id = await hashFile(face.filePath);
     const originalName = path.basename(face.filePath);
-    const originalPath = `fonts/${managedFilename(originalName, id)}`;
+    const filename =
+      assetIdFromFilename(originalName) === id
+        ? setManagedFilenameProtected(originalName, false)
+        : managedFilename(originalName, id);
+    const originalPath = `fonts/${filename}`;
     fonts.push(
       packagedFontSchema.parse({
         id,
@@ -153,33 +250,22 @@ async function packageWithFonts(
   resources?: PackageFontResources,
   embedLocalFonts = false,
 ) {
-  // Public packages retain document-owned fonts but never collect local fonts.
-  // Developer callers may opt into the existing embedding implementation.
   if (!embedLocalFonts) return packageResolvedFonts(resources?.files ?? []);
-  const usages = collectUsedFontUsages(
-    [
-      ...Object.values(document.slides),
-      ...Object.values(document.templates).map((page) => ({
-        ...page,
-        notes: "",
-      })),
-    ],
-    document.deck,
-  );
+  const usages = collectExportFontRequests(document.deck, [
+    ...Object.values(document.slides),
+    ...Object.values(document.templates),
+  ]);
   if (!usages.length) return { fonts: [], entries: [] };
-  const resolution = await resolveFontUsages(storage.assetRoot, usages);
-  const embedded = resolution.missing.flatMap((usage) => {
-    const found = resources?.files.find((face) => sameUsage(face, usage));
-    return found ? [found] : [];
-  });
-  const missing = resolution.missing.filter(
-    (usage) => !embedded.some((face) => sameUsage(face, usage)),
+  const { resolved, missing } = await resolveExportFontUsages(
+    storage.assetRoot,
+    usages,
+    resources,
   );
   if (missing.length)
     throw new Error(
-      `Cannot create a portable package because these fonts cannot be located: ${missing.map(fontUsageLabel).join(", ")}`,
+      `Cannot create a portable package because these fonts cannot be located: ${missing.map((request) => ("allVariants" in request ? request.family : fontUsageLabel(request))).join(", ")}`,
     );
-  return packageResolvedFonts([...resolution.resolved, ...embedded]);
+  return packageResolvedFonts(resolved);
 }
 export const fontStorageService = {
   load: loadPackagedFonts,

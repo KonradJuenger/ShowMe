@@ -105,7 +105,7 @@ test("Text Scramble defaults to a two-second timeline interval, plays and restor
 test("every built-in effect renders its finite phase or continuous clock without diagnostics", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/tests/helpers/effects-harness.html");
   const results = await page.evaluate(async () => {
     const path = "/tests/helpers/builtinEffectsHarness.tsx";
     const {
@@ -243,13 +243,11 @@ test("new Shader has pass-through code, preserves authored source and saves an i
   await expect(studio.locator('[data-effect-ready="true"]')).toBeVisible();
   const pixels = await studio
     .locator("canvas")
-    .evaluate((canvas: HTMLCanvasElement) =>
-      Array.from(
-        canvas
-          .getContext("2d")!
-          .getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data,
-      ),
-    );
+    .evaluate(async (canvas: HTMLCanvasElement) => {
+      const path = "/tests/helpers/webglPixels.ts";
+      const { readWebGlPixel } = await import(/* @vite-ignore */ path);
+      return readWebGlPixel(canvas, canvas.width / 2, canvas.height / 2);
+    });
   expect(pixels).toEqual([220, 80, 30, 255]);
   await page.screenshot({ path: testInfo.outputPath("new-shader.png") });
   await studio.getByLabel("Effect affects").selectOption("generated");
@@ -505,7 +503,7 @@ test("Effect Timing exposes Start and Stop from creation and the sidebar leaves 
   const prompt = await page.evaluate(() => navigator.clipboard.readText());
   expect(prompt).toContain("Start: Slide start. Stop: After 3 s.");
   expect(prompt).toContain(
-    "Dragging its block in the Click Timeline changes the start click and delay",
+    "Start / Stop / Speed control Effect timing",
   );
   await page.keyboard.press("Control+s");
   await expect(studio).toHaveCount(0);
@@ -757,7 +755,7 @@ test("all runtime surfaces deliver interval p, scaled t and independent referenc
     const runtimePath = "/src/components/effectRuntime.ts",
       corePath = "/src/core/effects.ts",
       authoringPath = "/src/core/effectAuthoring.ts";
-    const { mountEffectSurface, effectSurface } = (await import(
+    const { mountEffectSurface, effectSurface, createShaderChain } = (await import(
       /* @vite-ignore */ runtimePath
     )) as typeof import("../../../src/components/effectRuntime");
     const { newEffectInstance, effectTiming } = (await import(
@@ -844,12 +842,19 @@ test("all runtime surfaces deliver interval p, scaled t and independent referenc
       shader,
       newEffectInstance("shader", shader, "background"),
       { width: 20, height: 20 },
+      undefined,
+      undefined,
+      undefined,
+      Object.assign(createShaderChain(), { canvas }),
+      false,
+      false,
+      true,
     );
     effectSurface(root)!.setTiming(timing);
     await effectSurface(root)!.flush();
-    const pixels = Array.from(
-      canvas.getContext("2d")!.getImageData(10, 10, 1, 1).data,
-    );
+    const pixelPath = "/tests/helpers/webglPixels.ts";
+    const { readWebGlPixel } = await import(/* @vite-ignore */ pixelPath);
+    const pixels = readWebGlPixel(canvas, 10, 10);
     effectSurface(root)!.setTiming({ ...timing, active: false });
     await effectSurface(root)!.flush();
     const shaderHidden = canvas.style.visibility;
@@ -881,7 +886,7 @@ test("all runtime surfaces deliver interval p, scaled t and independent referenc
 test("Template A Presentation-start shader keeps u_t across slide remounts", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/tests/helpers/effects-harness.html");
   await page.evaluate(async () => {
     const path = "/tests/helpers/effectTimingHarness.tsx";
     const {
@@ -900,8 +905,11 @@ test("Template A Presentation-start shader keeps u_t across slide remounts", asy
       .locator("[data-effect-id] canvas")
       .first()
       .evaluate(
-        (canvas: HTMLCanvasElement) =>
-          canvas.getContext("2d")!.getImageData(50, 50, 1, 1).data[0],
+        async (canvas: HTMLCanvasElement) => {
+          const path = "/tests/helpers/webglPixels.ts";
+          const { readPresentedPixel } = await import(/* @vite-ignore */ path);
+          return readPresentedPixel(canvas, 50, 50)[0];
+        },
       );
   await expect.poll(red).toBe(0);
   await page.evaluate(() =>
@@ -1114,7 +1122,8 @@ test("Future Effect stages bypass independently for every target and preserve ea
       expect(snapshot.error, result.kind).toBeUndefined();
       expect(snapshot.started, result.kind).toBe("false");
       expect(snapshot.opacity, result.kind).toBe("1");
-      if (snapshot.pixel) expect(snapshot.pixel[3], result.kind).toBe(0);
+      if (snapshot.pixel)
+        expect(snapshot.canvasVisibility, result.kind).toBe("hidden");
       if (result.kind === "content" || result.kind === "stack")
         expect(snapshot.sourceOpacity, result.kind).toBe("");
       if (result.kind === "text") {

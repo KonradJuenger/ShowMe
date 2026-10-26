@@ -11,6 +11,7 @@ test("desktop IPC prepares the selected audience resolution and rejects screen r
       ([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined,
     ),
   ) as Record<string, string>;
+  Object.assign(env, { SHOWME_TESTING: "1", SHOWME_TEST_ROOT_SELECTION: folder });
   const app = await electron.launch({
     args: [path.resolve("."), `--user-data-dir=${path.join(folder, "user")}`],
     env,
@@ -66,6 +67,25 @@ test("desktop IPC prepares the selected audience resolution and rejects screen r
       .find((window) => window.url().includes("present=audience"));
     expect(audience).toBeDefined();
     await expect(audience!.locator("[data-active-slide]")).toBeVisible();
+    const measured = await audience!.evaluate(async () => {
+      const state = await window.desktop!.getPresentation();
+      return {
+        expected: {
+          width: Math.ceil(innerWidth * devicePixelRatio),
+          height: Math.ceil(innerHeight * devicePixelRatio),
+        },
+        actual: await window.desktop!.audienceImageProfile!(state!.deckId),
+      };
+    });
+    expect(measured.actual).toEqual(measured.expected);
+    const denied = await page.evaluate(async () => {
+      const state = await window.desktop!.getPresentation();
+      try {
+        await window.desktop!.prepareAudience!(state!.deckId);
+        return null;
+      } catch (error) { return String(error); }
+    });
+    expect(denied).toBeTruthy();
     await expect(
       page.getByRole("button", { name: "Presentation screen setup" }),
     ).toBeDisabled();

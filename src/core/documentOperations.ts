@@ -974,17 +974,10 @@ export function applyValidatedDocumentOperations(
     if (candidate.templates[id])
       for (const [slideId, meta] of Object.entries(candidate.deck.slideMeta))
         if (meta.templateId === id) pages.add(slideId);
-  const issues: z.ZodIssue[] = [];
-  validatePresentationReferences(
-    candidate,
-    {
-      addIssue: (issue) => {
-        issues.push({ ...issue, path: issue.path ?? [] } as z.ZodIssue);
-      },
-      path: [],
-    },
-    [...pages],
-  );
-  if (issues.length) throw new z.ZodError(issues);
+  z.unknown()
+    .superRefine((_, context) =>
+      validatePresentationReferences(candidate, context, [...pages]),
+    )
+    .parse(candidate);
   return candidate;
 }

@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { installPreparedSlideImagesMock } from "./preparedSlideImagesMock";
 import { useRef } from "react";
 import { SlideRenderer } from "../../src/components/SlideRenderer";
 import { usePreparedSlideImages } from "../../src/components/usePreparedSlideImages";
@@ -41,6 +42,7 @@ export function mountAudienceReadinessHarness(
       image.content.transform.intrinsicHeight = null;
   }
   slide.nodes[0].children = [image];
+  installPreparedSlideImagesMock(model.deck, model.slides);
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 600;
   const url = canvas.toDataURL();

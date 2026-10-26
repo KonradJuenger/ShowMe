@@ -1,0 +1,47 @@
+{
+  "method": "Comparable six-slide creation workload; 24 MCP calls in each run. Structured JSON excludes PNG bytes. Slide IDs/seeds differ, so preview metadata size differences are not a rendering-performance claim.",
+  "baselineVersion": "1.9.0",
+  "candidateVersion": "1.10.0",
+  "baselineCalls": 24,
+  "candidateCalls": 24,
+  "baselineStructuredBytes": 52452,
+  "candidateStructuredBytes": 50165,
+  "reductionPercent": 4.36,
+  "rows": [
+    {
+      "name": "context",
+      "before": 3968,
+      "after": 1964
+    },
+    {
+      "name": "authoring",
+      "before": 28566,
+      "after": 29279
+    },
+    {
+      "name": "inspect",
+      "before": 2832,
+      "after": 2832
+    },
+    {
+      "name": "apply",
+      "before": 8632,
+      "after": 7635
+    },
+    {
+      "name": "preview",
+      "before": 7182,
+      "after": 7182
+    },
+    {
+      "name": "deliver",
+      "before": 590,
+      "after": 591
+    },
+    {
+      "name": "workspace",
+      "before": 682,
+      "after": 682
+    }
+  ]
+}

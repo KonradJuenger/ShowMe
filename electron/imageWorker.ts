@@ -1,25 +1,44 @@
-import { parentPort, workerData } from "node:worker_threads";
+import { parentPort } from "node:worker_threads";
 import { processPresentationImage } from "./imageProcessor";
+import type { ImageCacheFormat } from "../src/core/presentationImages";
 
-const { source, assetId, size, output, width, height } = workerData as {
+export interface ImageWorkerRequest {
   source: string;
   assetId: string;
   size: number;
   output: string;
   width?: number;
   height?: number;
-};
-void processPresentationImage(
-  source,
-  assetId,
-  size,
-  output,
-  width,
-  height,
-).then(
-  (result) => parentPort?.postMessage({ result }),
-  (error) =>
-    parentPort?.postMessage({
-      error: error instanceof Error ? error.message : String(error),
-    }),
+  format?: ImageCacheFormat;
+  jpegQuality?: number;
+}
+parentPort?.on(
+  "message",
+  ({
+    source,
+    assetId,
+    size,
+    output,
+    width,
+    height,
+    format,
+    jpegQuality,
+  }: ImageWorkerRequest) => {
+    void processPresentationImage(
+      source,
+      assetId,
+      size,
+      output,
+      width,
+      height,
+      format,
+      jpegQuality,
+    ).then(
+      (result) => parentPort?.postMessage({ result }),
+      (error) =>
+        parentPort?.postMessage({
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    );
+  },
 );

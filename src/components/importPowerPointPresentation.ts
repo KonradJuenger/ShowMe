@@ -1,6 +1,6 @@
 import { parsePowerPoint } from "../core/powerpointImport";
 import { createPowerPointSlides } from "../core/powerpointImportCommands";
-import { prepareMediaAsset } from "../core/media";
+import { prepareMediaAsset } from "./mediaEnrichment";
 import { EditorSession } from "../core/editorSession";
 import { editorTransport } from "../platform/editorTransport";
 import { platform } from "../platform";

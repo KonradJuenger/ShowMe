@@ -366,6 +366,14 @@ export function addMotionPreset(
   stageIndex: number,
   elementIds: readonly string[],
   preset: MotionPreset,
+  settings: {
+    distance?: number;
+    scale?: number;
+    angle?: number;
+    direction?:
+      "Left" | "Right" | "Up" | "Down" | "Clockwise" | "Counter-clockwise";
+    opacity?: number;
+  } = {},
 ): SlideMotion {
   const motion = structuredClone(
     input ?? { stages: [{ id: uid(), tracks: [] }] },
@@ -379,9 +387,28 @@ export function addMotionPreset(
           {
             property: "transform.x",
             from: base,
-            to: { type: "offset", value: motionDefaults.distance },
+            to: {
+              type: "offset",
+              value:
+                settings.direction === "Up" || settings.direction === "Down"
+                  ? 0
+                  : (settings.direction === "Left" ? -1 : 1) *
+                    (settings.distance ?? motionDefaults.distance),
+            },
           },
-          { property: "transform.y", from: base, to: base },
+          {
+            property: "transform.y",
+            from: base,
+            to:
+              settings.direction === "Up" || settings.direction === "Down"
+                ? {
+                    type: "offset",
+                    value:
+                      (settings.direction === "Up" ? -1 : 1) *
+                      (settings.distance ?? motionDefaults.distance),
+                  }
+                : base,
+          },
         ]
       : preset === "Scale" || preset === "Pulse"
         ? ["transform.scaleX", "transform.scaleY"].map((property) => ({
@@ -390,21 +417,26 @@ export function addMotionPreset(
             to:
               preset === "Pulse"
                 ? base
-                : { type: "factor" as const, value: 1.15 },
+                : { type: "factor" as const, value: settings.scale ?? 1.15 },
           }))
         : preset === "Rotate"
           ? [
               {
                 property: "transform.rotation",
                 from: base,
-                to: { type: "offset", value: motionDefaults.rotation },
+                to: {
+                  type: "offset",
+                  value:
+                    (settings.direction === "Counter-clockwise" ? -1 : 1) *
+                    (settings.angle ?? motionDefaults.rotation),
+                },
               },
             ]
           : [
               {
                 property: "appearance.opacity",
                 from: base,
-                to: { type: "absolute", value: 0.5 },
+                to: { type: "absolute", value: settings.opacity ?? 0.5 },
               },
             ];
   // Align multi-selection and leave one millisecond between authored runs.
@@ -453,7 +485,10 @@ export function addMotionPreset(
               {
                 id: uid(),
                 at: start + motionDefaults.duration / 2,
-                value: { type: "factor" as const, value: 1.15 },
+                value: {
+                  type: "factor" as const,
+                  value: settings.scale ?? 1.15,
+                },
                 easeToNext: motionDefaults.ease,
               },
             ]

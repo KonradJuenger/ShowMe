@@ -108,6 +108,12 @@ export interface DocumentAuthorityOptions {
 }
 
 const RECENT_TRANSACTIONS = 4096;
+/** Host policy evaluated inside the commit queue; never persisted or sent over IPC. */
+export type CommitAdmission = (state: {
+  documentId: string;
+  epoch: string;
+  revision: number;
+}) => void;
 const HISTORY_LIMIT = 500;
 const defaultIdFactory = () => crypto.randomUUID();
 
@@ -1283,7 +1289,11 @@ export function scopesForOperations(
           );
         break;
       }
-      cursor = projected;
+      cursor =
+        operation.type === "slide.create" ||
+        operation.type === "slide.duplicate"
+          ? { ...projected, slide: structuredClone(operation.slide) }
+          : projected;
     }
   }
   return result;
@@ -1657,8 +1667,32 @@ export class DocumentAuthority {
     return run;
   }
 
-  commit(actorId: string, raw: DocumentTransaction) {
-    return this.enqueueCommit(() => this.commitInternal(actorId, raw, true));
+  private closing = false;
+
+  /** Revoke admissions synchronously, then drain admitted durability/accepted publication. */
+  beginClose(): Promise<void> {
+    this.closing = true;
+    return this.enqueueCommit(async () => {});
+  }
+
+  cancelClose() {
+    this.closing = false;
+  }
+
+  private requireOpen() {
+    if (this.closing) throw new Error("Document is closing");
+  }
+
+  commit(actorId: string, raw: DocumentTransaction, admit?: CommitAdmission) {
+    return this.enqueueCommit(() => {
+      this.requireOpen();
+      admit?.({
+        documentId: this.current.documentId,
+        epoch: this.epoch,
+        revision: this.sequence,
+      });
+      return this.commitInternal(actorId, raw, true);
+    });
   }
 
   runExclusive<T>(task: (snapshot: AuthoritySnapshot) => Promise<T>) {
@@ -1683,8 +1717,14 @@ export class DocumentAuthority {
     return !!this.historyTarget(actorId, true);
   }
 
-  undo(actorId: string, leaseTokens: string[] = []) {
+  undo(actorId: string, leaseTokens: string[] = [], admit?: CommitAdmission) {
     return this.enqueueCommit(async () => {
+      this.requireOpen();
+      admit?.({
+        documentId: this.current.documentId,
+        epoch: this.epoch,
+        revision: this.sequence,
+      });
       const entry = this.historyTarget(actorId, false);
       if (!entry) throw new Error("Nothing to undo");
       if (
@@ -1730,8 +1770,14 @@ export class DocumentAuthority {
     });
   }
 
-  redo(actorId: string, leaseTokens: string[] = []) {
+  redo(actorId: string, leaseTokens: string[] = [], admit?: CommitAdmission) {
     return this.enqueueCommit(async () => {
+      this.requireOpen();
+      admit?.({
+        documentId: this.current.documentId,
+        epoch: this.epoch,
+        revision: this.sequence,
+      });
       const entry = this.historyTarget(actorId, true);
       if (!entry) throw new Error("Nothing to redo");
       if (

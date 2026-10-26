@@ -3,11 +3,12 @@ export const LIBRARY_RETENTION_MS = 10 * 24 * 60 * 60 * 1000;
 export interface LibraryLifecycleInfo {
   mode: LibraryLifecycleMode | null;
   root: string;
-  presentations: string;
-  defaultPresentations: string;
+  library: string;
 }
 export interface LibraryTrashItem {
   hash: string;
+  version?: 1;
+  kind?: "effect";
   trashedAt: string;
   originalRelativePath: string;
   bytes: number;

@@ -3,6 +3,21 @@ import { resolveMediaFrame, walkElements, type Element } from "./element";
 import { resolveMotion, resolveMotionValue } from "./motion";
 
 export const IMAGE_RECIPE = "png-lanczos3-tiled-source-sdr-v1";
+export const JPEG_IMAGE_RECIPE = "jpeg-q100-444-lanczos3-tiled-source-sdr-v1";
+export type ImageCacheFormat = "png" | "jpg";
+export type PreparedImageMime = "image/png" | "image/jpeg";
+
+export function imageRecipe(format: ImageCacheFormat, jpegQuality = 100) {
+  return format === "jpg" ? `jpeg-q${jpegQuality}-444-lanczos3-tiled-source-sdr-v1` : IMAGE_RECIPE;
+}
+
+export function imageMime(format: ImageCacheFormat): PreparedImageMime {
+  return format === "jpg" ? "image/jpeg" : "image/png";
+}
+
+export function imageExtension(mime: PreparedImageMime): ImageCacheFormat {
+  return mime === "image/jpeg" ? "jpg" : "png";
+}
 // Generous allowance: almost twice an 8K frame (about 256 MiB of RGBA pixels).
 export const MAX_PREPARED_IMAGE_PIXELS = 64 * 1024 * 1024;
 
@@ -27,10 +42,15 @@ export interface ImageOutputProfile {
   width: number;
   height: number;
 }
-/** Canvas sampling is disposable; audience and export profiles stay exact. */
-export interface ImageRequestProfile extends ImageOutputProfile {
-  sampling?: "canvas";
+
+/** One physical output calculation for preparation and every consuming view. */
+export function audienceImageProfile(width: number, height: number, pixelRatio: number): ImageOutputProfile {
+  if (![width, height, pixelRatio].every(value => Number.isFinite(value) && value > 0))
+    throw new Error("Invalid audience output geometry");
+  return { width: imagePixels(width * pixelRatio), height: imagePixels(height * pixelRatio) };
 }
+
+export type PreparedSlideImages = Record<string, PreparedImage | null>;
 export interface ImageRequirement {
   assetId: string;
   size: number;
@@ -48,7 +68,7 @@ export interface PreparedImage {
   sourceHeight: number;
   width: number;
   height: number;
-  mime: "image/png";
+  mime: PreparedImageMime;
   recipe: string;
   url: string;
 }
@@ -61,6 +81,10 @@ export interface ImageReadiness {
   state: "checking" | "preparing" | "ready" | "failed";
   total: number;
   completed: number;
+  /** Settled requirements that deliberately use the original (SVG/animated raster). */
+  originals?: number;
+  /** Definitively unavailable sources; preparation failures remain separately actionable. */
+  missing?: number;
   failures: Array<{ assetId: string; slideIds: string[]; message: string }>;
 }
 
@@ -68,11 +92,6 @@ export function imagePixels(required: number) {
   if (!Number.isFinite(required) || required <= 0)
     throw new Error("Invalid image sampling requirement");
   return Math.max(1, Math.ceil(required));
-}
-
-/** Round upwards so a canvas variant never undersamples its requested size. */
-export function canvasImagePixels(required: number) {
-  return Math.ceil(imagePixels(required) / 256) * 256;
 }
 
 const scalePlans = new WeakMap<
@@ -178,8 +197,9 @@ export function maximumElementScale(
 export function planPresentationImages(
   deck: Deck,
   slides: readonly Slide[],
-  profile: ImageRequestProfile,
+  profile: ImageOutputProfile,
   includeHiddenSlides = false,
+  includeHiddenLayers = false,
 ): ImageRequirement[] {
   if (
     ![profile.width, profile.height].every(
@@ -192,8 +212,7 @@ export function planPresentationImages(
     profile.height / deck.height,
   );
   const requirements = new Map<string, ImageRequirement>();
-  const pixels =
-    profile.sampling === "canvas" ? canvasImagePixels : imagePixels;
+  const pixels = imagePixels;
   for (const slide of slides) {
     if (!includeHiddenSlides && deck.slideMeta[slide.id]?.hidden) continue;
     const visit = (
@@ -256,7 +275,7 @@ export function planPresentationImages(
       }
     };
     for (const root of slide.nodes)
-      if (!deck.layers.find((layer) => layer.id === root.id)?.hidden)
+      if (includeHiddenLayers || !deck.layers.find((layer) => layer.id === root.id)?.hidden)
         visit(root.children, { x: 1, y: 1 });
   }
   return Array.from(requirements.values()).map((value) => ({
@@ -276,6 +295,6 @@ export function imageDimensions(
     height: Math.max(1, Math.ceil(sourceHeight * ratio)),
   };
 }
-export function imageIdentity(assetId: string, width: number, height: number) {
-  return `${IMAGE_RECIPE}:${assetId}:${width}x${height}`;
+export function imageIdentity(assetId: string, width: number, height: number, format: ImageCacheFormat = "png", jpegQuality = 100) {
+  return `${imageRecipe(format, jpegQuality)}:${assetId}:${width}x${height}`;
 }

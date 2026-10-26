@@ -5,5 +5,8 @@ export const EffectRenderContext = createContext<{
   density: RenderDensity;
   root: RefObject<HTMLDivElement | null>;
   retain: boolean;
+  staticFrame?: boolean;
+  sceneRevision?: object;
+  deckRevision?: object;
   envelopes?: ReadonlyMap<string, number>;
 } | null>(null);

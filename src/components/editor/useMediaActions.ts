@@ -5,7 +5,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import { prepareMediaAsset } from "../../core/media";
+import { prepareMediaAsset } from "../mediaEnrichment";
 import {
   centerMedia,
   convertMediaRule,
@@ -89,14 +89,17 @@ export function useMediaActions({
   const { snapshotRef, apply, flush } = controller;
 
   const insertPrepared = useCallback(
-    async (assets: Awaited<ReturnType<typeof prepareMediaAsset>>[]) => {
+    async (
+      assets: Awaited<ReturnType<typeof prepareMediaAsset>>[],
+      insertionPoint?: { x: number; y: number },
+    ) => {
       const snapshot = snapshotRef.current;
       if (!snapshot || !assets.length) return;
       const result = insertMediaAssets(
         snapshot,
         getInsertionScopeId(),
         assets,
-        getInsertionWorldPoint(),
+        insertionPoint ?? getInsertionWorldPoint(),
         idFactory,
       );
       if (result.snapshot === snapshot) return;
@@ -123,10 +126,13 @@ export function useMediaActions({
   );
 
   const insertAsset = useCallback(
-    async (asset: Parameters<typeof prepareMediaAsset>[0]) => {
+    async (
+      asset: Parameters<typeof prepareMediaAsset>[0],
+      insertionPoint?: { x: number; y: number },
+    ) => {
       await run(async () => {
         const prepared = await prepareMediaAsset(asset);
-        await insertPrepared([prepared]);
+        await insertPrepared([prepared], insertionPoint);
       });
     },
     [insertPrepared, run],

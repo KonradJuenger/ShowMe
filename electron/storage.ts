@@ -1,4 +1,7 @@
 import type { AcceptedTransaction } from "../src/core/documentTransactions";
+import { resolveExportFontUsages } from "./fontIntegration";
+import type { FontEmbedding } from "../src/export/fontEmbedding";
+import type { ExportFontRequest } from "../src/export/fontUsage";
 import { acceptedImpact } from "../src/core/documentImpact";
 import type {
   PackageFontResources,
@@ -51,7 +54,7 @@ import type { LibraryLifecycleMode } from "../src/core/libraryLifecycle";
 import {
   LibraryOpenProtection,
   restoreLibraryAsset,
-  isInsideLibrary,
+  isInsideRoot,
   documentLibraryHashes,
   documentFontUsages,
 } from "./libraryLifecycle";
@@ -62,6 +65,7 @@ import {
   libraryIndex,
   folderForMediaType,
   findManagedFile,
+  setManagedFilenameProtected,
 } from "./mediaLibrary";
 
 interface StoredDocument {
@@ -96,6 +100,12 @@ function ensureSmePath(file: string) {
 
 function adjacentRecoveryPath(file: string) {
   return file.slice(0, -SHOWME_DOCUMENT_EXTENSION.length) + ".recovery.sme";
+}
+
+export interface PackageExportAsset { asset: Asset; file: string }
+export interface PackageExportOptions {
+  fontEmbedding: FontEmbedding;
+  prepareDocument?(document: PresentationDocument): Promise<ReadonlyMap<string, PackageExportAsset>>;
 }
 
 export class DocumentStorage {
@@ -134,6 +144,9 @@ export class DocumentStorage {
       ? this.entry(documentId).packageFonts
       : undefined;
     return this.fonts?.managed(this, resources) ?? [];
+  }
+  exportFontFaces(id: string, usages: ExportFontRequest[]) {
+    return resolveExportFontUsages(this.assetRoot, usages, this.entry(id).packageFonts);
   }
   private importDocumentId: string | null = null;
   private readonly retainedDocumentAssets = new Map<string, Set<string>>();
@@ -219,6 +232,7 @@ export class DocumentStorage {
     this.recoveryRoot = path.join(path.dirname(this.cacheRoot), "recovery");
     this.media = new StorageMedia(assetRoot, this.cacheRoot);
     this.media.onChanged = (change) => {
+      this.onMediaInventoryChanged?.();
       if (
         !change.ids ||
         change.ids.some((id) =>
@@ -262,6 +276,7 @@ export class DocumentStorage {
   }
 
   onFontInventoryChanged?: () => void;
+  onMediaInventoryChanged?: () => void;
 
   async init() {
     if (this.lifecycleMode !== "portable") await this.media.init();
@@ -291,6 +306,7 @@ export class DocumentStorage {
       ),
     ]);
     await previousProtection.dispose();
+    this.onMediaInventoryChanged?.();
   }
 
   private async lastSavedAt(file: string) {
@@ -412,8 +428,7 @@ export class DocumentStorage {
         ? documentNameFromFile(handle.filePath)
         : document.deck.name,
       location: entry.packagePath ?? handle.filePath ?? "",
-      dirty:
-        runtime.authority.dirty || (!entry.packagePath && !handle.filePath),
+      dirty: runtime.authority.dirty,
       untitled: !entry.packagePath && !handle.filePath,
     } satisfies DocumentSummary;
   }
@@ -627,7 +642,7 @@ export class DocumentStorage {
     );
   }
 
-  async saveDocument(id: string, destination?: string) {
+  async saveDocument(id: string, destination?: string, beforePersist?: (destination: string) => void) {
     const entry = this.entry(id);
     const { handle, runtime } = entry;
     if (!destination && entry.packagePath)
@@ -636,12 +651,14 @@ export class DocumentStorage {
         entry.packagePath,
         entry.packageLocked ?? false,
         entry.packageFingerprint,
+        beforePersist,
       );
     if (destination && path.extname(destination).toLowerCase() === ".smp")
-      return this.savePackageAs(id, destination, entry.packageLocked ?? false);
+      return this.savePackageAs(id, destination, entry.packageLocked ?? false, undefined, beforePersist);
     const target = destination ? ensureSmePath(destination) : handle.filePath;
     if (!target) throw new Error("Untitled presentations require Save As");
     return runtime.authority.runExclusive(async (snapshot) => {
+      beforePersist?.(target);
       if (entry.packageLocked)
         throw new Error(
           "Locked package media cannot be extracted into the shared Library",
@@ -688,27 +705,15 @@ export class DocumentStorage {
     });
   }
 
-  async assertNativeFileUnchanged(id: string) {
-    const { handle } = this.entry(id);
-    if (!handle.filePath || !handle.fileRevision)
-      throw new Error("This presentation has no saved native file");
-    if (
-      digest(await fs.readFile(handle.filePath, "utf8")) !== handle.fileRevision
-    )
-      throw new Error(
-        "This presentation changed on disk. Reopen it before moving to avoid removing external edits.",
-      );
-    return { file: handle.filePath, revision: handle.fileRevision };
-  }
-
-  closeDocument(id: string) {
-    this.entry(id);
+  async closeDocument(id: string) {
+    await this.entry(id).runtime.authority.beginClose();
     this.documents.delete(id);
     this.releaseDocumentAssets(id);
   }
 
   async discardDocumentChanges(id: string) {
-    const { handle } = this.entry(id);
+    const { handle, runtime } = this.entry(id);
+    await runtime.authority.beginClose();
     await this.recovery.discard(handle.recoveryPath);
     this.documents.delete(idSchema.parse(id));
     this.releaseDocumentAssets(id);
@@ -835,7 +840,7 @@ export class DocumentStorage {
       try {
         await this.recovery.checkpoint(entry.handle, document);
       } catch (error) {
-        this.closeDocument(document.documentId);
+        await this.closeDocument(document.documentId);
         throw error;
       }
       return this.summary(document.documentId);
@@ -850,6 +855,7 @@ export class DocumentStorage {
     lockMediaFiles: boolean,
     document: PresentationDocument,
     expectedFingerprint?: string,
+    exportOptions?: { fontEmbedding: FontEmbedding; assets?: ReadonlyMap<string, PackageExportAsset> },
   ) {
     const entry = this.entry(id);
     if (document.documentId !== entry.runtime.authority.document.documentId)
@@ -858,25 +864,25 @@ export class DocumentStorage {
     const assets: ShowMePackageManifest["assets"] = [];
     const entries: ZipEntryInput[] = [];
     for (const assetId of assetIds) {
-      let asset = await this.assetForDocument(id, assetId);
-      const source = this.assetPathForDocument(id, assetId);
-      if (!entry.packageAssets?.has(assetId)) {
-        const folder = path.basename(path.dirname(source));
-        asset = {
-          ...asset,
-          filename: path.basename(source),
-          mediaType:
-            folder === "images"
-              ? "image"
-              : folder === "video"
-                ? "video"
-                : folder === "audio"
-                  ? "audio"
-                  : folder === "fonts"
-                    ? "font"
-                    : "other",
-        };
-      }
+      const prepared = exportOptions?.assets?.get(assetId);
+      let asset = prepared?.asset ?? await this.assetForDocument(id, assetId);
+      const source = prepared?.file ?? this.assetPathForDocument(id, assetId);
+      const sourceName = path.basename(source);
+      const physicalManagedName =
+        assetIdFromFilename(sourceName) === assetId ? sourceName : null;
+      const metadataManagedName =
+        assetIdFromFilename(asset.filename) === assetId
+          ? asset.filename
+          : null;
+      const packageFilename = physicalManagedName
+        ? setManagedFilenameProtected(physicalManagedName, false)
+        : metadataManagedName
+          ? setManagedFilenameProtected(metadataManagedName, false)
+          : asset.filename;
+      asset = {
+        ...asset,
+        filename: packageFilename,
+      };
       const bytes = (await fs.stat(source)).size;
       if ((await hashFile(source)) !== assetId)
         throw new Error(`Asset ${assetId} failed hash verification`);
@@ -896,11 +902,12 @@ export class DocumentStorage {
       });
       entries.push({ name: originalPath, file: source });
     }
-    const packagedFonts = await this.fonts?.package(
+    const packagedFonts = !exportOptions || exportOptions.fontEmbedding === "file" ? await this.fonts?.package(
       this,
       document,
       entry.packageFonts,
-    );
+      exportOptions?.fontEmbedding === "file",
+    ) : undefined;
     entries.push(...(packagedFonts?.entries ?? []));
     const manifest = {
       ...packageManifestSchema.parse({
@@ -967,20 +974,28 @@ export class DocumentStorage {
     file: string,
     lockMediaFiles?: boolean,
     removeSpeakerNotes = false,
+    beforePersist?: (destination: string) => void,
+    options?: PackageExportOptions,
   ) {
     const entry = this.entry(id);
     return entry.runtime.authority.runExclusive(
-      async (snapshot) =>
-        (
+      async (snapshot) => {
+        beforePersist?.(file);
+        const copy = options?.prepareDocument ? structuredClone(snapshot.document) : snapshot.document;
+        const document = removeSpeakerNotes ? withoutSpeakerNotes(copy) : copy;
+        const assets = await options?.prepareDocument?.(document);
+        if (options?.prepareDocument) beforePersist?.(file);
+        return (
           await this.writePackage(
             id,
             file,
             lockMediaFiles ?? entry.packageLocked ?? false,
-            removeSpeakerNotes
-              ? withoutSpeakerNotes(snapshot.document)
-              : snapshot.document,
+            document,
+            undefined,
+            options ? { fontEmbedding: options.fontEmbedding, assets } : undefined,
           )
-        ).path,
+        ).path;
+      },
     );
   }
 
@@ -989,9 +1004,11 @@ export class DocumentStorage {
     file: string,
     lockMediaFiles: boolean,
     expectedFingerprint?: string,
+    beforePersist?: (destination: string) => void,
   ) {
     const entry = this.entry(id);
     return entry.runtime.authority.runExclusive(async (snapshot) => {
+      beforePersist?.(file);
       const written = await this.writePackage(
         id,
         file,
@@ -1035,7 +1052,7 @@ export class DocumentStorage {
       )
         throw error;
     }
-    if (file && !isInsideLibrary(this.assetRoot, file)) return file;
+    if (file && !isInsideRoot(this.assetRoot, file)) return file;
     await this.verifiedAssetPath(id);
     return this.assetPathForDocument(documentId, id);
   }
@@ -1132,7 +1149,11 @@ export class DocumentStorage {
     return entry.localMedia;
   }
 
-  private async importSource(name: string, source: string | Uint8Array) {
+  private async importSource(
+    name: string,
+    source: string | Uint8Array,
+    folder = "",
+  ) {
     const entry = this.importDocumentId
       ? this.documents.get(this.importDocumentId)
       : undefined;
@@ -1144,7 +1165,7 @@ export class DocumentStorage {
       const local = await this.localMedia(entry);
       const asset =
         typeof source === "string"
-          ? await local.importFile(source)
+          ? await local.importFile(source, undefined, folder)
           : await local.importBytes(name, source);
       entry.packageAssets ??= new Map();
       entry.packageAssets.set(asset.id, {
@@ -1164,16 +1185,21 @@ export class DocumentStorage {
       restoreLibraryAsset(this.assetRoot, hash);
     };
     return typeof source === "string"
-      ? this.media.importFile(source, protect)
+      ? this.media.importFile(source, protect, folder)
       : this.media.importBytes(name, source, protect);
   }
 
-  async importFile(file: string) {
-    return this.importSource(path.basename(file), file);
+  async importFile(file: string, folder = "") {
+    return this.importSource(path.basename(file), file, folder);
   }
 
   async importAssetData(name: string, bytes: Uint8Array) {
     return this.importSource(name, bytes);
+  }
+
+  /** Inventory metadata only; insertion and byte consumers still verify assets. */
+  async libraryAssetMetadata(id: string): Promise<Asset> {
+    return this.media.asset(id);
   }
 
   async asset(id: string): Promise<Asset> {

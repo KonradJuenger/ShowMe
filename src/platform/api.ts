@@ -133,29 +133,32 @@ export type FileCommand =
   | "package"
   | "export-pdf"
   | "export-pptx"
+  | "export-html"
   | "prepare-close";
 export type CloseResult = "closed" | "canceled";
 
 export interface Platform {
+  getMcpEnabled?(): Promise<boolean>;
+  getMcpEditingEnabled?(): Promise<boolean>;
+  setMcpEditingEnabled?(enabled: boolean): Promise<boolean>;
+  agentHistory?(): Promise<{ documentId: string | null; canUndo: boolean; canRedo: boolean; summary: string | null }>;
+  agentUndo?(request: { documentId: string; redo: boolean }): Promise<{ ok: boolean; error?: { message: string } }>;
+  onAgentHistoryChanged?(callback: () => void): () => void;
+  getMcpConnection?(): Promise<import("../core/agentRead").McpConnectionInfo>;
+  setMcpEnabled?(enabled: boolean): Promise<boolean>;
+  onMcpEnabledChanged?(callback: (enabled: boolean) => void): () => void;
+  editorAgentContext?(request: import("../core/agentContext").EditorAgentContextRequest): Promise<import("../core/agentContext").EditorAgentContextReply>;
+  agentContext?(): Promise<import("../core/agentContext").AgentContext>;
+  agentPreview?(request: import("../core/agentPreview").AgentPreviewRequest): Promise<import("../core/agentPreview").AgentPreviewResult>;
   effectLibrary?(
     request: import("../core/libraryEffects").EffectLibraryRequest,
   ): Promise<import("../core/libraryEffects").EffectLibrary>;
   getLibraryLifecycle?(): Promise<
     import("../core/libraryLifecycle").LibraryLifecycleInfo
   >;
-  choosePresentationsFolder?(): Promise<
+  chooseShowMeRoot?(): Promise<
     import("../core/libraryLifecycle").LibraryLifecycleInfo | null
   >;
-  resetPresentationsFolder?(): Promise<
-    import("../core/libraryLifecycle").LibraryLifecycleInfo
-  >;
-  documentLibraryState?(
-    documentId: string,
-  ): Promise<{ displaced: boolean; location: string }>;
-  moveDocumentToPresentationsFolder?(
-    documentId: string,
-  ): Promise<DocumentSummary | null>;
-  saveDocumentAsPortable?(documentId: string): Promise<DocumentSummary | null>;
   setLibraryLifecycleMode?(
     mode: import("../core/libraryLifecycle").LibraryLifecycleMode,
   ): Promise<import("../core/libraryLifecycle").LibraryLifecycleInfo>;
@@ -172,6 +175,7 @@ export interface Platform {
   }>;
   /** Null invalidates renderer cache choices after a global cache setting/clear. */
   onFontInventoryChanged?(callback: () => void): () => void;
+  onMediaInventoryChanged?(callback: () => void): () => void;
   onImageReadiness?(
     cb: (
       status: import("../core/presentationImages").ImageReadiness | null,
@@ -186,8 +190,17 @@ export interface Platform {
     documentId: string,
     slideId: string,
     elementId: string,
-    profile?: import("../core/presentationImages").ImageRequestProfile,
+    profile?: import("../core/presentationImages").ImageOutputProfile,
   ): Promise<import("../core/presentationImages").PreparedImage | null>;
+  /** Omitted output uses the shared audience profile, independent of editor zoom. */
+  preparedSlideImages?(
+    documentId: string,
+    slideId: string,
+    profile?: import("../core/presentationImages").ImageOutputProfile,
+  ): Promise<import("../core/presentationImages").PreparedSlideImages>;
+  /** Audience-only preparation handshake; completes the current whole-deck plan. */
+  prepareAudience?(documentId: string): Promise<import("../core/presentationImages").ImageOutputProfile>;
+  audienceImageProfile?(documentId: string): Promise<import("../core/presentationImages").ImageOutputProfile>;
   preparedAssetImage?(
     assetId: string,
     size: number,
@@ -196,6 +209,13 @@ export interface Platform {
   chooseImageCacheFolder?(): Promise<MediaLibraryInfo | null>;
   resetImageCacheFolder?(): Promise<MediaLibraryInfo>;
   getImageCachingEnabled?(): Promise<boolean>;
+  getExportFontEmbedding?(): Promise<import("../export/fontEmbedding").FontEmbedding>;
+  setExportFontEmbedding?(mode: import("../export/fontEmbedding").FontEmbedding): Promise<void>;
+  onHtmlExportProgress?(callback: (progress: import("../export/html/types").HtmlExportProgress | null) => void): () => void;
+  getHtmlExportJpegQuality?(): Promise<number>;
+  setHtmlExportJpegQuality?(quality: number): Promise<void>;
+  getImageCacheFormat?(): Promise<import("../core/presentationImages").ImageCacheFormat>;
+  setImageCacheFormat?(format: import("../core/presentationImages").ImageCacheFormat): Promise<void>;
   getDeleteImageCacheOnClose?(): Promise<boolean>;
   setDeleteImageCacheOnClose?(enabled: boolean): Promise<void>;
   setImageCachingEnabled?(enabled: boolean): Promise<void>;
@@ -297,8 +317,7 @@ export interface Platform {
   collaborationStop?(): Promise<void>;
   isTest?: boolean;
   getMediaLibrary(): Promise<MediaLibraryInfo>;
-  chooseMediaLibrary(): Promise<MediaLibraryInfo | null>;
-  resetMediaLibrary(): Promise<MediaLibraryInfo>;
+  openMediaLibrary?(): Promise<void>;
   systemFonts?(): Promise<SystemFontFamily[]>;
   managedFonts?(documentId?: string): Promise<SystemFontFamily[]>;
   showContextMenu?(
@@ -320,22 +339,30 @@ export interface Platform {
   packageDocument?(documentId: string): Promise<string | null>;
   exportPresentation?(
     documentId: string,
-    format: "pdf" | "pptx",
+    format: "pdf" | "pptx" | "html",
   ): Promise<{ warnings: import("../export/shared").ExportWarning[] } | null>;
   exportReady?(error: string | null): Promise<void>;
   packageMediaState?(
     documentId: string,
   ): Promise<{ packaged: boolean; locked: boolean }>;
   saveMediaAs?(documentId: string, assetId: string): Promise<void>;
+  confirmDocumentReplacement?(documentId: string): Promise<boolean>;
   requestClose?(documentId: string): Promise<CloseResult>;
   readSlideTransfer(files: File[]): Promise<unknown | null>;
   startSlideDrag(bundle: unknown): boolean;
+  libraryBrowser?(
+    request: import("../core/libraryBrowser").LibraryBrowserRequest,
+  ): Promise<import("../core/libraryBrowser").LibraryBrowserResult>;
+  effectThumbnail?(
+    definition: import("../core/effects").EffectDefinition,
+  ): Promise<string | null>;
   listAssets(query: string, offset: number, limit: number): Promise<AssetPage>;
   getAsset(id: string): Promise<Asset>;
   importAssets(files?: File[]): Promise<Asset[]>;
   importDroppedFiles(files: File[]): Promise<Asset[]>;
   assetUrl(id: string, preview?: boolean): Promise<string | null>;
   releaseUrl(url: string): void;
+  retainUrl?(url: string): void;
   updateAsset(asset: Asset): Promise<void>;
   storePreview(id: string, data: Uint8Array): Promise<void>;
   capturePreview?(

@@ -1,30 +1,39 @@
 import { expect, it, vi } from "vitest";
 import {
-  mkdir,
-  writeFile,
-  readFile,
   access,
-  rm,
+  mkdir,
+  readFile,
   realpath,
+  rm,
+  symlink,
+  writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
+import { promises as fs } from "node:fs";
 import { storedDocument } from "../../helpers/storage";
-import { LibraryLifecycle } from "../../../electron/libraryLifecycle";
+import {
+  LibraryLifecycle,
+  assertShowMeRootChangeAllowed,
+} from "../../../electron/libraryLifecycle";
 import { createMediaElement } from "../../../src/core/media";
 import { LIBRARY_RETENTION_MS } from "../../../src/core/libraryLifecycle";
 import { digest } from "../../../electron/storage/io";
+import { managedFilename } from "../../../electron/mediaLibrary";
+import { setLibraryProtection } from "../../../electron/libraryProtection";
 import {
-  defaultPresentationsFolderPath,
-  initializePresentationsFolder,
   readSettings,
+  showMeLibraryPath,
+  validateShowMeRoot,
   writeSettings,
 } from "../../../electron/settings";
 
 async function libraryFixture() {
   const context = await storedDocument();
-  const presentations = path.join(context.root, "presentations");
-  await mkdir(presentations);
+  const showMeRoot = path.join(context.root, "Studio Shared");
+  await mkdir(showMeRoot);
+  await context.storage.setAssetRoot(showMeLibraryPath(showMeRoot));
+
   const asset = await context.storage.importAssetData(
     "used.png",
     new Uint8Array([1, 2, 3]),
@@ -40,14 +49,14 @@ async function libraryFixture() {
     createMediaElement("library-image", { ...asset, width: 32, height: 32 }),
   );
   context.session.dispose();
-  context.storage.closeDocument(context.id);
+  await context.storage.closeDocument(context.id);
+
   let now = Date.parse("2026-10-12T12:00:00Z");
   const deleteTrash = vi.fn(async (file: string) => {
     await rm(file, { recursive: true });
   });
   const lifecycle = new LibraryLifecycle(
-    context.storage.assetRoot,
-    presentations,
+    showMeRoot,
     () => context.storage.openDocuments(),
     context.storage.openProtection,
     deleteTrash,
@@ -56,7 +65,8 @@ async function libraryFixture() {
   await lifecycle.init();
   return {
     ...context,
-    presentations,
+    showMeRoot,
+    libraryRoot: showMeLibraryPath(showMeRoot),
     asset,
     unused,
     source,
@@ -70,9 +80,20 @@ async function libraryFixture() {
   };
 }
 
-it("separate presentations subfolders protect referenced media while cleanup stays inside the media library", async () => {
+it("one ShowMe root owns the visible Library and recursive presentation scope", async () => {
   const fixture = await libraryFixture();
-  const nested = path.join(fixture.presentations, "client", "project");
+  expect(fixture.lifecycle.root).toBe(fixture.showMeRoot);
+  expect(fixture.lifecycle.libraryRoot).toBe(
+    path.join(fixture.showMeRoot, "ShowMe Library"),
+  );
+
+  const nested = path.join(
+    fixture.showMeRoot,
+    "clients",
+    "alpha",
+    "presentations",
+    "2026",
+  );
   await mkdir(nested, { recursive: true });
   const file = path.join(nested, "deck.SME");
   const text = JSON.stringify(fixture.document);
@@ -83,63 +104,178 @@ it("separate presentations subfolders protect referenced media while cleanup sta
     path.join(nested, "deck.recovery.sme", "journal.sme"),
     "not a document",
   );
-  const outside = path.join(fixture.storage.assetRoot, "outside.sme");
-  await writeFile(outside, "not in the selected presentation scope");
+
+  const outside = path.join(fixture.root, "outside.sme");
+  await writeFile(outside, "{ this deliberately is not a valid document");
+
   const result = await fixture.lifecycle.scan(true);
-  expect(result.complete).toBe(true);
+  expect(result.complete, result.errors.join("\n")).toBe(true);
   expect(result.presentations).toBe(1);
   expect(result.referencedBytes).toBe(3);
   expect(result.trash.map((item) => item.hash)).toEqual([fixture.unused.id]);
   await expect(access(fixture.source)).resolves.toBeUndefined();
   await expect(access(fixture.unusedSource)).rejects.toThrow();
   expect(await readFile(file, "utf8")).toBe(text);
-  expect(await readFile(outside, "utf8")).toBe(
-    "not in the selected presentation scope",
-  );
+  expect(await readFile(outside, "utf8")).toContain("deliberately");
 });
 
-it("a malformed nested .sme stops moves and expiry of existing trash", async () => {
+it("a malformed nested .sme anywhere below the root blocks moves and expiry", async () => {
   const fixture = await libraryFixture();
-  await fixture.lifecycle.scan(true);
+  expect((await fixture.lifecycle.scan(true)).complete).toBe(true);
   fixture.ageTrash();
-  await mkdir(path.join(fixture.presentations, "nested"));
-  await writeFile(
-    path.join(fixture.presentations, "nested", "invalid.sme"),
-    "{",
-  );
-  const before = await readFile(
-    path.join(fixture.presentations, "nested", "invalid.sme"),
-    "utf8",
-  );
+
+  const nested = path.join(fixture.showMeRoot, "project", "nested");
+  await mkdir(nested, { recursive: true });
+  const invalid = path.join(nested, "invalid.sme");
+  await writeFile(invalid, "{");
+  const before = await readFile(invalid, "utf8");
+
   const result = await fixture.lifecycle.scan(true, true);
   expect(result.complete).toBe(false);
   expect(result.errors).toHaveLength(1);
   expect(fixture.deleteTrash).not.toHaveBeenCalled();
-  expect(
-    await readFile(
-      path.join(fixture.presentations, "nested", "invalid.sme"),
-      "utf8",
-    ),
-  ).toBe(before);
-  await rm(path.join(fixture.presentations, "nested", "invalid.sme"));
+  expect(await readFile(invalid, "utf8")).toBe(before);
+
+  await rm(invalid);
   expect((await fixture.lifecycle.scan()).trash).toHaveLength(2);
 });
 
-it("an unavailable presentations folder is not recreated and prevents cleanup", async () => {
+it("an unavailable ShowMe root prevents cleanup instead of creating a new scope", async () => {
   const fixture = await libraryFixture();
-  await rm(fixture.presentations, { recursive: true });
-  await fixture.lifecycle.init();
-  const result = await fixture.lifecycle.scan(true, true);
+  // A watched directory cannot reliably be renamed on Windows. Model the
+  // unavailable filesystem at its boundary instead of fighting watcher handles.
+  const unavailable = vi
+    .spyOn(fs, "lstat")
+    .mockRejectedValueOnce(
+      Object.assign(new Error("Root unavailable"), { code: "ENOENT" }),
+    );
+  const mkdirCalls = vi.spyOn(fs, "mkdir");
+  try {
+    const result = await fixture.lifecycle.scan(true, true);
+    expect(unavailable).toHaveBeenCalledWith(fixture.showMeRoot);
+    expect(result.complete).toBe(false);
+    expect(result.errors).toEqual(["Root unavailable"]);
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+    expect(mkdirCalls).not.toHaveBeenCalled();
+    await expect(access(fixture.source)).resolves.toBeUndefined();
+    await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+  } finally {
+    unavailable.mockRestore();
+    mkdirCalls.mockRestore();
+  }
+});
+
+it("an incomplete tree arriving during cleanup checks blocks all moves", async () => {
+  const fixture = await libraryFixture();
+  const lifecycle = new LibraryLifecycle(
+    fixture.showMeRoot,
+    () => [],
+    fixture.storage.openProtection,
+    fixture.deleteTrash,
+    Date.now,
+    async () => {
+      await writeFile(path.join(fixture.showMeRoot, "incoming.sme"), "{");
+      return true;
+    },
+  );
+  const result = await lifecycle.scan(true, true);
   expect(result.complete).toBe(false);
-  await expect(access(fixture.presentations)).rejects.toThrow();
+  expect(result.errors).toHaveLength(1);
   await expect(access(fixture.source)).resolves.toBeUndefined();
   await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+  expect(
+    await fs.readdir(path.join(fixture.libraryRoot, "Trash", "assets")),
+  ).toEqual([]);
   expect(fixture.deleteTrash).not.toHaveBeenCalled();
 });
 
-it("changed presentations abort cleanup before any media is moved", async () => {
+it("a presentation arriving after a move rolls back this scan's Trash moves", async () => {
   const fixture = await libraryFixture();
-  const file = path.join(fixture.presentations, "deck.sme");
+  const rename = fs.rename.bind(fs);
+  const moving = vi
+    .spyOn(fs, "rename")
+    .mockImplementation(async (source, destination) => {
+      await rename(source, destination);
+      if (source === fixture.source || source === fixture.unusedSource)
+        await writeFile(
+          path.join(fixture.showMeRoot, "incoming.sme"),
+          JSON.stringify(fixture.document),
+        );
+    });
+  try {
+    const result = await fixture.lifecycle.scan(true);
+    expect(result.complete).toBe(false);
+    expect(result.errors).toEqual([
+      "Presentations changed during Library scan; retry",
+    ]);
+    await expect(access(fixture.source)).resolves.toBeUndefined();
+    await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+    expect(
+      await fs.readdir(path.join(fixture.libraryRoot, "Trash", "assets")),
+    ).toEqual([]);
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+  } finally {
+    moving.mockRestore();
+  }
+});
+
+it("an incomplete tree arriving at the expiry gate preserves aged Trash", async () => {
+  const fixture = await libraryFixture();
+  const initial = await fixture.lifecycle.scan(true);
+  expect(initial.complete).toBe(true);
+  fixture.ageTrash();
+  const lifecycle = new LibraryLifecycle(
+    fixture.showMeRoot,
+    () => [],
+    fixture.storage.openProtection,
+    fixture.deleteTrash,
+    () => Date.now() + LIBRARY_RETENTION_MS * 2,
+    async () => {
+      await writeFile(path.join(fixture.showMeRoot, "incoming.sme"), "{");
+      return true;
+    },
+  );
+  const result = await lifecycle.scan(false, true);
+  expect(result.complete).toBe(false);
+  expect(result.errors).toHaveLength(1);
+  expect(fixture.deleteTrash).not.toHaveBeenCalled();
+  expect(
+    await fs.readdir(path.join(fixture.libraryRoot, "Trash", "assets")),
+  ).toHaveLength(2);
+});
+
+it("rollback preserves an arriving replacement and retains the original payload in Trash", async () => {
+  const fixture = await libraryFixture();
+  const rename = fs.rename.bind(fs);
+  let original: string | undefined;
+  const moving = vi
+    .spyOn(fs, "rename")
+    .mockImplementation(async (source, destination) => {
+      await rename(source, destination);
+      if (source === fixture.source) {
+        original = String(destination);
+        await writeFile(fixture.source, "arriving replacement");
+        await writeFile(path.join(fixture.showMeRoot, "incoming.sme"), "{");
+      }
+    });
+  try {
+    const result = await fixture.lifecycle.scan(true);
+    expect(result.complete).toBe(false);
+    expect(
+      result.errors.some((error) => error.includes("Could not restore")),
+    ).toBe(true);
+    expect(await readFile(fixture.source, "utf8")).toBe("arriving replacement");
+    expect(original).toBeDefined();
+    expect(await readFile(original!)).toEqual(Buffer.from([1, 2, 3]));
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+  } finally {
+    moving.mockRestore();
+  }
+});
+
+it("changed presentations abort cleanup before any Library asset is moved", async () => {
+  const fixture = await libraryFixture();
+  const file = path.join(fixture.showMeRoot, "deck.sme");
   await writeFile(file, JSON.stringify(fixture.document));
   vi.spyOn(fixture.storage.openProtection, "hashes").mockImplementationOnce(
     async () => {
@@ -149,6 +285,7 @@ it("changed presentations abort cleanup before any media is moved", async () => 
       return new Set();
     },
   );
+
   const result = await fixture.lifecycle.scan(true);
   expect(result.complete).toBe(false);
   expect(result.errors).toEqual([
@@ -158,39 +295,89 @@ it("changed presentations abort cleanup before any media is moved", async () => 
   await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
 });
 
-it("a newly referenced asset in trash is restored from a nested presentation before expiry", async () => {
+it("a managed Library directory escaping through a symlink blocks cleanup", async () => {
+  const fixture = await libraryFixture();
+  const effects = path.join(fixture.libraryRoot, "Effects");
+  const outside = path.join(fixture.root, "outside-effects");
+  await rm(effects, { recursive: true });
+  await mkdir(outside);
+  await symlink(
+    outside,
+    effects,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+
+  const result = await fixture.lifecycle.scan(true, true);
+  expect(result.complete).toBe(false);
+  expect(result.errors.join("\n")).toContain("Unsafe Library directory");
+  await expect(access(fixture.source)).resolves.toBeUndefined();
+  await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+  expect(fixture.deleteTrash).not.toHaveBeenCalled();
+});
+
+it("lifecycle restoration preserves Trash when original parent names collide by case or NFC", async () => {
+  for (const [existing, original] of [["project", "Project"], ["Café", "Cafe\u0301"]]) {
+    const fixture = await libraryFixture();
+    await fixture.lifecycle.scan(true);
+    const trashRoot = path.join(fixture.libraryRoot, "Trash", "assets");
+    const entries = await Promise.all((await fs.readdir(trashRoot)).map(async name => {
+      const directory = path.join(trashRoot, name);
+      return { directory, metadata: JSON.parse(await readFile(path.join(directory, "item.json"), "utf8")) };
+    }));
+    const directory = entries.find(entry => entry.metadata.hash === fixture.asset.id)!.directory;
+    const metadataFile = path.join(directory, "item.json");
+    const metadata = JSON.parse(await readFile(metadataFile, "utf8"));
+    metadata.originalRelativePath = `images/${original}/${path.basename(fixture.source)}`;
+    await writeFile(metadataFile, JSON.stringify(metadata));
+    await mkdir(path.join(fixture.libraryRoot, "images", existing));
+    await writeFile(path.join(fixture.showMeRoot, "referenced.sme"), JSON.stringify(fixture.document));
+    const result = await fixture.lifecycle.scan(true, true);
+    expect(result.complete).toBe(false);
+    expect(result.errors.join("\n")).toContain("collides");
+    expect(await readFile(path.join(directory, path.basename(fixture.source)))).toEqual(Buffer.from([1, 2, 3]));
+    expect(await readFile(metadataFile, "utf8")).toContain(original);
+    expect(await fs.readdir(path.join(fixture.libraryRoot, "images", existing))).toEqual([]);
+    expect(fixture.deleteTrash).not.toHaveBeenCalled();
+  }
+});
+
+it("a referenced Trash asset is restored from a deeply nested presentation before expiry", async () => {
   const fixture = await libraryFixture();
   expect((await fixture.lifecycle.scan(true)).trash).toHaveLength(2);
   fixture.ageTrash();
-  await mkdir(path.join(fixture.presentations, "nested"));
+
+  const nested = path.join(fixture.showMeRoot, "project-a", "slides", "final");
+  await mkdir(nested, { recursive: true });
   await writeFile(
-    path.join(fixture.presentations, "nested", "deck.sme"),
+    path.join(nested, "deck.sme"),
     JSON.stringify(fixture.document),
   );
+
   const result = await fixture.lifecycle.scan(true, true);
-  expect(result.complete).toBe(true);
+  expect(result.complete, result.errors.join("\n")).toBe(true);
   await expect(access(fixture.source)).resolves.toBeUndefined();
   expect(result.referencedBytes).toBe(3);
   expect(result.trash).toHaveLength(0);
   expect(fixture.deleteTrash).toHaveBeenCalledTimes(1);
 });
 
-it("open documents and imports remain protected independently of the presentations folder", async () => {
+it("open documents and imports remain protected independently of saved root files", async () => {
   const fixture = await libraryFixture();
   const lifecycle = new LibraryLifecycle(
-    fixture.storage.assetRoot,
-    fixture.presentations,
+    fixture.showMeRoot,
     () => [fixture.document],
     fixture.storage.openProtection,
     fixture.deleteTrash,
   );
   fixture.storage.openProtection.protect([fixture.unused.id]);
+
   const protectedResult = await lifecycle.scan(true);
   expect(protectedResult.complete, protectedResult.errors.join("\n")).toBe(
     true,
   );
   expect(protectedResult.referencedBytes).toBe(6);
   expect(protectedResult.trash).toHaveLength(0);
+
   fixture.storage.openProtection.replace([]);
   const result = await lifecycle.scan(true);
   expect(result.complete).toBe(true);
@@ -199,7 +386,7 @@ it("open documents and imports remain protected independently of the presentatio
   expect(result.trash.map((item) => item.hash)).toEqual([fixture.unused.id]);
 });
 
-it("collector locks preserve imports, exclude competing collectors and avoid Windows TCP contention", async () => {
+it("collector locks preserve imports and exclude competing cleanup collectors", async () => {
   const fixture = await libraryFixture();
   fixture.storage.openProtection.protect([fixture.asset.id, fixture.unused.id]);
   const tcp = createServer();
@@ -216,13 +403,13 @@ it("collector locks preserve imports, exclude competing collectors and avoid Win
     fixture.storage.openProtection,
   );
   let scanning: ReturnType<LibraryLifecycle["scan"]> | undefined;
+
   try {
     if (process.platform === "win32") {
-      const key = (await realpath(fixture.storage.assetRoot)).toLowerCase();
+      const key = (await realpath(fixture.showMeRoot)).toLowerCase();
       const port = 49152 + (parseInt(digest(key).slice(0, 8), 16) % 16384);
       await new Promise<void>((resolve, reject) => {
         tcp.once("error", (error: NodeJS.ErrnoException) => {
-          // An already occupied/reserved port also supplies the intended contention.
           if (error.code === "EADDRINUSE" || error.code === "EACCES") resolve();
           else reject(error);
         });
@@ -235,6 +422,7 @@ it("collector locks preserve imports, exclude competing collectors and avoid Win
       expect(result.complete, result.errors.join("\n")).toBe(true);
       expect(result.referencedBytes).toBe(6);
     }
+
     vi.spyOn(fixture.storage.openProtection, "hashes").mockImplementationOnce(
       async () => {
         entered();
@@ -249,6 +437,7 @@ it("collector locks preserve imports, exclude competing collectors and avoid Win
     expect(competing.errors).toHaveLength(1);
     await expect(access(fixture.source)).resolves.toBeUndefined();
     await expect(access(fixture.unusedSource)).resolves.toBeUndefined();
+
     release();
     const result = await scanning;
     expect(result.complete, result.errors.join("\n")).toBe(true);
@@ -263,54 +452,84 @@ it("collector locks preserve imports, exclude competing collectors and avoid Win
   }
 });
 
-it("new settings create an independent presentations default and preserve both paths across reload", async () => {
+it("a new installation has no implicit root and requires explicit root setup", async () => {
   const { root } = await storedDocument();
   const user = path.join(root, "new-user");
+  const selected = path.join(root, "selected-root");
   await mkdir(user);
-  const media = path.join(root, "new-media");
-  const settings = { mediaLibraryPath: media };
-  const folder = await initializePresentationsFolder(user, settings);
-  expect(folder).toBe(defaultPresentationsFolderPath(user));
-  expect(folder).not.toContain(media);
-  const loaded = await readSettings(user);
-  expect(loaded.mediaLibraryPath).toBe(media);
-  expect(loaded.presentationsFolderPath).toBe(folder);
-  loaded.mediaLibraryPath = path.join(root, "another-media");
-  await writeSettings(user, loaded);
-  expect((await readSettings(user)).presentationsFolderPath).toBe(folder);
+  await mkdir(selected);
+
+  expect(await readSettings(user)).toEqual({});
+  await expect(validateShowMeRoot(selected)).rejects.toThrow(
+    "does not contain a ShowMe Library directory",
+  );
+  await expect(access(showMeLibraryPath(selected))).rejects.toThrow();
+
+  await validateShowMeRoot(selected, { createLibrary: true });
+  await expect(access(showMeLibraryPath(selected))).resolves.toBeUndefined();
 });
 
-it("configured missing presentations paths are preserved without creating an empty cleanup scope", async () => {
-  const { root, storage } = await storedDocument();
+it("old two-folder settings do not configure or infer the new ShowMe root", async () => {
+  const { root } = await storedDocument();
+  const user = path.join(root, "legacy-user");
+  await mkdir(user);
+  const settingsFile = path.join(user, "settings.json");
+  await writeFile(
+    settingsFile,
+    JSON.stringify({
+      mediaLibraryPath: path.join(root, "old-media"),
+      presentationsFolderPath: path.join(root, "old-presentations"),
+      libraryLifecycleMode: "managed",
+    }),
+  );
+
+  const loaded = await readSettings(user);
+  expect(loaded).toEqual({ libraryLifecycleMode: "managed" });
+  expect(loaded.showMeRootPath).toBeUndefined();
+});
+
+it("explicit root setup creates only Library and never moves old filesystem contents", async () => {
+  const { root } = await storedDocument();
+  const selected = path.join(root, "selected-root");
+  const oldMedia = path.join(root, "old-media");
+  const oldPresentations = path.join(root, "old-presentations");
+  await mkdir(selected);
+  await mkdir(oldMedia);
+  await mkdir(oldPresentations);
+  await writeFile(path.join(oldMedia, "asset.bin"), "asset");
+  await writeFile(path.join(oldPresentations, "deck.sme"), "presentation");
+
+  const canonical = await validateShowMeRoot(selected, { createLibrary: true });
+  expect(canonical).toBe(await realpath(selected));
+  await expect(access(showMeLibraryPath(selected))).resolves.toBeUndefined();
+  expect(await readFile(path.join(oldMedia, "asset.bin"), "utf8")).toBe(
+    "asset",
+  );
+  expect(await readFile(path.join(oldPresentations, "deck.sme"), "utf8")).toBe(
+    "presentation",
+  );
+});
+
+it("configured missing or malformed roots never become cleanup scopes", async () => {
+  const { root } = await storedDocument();
   const user = path.join(root, "user");
   await mkdir(user);
-  const missing = path.join(root, "missing-drive", "presentations");
-  await writeSettings(user, {
-    mediaLibraryPath: storage.assetRoot,
-    presentationsFolderPath: missing,
-  });
-  const loaded = await readSettings(user);
-  expect(await initializePresentationsFolder(user, loaded)).toBe(missing);
-  await expect(access(missing)).rejects.toThrow();
-});
+  const missing = path.join(root, "missing-drive", "shared");
+  await writeSettings(user, { showMeRootPath: missing });
 
-it("unreadable settings never become a default cleanup scope or get overwritten during initialization", async () => {
-  const { root } = await storedDocument();
-  const user = path.join(root, "corrupt-user");
-  await mkdir(user);
+  const loaded = await readSettings(user);
+  expect(loaded.showMeRootPath).toBe(missing);
+  await expect(validateShowMeRoot(missing)).rejects.toThrow();
+  await expect(access(missing)).rejects.toThrow();
+
   const file = path.join(user, "settings.json");
   await writeFile(file, "{");
   await expect(readSettings(user)).rejects.toThrow(
     "Could not read ShowMe settings",
   );
-  await expect(initializePresentationsFolder(user, {})).rejects.toThrow(
-    "Could not read ShowMe settings",
-  );
   expect(await readFile(file, "utf8")).toBe("{");
-  await writeFile(
-    file,
-    JSON.stringify({ presentationsFolderPath: "relative/path" }),
-  );
+
+  await writeFile(file, JSON.stringify({ showMeRootPath: "relative/path" }));
   await expect(readSettings(user)).rejects.toThrow(
     "Could not read ShowMe settings",
   );
@@ -319,4 +538,126 @@ it("unreadable settings never become a default cleanup scope or get overwritten 
   await expect(readSettings(user, { requireExisting: true })).rejects.toThrow(
     "Could not read ShowMe settings",
   );
+});
+
+it("active host and guest collaboration states block ShowMe root changes", () => {
+  expect(() =>
+    assertShowMeRootChangeAllowed({
+      hosted: { sessionId: "host" },
+      clientStatus: "idle",
+    }),
+  ).toThrow(
+    "Stop hosting or leave the active collaboration session before changing the ShowMe root.",
+  );
+  expect(() =>
+    assertShowMeRootChangeAllowed({
+      hosted: null,
+      clientStatus: "connected",
+    }),
+  ).toThrow(
+    "Stop hosting or leave the active collaboration session before changing the ShowMe root.",
+  );
+  expect(() =>
+    assertShowMeRootChangeAllowed({
+      hosted: null,
+      clientStatus: "idle",
+    }),
+  ).not.toThrow();
+});
+
+
+it("folder protection renames current managed contents and excludes them from cleanup", async () => {
+  const fixture = await libraryFixture();
+  const folder = path.join(fixture.libraryRoot, "images", "keepers");
+  const bytes = Buffer.from("keep this asset");
+  const hash = digest(bytes);
+  const file = path.join(folder, managedFilename("protected.png", hash));
+  const protectedFile = path.join(
+    folder,
+    managedFilename("protected.png", hash, true),
+  );
+  await mkdir(folder, { recursive: true });
+  await writeFile(file, bytes);
+  await setLibraryProtection(fixture.libraryRoot, "images/keepers", true);
+
+  await expect(access(file)).rejects.toThrow();
+  await expect(access(protectedFile)).resolves.toBeUndefined();
+
+  // Folder protection is a bulk operation, not inherited policy. A file that
+  // arrives later stays unprotected until explicitly protected itself.
+  const laterBytes = Buffer.from("arrived after folder protection");
+  const laterHash = digest(laterBytes);
+  const laterFile = path.join(folder, managedFilename("later.png", laterHash));
+  await writeFile(laterFile, laterBytes);
+
+  const protectedScan = await fixture.lifecycle.scan(true);
+  expect(protectedScan.complete, protectedScan.errors.join("\n")).toBe(true);
+  expect(protectedScan.trash.map((item) => item.hash)).not.toContain(hash);
+  expect(protectedScan.trash.map((item) => item.hash)).toContain(laterHash);
+  await expect(access(protectedFile)).resolves.toBeUndefined();
+  await expect(access(laterFile)).rejects.toThrow();
+
+  await setLibraryProtection(fixture.libraryRoot, "images/keepers", false);
+  await expect(access(protectedFile)).rejects.toThrow();
+  await expect(access(file)).resolves.toBeUndefined();
+  const collectibleScan = await fixture.lifecycle.scan(true);
+  expect(collectibleScan.complete, collectibleScan.errors.join("\n")).toBe(
+    true,
+  );
+  expect(collectibleScan.trash.map((item) => item.hash)).toContain(hash);
+  await expect(access(file)).rejects.toThrow();
+});
+
+it("filename protection retains only its physical copy while document references retain every duplicate", async () => {
+  const fixture = await libraryFixture();
+  const bytes = Buffer.from("duplicate immutable content");
+  const hash = digest(bytes);
+  const protectedRelative = `images/a/${managedFilename("copy.png", hash, true)}`;
+  const ordinaryRelative = `images/b/${managedFilename("copy.png", hash)}`;
+  const protectedFile = path.join(fixture.libraryRoot, protectedRelative);
+  const ordinaryFile = path.join(fixture.libraryRoot, ordinaryRelative);
+  await mkdir(path.dirname(protectedFile), { recursive: true });
+  await mkdir(path.dirname(ordinaryFile), { recursive: true });
+  await writeFile(protectedFile, bytes);
+  await writeFile(ordinaryFile, bytes);
+  const collected = await fixture.lifecycle.scan(true);
+  expect(collected.complete, collected.errors.join("\n")).toBe(true);
+  expect(collected.trash.filter((item) => item.hash === hash).map((item) => item.originalRelativePath)).toEqual([ordinaryRelative]);
+  await expect(access(protectedFile)).resolves.toBeUndefined();
+  await expect(access(ordinaryFile)).rejects.toThrow();
+
+  // A presentation reference still protects all physical copies by content ID.
+  await writeFile(ordinaryFile, bytes);
+  const document = structuredClone(fixture.document);
+  document.slides[document.deck.slideIds[0]].nodes[0].children.push(
+    createMediaElement("duplicate-reference", { ...fixture.asset, id: hash, filename: managedFilename("copy.png", hash), bytes: bytes.length, width: 32, height: 32 }),
+  );
+  await writeFile(path.join(fixture.showMeRoot, "references.sme"), JSON.stringify(document));
+  const referenced = await fixture.lifecycle.scan(true);
+  expect(referenced.complete, referenced.errors.join("\n")).toBe(true);
+  await expect(access(protectedFile)).resolves.toBeUndefined();
+  await expect(access(ordinaryFile)).resolves.toBeUndefined();
+});
+
+it("a protection rename at the cleanup gate invalidates the fingerprint before collection", async () => {
+  const fixture = await libraryFixture();
+  let checks = 0;
+  const lifecycle = new LibraryLifecycle(
+    fixture.showMeRoot,
+    () => [],
+    fixture.storage.openProtection,
+    fixture.deleteTrash,
+    Date.now,
+    async () => {
+      if (++checks === 2) {
+        await setLibraryProtection(fixture.libraryRoot, `images/${path.basename(fixture.unusedSource)}`, true);
+      }
+      return true;
+    },
+  );
+  const result = await lifecycle.scan(true);
+  expect(result.complete).toBe(false);
+  expect(result.errors).toContain("Presentations changed during Library scan; retry");
+  await expect(access(path.join(fixture.libraryRoot, "images", managedFilename("unused.png", fixture.unused.id, true)))).resolves.toBeUndefined();
+  await expect(access(fixture.source)).resolves.toBeUndefined();
 });

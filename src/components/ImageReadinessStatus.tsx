@@ -4,7 +4,6 @@ import type { ImageReadiness } from "../core/presentationImages";
 
 export function ImageReadinessStatus({
   documentId,
-  slideId,
   slideIds,
 }: {
   documentId: string;
@@ -17,7 +16,7 @@ export function ImageReadinessStatus({
     let live = true;
     const update = () =>
       void platform
-        .imageReadiness?.(documentId, false, slideId)
+        .imageReadiness?.(documentId)
         .then((value) => {
           if (live) setStatus(value);
         })
@@ -30,17 +29,15 @@ export function ImageReadinessStatus({
       if (live && value?.documentId === documentId) setStatus(value);
     });
     update();
-    const timer = setInterval(update, 750);
     return () => {
       live = false;
-      clearInterval(timer);
       unsubscribe?.();
     };
-  }, [documentId, slideId]);
+  }, [documentId]);
   if (!status || status.documentId !== documentId) return null;
   const label =
     status.state === "ready"
-      ? "Ready to present"
+      ? "Presentation images cached"
       : status.state === "failed"
         ? `Image preparation failed · ${status.failures.length} images`
         : `Preparing images · ${status.completed}/${status.total}`;
@@ -53,7 +50,7 @@ export function ImageReadinessStatus({
         aria-expanded={details}
         aria-label={label}
         onClick={() => setDetails(!details)}
-        title={`${label}. Static presentation images for ${status.profile.width} × ${status.profile.height} display pixels. Media and fonts prepare separately.`}
+        title={`${label}. Whole-deck encoded images for ${status.profile.width} × ${status.profile.height} display pixels. Audience decoding, media and fonts prepare separately.`}
         style={{
           color:
             status.state === "ready"

@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { installPreparedSlideImagesMock } from "./preparedSlideImagesMock";
 import { useState } from "react";
 import { SlideRenderer } from "../../src/components/SlideRenderer";
 import { platform } from "../../src/platform";
@@ -30,6 +31,7 @@ export function mountPresenterImagesHarness() {
   });
   image.frame.width = image.frame.height = 600;
   slide.nodes[0].children = [image];
+  installPreparedSlideImagesMock(model.deck, model.slides);
   const host = document.createElement("main");
   document.body.replaceChildren(host);
   const requests = document.createElement("output");

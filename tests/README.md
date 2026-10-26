@@ -21,6 +21,12 @@ verification. Release verification requires Windows or macOS and native packagin
 prerequisites. The manual desktop workflow checks both platforms. There are no retries;
 traces/screenshots are retained only for failures.
 
+Electron groups run sequentially in separate Playwright processes. Native groups
+can own in-process Vite servers and compositor capture fixtures; sharing the
+automation/compiler process across unrelated files caused capture stalls that did
+not occur in isolated runs. Each registered file still runs once, without retries,
+with artifacts under `test-results-electron/<group-id>/`.
+
 `registry.json` owns selection; folders express product responsibility. Moving a
 group between tiers requires only metadata editing; moving its file is optional.
 Every `.test.ts` / `.spec.ts` is registered exactly once. Unit files use Vitest;

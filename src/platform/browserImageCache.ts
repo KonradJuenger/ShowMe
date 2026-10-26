@@ -1,6 +1,11 @@
-import { validPng } from "../core/pngValidation";
+import { validPreparedImage } from "../core/preparedImageValidation";
+import { imageWorkerConcurrency } from "../core/imageWorkQueue";
 import {
-  IMAGE_RECIPE,
+  imageRecipe,
+  imageMime,
+  imageExtension,
+  type ImageCacheFormat,
+  type PreparedImageMime,
   canPrepareImage,
   imageIdentity,
   MAX_PREPARED_IMAGE_PIXELS,
@@ -9,14 +14,62 @@ import {
 
 const sourceDimensions = new Map<
   string,
-  Promise<{ width: number; height: number }>
+  Promise<{ width: number; height: number; format: ImageCacheFormat } | null>
 >();
 
 export const BROWSER_IMAGE_PREFIX = "images/";
+export const browserImageConcurrency = imageWorkerConcurrency(navigator.hardwareConcurrency);
 export interface BrowserImageRecord {
   blob: Blob;
   descriptor: Omit<PreparedImage, "url">;
 }
+
+const imageWorkers = new Set<Worker>();
+const idleImageWorkers: Worker[] = [];
+const imageWorkerWaiters: Array<{
+  resolve: (worker: Worker) => void;
+  reject: (error: Error) => void;
+}> = [];
+const activeImageJobs = new Map<Worker, (error: Error) => void>();
+
+function createImageWorker() {
+  const worker = new Worker(new URL("./imageWorker.ts", import.meta.url), {
+    type: "module",
+  });
+  imageWorkers.add(worker);
+  worker.addEventListener("error", () => {
+    imageWorkers.delete(worker);
+    const index = idleImageWorkers.indexOf(worker);
+    if (index >= 0) idleImageWorkers.splice(index, 1);
+    worker.terminate();
+  });
+  return worker;
+}
+
+async function acquireImageWorker() {
+  const idle = idleImageWorkers.pop();
+  if (idle) return idle;
+  if (imageWorkers.size < browserImageConcurrency) return createImageWorker();
+  return new Promise<Worker>((resolve, reject) =>
+    imageWorkerWaiters.push({ resolve, reject }),
+  );
+}
+
+function releaseImageWorker(worker: Worker) {
+  const waiter = imageWorkerWaiters.shift();
+  if (waiter)
+    waiter.resolve(imageWorkers.has(worker) ? worker : createImageWorker());
+  else if (imageWorkers.has(worker)) idleImageWorkers.push(worker);
+}
+
+window.addEventListener("pagehide", () => {
+  const error = new Error("Image worker owner closed");
+  for (const job of activeImageJobs.values()) job(error);
+  for (const worker of imageWorkers) worker.terminate();
+  imageWorkers.clear();
+  idleImageWorkers.length = 0;
+  for (const waiter of imageWorkerWaiters.splice(0)) waiter.reject(error);
+});
 
 export async function validBrowserImage(
   record: BrowserImageRecord,
@@ -26,8 +79,8 @@ export async function validBrowserImage(
   const image = record.descriptor;
   if (
     image.assetId !== assetId ||
-    image.recipe !== IMAGE_RECIPE ||
-    image.mime !== "image/png" ||
+    !["image/png", "image/jpeg"].includes(image.mime) ||
+    image.recipe !== imageRecipe(imageExtension(image.mime)) ||
     !canPrepareImage(
       image.sourceWidth,
       image.sourceHeight,
@@ -44,7 +97,7 @@ export async function validBrowserImage(
   )
     return false;
   const bytes = new Uint8Array(await record.blob.arrayBuffer());
-  return validPng(bytes, image.width, image.height);
+  return validPreparedImage(bytes, image.width, image.height, image.mime);
 }
 
 export async function createBrowserImage(
@@ -53,15 +106,34 @@ export async function createBrowserImage(
   size: number,
   width?: number,
   height?: number,
+  format: ImageCacheFormat = "png",
 ): Promise<BrowserImageRecord | null> {
-  const worker = new Worker(new URL("./imageWorker.ts", import.meta.url), {
-    type: "module",
+  return runImageWorker<BrowserImageRecord | null>({
+    blob,
+    assetId,
+    size,
+    width,
+    height,
+    format,
   });
+}
+
+async function runImageWorker<T>(request: {
+  blob: Blob;
+  assetId: string;
+  size: number;
+  width?: number;
+  height?: number;
+  format: ImageCacheFormat;
+  operation?: "inspect";
+}): Promise<T> {
+  const worker = await acquireImageWorker();
   try {
     return await new Promise((resolve, reject) => {
+      activeImageJobs.set(worker, reject);
       worker.onmessage = (
         event: MessageEvent<{
-          result: BrowserImageRecord | null;
+          result: T;
           error?: string;
         }>,
       ) => {
@@ -69,15 +141,20 @@ export async function createBrowserImage(
         else resolve(event.data.result);
       };
       worker.onerror = (event) => reject(new Error(event.message));
-      worker.postMessage({ blob, assetId, size, width, height });
+      worker.postMessage(request);
     });
   } finally {
-    worker.terminate();
+    activeImageJobs.delete(worker);
+    worker.onmessage = worker.onerror = null;
+    releaseImageWorker(worker);
   }
 }
 
-export function browserImageKey(hash: string) {
-  return `${BROWSER_IMAGE_PREFIX}${hash}.png`;
+export function browserImageKey(
+  hash: string,
+  mime: PreparedImageMime = "image/png",
+) {
+  return `${BROWSER_IMAGE_PREFIX}${hash}.${imageExtension(mime)}`;
 }
 
 export async function browserImageDescriptor(
@@ -86,24 +163,31 @@ export async function browserImageDescriptor(
   size: number,
   targetWidth: number,
   targetHeight: number,
+  preferredFormat: ImageCacheFormat = "png",
 ): Promise<Omit<PreparedImage, "url"> | null> {
   if (blob.size > 256 * 1024 ** 2) return null;
-  let dimensions = sourceDimensions.get(assetId);
+  const key = `${assetId}:${preferredFormat}`;
+  let dimensions = sourceDimensions.get(key);
   if (!dimensions) {
-    dimensions = createImageBitmap(blob, { imageOrientation: "from-image" })
-      .then((image) => {
-        const result = { width: image.width, height: image.height };
-        image.close();
-        return result;
-      })
-      .catch((error) => {
-        sourceDimensions.delete(assetId);
-        throw error;
-      });
-    sourceDimensions.set(assetId, dimensions);
+    dimensions = runImageWorker<{
+      width: number;
+      height: number;
+      format: ImageCacheFormat;
+    } | null>({
+      blob,
+      assetId,
+      size: 1,
+      format: preferredFormat,
+      operation: "inspect",
+    }).catch((error) => {
+      sourceDimensions.delete(key);
+      throw error;
+    });
+    sourceDimensions.set(key, dimensions);
   }
   const image = await dimensions;
-  if (image.width * image.height > MAX_PREPARED_IMAGE_PIXELS) return null;
+  if (!image || image.width * image.height > MAX_PREPARED_IMAGE_PIXELS)
+    return null;
   const width = Math.min(image.width, targetWidth),
     height = Math.min(image.height, targetHeight);
   if (!canPrepareImage(image.width, image.height, width, height)) return null;
@@ -111,7 +195,9 @@ export async function browserImageDescriptor(
     new Uint8Array(
       await crypto.subtle.digest(
         "SHA-256",
-        new TextEncoder().encode(imageIdentity(assetId, width, height)),
+        new TextEncoder().encode(
+          imageIdentity(assetId, width, height, image.format),
+        ),
       ),
     ),
     (byte) => byte.toString(16).padStart(2, "0"),
@@ -124,7 +210,7 @@ export async function browserImageDescriptor(
     sourceHeight: image.height,
     width,
     height,
-    recipe: IMAGE_RECIPE,
-    mime: "image/png",
+    recipe: imageRecipe(image.format),
+    mime: imageMime(image.format),
   };
 }

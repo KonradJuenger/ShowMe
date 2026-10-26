@@ -3,9 +3,12 @@ import { createPortal } from "react-dom";
 import "./PresentationMenu.css";
 import { MaterialIcon } from "./MaterialIcon";
 import { platform } from "../platform";
+import { type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../export/html/types";
+import { DEFAULT_FONT_EMBEDDING, type FontEmbedding } from "../export/fontEmbedding";
 import { formatExportWarnings } from "../export/shared";
 import { LibraryStorageSettings } from "./LibraryStorageSettings";
 import { NewPresentationDialog } from "./NewPresentationDialog";
+import type { ImageCacheFormat } from "../core/presentationImages";
 import type { MediaLibraryInfo } from "../platform/api";
 
 interface PresentationMenuProps {
@@ -47,6 +50,18 @@ export function PresentationMenu({
   const [position, setPosition] = useState<MenuPosition>({ top: 0, left: 0 });
   const settingsRef = useRef<HTMLElement>(null);
   const [imageCaching, setImageCaching] = useState(true);
+  const [imageCacheFormat, setImageCacheFormat] = useState<ImageCacheFormat>("png");
+  const [htmlQuality, setHtmlQuality] = useState(
+    DEFAULT_HTML_EXPORT_JPEG_QUALITY,
+  );
+  const [htmlQualityDraft, setHtmlQualityDraft] = useState(
+    String(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
+  );
+  const [fontEmbedding, setFontEmbedding] = useState<FontEmbedding>(DEFAULT_FONT_EMBEDDING);
+  const [fontBusy, setFontBusy] = useState(false);
+  const [htmlProgress, setHtmlProgress] = useState<HtmlExportProgress | null>(null);
+  const htmlProgressDialog = useRef<HTMLDialogElement>(null);
+  const [htmlQualityBusy, setHtmlQualityBusy] = useState(false);
   const [deleteCacheOnClose, setDeleteCacheOnClose] = useState(true);
   const [cacheFolder, setCacheFolder] = useState<MediaLibraryInfo | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
@@ -65,6 +80,14 @@ export function PresentationMenu({
   const importProgress = useRef<HTMLDialogElement>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [importError, setImportError] = useState("");
+  useEffect(() => platform.onHtmlExportProgress?.(progress => {
+    if (progress === null || progress.documentId === deckId) setHtmlProgress(progress);
+  }), [deckId]);
+  useEffect(() => {
+    const dialog = htmlProgressDialog.current;
+    if (htmlProgress && !dialog?.open) dialog?.showModal();
+    else if (!htmlProgress) dialog?.close();
+  }, [htmlProgress]);
   useEffect(() => {
     if (importBusy) importProgress.current?.showModal();
     else importProgress.current?.close();
@@ -133,13 +156,20 @@ export function PresentationMenu({
       platform.getImageCachingEnabled?.() ?? Promise.resolve(true),
       platform.getDeleteImageCacheOnClose?.() ?? Promise.resolve(true),
       platform.getImageCacheFolder?.() ?? Promise.resolve(null),
+      platform.getImageCacheFormat?.() ?? Promise.resolve<ImageCacheFormat>("png"),
+      platform.getHtmlExportJpegQuality?.() ?? Promise.resolve(DEFAULT_HTML_EXPORT_JPEG_QUALITY),
+      platform.getExportFontEmbedding?.() ?? Promise.resolve(DEFAULT_FONT_EMBEDDING),
     ])
-      .then(([info, enabled, deleteOnClose, folder]) => {
+      .then(([info, enabled, deleteOnClose, folder, format, quality, embedding]) => {
         if (live) {
           setMediaLibrary(info);
           setImageCaching(enabled);
           setDeleteCacheOnClose(deleteOnClose);
           setCacheFolder(folder);
+          setImageCacheFormat(format);
+          setHtmlQuality(quality);
+          setFontEmbedding(embedding);
+          setHtmlQualityDraft(String(quality));
         }
       })
       .catch(onError)
@@ -192,27 +222,9 @@ export function PresentationMenu({
     void task().catch(onError);
   }
 
-  async function chooseMediaLibrary() {
-    setSettingsBusy(true);
-    try {
-      const next = await platform.chooseMediaLibrary();
-      if (next) setMediaLibrary(next);
-    } catch (error) {
-      onError(error);
-    } finally {
-      setSettingsBusy(false);
-    }
-  }
-
-  async function resetMediaLibrary() {
-    setSettingsBusy(true);
-    try {
-      setMediaLibrary(await platform.resetMediaLibrary());
-    } catch (error) {
-      onError(error);
-    } finally {
-      setSettingsBusy(false);
-    }
+  async function prepareReplacement() {
+    await flushTransactions();
+    return (await platform.confirmDocumentReplacement?.(deckId)) ?? true;
   }
 
   const menu = open
@@ -273,7 +285,7 @@ export function PresentationMenu({
                   title={document.location}
                   onClick={() =>
                     execute(async () => {
-                      await flushTransactions();
+                      if (!(await prepareReplacement())) return;
                       onPresentationOpened(
                         await platform.openRecentDocument(document.location),
                       );
@@ -348,6 +360,22 @@ export function PresentationMenu({
                 onClick={() =>
                   execute(async () => {
                     await flushTransactions();
+                    let result;
+                    try { result = await platform.exportPresentation?.(deckId, "html"); }
+                    finally { setHtmlProgress(null); buttonRef.current?.focus(); }
+                    if (result?.warnings.length)
+                      window.alert(formatExportWarnings(result.warnings));
+                  })
+                }
+              >
+                <span>Export HTML…</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() =>
+                  execute(async () => {
+                    await flushTransactions();
                     const result = await platform.exportPresentation?.(
                       deckId,
                       "pptx",
@@ -398,7 +426,7 @@ export function PresentationMenu({
             <header className="settings-dialog-header">
               <div>
                 <h2 id="settings-dialog-title">Settings</h2>
-                <p>Library storage, collaboration, and image caching.</p>
+                <p>Library storage, collaboration, image caching, and HTML export.</p>
               </div>
               <button
                 type="button"
@@ -410,7 +438,6 @@ export function PresentationMenu({
               </button>
             </header>
             <div className="settings-dialog-body">
-              {applicationSettings}
               <div className="settings-section">
                 <h3>Image cache</h3>
                 <label><input type="checkbox" checked={imageCaching} disabled={cacheBusy || settingsBusy} onChange={event => {
@@ -419,6 +446,19 @@ export function PresentationMenu({
                   void platform.setImageCachingEnabled?.(enabled).then(() => setImageCaching(enabled)).catch(onError).finally(() => setCacheBusy(false));
                 }} /> Enable image caching</label>
                 <p>Prepare whole images at the resolution needed by the editor, thumbnails and presentation. Originals retain all their detail.</p>
+                {platform.setImageCacheFormat && <>
+                  <label>Image cache format{" "}
+                    <select aria-label="Image cache format" value={imageCacheFormat} disabled={cacheBusy || settingsBusy} onChange={event => {
+                      const format = event.target.value as ImageCacheFormat;
+                      setCacheBusy(true);
+                      void platform.setImageCacheFormat!(format).then(() => setImageCacheFormat(format)).catch(onError).finally(() => setCacheBusy(false));
+                    }}>
+                      <option value="png">PNG (lossless)</option>
+                      <option value="jpg">JPG (maximum quality)</option>
+                    </select>
+                  </label>
+                  <p>JPG uses maximum quality. Images with transparency or high bit depth always use PNG. Originals are unchanged.</p>
+                </>}
                 {platform.setDeleteImageCacheOnClose && <label><input type="checkbox" checked={deleteCacheOnClose} disabled={cacheBusy || settingsBusy} onChange={event => {
                   const enabled = event.target.checked;
                   setCacheBusy(true);
@@ -444,6 +484,67 @@ export function PresentationMenu({
                 </>}
                 {cacheMessage && <p role="status">{cacheMessage}</p>}
               </div>
+              {platform.setExportFontEmbedding && <div className="settings-section">
+                <h3>Export fonts</h3>
+                <p>Applies to HTML and ShowMe Package (.smp) exports.</p>
+                <label>Font embedding{" "}
+                  <select aria-label="Export font embedding" value={fontEmbedding} disabled={settingsBusy || fontBusy} onChange={event => {
+                    const mode = event.target.value as FontEmbedding;
+                    setFontBusy(true);
+                    void platform.setExportFontEmbedding!(mode).then(() => setFontEmbedding(mode)).catch(onError).finally(() => setFontBusy(false));
+                  }}>
+                    <option value="none">None</option>
+                    <option value="svg">SVG</option>
+                    <option value="file">Font file</option>
+                  </select>
+                </label>
+                <p>{fontEmbedding === "svg" ? "Static text becomes SVG outlines. Text with Effects stays live and is reported after export." : fontEmbedding === "file" ? "Includes complete font files and keeps text editable and animated. You must have a license to embed and share the fonts." : "No fonts are included. Text uses fonts installed on the receiving computer."}</p>
+              </div>}
+              {platform.setHtmlExportJpegQuality && (
+                <div className="settings-section">
+                  <h3>HTML export</h3>
+                  <label>
+                    JPEG quality{" "}
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      aria-label="HTML export JPEG quality"
+                      value={htmlQualityDraft}
+                      disabled={settingsBusy || htmlQualityBusy}
+                      onChange={(event) =>
+                        setHtmlQualityDraft(event.target.value)
+                      }
+                      onBlur={() => {
+                        const quality = Number(htmlQualityDraft);
+                        if (
+                          !Number.isInteger(quality) ||
+                          quality < 1 ||
+                          quality > 100
+                        ) {
+                          setHtmlQualityDraft(String(htmlQuality));
+                          return;
+                        }
+                        if (quality === htmlQuality) return;
+                        setHtmlQualityBusy(true);
+                        void platform.setHtmlExportJpegQuality!(quality)
+                          .then(() => setHtmlQuality(quality))
+                          .catch((error) => {
+                            setHtmlQualityDraft(String(htmlQuality));
+                            onError(error);
+                          })
+                          .finally(() => setHtmlQualityBusy(false));
+                      }}
+                    />
+                  </label>
+                  <p>
+                    1–100, default 90. Applies only to prepared images in HTML
+                    exports. Transparent and high bit depth images stay PNG;
+                    animated images and SVGs keep their original format.
+                  </p>
+                </div>
+              )}
               <LibraryStorageSettings />
               {!platform.getLibraryLifecycle && (<div className="settings-section">
                 <div className="settings-section-heading">
@@ -466,28 +567,8 @@ export function PresentationMenu({
                   {mediaLibrary?.path ??
                     (settingsBusy ? "Loading…" : "Unavailable")}
                 </div>
-                {mediaLibrary && !mediaLibrary.isDefault && (
-                  <p className="settings-default-path">
-                    Default: {mediaLibrary.defaultPath}
-                  </p>
-                )}
-                <div className="settings-actions">
-                  <button
-                    type="button"
-                    disabled={settingsBusy}
-                    onClick={() => void chooseMediaLibrary()}
-                  >
-                    Choose Folder…
-                  </button>
-                  <button
-                    type="button"
-                    disabled={settingsBusy || mediaLibrary?.isDefault}
-                    onClick={() => void resetMediaLibrary()}
-                  >
-                    Use Default
-                  </button>
-                </div>
               </div>)}
+              {applicationSettings}
             </div>
             <footer className="settings-dialog-footer">
               <button type="button" onClick={() => setSettingsOpen(false)}>
@@ -519,7 +600,7 @@ export function PresentationMenu({
         <NewPresentationDialog
           onClose={() => setNewOpen(false)}
           onCreate={async (name) => {
-            await flushTransactions();
+            if (!(await prepareReplacement())) return;
             await onNewPresentation(name);
           }}
         />
@@ -538,7 +619,7 @@ export function PresentationMenu({
           setImportBusy(true);
           setImportError("");
           void (async () => {
-            await flushTransactions();
+            if (!(await prepareReplacement())) return;
             const { importPowerPointPresentation } =
               await import("./importPowerPointPresentation");
             const result = await importPowerPointPresentation(file);
@@ -574,7 +655,20 @@ export function PresentationMenu({
       >
         <p role="status">Importing PowerPoint…</p>
       </dialog>
+      <dialog ref={htmlProgressDialog} className="new-presentation-dialog html-export-progress" aria-labelledby="html-export-progress-title" onCancel={event => event.preventDefault()}>
+        <h2 id="html-export-progress-title">Exporting HTML</h2>
+        {htmlProgress && <>
+          <p role="status">{{ fonts: "Preparing text…", videos: "Trimming videos…", images: "Preparing images…", embedding: "Embedding media…", writing: "Saving HTML…", complete: "Export complete" }[htmlProgress.stage]}</p>
+          <progress aria-label="HTML export progress" max={100} value={htmlProgressValue(htmlProgress)} />
+          <div className="html-export-progress-detail"><span>{htmlProgress.total > 0 ? `${htmlProgress.completed} / ${htmlProgress.total}` : "Preparing…"}</span><span>{Math.floor(htmlProgressValue(htmlProgress))}%</span></div>
+        </>}
+      </dialog>
       {settings}
     </>
   );
+}
+
+function htmlProgressValue(progress: HtmlExportProgress) {
+  const [start, end] = { fonts: [0, 15], videos: [15, 55], images: [55, 80], embedding: [80, 95], writing: [95, 99], complete: [100, 100] }[progress.stage];
+  return start + (end - start) * (progress.total > 0 ? Math.min(1, progress.completed / progress.total) : 0);
 }

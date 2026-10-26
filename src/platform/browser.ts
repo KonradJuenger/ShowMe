@@ -1,16 +1,22 @@
 import { ASSET_VERSION } from "../core/assets";
 import { acceptedImpact } from "../core/documentImpact";
 import { editEffectLibrary, type EffectLibrary } from "../core/libraryEffects";
-import { resolveSlide, resolveVisualSlide } from "../core/templates";
+import { resolveSlide } from "../core/templates";
 import { ImageWorkQueue } from "../core/imageWorkQueue";
 import {
-  planPresentationImages,
   imageDimensions,
+  imageExtension,
+  type ImageCacheFormat,
+  audienceImageProfile as outputImageProfile,
   type ImageRequirement,
+  type ImageOutputProfile,
+  type PreparedImage,
+  type PreparedSlideImages,
 } from "../core/presentationImages";
 import { ImagePreparationCoordinator } from "../core/imagePreparationCoordinator";
 import {
   BROWSER_IMAGE_PREFIX,
+  browserImageConcurrency,
   validBrowserImage,
   browserImageKey,
   browserImageDescriptor,
@@ -200,16 +206,30 @@ function notifyBrowserImageCacheChanged() {
 }
 let imageCachingEnabled =
   localStorage.getItem("showme-image-caching") !== "false";
+let imageCacheFormat: ImageCacheFormat = localStorage.getItem("showme-image-cache-format") === "jpg" ? "jpg" : "png";
 const presentationRole = new URLSearchParams(location.search).get("present");
 let presentation: PresenterState | null = null;
+let browserAudienceProfile: ImageOutputProfile | null = null;
 const channel = new BroadcastChannel("show-me-presenter");
 const listeners = new Set<(state: PresenterState | null) => void>();
 channel.onmessage = (event) => {
+  if (event.data?.type === "image-readiness" && presentationRole) {
+    for (const listener of imageInvalidationListeners) listener(event.data.status);
+    return;
+  }
   if (event.data?.type === "document-accepted") {
     const { documentId, accepted } = event.data;
     browserRuntimes.delete(documentId);
     for (const listener of acceptedListeners)
       listener({ documentId, accepted });
+    return;
+  }
+  if (event.data?.type === "image-cache-format") {
+    if (event.data.format !== "png" && event.data.format !== "jpg") return;
+    browserImages.suspend();
+    imageCacheFormat = event.data.format;
+    if (imageCachingEnabled) browserImages.resume();
+    notifyBrowserImageCacheChanged();
     return;
   }
   if (event.data?.type === "image-cache-setting") {
@@ -240,12 +260,16 @@ channel.onmessage = (event) => {
   )
     browserRuntimes.delete(next.deckId);
   presentation = event.data.state ?? null;
+  if (!presentation) browserAudienceProfile = null;
+  if (!presentationRole && presentation?.index !== null && presentation?.index !== undefined)
+    browserImages.prioritize(presentation.deckId, presentation.slideIds[presentation.index]);
   listeners.forEach((listener) => listener(presentation));
   if (!presentation && presentationRole) window.close();
 };
 
 async function broadcast(state: PresenterState | null) {
   presentation = state;
+  if (!state) browserAudienceProfile = null;
   await put("presentation", state);
   channel.postMessage({ type: "state", state });
   listeners.forEach((listener) => listener(state));
@@ -439,95 +463,68 @@ const browserImageDiagnostics = {
   pending: 0,
   rssBytes: null,
 };
-const browserImageQueue = new ImageWorkQueue();
+const browserImageQueue = new ImageWorkQueue(browserImageConcurrency);
 let browserImageGeneration = 0;
 let clearingBrowserImages = false;
 const validatedBrowserImages = new Set<string>();
 const unsupportedBrowserImages = new Set<string>();
-async function prepareBrowserVariant(requirement: ImageRequirement) {
-  if (
-    clearingBrowserImages ||
-    unsupportedBrowserImages.has(requirement.assetId)
-  )
-    return null;
+const pendingBrowserImages = new Map<string, Promise<PreparedImage | null>>();
+const browserImageDemands = new Map<string, number>();
+async function prepareBrowserVariant(requirement: ImageRequirement, priority = 0): Promise<PreparedImage | null> {
+  if (clearingBrowserImages || unsupportedBrowserImages.has(requirement.assetId)) return null;
   const generation = browserImageGeneration;
-  return browserImageQueue.run(requirement.estimatedBytes, async () => {
-    if (generation !== browserImageGeneration) return null;
-    return navigator.locks.request(
-      "show-me-image-cache",
-      { mode: "shared" },
-      () =>
-        navigator.locks.request(
-          "show-me-image:" +
-            requirement.assetId +
-            ":" +
-            requirement.width +
-            "x" +
-            requirement.height,
-          async () => {
-            const blob = await get<Blob>("blob/" + requirement.assetId);
-            if (!blob) throw new Error("Image asset is missing");
-            const descriptor = await browserImageDescriptor(
-              blob,
-              requirement.assetId,
-              requirement.size,
-              requirement.width,
-              requirement.height,
-            );
-            if (!descriptor) return null;
-            const key = browserImageKey(descriptor.hash);
-            const cached = await get<Blob>(key);
-            if (
-              cached &&
-              (validatedBrowserImages.has(key) ||
-                (await validBrowserImage(
-                  { blob: cached, descriptor },
-                  requirement.assetId,
-                )))
-            ) {
-              validatedBrowserImages.add(key);
-              browserImageDiagnostics.cacheHits++;
-              return { ...descriptor, url: key };
-            }
-            browserImageDiagnostics.jobs++;
-            browserImageDiagnostics.pending++;
-            let record: BrowserImageRecord | null;
-            try {
-              record = await createBrowserImage(
-                blob,
-                requirement.assetId,
-                requirement.size,
-                descriptor.width,
-                descriptor.height,
-              );
-            } finally {
-              browserImageDiagnostics.pending--;
-            }
-            if (!record) {
-              unsupportedBrowserImages.add(requirement.assetId);
-              return null;
-            }
-            await put(key, record.blob);
-            validatedBrowserImages.add(key);
-            return { ...record.descriptor, url: key };
-          },
-        ),
-    );
-  });
+  const blob = await get<Blob>("blob/" + requirement.assetId);
+  if (!blob) throw new Error("Image asset is missing");
+  const descriptor = await browserImageDescriptor(blob, requirement.assetId, requirement.size, requirement.width, requirement.height, imageCacheFormat);
+  if (!descriptor || generation !== browserImageGeneration || clearingBrowserImages) return null;
+  const key = `${generation}:${descriptor.hash}`;
+  const demand = Math.max(browserImageDemands.get(key) ?? 0, priority);
+  browserImageDemands.set(key, demand);
+  const prior = pendingBrowserImages.get(key);
+  if (prior) {
+    browserImageQueue.setPriorities(new Map([[key, demand]]));
+    return prior;
+  }
+  const pending = navigator.locks.request("show-me-image-cache", { mode: "shared" }, () =>
+    navigator.locks.request("show-me-image:" + descriptor.hash, async () => {
+      if (generation !== browserImageGeneration || clearingBrowserImages) return null;
+      const cacheKey = browserImageKey(descriptor.hash, descriptor.mime);
+      const cached = await get<Blob>(cacheKey);
+      if (cached && (validatedBrowserImages.has(cacheKey) || await validBrowserImage({ blob: cached, descriptor }, requirement.assetId))) {
+        validatedBrowserImages.add(cacheKey);
+        browserImageDiagnostics.cacheHits++;
+        return { ...descriptor, url: cacheKey };
+      }
+      return browserImageQueue.run(requirement.estimatedBytes, async () => {
+        if (generation !== browserImageGeneration || clearingBrowserImages) return null;
+        browserImageDiagnostics.jobs++;
+        browserImageDiagnostics.pending++;
+        let record: BrowserImageRecord | null;
+        try { record = await createBrowserImage(blob, requirement.assetId, requirement.size, descriptor.width, descriptor.height, imageExtension(descriptor.mime)); }
+        finally { browserImageDiagnostics.pending--; }
+        if (!record) { unsupportedBrowserImages.add(requirement.assetId); return null; }
+        if (generation !== browserImageGeneration || clearingBrowserImages) return null;
+        await put(cacheKey, record.blob);
+        validatedBrowserImages.add(cacheKey);
+        return { ...record.descriptor, url: cacheKey };
+      }, { key, priority: browserImageDemands.get(key) ?? demand });
+    }),
+  ).finally(() => { pendingBrowserImages.delete(key); browserImageDemands.delete(key); });
+  pendingBrowserImages.set(key, pending);
+  return pending;
 }
 const browserImages = new ImagePreparationCoordinator({
+  concurrency: browserImageConcurrency,
   slides: async (id, slideIds) => {
     const document = (await browserRuntime(id)).authority.document;
     return slideIds.map((slideId) => resolveSlide(document, slideId).slide);
   },
   projection: async (id, slideId) =>
     (await browserRuntime(id)).projection(id, slideId),
-  profile: () => ({
-    width: Math.ceil(screen.width * devicePixelRatio),
-    height: Math.ceil(screen.height * devicePixelRatio),
-  }),
-  prepare: (_id, requirement) => prepareBrowserVariant(requirement),
+  profile: () => (presentation ? browserAudienceProfile : null) ?? outputImageProfile(screen.width, screen.height, devicePixelRatio),
+  prepare: (_id, requirement, priority) => prepareBrowserVariant(requirement, priority),
 });
+if (!presentationRole) browserImages.subscribe(status => channel.postMessage({ type: "image-readiness", status }));
 if (!imageCachingEnabled) browserImages.suspend();
 function prepareBrowserImages(
   id: string,
@@ -539,17 +536,114 @@ function prepareBrowserImages(
       .catch((error) => console.error("Image preparation failed", error));
 }
 
+interface ImageOwnerRequest {
+  type: "showme-image-request";
+  requestId: string;
+  method: "prepare" | "slide" | "profile";
+  documentId: string;
+  slideId?: string;
+  profile?: ImageOutputProfile;
+}
+
+/** Image work uses the existing owning editor; popup roles never run competing queues. */
+function ownerImageRequest<T>(request: Omit<ImageOwnerRequest, "type" | "requestId">): Promise<T> {
+  const owner: Window | null = window.opener;
+  if (!owner || owner.closed) return Promise.reject(new Error("Presentation image owner is unavailable"));
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
+    const receive = (event: MessageEvent) => {
+      if (event.origin !== location.origin || event.source !== owner || event.data?.type !== "showme-image-response" || event.data.requestId !== requestId) return;
+      cleanup();
+      if (event.data.error) reject(new Error(event.data.error)); else resolve(event.data.result);
+    };
+    const timer = setTimeout(() => { cleanup(); reject(new Error("Presentation image preparation timed out")); }, 120000);
+    window.addEventListener("message", receive);
+    owner.postMessage({ ...request, type: "showme-image-request", requestId }, location.origin);
+  });
+}
+
+if (!presentationRole) window.addEventListener("message", event => {
+  if (event.origin !== location.origin || event.data?.type !== "showme-image-request" ||
+      (event.source !== popup && event.source !== consolePopup) || !event.source) return;
+  const requester = event.source as Window;
+  const request = event.data as ImageOwnerRequest;
+  void (async () => {
+    if (!presentation || request.documentId !== presentation.deckId) throw new Error("Outside presentation image session");
+    if (request.method === "profile") return browserAudienceProfile ?? outputImageProfile(screen.width, screen.height, devicePixelRatio);
+    const profile = request.profile;
+    if (!profile || ![profile.width, profile.height].every(v => Number.isFinite(v) && v > 0 && v <= 100000)) throw new Error("Invalid audience profile");
+    if (request.method === "prepare") {
+      if (requester !== popup) throw new Error("Unauthorized audience preparation");
+      browserAudienceProfile = { width: profile.width, height: profile.height };
+      browserImages.prioritize(request.documentId, presentation.slideIds[presentation.index ?? 0]);
+      await browserImages.reconcile(request.documentId);
+      if (imageCachingEnabled) await browserImages.presentationReady(request.documentId, true);
+      return browserAudienceProfile;
+    }
+    if (request.method !== "slide" || !request.slideId || !presentation.slideIds.includes(request.slideId)) throw new Error("Outside presentation slide");
+    if (!imageCachingEnabled) return {};
+    return browserImages.prepareSlide(request.documentId, request.slideId, profile, 0);
+  })().then(result => requester.postMessage({ type: "showme-image-response", requestId: request.requestId, result }, location.origin),
+    error => requester.postMessage({ type: "showme-image-response", requestId: request.requestId, error: String(error) }, location.origin));
+});
+
+const imageUrls = new Map<string, { url: string; users: number }>();
+const imageUrlHashes = new Map<string, string>();
+async function leaseBrowserImage(image: PreparedImage): Promise<PreparedImage> {
+  let entry = imageUrls.get(image.hash);
+  if (!entry) {
+    const blob = await get<Blob>(browserImageKey(image.hash, image.mime));
+    if (!blob) throw new Error("Prepared image disappeared");
+    // Another request may have installed a lease while IndexedDB was loading.
+    entry = imageUrls.get(image.hash);
+    if (!entry) {
+      entry = { url: URL.createObjectURL(blob), users: 0 };
+      imageUrls.set(image.hash, entry);
+      imageUrlHashes.set(entry.url, image.hash);
+    }
+  }
+  entry.users++;
+  return { ...image, url: entry.url };
+}
+
+async function leaseSlideImages(images: PreparedSlideImages): Promise<PreparedSlideImages> {
+  const leases = new Map<string, Promise<PreparedImage>>();
+  try {
+    return Object.fromEntries(await Promise.all(Object.entries(images).map(async ([id, image]) => {
+      if (!image) return [id, null];
+      let lease = leases.get(image.hash);
+      if (!lease) { lease = leaseBrowserImage(image); leases.set(image.hash, lease); }
+      return [id, await lease];
+    })));
+  } catch (error) {
+    for (const result of await Promise.allSettled(leases.values())) if (result.status === "fulfilled") browser.releaseUrl(result.value.url);
+    throw error;
+  }
+}
+
 export const browser: Platform = {
   presentationImageDiagnostics: async () => ({ ...browserImageDiagnostics }),
   onImageReadiness: (callback) => {
     imageInvalidationListeners.add(callback);
-    const unsubscribe = browserImages.subscribe(callback);
+    const unsubscribe = presentationRole ? () => {} : browserImages.subscribe(callback);
     return () => {
       unsubscribe();
       imageInvalidationListeners.delete(callback);
     };
   },
   getImageCachingEnabled: async () => imageCachingEnabled,
+  getImageCacheFormat: async () => imageCacheFormat,
+  async setImageCacheFormat(format) {
+    if (format !== "png" && format !== "jpg") throw new Error("Invalid image cache format");
+    if (format === imageCacheFormat) return;
+    localStorage.setItem("showme-image-cache-format", format);
+    browserImages.suspend();
+    imageCacheFormat = format;
+    if (imageCachingEnabled) browserImages.resume();
+    channel.postMessage({ type: "image-cache-format", format });
+    notifyBrowserImageCacheChanged();
+  },
   async setImageCachingEnabled(enabled) {
     localStorage.setItem("showme-image-caching", String(enabled));
     imageCachingEnabled = enabled;
@@ -562,39 +656,36 @@ export const browser: Platform = {
     if (!imageCachingEnabled) return null;
     if (slideId) {
       await (await browserRuntime(documentId)).projection(documentId, slideId);
-      browserImages.prioritize(documentId, slideId);
     }
-    await browserImages.reconcile(documentId, retry);
+    if (retry || !browserImages.status(documentId)) await browserImages.reconcile(documentId, retry);
     return browserImages.status(documentId);
+  },
+  async audienceImageProfile(documentId) {
+    if (presentationRole) return ownerImageRequest<ImageOutputProfile>({ method: "profile", documentId });
+    return browserAudienceProfile ?? outputImageProfile(screen.width, screen.height, devicePixelRatio);
+  },
+  async prepareAudience(documentId) {
+    const profile = outputImageProfile(innerWidth, innerHeight, devicePixelRatio);
+    if (presentationRole) return ownerImageRequest<ImageOutputProfile>({ method: "prepare", documentId, profile });
+    browserAudienceProfile = profile;
+    await browserImages.reconcile(documentId);
+    if (imageCachingEnabled) await browserImages.presentationReady(documentId, true);
+    return profile;
+  },
+  async preparedSlideImages(documentId, slideId, profile) {
+    if (!imageCachingEnabled) return {};
+    const output = profile ?? await browser.audienceImageProfile!(documentId);
+    const images = presentationRole
+      ? await ownerImageRequest<PreparedSlideImages>({ method: "slide", documentId, slideId, profile: output })
+      : await browserImages.prepareSlide(documentId, slideId, output, presentation ? 0 : 1);
+    return leaseSlideImages(images);
   },
   async preparedImage(documentId, slideId, elementId, profile) {
     if (!imageCachingEnabled) return null;
-    const projection = await (
-      await browserRuntime(documentId)
-    ).projection(documentId, slideId);
-    const output = profile ?? {
-      width: Math.ceil(screen.width * devicePixelRatio),
-      height: Math.ceil(screen.height * devicePixelRatio),
-    };
-    const requirement = planPresentationImages(
-      projection.deck,
-      [
-        resolveVisualSlide(
-          projection.deck,
-          projection.slide,
-          projection.templates ?? {},
-        ).slide,
-      ],
-      output,
-      true,
-    ).find((item) =>
-      item.instances.some((instance) => instance.elementId === elementId),
-    );
-    if (!requirement) return null;
-    const image = await prepareBrowserVariant(requirement);
-    if (!image) return null;
-    const blob = await get<Blob>(image.url);
-    return blob ? { ...image, url: URL.createObjectURL(blob) } : null;
+    const images = await browser.preparedSlideImages!(documentId, slideId, profile ?? await browser.audienceImageProfile!(documentId));
+    const selected = images[elementId] ?? null;
+    for (const url of new Set(Object.values(images).flatMap(image => image && image.hash !== selected?.hash ? [image.url] : []))) browser.releaseUrl(url);
+    return selected;
   },
   async preparedAssetImage(assetId, size) {
     if (!imageCachingEnabled) return null;
@@ -721,12 +812,6 @@ export const browser: Platform = {
       defaultPath: "IndexedDB (Browser Storage)",
     };
   },
-  async chooseMediaLibrary() {
-    return null;
-  },
-  async resetMediaLibrary() {
-    return this.getMediaLibrary();
-  },
   async createDocument(name) {
     const document = newPresentationDocument(name);
     resetBrowserRuntime(document.documentId);
@@ -746,6 +831,7 @@ export const browser: Platform = {
       throw new Error("Unknown presentation");
     const id = location.slice("browser:".length);
     const record = await documentRecord(id);
+    prepareBrowserImages(id);
     return documentSummary(
       record.document,
       (record.revision ?? 0) !== (record.savedRevision ?? 0),
@@ -783,6 +869,13 @@ export const browser: Platform = {
       runtime.authority.markSaved(snapshot.revision);
       return documentSummary(snapshot.document);
     });
+  },
+  async confirmDocumentReplacement(documentId) {
+    const runtime = await browserRuntime(documentId);
+    if (!runtime.authority.dirty) return true;
+    if (window.confirm(`Save changes to ${runtime.authority.document.deck.name}?`))
+      return !!(await browser.saveDocument!(documentId));
+    return window.confirm("Continue without saving changes?");
   },
   async closeDocument(documentId) {
     const pending = browserRuntimes.get(documentId);
@@ -864,7 +957,18 @@ export const browser: Platform = {
     }
     return blob ? URL.createObjectURL(blob) : null;
   },
-  releaseUrl: URL.revokeObjectURL,
+  retainUrl(url) {
+    const hash = imageUrlHashes.get(url);
+    const entry = hash ? imageUrls.get(hash) : undefined;
+    if (entry) entry.users++;
+  },
+  releaseUrl(url) {
+    const hash = imageUrlHashes.get(url);
+    const entry = hash ? imageUrls.get(hash) : undefined;
+    if (entry && --entry.users > 0) return;
+    if (hash) { imageUrls.delete(hash); imageUrlHashes.delete(url); }
+    URL.revokeObjectURL(url);
+  },
   async updateAsset(asset) {
     await put("asset/" + asset.id, assetSchema.parse(asset));
   },
@@ -886,6 +990,7 @@ export const browser: Platform = {
     return [];
   },
   async present(input) {
+    browserAudienceProfile = null;
     popup = window.open(
       location.pathname + "?present=audience",
       "show-me-audience",
@@ -947,6 +1052,8 @@ export const browser: Platform = {
     await mutatePresentation((current) =>
       current ? applyPresentationCommand(current, command) : null,
     );
+    if (!presentationRole && presentation?.index !== null && presentation?.index !== undefined)
+      browserImages.prioritize(presentation.deckId, presentation.slideIds[presentation.index]);
   },
   async navigate(index) {
     await browser.presentationCommand({ type: "jump", index });

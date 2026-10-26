@@ -46,11 +46,7 @@ test("editor errors copy their full text by click or Enter and report clipboard 
     )
     .toBe(`Error: ${message}`);
   await page.evaluate(async () => {
-    const path = "/src/platform/index.ts";
-    const { platform }: typeof import("../../../src/platform") = await import(
-      /* @vite-ignore */ path
-    );
-    platform.writeTextClipboard = async () => {
+    navigator.clipboard.writeText = async () => {
       throw new Error("Clipboard unavailable");
     };
   });

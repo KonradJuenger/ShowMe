@@ -662,14 +662,3 @@ export function setMediaContent(
   requireEditableMedia(snapshot, elementId);
   return setElementContents(snapshot, [{ elementId, value: content }]);
 }
-
-export async function enrichAsset(asset: Asset) {
-  const mod = await import("../components/mediaEnrichment");
-  return mod.enrichAsset(asset);
-}
-
-export async function prepareMediaAsset(asset: Asset): Promise<Asset> {
-  const mod = await import("../components/mediaEnrichment");
-  return mod.prepareMediaAsset(asset);
-}
-

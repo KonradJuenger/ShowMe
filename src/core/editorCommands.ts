@@ -654,6 +654,26 @@ export function resizeElements(
     (frame) => scaleTransformToBox(frame, start, next),
     scopeId,
   );
+  return preserveResizedContents(snapshot, resized, selected);
+}
+
+/** Frame replacement with the same text/media preservation as native resizing. */
+export function setElementFramesPreservingContent(
+  snapshot: EditorSnapshot,
+  changes: readonly { elementId: string; value: Element["frame"] }[],
+): EditorSnapshot {
+  return preserveResizedContents(
+    snapshot,
+    setElementFrames(snapshot, changes),
+    changes.map((change) => change.elementId),
+  );
+}
+
+function preserveResizedContents(
+  snapshot: EditorSnapshot,
+  resized: EditorSnapshot,
+  selected: string[],
+) {
   // Free media is independent of the viewport boundary, including its origin.
   return setElementContents(
     resized,
@@ -835,6 +855,7 @@ export function unframeElement(
 export interface DuplicateElementsResult {
   snapshot: EditorSnapshot;
   elementIds: string[];
+  idMap: Record<string, string>;
 }
 
 export function duplicateElementsWithResult(
@@ -844,7 +865,7 @@ export function duplicateElementsWithResult(
   offset: { x: number; y: number } = { x: 20, y: 20 },
 ): DuplicateElementsResult {
   const selected = distinctElementIds(ids, "Duplicate selection");
-  if (!selected.length) return { snapshot, elementIds: [] };
+  if (!selected.length) return { snapshot, elementIds: [], idMap: {} };
   const locations = selected.map((id) => locateElement(snapshot.slide, id));
   if (locations.some((location) => !location))
     throw new Error("Unknown Element in duplicate selection");
@@ -884,7 +905,11 @@ export function duplicateElementsWithResult(
         ),
       ),
     );
-  return { snapshot: next, elementIds: copies.map(({ id }) => id) };
+  return {
+    snapshot: next,
+    elementIds: copies.map(({ id }) => id),
+    idMap: Object.fromEntries(elementMap),
+  };
 }
 
 export function duplicateElements(
@@ -950,14 +975,19 @@ export function createSlide(
   ]);
 }
 
-export function duplicateSlide(
+export interface DuplicateSlideResult {
+  snapshot: EditorSnapshot;
+  idMap: Record<string, string>;
+}
+
+export function duplicateSlideWithResult(
   snapshot: EditorSnapshot,
   sourceSlide: Slide,
   newSlideId: string,
   meta: Deck["slideMeta"][string],
   afterId: string | null = sourceSlide.id,
   newElementId: () => string = uid,
-): EditorSnapshot {
+): DuplicateSlideResult {
   if (!snapshot.deck.slideIds.includes(sourceSlide.id))
     throw new Error("Unknown source slide");
   if (snapshot.deck.slideIds.includes(newSlideId))
@@ -990,15 +1020,36 @@ export function duplicateSlide(
       [newSlideId]: structuredClone(meta),
     },
   });
-  return appendChange(snapshot, withDeck(snapshot, deck), [
-    {
-      type: "slide.duplicate",
-      sourceSlideId: sourceSlide.id,
-      slide,
-      meta: structuredClone(meta),
-      afterId,
-    },
-  ]);
+  return {
+    snapshot: appendChange(snapshot, withDeck(snapshot, deck), [
+      {
+        type: "slide.duplicate",
+        sourceSlideId: sourceSlide.id,
+        slide,
+        meta: structuredClone(meta),
+        afterId,
+      },
+    ]),
+    idMap: Object.fromEntries(elementMap),
+  };
+}
+
+export function duplicateSlide(
+  snapshot: EditorSnapshot,
+  sourceSlide: Slide,
+  newSlideId: string,
+  meta: Deck["slideMeta"][string],
+  afterId: string | null = sourceSlide.id,
+  newElementId: () => string = uid,
+): EditorSnapshot {
+  return duplicateSlideWithResult(
+    snapshot,
+    sourceSlide,
+    newSlideId,
+    meta,
+    afterId,
+    newElementId,
+  ).snapshot;
 }
 
 export function deleteSlide(
@@ -1126,7 +1177,10 @@ export function updateSlideMeta(
 export function setDeckProperties(
   snapshot: EditorSnapshot,
   changes: Partial<
-    Pick<Deck, "name" | "width" | "height" | "transitionDefaults">
+    Pick<
+      Deck,
+      "name" | "stylesheet" | "width" | "height" | "transitionDefaults"
+    >
   >,
 ): EditorSnapshot {
   if (

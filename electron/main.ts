@@ -1,15 +1,35 @@
+import { AGENT_CONTRACT_VERSION, AGENT_RUNTIME_CAPACITY } from "../src/core/agentProtocol";
+import { importAgentMedia } from "./agentMediaImport";
+import {
+  effectDefinitionSchema,
+  type EffectDefinition,
+} from "../src/core/effects";
+import type { EffectValidationResult } from "../src/core/effectValidation";
+import { SHOWME_MCP_SERVER_VERSION } from "../src/core/agentRead";
+import { AgentMutationError } from "../src/core/agentMutation";
+import {AgentWorkspaceService} from "./agentWorkspace";
+import { AgentDeliveryService } from "./agentDelivery";
+import { NativeLibraryBrowser } from "./libraryBrowser";
+import { libraryBrowserRequestSchema } from "../src/core/libraryBrowser";
+import { importManagedFile, mediaFolder } from "./mediaLibrary";
 import { presentationMotionStages } from "../src/core/documentRuntime";
 import { acceptedImpact } from "../src/core/documentImpact";
 import { fontStorageService } from "./fontIntegration";
 import { EffectLibraryStorage } from "./effectLibrary";
-import { effectLibraryRequestSchema } from "../src/core/libraryEffects";
+import {
+  effectLibraryRequestSchema,
+  libraryEffectSchema,
+} from "../src/core/libraryEffects";
 import sharp from "sharp";
 import { ImageWorkQueue } from "../src/core/imageWorkQueue";
-import { resolveSlide, resolveVisualSlide } from "../src/core/templates";
-import { randomUUID } from "node:crypto";
+import { nativeImageConcurrency } from "./imageProcessorPool";
+import { resolveSlide } from "../src/core/templates";
+import { createHash, randomUUID } from "node:crypto";
 import {
-  planPresentationImages,
+  audienceImageProfile as outputImageProfile,
   MAX_PREPARED_IMAGE_PIXELS,
+  type ImageOutputProfile,
+  type ImageCacheFormat,
 } from "../src/core/presentationImages";
 import { ImagePreparationCoordinator } from "../src/core/imagePreparationCoordinator";
 import {
@@ -31,6 +51,7 @@ import {
   screen,
   shell,
   type WebContents,
+  type NativeImage,
 } from "electron";
 
 export function mayAccessLocalFonts(contents: WebContents | null) {
@@ -40,18 +61,26 @@ export function mayAccessLocalFonts(contents: WebContents | null) {
 }
 import { mediaResponse } from "./mediaResponse";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import { exportPowerPoint } from "./export/pptx";
+import { createHtmlExport, htmlFontUsages } from "./export/html";
+import { ExportTextOutlines } from "./export/textOutlines";
+import { ExportTextLayoutSurface } from "./export/textLayoutSurface";
+import { preparePackageText } from "./export/prepareText";
+import { DEFAULT_FONT_EMBEDDING } from "../src/export/fontEmbedding";
+import { fontFamiliesFromFaces } from "./fontIntegration";
+import { HtmlExportImageCache } from "./export/imageCache";
+import { type HtmlExportProgress, DEFAULT_HTML_EXPORT_JPEG_QUALITY } from "../src/export/html/types";
 import {
   pdfSlides,
   type ExportDocument,
   type ExportWarning,
 } from "../src/export/shared";
 import { walkElements } from "../src/core/element";
+import { getPresentationSlideIds } from "../src/core/presentationSequence";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { DocumentStorage, atomicWrite } from "./storage";
-import { digest } from "./storage/io";
 import { CollaborationService } from "./collaboration/session";
 import { lanInterfaces, selectedLanAddress } from "./collaboration/security";
 import { resolveOriginalAsset } from "./assetServing";
@@ -80,22 +109,29 @@ import {
   writeSlideTransferDescriptor,
 } from "./slideTransfer";
 import {
-  defaultMediaLibraryPath,
-  defaultPresentationsFolderPath,
-  initializePresentationsFolder,
   defaultImageCachePath,
   readSettings,
+  showMeLibraryPath,
+  validateShowMeRoot,
   writeSettings,
 } from "./settings";
 import {
   LibraryLifecycle,
+  assertShowMeRootChangeAllowed,
   librarySavePath,
-  isInsideLibrary,
-  documentLibraryHashes,
-  canonicalFilesystemPath,
+  isInsideRoot,
 } from "./libraryLifecycle";
 import type { LibraryLifecycleMode } from "../src/core/libraryLifecycle";
 import { registerIpcRouter } from "./ipcRouter";
+import { AgentContextService } from "./agentContext";
+import { AgentPreviewService } from "./agentPreview";
+import { AgentInspectionService } from "./agentInspection";
+import { AgentAuthoringService } from "./agentAuthoring";
+import { AgentBridge } from "./agentBridge";
+import { AgentEditingService } from "./agentEditing";
+import { AgentTextMeasurementService } from "./agentTextMeasurement";
+import { DocumentClosing } from "./documentClosing";
+import type { AgentPreviewWarning, SlidePreviewCapture } from "../src/core/agentPreview";
 import { PresentationRuntime } from "./presentationRuntime";
 import {
   loadWindow as load,
@@ -133,22 +169,20 @@ let closeRequestPending = false;
 let effectLibraryQueue = Promise.resolve();
 let lifecycleMode: LibraryLifecycleMode | null = null;
 let lifecycle: LibraryLifecycle | null = null;
-let presentationsFolder = "";
-function configureLifecycle() {
+let showMeRoot = "";
+function createLibraryLifecycle(root = showMeRoot) {
   const storage = requireStorage();
-  const root = storage.assetRoot;
-  const presentationsRoot = presentationsFolder;
-  lifecycle = new LibraryLifecycle(
+  const libraryRoot = showMeLibraryPath(root);
+  return new LibraryLifecycle(
     root,
-    presentationsRoot,
     () => {
       const remote = collaboration.clientDocument();
       return [...storage.openDocuments(), ...(remote ? [remote] : [])];
     },
     storage.openProtection,
     async (file) => {
-      const trashRoot = path.join(root, "Trash", "assets");
-      if (!isInsideLibrary(trashRoot, file))
+      const trashRoot = path.join(libraryRoot, "Trash", "assets");
+      if (!isInsideRoot(trashRoot, file))
         throw new Error("Unsafe Library Trash deletion");
       await fs.rm(file, { recursive: true, force: true });
     },
@@ -157,16 +191,11 @@ function configureLifecycle() {
       const settings = await readSettings(app.getPath("userData"), {
         requireExisting: true,
       });
-      const currentRoot =
-        settings.mediaLibraryPath ??
-        defaultMediaLibraryPath(app.getPath("userData"));
       return (
         (settings.libraryLifecycleMode ?? "managed") === "managed" &&
-        path.resolve(currentRoot) === path.resolve(root) &&
-        path.resolve(
-          settings.presentationsFolderPath ??
-            defaultPresentationsFolderPath(app.getPath("userData")),
-        ) === path.resolve(presentationsRoot)
+        Boolean(settings.showMeRootPath) &&
+        path.resolve(settings.showMeRootPath!) === path.resolve(root) &&
+        path.resolve(showMeLibraryPath(root)) === path.resolve(libraryRoot)
       );
     },
   );
@@ -176,7 +205,7 @@ async function runLibraryScan(cleanup = false, expire = false) {
     throw new Error("Portable presentations do not use Library cleanup");
   if ((cleanup || expire) && lifecycleMode !== "managed")
     throw new Error("Automatic cleanup is disabled");
-  configureLifecycle();
+  lifecycle = createLibraryLifecycle();
   const result = await lifecycle!.scan(
     cleanup,
     expire,
@@ -190,61 +219,24 @@ async function getLibraryLifecycle() {
   await refreshLifecycleSettings();
   return {
     mode: lifecycleMode,
-    root: requireStorage().assetRoot,
-    presentations: presentationsFolder,
-    defaultPresentations: defaultPresentationsFolderPath(
-      app.getPath("userData"),
-    ),
-  };
-}
-async function setPresentationsFolder(selected: string | null) {
-  const folder =
-    selected ?? defaultPresentationsFolderPath(app.getPath("userData"));
-  const trash = path.join(requireStorage().assetRoot, "Trash");
-  if (
-    canonicalFilesystemPath(folder) === canonicalFilesystemPath(trash) ||
-    isInsideLibrary(trash, folder)
-  )
-    throw new Error("The presentations folder cannot be inside Library Trash");
-  if (!(await fs.stat(folder)).isDirectory())
-    throw new Error("Choose a presentations directory");
-  const settings = await readSettings(app.getPath("userData"), {
-    requireExisting: true,
-  });
-  settings.presentationsFolderPath = selected;
-  await writeSettings(app.getPath("userData"), settings);
-  await refreshLifecycleSettings();
-  configureLifecycle();
-}
-async function documentLibraryState(id: string) {
-  await refreshLifecycleSettings();
-  const storage = requireStorage();
-  idSchema.parse(id);
-  if (collaboration.isGuest(id) || !storage.hasDocument(id))
-    return { displaced: false, location: "" };
-  const summary = storage.summary(idSchema.parse(id));
-  const dependent =
-    documentLibraryHashes(
-      storage.assetRoot,
-      storage.documentRuntime(id).authority.document,
-    ).length > 0;
-  return {
-    displaced:
-      dependent &&
-      !storage.isPackaged(id).packaged &&
-      Boolean(summary.location) &&
-      !isInsideLibrary(presentationsFolder, summary.location),
-    location: summary.location,
+    root: showMeRoot,
+    library: requireStorage().assetRoot,
   };
 }
 async function refreshLifecycleSettings() {
   const settings = await readSettings(app.getPath("userData"), {
     requireExisting: true,
   });
+  if (!settings.showMeRootPath)
+    throw new Error("ShowMe root is not configured");
+  const configuredRoot = await validateShowMeRoot(settings.showMeRootPath);
+  if (
+    path.resolve(showMeLibraryPath(configuredRoot)) !==
+    path.resolve(requireStorage().assetRoot)
+  )
+    throw new Error("ShowMe root changed outside the app; choose it again");
+  showMeRoot = configuredRoot;
   lifecycleMode = settings.libraryLifecycleMode ?? "managed";
-  presentationsFolder =
-    settings.presentationsFolderPath ??
-    defaultPresentationsFolderPath(app.getPath("userData"));
   requireStorage().lifecycleMode = lifecycleMode ?? "managed";
 }
 
@@ -281,6 +273,7 @@ function registerDocumentNotifications(documentId: string) {
     documentId,
     (accepted) => {
       try {
+        if (accepted.actorId === "mcp-local") notifyAgentHistory();
         const consoleWindow = presentation?.presenterConsoleWindow;
         if (consoleWindow && !consoleWindow.isDestroyed())
           consoleWindow.webContents.send("document-accepted", {
@@ -317,8 +310,55 @@ const collaboration = new CollaborationService(
   documentRuntime,
   app.getVersion(),
 );
+function activeAgentDocumentId() {
+  const guest = collaboration.status().clientDocumentId;
+  return guest ?? (activeDocumentId && storage?.hasDocument(activeDocumentId) ? activeDocumentId : null);
+}
+let mcpAccessVersion = 0;
+let mcpEditingEnabled = false;
+let mcpWriteAccessVersion = 0;
+const agentPreview = new AgentPreviewService({
+  access: () => agentContext.isEnabled ? mcpAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  projection: async (id, slideId) => {
+    if (collaboration.isGuest(id) && collaboration.status().clientStatus !== "connected")
+      throw new Error("Guest unavailable");
+    return operations.renderProjection(id, slideId);
+  },
+  capture: (projection, width, height, signal, sample, previous) => captureSlidePreview(projection, width, height, true, signal, sample, previous),
+});
+const agentContext = new AgentContextService({
+  activeDocumentId: activeAgentDocumentId,
+  projection: async (id, pageId) => {
+    if (collaboration.isGuest(id)) {
+      if (collaboration.status().clientStatus !== "connected") return Promise.reject(new Error("Guest unavailable"));
+      return collaboration.projection(id, pageId);
+    }
+    return documentRuntime(id).projection(id, pageId);
+  },
+  presentation: () => {
+    const state = presentation?.state;
+    return state ? {
+      documentId: state.deckId,
+      slideId: state.index === null ? null : state.slideIds[state.index] ?? null,
+      slideIndex: state.index,
+      black: !!state.black,
+      stageIndex: state.motion?.stageIndex ?? null,
+      stageTimeMs: state.motion?.time ?? null,
+      running: state.motion?.running ?? false,
+      startedAtMs: state.motion?.startedAt ?? null,
+      restartToken: state.restartToken ?? null,
+    } : null;
+  },
+});
+let agentGuestDocumentId: string | null = null;
 collaboration.subscribe(
   () => {
+    const next = collaboration.status().clientDocumentId;
+    if (next !== agentGuestDocumentId) {
+      agentGuestDocumentId = next;
+      agentContext.invalidate();
+    }
     storage?.setExternalOpenDocument(collaboration.clientDocument());
     if (editor && !editor.isDestroyed())
       editor.webContents.send("collaboration-status", collaboration.status());
@@ -379,6 +419,7 @@ collaboration.subscribe(
 );
 
 let imageCachingEnabled = true;
+let imageCacheFormat: ImageCacheFormat = "png";
 let deleteImageCacheOnClose = true;
 let imageCacheFolder = "";
 const imageCacheSession = randomUUID();
@@ -396,8 +437,11 @@ const imageCache = new ImageVariantCache(
   path.join(__dirname, "imageWorker.cjs"),
   () => path.join(imageCacheFolder, "showme", "retained", "images"),
   () => !deleteImageCacheOnClose,
+  () => imageCacheFormat,
 );
+let measuredAudienceProfile: ImageOutputProfile | null = null;
 function imagePreparationProfile() {
+  if (presentation?.state && measuredAudienceProfile) return measuredAudienceProfile;
   const displays = screen.getAllDisplays();
   const display =
     displays.find(
@@ -405,12 +449,10 @@ function imagePreparationProfile() {
     ) ??
     displays.find((item) => item.id !== screen.getPrimaryDisplay().id) ??
     screen.getPrimaryDisplay();
-  return {
-    width: Math.ceil(display.size.width * display.scaleFactor),
-    height: Math.ceil(display.size.height * display.scaleFactor),
-  };
+  return outputImageProfile(display.size.width, display.size.height, display.scaleFactor);
 }
 const imagePreparation = new ImagePreparationCoordinator({
+  concurrency: nativeImageConcurrency,
   slides: (id, slideIds) => {
     const document = collaboration.isGuest(id)
       ? collaboration.clientDocument()!
@@ -422,7 +464,7 @@ const imagePreparation = new ImagePreparationCoordinator({
       ? collaboration.projection(id, slideId)
       : documentRuntime(id).projection(id, slideId),
   profile: imagePreparationProfile,
-  prepare: async (id, requirement) =>
+  prepare: async (id, requirement, priority = 0) =>
     imageCache.prepare(
       collaboration.isGuest(id)
         ? await requireStorage().verifiedAssetPath(requirement.assetId)
@@ -434,6 +476,7 @@ const imagePreparation = new ImagePreparationCoordinator({
       requirement.size,
       requirement.width,
       requirement.height,
+      priority,
     ),
 });
 imagePreparation.subscribe((status) => {
@@ -461,7 +504,7 @@ function imageCacheFolderInfo() {
 async function assertLocalCacheFolder(cacheFolder: string, library: string) {
   await fs.mkdir(cacheFolder, { recursive: true });
   const realCache = await fs.realpath(cacheFolder);
-  const realLibrary = canonicalFilesystemPath(library);
+  const realLibrary = await fs.realpath(library);
   const inside = (parent: string, child: string) => {
     const relative = path.relative(parent, child);
     return (
@@ -473,7 +516,7 @@ async function assertLocalCacheFolder(cacheFolder: string, library: string) {
   };
   if (inside(realLibrary, realCache) || inside(realCache, realLibrary))
     throw new Error(
-      "Choose an image cache folder outside the media library. Cache files are local to this computer.",
+      "Choose an image cache folder outside ShowMe Library/. Cache files are local to this computer.",
     );
 }
 async function changeImageCacheFolder(selected: string | null) {
@@ -574,6 +617,7 @@ function updateDocumentWindow(document: DocumentSummary | null) {
 }
 
 function activateDocument(document: DocumentSummary) {
+  agentContext.invalidate();
   prepareImages(document.id);
   activeDocumentId = document.id;
   requireStorage().setImportDocument(document.id);
@@ -608,7 +652,18 @@ async function chooseRecoveryAction(file: string) {
   return "saved" as const;
 }
 
-async function openDocumentPath(file: string) {
+function assertPresentationInsideShowMeRoot(file: string) {
+  const resolved = path.resolve(file);
+  if (
+    path.extname(resolved).toLowerCase() === SHOWME_DOCUMENT_EXTENSION &&
+    !isInsideRoot(showMeRoot, resolved)
+  )
+    throw new Error(
+      "Native .sme presentations must live inside the selected ShowMe root. Move this file below the root or use a portable .smp package.",
+    );
+}
+
+async function openDocumentPath(file: string, beforeActivate?: () => Promise<void>) {
   const resolved = path.resolve(file);
   const extension = path.extname(resolved).toLowerCase();
   if (
@@ -616,6 +671,7 @@ async function openDocumentPath(file: string) {
     extension !== SHOWME_PACKAGE_EXTENSION
   )
     throw new Error("Unsupported ShowMe file type");
+  assertPresentationInsideShowMeRoot(resolved);
   const document =
     extension === SHOWME_PACKAGE_EXTENSION
       ? await requireStorage().openPackage(resolved)
@@ -625,6 +681,7 @@ async function openDocumentPath(file: string) {
         );
   registerDocumentNotifications(document.id);
   await rememberDocument(document);
+  await beforeActivate?.();
   activateDocument(document);
   return document;
 }
@@ -693,15 +750,15 @@ async function chooseSavePath(name: string) {
   const testExtension =
     portable ||
     (testDirectory &&
-      !isInsideLibrary(presentationsFolder, path.join(testDirectory, name)))
+      !isInsideRoot(showMeRoot, path.join(testDirectory, name)))
       ? ".smp"
       : ".sme";
   const testPath = await nextTestPath(name, testExtension);
-  if (testPath) return librarySavePath(presentationsFolder, testPath, portable);
+  if (testPath) return librarySavePath(showMeRoot, testPath, portable);
   const result = await dialog.showSaveDialog(editor!, {
     title: "Save presentation — .sme or portable .smp",
     defaultPath: path.join(
-      presentationsFolder,
+      showMeRoot,
       safeFileName(name) + (portable ? ".smp" : ".sme"),
     ),
     filters: [
@@ -713,7 +770,7 @@ async function chooseSavePath(name: string) {
   });
   if (result.canceled || !result.filePath) return null;
   const target = librarySavePath(
-    presentationsFolder,
+    showMeRoot,
     result.filePath,
     portable,
   );
@@ -722,8 +779,8 @@ async function chooseSavePath(name: string) {
       type: "info",
       message: `Save as ${path.basename(target)}`,
       detail: target.endsWith(".smp")
-        ? "Presentations saved outside the presentations folder use a self-contained .smp package."
-        : "Presentations saved inside the presentations folder use a .sme document with assets stored in the Library.",
+        ? "Presentations saved outside the ShowMe root use a self-contained .smp package."
+        : "Presentations saved inside the ShowMe root use a .sme document with assets stored in the Library.",
       buttons: ["Continue", "Cancel"],
       defaultId: 0,
       cancelId: 1,
@@ -735,7 +792,7 @@ async function chooseSavePath(name: string) {
         type: "question",
         message: `Replace ${path.basename(target)}?`,
         detail:
-          "The destination uses a portable .smp package outside the presentations folder and a .sme document inside it.",
+          "The destination uses a portable .smp package outside the ShowMe root and a .sme document inside it.",
         buttons: ["Replace", "Cancel"],
         defaultId: 1,
         cancelId: 1,
@@ -755,7 +812,7 @@ async function choosePackagePath(name: string) {
   const result = await dialog.showSaveDialog(editor!, {
     title: "Export ShowMe presentation",
     defaultPath: path.join(
-      presentationsFolder,
+      showMeRoot,
       safeFileName(name) + SHOWME_PACKAGE_EXTENSION,
     ),
     filters: [{ name: "ShowMe Packaged Presentation", extensions: ["smp"] }],
@@ -842,9 +899,7 @@ app.on("open-file", (event, file) => {
 
 async function getMediaLibraryInfo() {
   const current = requireStorage().assetRoot;
-  const def = defaultMediaLibraryPath(app.getPath("userData"));
-  const isDefault = path.resolve(current) === path.resolve(def);
-  return { path: current, isDefault, defaultPath: def };
+  return { path: current, isDefault: true, defaultPath: current };
 }
 
 async function explainStorageAndFonts(id: string, portable: boolean) {
@@ -857,7 +912,7 @@ async function explainStorageAndFonts(id: string, portable: boolean) {
       type: "info",
       message: "Library documents and portable packages",
       detail:
-        ".sme documents are not self-contained: their assets live in the Managed Library. .smp packages are portable. Cleanup scans .sme files recursively in the presentations folder; unused assets go to Library Trash and may be permanently deleted after 10 days. Find this explanation again in Settings → Library / Storage.",
+        ".sme documents are not self-contained: their assets live in the Managed Library. .smp packages are portable. Cleanup scans .sme files recursively below the selected ShowMe root; unused assets go to Library Trash and may be permanently deleted after 10 days. Find this explanation again in Settings → Library / Storage.",
     });
     settings.storageWarningSeen = true;
     await writeSettings(app.getPath("userData"), settings);
@@ -874,7 +929,7 @@ async function explainStorageAndFonts(id: string, portable: boolean) {
     });
 }
 
-async function saveDocument(documentId: string, beforePersist?: () => void) {
+async function saveDocument(documentId: string, beforePersist?: (destination: string) => void) {
   const id = idSchema.parse(documentId);
   if (collaboration.isGuest(id))
     throw new Error("Collaboration guests cannot save the host presentation");
@@ -887,16 +942,18 @@ async function saveDocument(documentId: string, beforePersist?: () => void) {
     id,
     destination?.endsWith(".smp") ?? requireStorage().isPackaged(id).packaged,
   );
-  beforePersist?.();
   const summary = destination?.endsWith(".smp")
-    ? await requireStorage().savePackageAs(id, destination, false)
-    : await requireStorage().saveDocument(id, destination ?? undefined);
+    ? await requireStorage().savePackageAs(id, destination, false, undefined, beforePersist)
+    : await requireStorage().saveDocument(id, destination ?? undefined, beforePersist);
   await rememberDocument(summary);
-  activateDocument(summary);
+  if (activeDocumentId === id) {
+    prepareImages(id);
+    refreshDocumentWindow(id);
+  } else activateDocument(summary);
   return summary;
 }
 
-async function saveDocumentAs(documentId: string) {
+async function saveDocumentAs(documentId: string, beforePersist?: (destination: string) => void) {
   const id = idSchema.parse(documentId);
   if (collaboration.isGuest(id))
     throw new Error("Collaboration guests cannot save the host presentation");
@@ -916,14 +973,17 @@ async function saveDocumentAs(documentId: string) {
       : null;
   if (packaged && packageDestination && locked === null) return null;
   const summary = packageDestination
-    ? await currentStorage.savePackageAs(id, file, locked ?? false)
-    : await currentStorage.saveDocument(id, file);
+    ? await currentStorage.savePackageAs(id, file, locked ?? false, undefined, beforePersist)
+    : await currentStorage.saveDocument(id, file, beforePersist);
   await rememberDocument(summary);
-  activateDocument(summary);
+  if (activeDocumentId === id) {
+    prepareImages(id);
+    refreshDocumentWindow(id);
+  } else activateDocument(summary);
   return summary;
 }
 
-async function packageDocument(documentId: string) {
+async function packageDocument(documentId: string, beforePersist?: (destination: string) => void, options?: import("../src/core/agentDelivery").AgentDeliveryRequest["packageOptions"]) {
   const id = idSchema.parse(documentId);
   if (collaboration.isGuest(id))
     throw new Error(
@@ -932,13 +992,13 @@ async function packageDocument(documentId: string) {
   const summary = requireStorage().summary(id);
   const file = await choosePackagePath(summary.name);
   if (!file) return null;
-  const locked = await choosePackageMediaLock(
+  const locked = options?.mediaLocked ?? await choosePackageMediaLock(
     "Export",
     requireStorage().isPackaged(id).locked,
   );
   if (locked === null) return null;
-  await explainStorageAndFonts(id, true);
-  const notes = await dialog.showMessageBox(editor!, {
+  if (!options) await explainStorageAndFonts(id, false);
+  const notes = options ? { response: 0, checkboxChecked: options.speakerNotes === "remove" } : await dialog.showMessageBox(editor!, {
     type: "question",
     title: "Share packaged presentation",
     message: "Speaker notes",
@@ -951,16 +1011,44 @@ async function packageDocument(documentId: string) {
     checkboxChecked: false,
   });
   if (notes.response !== 0) return null;
-  return requireStorage().packageDocument(
-    id,
-    file,
-    locked,
-    notes.checkboxChecked,
-  );
+  const mode = (await readSettings(app.getPath("userData"))).exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING;
+  if (mode === "file" && !await confirmFontFileExport()) return null;
+  const storage = requireStorage(), surface = new ExportTextLayoutSurface();
+  const outlines = mode === "svg" ? new ExportTextOutlines(
+    async usage => (await storage.exportFontFaces(id, [usage])).resolved[0] ?? null,
+    request => surface.layout(request),
+  ) : undefined;
+  let warnings: ExportWarning[] = [];
+  try {
+    const destination = await storage.packageDocument(id, file, locked, notes.checkboxChecked, beforePersist, {
+      fontEmbedding: mode,
+      prepareDocument: outlines ? async document => {
+        const prepared = await preparePackageText(document, element => outlines.prepare(element));
+        warnings = prepared.warnings;
+        return prepared.assets;
+      } : undefined,
+    });
+    if (warnings.length) await dialog.showMessageBox(editor!, { type: "warning", message: "Package created with font warnings",
+      detail: warnings.map(warning => warning.message).join("\n"), buttons: ["OK"] });
+    return destination;
+  } finally { surface.dispose(); await outlines?.dispose(); }
+
+}
+
+async function confirmFontFileExport() {
+  const result = await dialog.showMessageBox(editor!, {
+    type: "warning", title: "Embed font files", message: "You must have a license to embed and share these font files.",
+    detail: "Font files will be included in the exported file. Make sure your license permits this use. ShowMe does not check font licenses or embedding permission flags.",
+    buttons: ["Export with font files", "Cancel"], defaultId: 0, cancelId: 1,
+  });
+  return result.response === 0;
 }
 
 let exportBusy = false;
-async function exportPresentation(documentId: string, format: "pdf" | "pptx") {
+async function exportPresentation(
+  documentId: string,
+  format: "pdf" | "pptx" | "html",
+) {
   if (exportBusy) throw new Error("An export is already in progress");
   exportBusy = true;
   try {
@@ -972,12 +1060,12 @@ async function exportPresentation(documentId: string, format: "pdf" | "pptx") {
 
 async function performExportPresentation(
   documentId: string,
-  format: "pdf" | "pptx",
+  format: "pdf" | "pptx" | "html",
 ) {
   const id = idSchema.parse(documentId);
   if (id !== activeDocumentId)
     throw new Error("Only the current presentation can be exported");
-  const type = z.enum(["pdf", "pptx"]).parse(format);
+  const type = z.enum(["pdf", "pptx", "html"]).parse(format);
   if (collaboration.isGuest(id))
     throw new Error(
       "Collaboration guests cannot export the host presentation because media ownership is local to the host",
@@ -991,17 +1079,86 @@ async function performExportPresentation(
   const document: ExportDocument = { deck, slides };
   if (type === "pdf" && pdfSlides(document).length === 0)
     throw new Error("There are no slides to export");
+  if (type === "html" && getPresentationSlideIds(deck).length === 0)
+    throw new Error("There are no visible slides to export");
+  const exportSpec =
+    type === "pdf"
+      ? { title: "Export as PDF", name: "PDF", extension: "pdf" }
+      : type === "pptx"
+        ? {
+            title: "Export as PowerPoint",
+            name: "PowerPoint",
+            extension: "pptx",
+          }
+        : {
+            title: "Export HTML",
+            name: "HTML",
+            extension: "html",
+          };
   const result = await dialog.showSaveDialog(editor!, {
-    title: type === "pdf" ? "Export as PDF" : "Export as PowerPoint",
-    defaultPath: `${deck.name.replace(/[<>:"/\\|?*]/g, "_")}.${type === "pdf" ? "pdf" : "pptx"}`,
+    title: exportSpec.title,
+    defaultPath: `${deck.name.replace(/[<>:"/\\|?*]/g, "_")}.${exportSpec.extension}`,
     filters: [
       {
-        name: type === "pdf" ? "PDF" : "PowerPoint",
-        extensions: [type === "pdf" ? "pdf" : "pptx"],
+        name: exportSpec.name,
+        extensions: [exportSpec.extension],
       },
     ],
   });
   if (result.canceled || !result.filePath) return null;
+  if (type === "html") {
+    const settings = await readSettings(app.getPath("userData"));
+    if ((settings.exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING) === "file" && !await confirmFontFileExport()) return null;
+    const report = (stage: HtmlExportProgress["stage"], completed: number, total: number) => {
+      if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", { documentId: id, stage, completed, total });
+    };
+    report("fonts", 0, 0);
+    const textSurface = new ExportTextLayoutSurface();
+    const fontMode = settings.exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING;
+    const outlines = fontMode === "svg" ? new ExportTextOutlines(
+      async usage => (await currentStorage.exportFontFaces(id, [usage])).resolved[0] ?? null,
+      request => textSurface.layout(request),
+    ) : undefined;
+    const images = new HtmlExportImageCache(
+      path.join(__dirname, "imageWorker.cjs"),
+      settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY,
+    );
+    try {
+      const exported = await createHtmlExport({
+        document,
+        runtimeVersion: app.getVersion(),
+        runtimeDirectory: path.join(__dirname, "../dist-html-export"),
+        resolveAsset: async (assetId) => {
+          try {
+            const source = await resolveOriginalAsset(
+              currentStorage,
+              id,
+              assetId,
+            );
+            await fs.access(source.file);
+            return source;
+          } catch {
+            return null;
+          }
+        },
+        managedFonts: fontMode === "file" ? async () => fontFamiliesFromFaces((await currentStorage.exportFontFaces(id, htmlFontUsages(document))).resolved) : async () => [],
+        prepareText: outlines ? element => outlines.prepare(element) : undefined,
+        onProgress: report,
+        prepareImage: (source, requirement) =>
+          images.prepare(source, requirement),
+      });
+      report("writing", 0, 1);
+      await atomicWrite(result.filePath, Buffer.from(exported.html, "utf8"));
+      report("complete", 1, 1);
+      return { warnings: exported.warnings };
+    } finally {
+      try { await Promise.all([images.dispose(), outlines?.dispose()]); }
+      finally {
+        textSurface.dispose();
+        if (editor && !editor.isDestroyed()) editor.webContents.send("html-export-progress", null);
+      }
+    }
+  }
   if (type === "pptx")
     return exportPowerPoint(
       document,
@@ -1147,15 +1304,740 @@ async function performExportPresentation(
 }
 
 let previewWindow: BrowserWindow | null = null;
+let previewWindowSize = "";
 let previewDocumentId: string | null = null;
 let previewQueue: Promise<void> = Promise.resolve();
 let pendingPreviews = 0;
+let agentRuntimeWindow: BrowserWindow | null = null;
+let agentRuntimeStatus: "uninitialized" | "initializing" | "ready" | "failed" = "uninitialized";
+let agentRuntimeQueue: Promise<void> = Promise.resolve();
+let pendingAgentRuntime = 0;
+const AGENT_RUNTIME_MAX_ADMITTED = AGENT_RUNTIME_CAPACITY;
+let effectPreviewWindow: BrowserWindow | null = null;
+let previewsTornDown = false;
+let effectPreviewQueue: Promise<void> = Promise.resolve();
+const EFFECT_PREVIEW_MAX_ADMITTED = 8;
+let admittedEffectPreviews = 0;
+const effectPreviewSlotWaiters: Array<() => void> = [];
+const effectThumbnailJobs = new Map<string, Promise<string | null>>();
+let nativeLibraryBrowser: NativeLibraryBrowser | null = null;
 
+function previewOwnerAlive(owner: BrowserWindow | null) {
+  return !previewsTornDown && owner !== null && editor === owner && !owner.isDestroyed();
+}
+
+function tearDownPreviewWindows() {
+  previewsTornDown = true;
+  const windows = [previewWindow, agentRuntimeWindow, effectPreviewWindow];
+  previewWindow = null;
+  agentRuntimeWindow = null;
+  agentRuntimeStatus = "uninitialized";
+  effectPreviewWindow = null;
+  previewDocumentId = null;
+  for (const window of windows) if (window && !window.isDestroyed()) window.destroy();
+}
+
+function activeNativeLibraryBrowser() {
+  const storage = requireStorage();
+  if (nativeLibraryBrowser?.root === storage.assetRoot)
+    return nativeLibraryBrowser;
+  nativeLibraryBrowser?.dispose();
+  nativeLibraryBrowser = new NativeLibraryBrowser(
+    storage.assetRoot,
+    (id) => requireStorage().libraryAssetMetadata(id),
+    (file, folder) => requireStorage().importFile(file, folder),
+    async (file) => {
+      const currentStorage = requireStorage();
+      const id = /__([a-f0-9]{64})/.exec(path.basename(file))?.[1];
+      if (id && /\.(mp4|webm)$/i.test(file)) {
+        try {
+          const data = await fs.readFile(currentStorage.previewPath(id));
+          return `data:image/jpeg;base64,${data.toString("base64")}`;
+        } catch {}
+      }
+      if (
+        /\.txt$/i.test(file) &&
+        (file.includes(`${path.sep}Effects${path.sep}`) ||
+          file.includes(`${path.sep}Trash${path.sep}`))
+      ) {
+        try {
+          const effect = libraryEffectSchema.parse(
+            JSON.parse(await fs.readFile(file, "utf8")),
+          );
+          return (
+            (await operations.effectThumbnail(effect.definition)) ?? undefined
+          );
+        } catch {
+          return undefined;
+        }
+      }
+      if (/\.(ttf|otf|woff2?)$/i.test(file)) {
+        if ((await fs.stat(file)).size > 32 * 1024 ** 2) return undefined;
+        return `data:font/ttf;base64,${(await fs.readFile(file)).toString("base64")}`;
+      }
+      if (!/\.(png|jpe?g|webp|gif|svg)$/i.test(file)) return undefined;
+      const data = await sharp(file, {
+        limitInputPixels: MAX_PREPARED_IMAGE_PIXELS,
+      })
+        .rotate()
+        .resize(320, 180, { fit: "inside", withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      return `data:image/png;base64,${data.toString("base64")}`;
+    },
+    (file) => shell.showItemInFolder(file),
+  );
+  return nativeLibraryBrowser;
+}
+
+async function compositionWindow(width: number, height: number, owner: BrowserWindow | null) {
+  if (!previewOwnerAlive(owner)) return null;
+  const size = `${width}x${height}`;
+  if (previewWindow && !previewWindow.isDestroyed() && previewWindowSize !== size) {
+    // Resizing a hidden Windows compositor can retain the old cleared backing
+    // surface. Create the next bounded surface at its final size instead.
+    previewWindow.destroy();
+    previewWindow = null;
+  }
+  if (!previewWindow || previewWindow.isDestroyed()) {
+    previewWindowSize = size;
+    previewWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width,
+      height,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+        offscreen: true,
+      },
+    });
+    secure(previewWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await previewWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await previewWindow.loadFile(path.join(__dirname, "../dist/index.html"), {
+        query: { slidePreview: "1" },
+      });
+  }
+  const window = previewWindow;
+  if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
+  return window;
+}
+
+async function agentRuntimeSurface(owner: BrowserWindow | null) {
+  if (!previewOwnerAlive(owner)) return null;
+  if (!agentRuntimeWindow || agentRuntimeWindow.isDestroyed()) {
+    agentRuntimeStatus = "initializing";
+    agentRuntimeWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width: 320,
+      height: 180,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+        offscreen: true,
+      },
+    });
+    secure(agentRuntimeWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await agentRuntimeWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await agentRuntimeWindow.loadFile(
+        path.join(__dirname, "../dist/index.html"),
+        { query: { slidePreview: "1" } },
+      );
+    await agentRuntimeWindow.webContents.executeJavaScript("window.installAgentRuntime()");
+    agentRuntimeStatus = "ready";
+  }
+  const window = agentRuntimeWindow;
+  if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
+  return window;
+}
+
+function resetAgentRuntimeWindow(window?: BrowserWindow | null) {
+  const target = window ?? agentRuntimeWindow;
+  if (target && !target.isDestroyed()) target.destroy();
+  if (!window || agentRuntimeWindow === window) agentRuntimeWindow = null;
+  agentRuntimeStatus = "uninitialized";
+}
+
+function runAgentRuntime<T>(
+  execute: (window: BrowserWindow) => Promise<T>,
+  code = "MEASUREMENT_UNAVAILABLE",
+): Promise<T | null> {
+  const owner = editor;
+  if (
+    !agentContext.isEnabled ||
+    !previewOwnerAlive(owner) ||
+    pendingAgentRuntime >= AGENT_RUNTIME_MAX_ADMITTED
+  )
+    return Promise.reject(new AgentMutationError(code,
+      "Production runtime request was not admitted.", undefined, undefined,
+      { reason: pendingAgentRuntime >= AGENT_RUNTIME_MAX_ADMITTED ? "queue_capacity" : "access_unavailable", retry: "Read context; retry after pending runtime work finishes." }));
+  pendingAgentRuntime++;
+  const task = agentRuntimeQueue.then(async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!agentContext.isEnabled || !previewOwnerAlive(owner)) return null;
+      let window: BrowserWindow | null = null;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      let timedOut = false;
+      let initialized = false;
+      try {
+        timeout = setTimeout(() => { timedOut = true; resetAgentRuntimeWindow(window); }, 10000);
+        window = await agentRuntimeSurface(owner);
+        if (!window) throw new Error("Agent runtime initialization unavailable");
+        initialized = true;
+        const result = await execute(window);
+        if (
+          !agentContext.isEnabled ||
+          !previewOwnerAlive(owner) ||
+          window.isDestroyed() ||
+          agentRuntimeWindow !== window
+        )
+          throw new Error("Agent runtime unavailable");
+        return result;
+      } catch {
+        resetAgentRuntimeWindow(window);
+        if (attempt === 1) {
+          agentRuntimeStatus = "failed";
+          throw new AgentMutationError(code, "Production runtime failed; the next request will create a fresh surface.", undefined, undefined,
+            { reason: timedOut ? "timeout" : initialized ? "renderer_loss" : "initialization_failure", retry: "Read context and retry. No staged mutation was committed." });
+        }
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    }
+    return null;
+  });
+  agentRuntimeQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  void task
+    .finally(() => {
+      pendingAgentRuntime--;
+    })
+    .catch(() => {});
+  return task;
+}
+
+/** Accept only a compositor frame carrying this request's cropped-out acknowledgement. */
+function captureComposedFrame(window: BrowserWindow, width: number, height: number, token: string): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const contents = window.webContents;
+    let finished = false;
+    let checking = false;
+    let pendingFrame: NativeImage | null = null;
+    const finish = (image: Buffer | null) => {
+      if (finished) return;
+      finished = true;
+      pendingFrame = null;
+      clearTimeout(timer);
+      contents.removeListener("paint", painted);
+      contents.removeListener("destroyed", unavailable);
+      contents.removeListener("render-process-gone", unavailable);
+      resolve(image);
+    };
+    const unavailable = () => finish(null);
+    const timer = setTimeout(unavailable, 5000);
+    const painted = (_event: unknown, _rect: unknown, image: NativeImage) => {
+      if (finished) return;
+      if (checking) {
+        pendingFrame = image;
+        return;
+      }
+      checking = true;
+      void (async () => {
+        // Offscreen output uses one pixel per CSS pixel. Crop native padding,
+        // rather than scaling padding and acknowledgement pixels into the slide.
+        const {data, info} = await sharp(image.toPNG()).ensureAlpha().raw().toBuffer({resolveWithObject: true});
+        if (info.width < width || info.height < height + 48) return;
+        const value = parseInt(token, 16);
+        const matches = Array.from({length: 12}, (_, index) => index).every((index) => {
+          const offset = ((height + 2 + index * 4) * info.width + Math.floor(width / 2)) * info.channels;
+          return [0, 1, 2].every((channel) => Number(data[offset + channel] >= 128) === Math.floor(value / 2 ** (35 - index * 3 - channel)) % 2);
+        });
+        if (matches) finish(await sharp(data, {raw: info}).extract({left: 0, top: 0, width, height}).png().toBuffer());
+      })().catch(unavailable).finally(() => {
+        checking = false;
+        const pending = pendingFrame;
+        pendingFrame = null;
+        if (pending && !finished) painted(undefined, undefined, pending);
+      });
+    };
+    contents.once("destroyed", unavailable);
+    contents.once("render-process-gone", unavailable);
+    try {
+      contents.on("paint", painted);
+      contents.invalidate();
+    } catch { finish(null); }
+  });
+}
+
+async function effectCompositionWindow(width: number, height: number, owner: BrowserWindow | null) {
+  if (!previewOwnerAlive(owner)) return null;
+  if (!effectPreviewWindow || effectPreviewWindow.isDestroyed()) {
+    effectPreviewWindow = new BrowserWindow({
+      ...windowOptions(),
+      show: false,
+      frame: false,
+      useContentSize: true,
+      minWidth: 1,
+      minHeight: 1,
+      width,
+      height,
+      webPreferences: {
+        ...windowOptions().webPreferences,
+        backgroundThrottling: false,
+      },
+    });
+    secure(effectPreviewWindow);
+    const devUrl = process.env.SHOWME_DEV_URL;
+    if (devUrl && !app.isPackaged)
+      await effectPreviewWindow.loadURL(devUrl + "?slidePreview=1");
+    else
+      await effectPreviewWindow.loadFile(
+        path.join(__dirname, "../dist/index.html"),
+        { query: { slidePreview: "1" } },
+      );
+  }
+  const window = effectPreviewWindow;
+  if (!previewOwnerAlive(owner) || !window || window.isDestroyed()) return null;
+  window.setContentSize(width, height);
+  return window;
+}
+
+async function acquireEffectPreviewSlot() {
+  if (admittedEffectPreviews < EFFECT_PREVIEW_MAX_ADMITTED) {
+    admittedEffectPreviews++;
+    return;
+  }
+  await new Promise<void>((resolve) => effectPreviewSlotWaiters.push(resolve));
+  admittedEffectPreviews++;
+}
+
+function releaseEffectPreviewSlot() {
+  admittedEffectPreviews--;
+  effectPreviewSlotWaiters.shift()?.();
+}
+
+async function waitForSlidePreviewIdle() {
+  while (pendingPreviews > 0) {
+    await previewQueue.catch(() => {});
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function captureSlidePreview(
+  projection: import("../src/core/documentProjection").DocumentProjection,
+  width: unknown,
+  height: unknown,
+  diagnostics = false,
+  signal?: AbortSignal,
+  sample?: import("../src/core/agentPreviewSample").AgentPreviewSample,
+  previous?: import("../src/core/documentProjection").DocumentProjection,
+): Promise<SlidePreviewCapture | null> {
+  const owner = editor;
+  if (signal?.aborted || !previewOwnerAlive(owner)) return Promise.resolve(null);
+  // Capture an isolated canonical surface, never editor UI overlays.
+  const requestedWidth = z.number().int().positive().max(2048).parse(width);
+  const requestedHeight = z.number().int().positive().max(2048).parse(height);
+  const documentId = idSchema.parse(projection.documentId),
+    slideId = idSchema.parse(projection.slide.id);
+  if (pendingPreviews >= 8) return Promise.resolve(null);
+  pendingPreviews++;
+  const task = previewQueue.then(async () => {
+    if (signal?.aborted || !previewOwnerAlive(owner)) return null;
+    const current = await operations.renderProjection(documentId, slideId);
+    if (
+      signal?.aborted || !previewOwnerAlive(owner) ||
+      current.epoch !== projection.epoch ||
+      current.revision !== projection.revision
+    )
+      return null;
+    previewDocumentId = documentId;
+    const nonce = randomUUID().replaceAll("-", "").slice(0, 9);
+    // The leading dark bit prevents an empty light app surface from matching.
+    const captureToken = (parseInt(nonce[0], 16) & 7).toString(16) + nonce.slice(1);
+    const window = await compositionWindow(
+      requestedWidth,
+      requestedHeight + 48,
+      owner,
+    );
+    if (!window) return null;
+    let cancelled!: () => void;
+    const cancellation = new Promise<null>(resolve => { cancelled = () => resolve(null); });
+    const cancel = () => { cancelled(); if (!window.isDestroyed()) window.destroy(); };
+    signal?.addEventListener("abort", cancel, {once: true});
+    try {
+      if (signal?.aborted) { cancel(); return null; }
+      const ready = await Promise.race([window.webContents.executeJavaScript(
+        "window.composeSlidePreview(" +
+          JSON.stringify(current) +
+          "," +
+          requestedWidth +
+          "," +
+          requestedHeight +
+          "," + JSON.stringify(captureToken) +
+          "," + JSON.stringify(sample) + "," + JSON.stringify(previous) +
+          ")",
+      ), cancellation]);
+      if (!ready || !previewOwnerAlive(owner) || window.isDestroyed()) return null;
+      const image = await Promise.race([captureComposedFrame(window, requestedWidth, requestedHeight, captureToken), cancellation]);
+      if (!image) return null;
+      if (!previewOwnerAlive(owner) || window.isDestroyed()) return null;
+      const warnings: AgentPreviewWarning[] = diagnostics
+        ? await Promise.race([window.webContents.executeJavaScript(
+            "window.slidePreviewWarnings()",
+          ), cancellation])
+        : [];
+      if (signal?.aborted || !warnings) return null;
+      return {
+        width: requestedWidth,
+        height: requestedHeight,
+        warnings,
+        pngDataUrl: `data:image/png;base64,${image.toString("base64")}`,
+      };
+    } finally {
+      signal?.removeEventListener("abort", cancel);
+      if (!window.isDestroyed()) {
+        await window.webContents
+          .executeJavaScript("window.clearSlidePreview()")
+          .catch(() => {});
+      }
+    }
+  });
+  previewQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  void task
+    .finally(() => {
+      pendingPreviews--;
+    })
+    .catch(() => {});
+  return task;
+}
+
+function validateAgentEffect(
+  _documentId: string,
+  definition: EffectDefinition,
+  sampleText?: string,
+): Promise<EffectValidationResult | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.validateAgentEffect(" +
+        JSON.stringify(definition) +
+        "," +
+        JSON.stringify(sampleText) +
+        ")",
+    ), "EFFECT_VALIDATION_UNAVAILABLE",
+  );
+}
+
+function measureAgentText(
+  documentId: string,
+  element: import("../src/core/element").Element & {
+    content: import("../src/core/text").TextContent;
+  },
+): Promise<import("../src/core/text").TextMeasurement | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.measureAgentText(" +
+        JSON.stringify(documentId) +
+        "," +
+        JSON.stringify(element) +
+        ")",
+    ),
+  );
+}
+
+function measureAgentTextBatch(
+  documentId: string,
+  items: readonly import("../src/core/agentTextMeasure").AgentTextMeasureItem[],
+): Promise<import("../src/core/agentTextMeasure").AgentTextFitMeasurement[] | null> {
+  return runAgentRuntime((window) =>
+    window.webContents.executeJavaScript(
+      "window.measureAgentTextBatch(" +
+        JSON.stringify(documentId) +
+        "," +
+        JSON.stringify(items) +
+        ")",
+    ),
+  );
+}
+
+const agentInspection = new AgentInspectionService({
+  access: () => agentContext.isEnabled ? mcpAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  context: () => agentContext.read(),
+  projection: async (id, pageId) => {
+    if (collaboration.isGuest(id) && collaboration.status().clientStatus !== "connected") throw new Error("Guest unavailable");
+    return collaboration.isGuest(id) ? collaboration.projection(id, pageId) : documentRuntime(id).projection(id, pageId);
+  },
+  listAssets: async (_documentId, query, offset, limit) =>
+    requireStorage().listAssets(query, offset, limit),
+});
+const agentAuthoring = new AgentAuthoringService({
+  access: () => (agentContext.isEnabled ? mcpAccessVersion : null),
+  activeDocumentId: activeAgentDocumentId,
+  context: () => agentContext.read(),
+  projection: async (id, pageId) => {
+    if (
+      collaboration.isGuest(id) &&
+      collaboration.status().clientStatus !== "connected"
+    )
+      throw new Error("Guest unavailable");
+    return collaboration.isGuest(id)
+      ? collaboration.projection(id, pageId)
+      : documentRuntime(id).projection(id, pageId);
+  },
+});
+const agentTextMeasurement = new AgentTextMeasurementService({
+  access: () => (agentContext.isEnabled ? mcpAccessVersion : null),
+  activeDocumentId: activeAgentDocumentId,
+  state: async (documentId) => {
+    const context = await agentContext.read();
+    if (!context.document || context.document.id !== documentId)
+      throw new Error("Document unavailable");
+    return {
+      documentId: context.document.id,
+      epoch: context.document.epoch,
+      revision: context.document.revision,
+    };
+  },
+  measure: measureAgentTextBatch,
+});
+function notifyAgentHistory() {
+  if (editor && !editor.isDestroyed()) editor.webContents.send("agent-history-changed");
+}
+const agentEditing = new AgentEditingService({
+  access: () => agentContext.isEnabled && mcpEditingEnabled ? mcpWriteAccessVersion : null,
+  eligibility: id => collaboration.isGuest(id) ? "GUEST_EDITING_UNSUPPORTED" : !agentContext.isEnabled ? "MCP_DISABLED" : !mcpEditingEnabled ? "EDITING_DISABLED" : null,
+  activeDocumentId: activeAgentDocumentId,
+  runtime: documentRuntime,
+  measure: measureAgentText,
+  validateEffect: validateAgentEffect,
+  asset: (documentId, assetId) =>
+    requireStorage().assetForDocument(documentId, assetId),
+  changed: notifyAgentHistory,
+});
+const documentClosing = new DocumentClosing(agentEditing);
+const agentDelivery = new AgentDeliveryService({
+  access: () => agentContext.isEnabled ? mcpAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  eligibility: (id) => collaboration.isGuest(id) ? "GUEST_DELIVERY_UNSUPPORTED" : null,
+  runtime: documentRuntime,
+  deliver: async (request, beforePersist) => {
+    let overwritten = false;
+    const admission = (destination: string) => { beforePersist(); overwritten = existsSync(destination); };
+    if (request.action === "package") {
+      const destination = await packageDocument(request.documentId, admission, request.packageOptions);
+      return destination ? { destination, format: "smp", overwrite: "native-policy", overwritten, packageOptions: request.packageOptions ?? null, fontWarnings: requireStorage().packageFontWarnings(request.documentId) } : null;
+    }
+    const summary = await (request.action === "save-as" ? saveDocumentAs : saveDocument)(request.documentId, admission);
+    return summary ? { destination: summary.location, format: summary.location.toLowerCase().endsWith(".smp") ? "smp" : "sme", overwrite: "native-policy", overwritten } : null;
+  },
+});
+function workspaceDocumentReceipt(document: { id: string; name: string }) {
+  const runtime = documentRuntime(document.id), metadata = runtime.metadata(document.id), deck = runtime.presentationDeck(document.id);
+  return { document: { id: document.id, name: document.name, ...metadata, dirty: metadata.revision !== metadata.savedRevision },
+    initialPageIds: { slides: deck.slideIds, templates: deck.templateIds },
+    readiness: { authority: "ready", editor: "poll-context", guidance: "Read showme.context until availability=ready and editor.documentId matches document.id. Replace the COMPLETE document identity, including id and epoch, before further requests." } };
+}
+const agentWorkspace = new AgentWorkspaceService({
+  access: () =>
+    agentContext.isEnabled && mcpEditingEnabled ? mcpWriteAccessVersion : null,
+  activeDocumentId: activeAgentDocumentId,
+  runtime: documentRuntime,
+  eligibility: (id) =>
+    collaboration.isGuest(id) ? "GUEST_EDITING_UNSUPPORTED" : null,
+  perform: async (request, admit) => {
+    const authorized = async (file: string) => {
+      const resolved = await fs.realpath(path.resolve(file));
+      const root = await fs.realpath(showMeRoot);
+      if (!isInsideRoot(root, resolved))
+        throw new Error("Select a file inside the user-selected ShowMe root.");
+      return resolved;
+    };
+    const ensureIdle = async () => {
+      admit();
+      if (documentRuntime(request.documentId).leaseState(request.documentId).length) throw new AgentMutationError("EDITOR_BUSY", "Finish the active editor interaction before switching documents.");
+      const idle = await editor?.webContents.executeJavaScript("window.agentWorkspaceIdle?.(" + JSON.stringify(request.documentId) + ") === true");
+      admit();
+      if (!idle) throw new AgentMutationError("EDITOR_BUSY", "Finish text editing, drafts and active interactions before switching documents. No draft was flushed or discarded.");
+    };
+    if (request.action === "create") {
+      await ensureIdle();
+      const document = await requireStorage().createDocument(request.name);
+      await ensureIdle();
+      registerDocumentNotifications(document.id);
+      activateDocument(document);
+      editor?.webContents.send("document-opened", document);
+      return workspaceDocumentReceipt(document);
+    }
+    if (request.action === "open") {
+      const file = request.path
+        ? await authorized(request.path)
+        : await chooseOpenPath();
+      if (!file) return { cancelled: true };
+      admit();
+      await ensureIdle();
+      const existing = requireStorage()
+        .openDocuments()
+        .map((d) => requireStorage().summary(d.documentId))
+        .find(
+          (d) =>
+            !!d.location && path.resolve(d.location) === path.resolve(file),
+        );
+      const document = existing ?? (await openDocumentPath(file, ensureIdle));
+      if (existing) { await ensureIdle(); activateDocument(existing); }
+      editor?.webContents.send("document-opened", document);
+      return workspaceDocumentReceipt(document);
+    }
+    if (request.action === "close") {
+      await ensureIdle();
+      // Existing close coordination handles authority draining and native cleanup.
+      // Defer window shutdown until the bridge has delivered the clean-close receipt.
+      await documentClosing.run(request.documentId, async () => {
+        await ensureIdle();
+        documentNotifications.get(request.documentId)?.();
+        documentNotifications.delete(request.documentId);
+        await requireStorage().closeDocument(request.documentId);
+        return true;
+      });
+      agentContext.invalidate();
+      activeDocumentId = null;
+      setTimeout(() => {
+        allowEditorClose = true;
+        editor?.close();
+      }, 500);
+      return { closed: true };
+    }
+    const paths = request.paths ?? (await dialog.showOpenDialog(editor!, {
+      properties: ["openFile", "multiSelections"], filters: [{ name: "Media", extensions: ["png", "jpg", "jpeg", "webp", "gif", "svg", "mp4", "webm"] }],
+    })).filePaths;
+    return importAgentMedia(paths, admit, {
+      authorize: async file => request.paths ? authorized(file) : file,
+      importFile: source => requireStorage().importFile(source),
+      prepare: imported => runAgentRuntime(window => window.webContents.executeJavaScript(
+        "window.prepareAgentMedia(" + JSON.stringify(imported) + ")"), "MEDIA_PREPARATION_UNAVAILABLE"),
+      updateAsset: asset => requireStorage().updateAsset(asset),
+      storePreview: (id, bytes) => requireStorage().storePreview(id, bytes),
+    });
+
+  },
+});
+const agentContextRead = async () => ({
+  ...(await agentContext.read()),
+  serverVersion: SHOWME_MCP_SERVER_VERSION,
+  contractVersion: AGENT_CONTRACT_VERSION,
+  services: { agentRuntime: {
+    state: agentRuntimeWindow?.isDestroyed() ? "uninitialized" : agentRuntimeStatus,
+    pending: pendingAgentRuntime,
+  } },
+  editing: { enabled: mcpEditingEnabled, ...agentEditing.availability() },
+});
+const agentBridge = new AgentBridge(app.getPath("userData"), async (request, signal) => {
+  if (request.command === "context") return { ok: true, data: await agentContextRead() };
+  if (request.command === "inspect") return agentInspection.inspect(request.params);
+  if (request.command === "authoring")
+    return agentAuthoring.authoring(request.params);
+  if (request.command === "measure_text")
+    return agentTextMeasurement.measure(request.params);
+  if (request.command === "apply") return agentEditing.apply(request.params, signal);
+  if (request.command === "deliver") return agentDelivery.deliver(request.params, signal);
+  if(request.command === "workspace")return agentWorkspace.run(request.params,signal);
+  return agentPreview.preview(request.params, signal);
+});
 const operations: Record<string, (...args: any[]) => any> = {
+  getMcpEditingEnabled: () => mcpEditingEnabled,
+  async setMcpEditingEnabled(input: unknown) {
+    const enabled = z.boolean().parse(input);
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.mcpEditingEnabled = enabled;
+    await writeSettings(app.getPath("userData"), settings);
+    if (mcpEditingEnabled !== enabled) mcpWriteAccessVersion++;
+    mcpEditingEnabled = enabled;
+    return enabled;
+  },
+  agentHistory: () => agentEditing.history(),
+  agentUndo: (input: unknown) => agentEditing.undo(z.object({ documentId: idSchema, redo: z.boolean() }).strict().parse(input)),
+  getMcpConnection: () => ({
+    status: agentContext.isEnabled ? agentBridge.status : "disabled",
+    instanceId: agentBridge.instanceId,
+    configuration: agentContext.isEnabled && agentBridge.status === "ready" ? JSON.stringify({ mcpServers: { showme: {
+      command: "node", args: [app.isPackaged ? path.join(process.resourcesPath, "showme-mcp.cjs") : path.join(__dirname, "showme-mcp.cjs"), "--user-data", app.getPath("userData")],
+    } } }, null, 2) : null,
+  }),
+  getMcpEnabled: () => agentContext.isEnabled,
+  async setMcpEnabled(input: unknown) {
+    const enabled = z.boolean().parse(input);
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.mcpEnabled = enabled;
+    await writeSettings(app.getPath("userData"), settings);
+    if (agentContext.isEnabled !== enabled) { mcpAccessVersion++; mcpWriteAccessVersion++; }
+    agentContext.setEnabled(enabled);
+    if (!enabled) {
+      agentPreview.cancelAll();
+      resetAgentRuntimeWindow();
+    }
+    await agentBridge.setEnabled(enabled);
+    editor?.webContents.send("mcp-enabled-changed", enabled);
+    return enabled;
+  },
+  editorAgentContext: (input: unknown) => agentContext.update(input),
+  agentContext: agentContextRead,
+  agentPreview: (input: unknown) => agentPreview.preview(input),
   managedFonts: (documentId?: string) =>
     requireStorage().managedFonts(documentId),
   presentationImageDiagnostics: () => imageCache.diagnostics(),
   getImageCachingEnabled: () => imageCachingEnabled,
+  async getExportFontEmbedding() {
+    return (await readSettings(app.getPath("userData"))).exportFontEmbedding ?? DEFAULT_FONT_EMBEDDING;
+  },
+  async setExportFontEmbedding(value: unknown) {
+    const mode = z.enum(["none", "svg", "file"]).parse(value);
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.exportFontEmbedding = mode;
+    await writeSettings(app.getPath("userData"), settings);
+  },
+  async getHtmlExportJpegQuality() {
+    const settings = await readSettings(app.getPath("userData"));
+    return settings.htmlExportJpegQuality ?? DEFAULT_HTML_EXPORT_JPEG_QUALITY;
+  },
+  async setHtmlExportJpegQuality(value: unknown) {
+    const quality = z.number().int().min(1).max(100).parse(value);
+    const settings = await readSettings(app.getPath("userData"), {
+      requireExisting: true,
+    });
+    settings.htmlExportJpegQuality = quality;
+    await writeSettings(app.getPath("userData"), settings);
+  },
+  getImageCacheFormat: () => imageCacheFormat,
+  async setImageCacheFormat(value: unknown) {
+    const format = z.enum(["png", "jpg"]).parse(value);
+    if (format === imageCacheFormat) return;
+    const settings = await readSettings(app.getPath("userData"), { requireExisting: true });
+    settings.imageCacheFormat = format;
+    await writeSettings(app.getPath("userData"), settings);
+    imagePreparation.suspend();
+    imageCacheFormat = format;
+    if (imageCachingEnabled) imagePreparation.resume();
+    notifyImageCacheChanged();
+  },
   getDeleteImageCacheOnClose: () => deleteImageCacheOnClose,
   async setDeleteImageCacheOnClose(value: unknown) {
     const enabled = z.boolean().parse(value);
@@ -1185,10 +2067,41 @@ const operations: Record<string, (...args: any[]) => any> = {
     if (slideId) {
       idSchema.parse(slideId);
       await operations.documentProjection(id, slideId);
-      imagePreparation.prioritize(id, slideId);
     }
-    await imagePreparation.reconcile(id, retry);
+    if (retry || !imagePreparation.status(id)) await imagePreparation.reconcile(id, retry);
     return imagePreparation.status(id);
+  },
+  audienceImageProfile(documentId: string) {
+    idSchema.parse(documentId);
+    return imagePreparationProfile();
+  },
+  async prepareAudience(documentId: string) {
+    const id = idSchema.parse(documentId);
+    const runtime = requirePresentation();
+    await runtime.outputShown();
+    const window = runtime.audienceWindow;
+    if (runtime.state?.deckId !== id || !window || window.isDestroyed()) throw new Error("Audience session ended");
+    const geometry: { width: number; height: number; pixelRatio: number } = await window.webContents.executeJavaScript(
+      "({ width: innerWidth, height: innerHeight, pixelRatio: devicePixelRatio })",
+    );
+    const profile = outputImageProfile(geometry.width, geometry.height, geometry.pixelRatio);
+    measuredAudienceProfile = profile;
+    imagePreparation.prioritize(id, runtime.state.slideIds[runtime.state.index ?? 0]);
+    await imagePreparation.reconcile(id);
+    if (imageCachingEnabled) await imagePreparation.presentationReady(id, true);
+    if (runtime.state?.deckId !== id) throw new Error("Audience session ended");
+    for (const view of [editor, runtime.presenterConsoleWindow])
+      if (view && !view.isDestroyed()) view.webContents.send("presentation-displays", runtime.displays());
+    return profile;
+  },
+  async preparedSlideImages(documentId: string, slideId: string, outputProfile?: unknown) {
+    if (!imageCachingEnabled) return {};
+    const id = idSchema.parse(documentId);
+    idSchema.parse(slideId);
+    const profile = outputProfile === undefined ? imagePreparationProfile() : z.object({
+      width: z.number().positive().max(100000), height: z.number().positive().max(100000),
+    }).strict().parse(outputProfile);
+    return imagePreparation.prepareSlide(id, slideId, profile, presentation?.state ? 0 : 1);
   },
   async preparedImage(
     documentId: string,
@@ -1200,45 +2113,17 @@ const operations: Record<string, (...args: any[]) => any> = {
     const id = idSchema.parse(documentId);
     idSchema.parse(slideId);
     idSchema.parse(elementId);
-    const projection = await operations.documentProjection(id, slideId);
-    const profile =
+    const profile: ImageOutputProfile =
       outputProfile === undefined
         ? imagePreparationProfile()
         : z
             .object({
               width: z.number().positive().max(100000),
               height: z.number().positive().max(100000),
-              sampling: z.literal("canvas").optional(),
             })
             .strict()
             .parse(outputProfile);
-    const requirement = planPresentationImages(
-      projection.deck,
-      [
-        resolveVisualSlide(
-          projection.deck,
-          projection.slide,
-          projection.templates ?? {},
-        ).slide,
-      ],
-      profile,
-      true,
-    ).find((item) =>
-      item.instances.some((instance) => instance.elementId === elementId),
-    );
-    if (!requirement) return null;
-    return imageCache.prepare(
-      collaboration.isGuest(id)
-        ? await requireStorage().verifiedAssetPath(requirement.assetId)
-        : await requireStorage().verifiedAssetPathForDocument(
-            id,
-            requirement.assetId,
-          ),
-      requirement.assetId,
-      requirement.size,
-      requirement.width,
-      requirement.height,
-    );
+    return (await operations.preparedSlideImages(id, slideId, profile))[elementId] ?? null;
   },
   async preparedAssetImage(assetId: string, size: number) {
     if (!imageCachingEnabled) return null;
@@ -1276,8 +2161,10 @@ const operations: Record<string, (...args: any[]) => any> = {
   recoveryCandidate: (file: unknown) =>
     requireStorage().recoveryCandidate(z.string().min(1).parse(file)),
   async openDocumentFile(file: unknown, mode: unknown = "saved") {
+    const resolved = path.resolve(z.string().min(1).parse(file));
+    assertPresentationInsideShowMeRoot(resolved);
     const summary = await requireStorage().openDocument(
-      z.string().min(1).parse(file),
+      resolved,
       z.enum(["saved", "recover"]).parse(mode),
     );
     registerDocumentNotifications(summary.id);
@@ -1301,7 +2188,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       destination === undefined
         ? undefined
         : librarySavePath(
-            presentationsFolder,
+            showMeRoot,
             z.string().min(1).parse(destination),
             lifecycleMode === "portable",
           ),
@@ -1309,10 +2196,14 @@ const operations: Record<string, (...args: any[]) => any> = {
   },
   async closeDocument(id: string) {
     const parsed = idSchema.parse(id);
+    const clearsAgentContext = parsed === activeDocumentId || parsed === agentGuestDocumentId;
     if (collaboration.isGuest(parsed)) {
+      agentEditing.forget(parsed);
       collaboration.leave();
+      if (clearsAgentContext) agentContext.invalidate();
       return;
     }
+    await documentClosing.run(parsed, async () => {
     documentNotifications.get(parsed)?.();
     documentNotifications.delete(parsed);
     imagePreparation.close(parsed);
@@ -1322,7 +2213,10 @@ const operations: Record<string, (...args: any[]) => any> = {
       storage.documentRuntime(parsed).authority.revision === 0
     )
       await storage.discardDocumentChanges(parsed);
-    else storage.closeDocument(parsed);
+    else await storage.closeDocument(parsed);
+    return true;
+    });
+    if (clearsAgentContext) agentContext.invalidate();
   },
   documentProjection: (documentId: string, slideId?: string) => {
     const id = idSchema.parse(documentId);
@@ -1451,7 +2345,9 @@ const operations: Record<string, (...args: any[]) => any> = {
         shell.showItemInFolder(await storage.file(request.id));
         return storage.list();
       }
-      return storage.run(request);
+      const output = await storage.run(request);
+      if (request.type !== "list") nativeLibraryBrowser?.invalidate();
+      return output;
     });
     effectLibraryQueue = result.then(
       () => undefined,
@@ -1460,49 +2356,15 @@ const operations: Record<string, (...args: any[]) => any> = {
     return result;
   },
   getMediaLibrary: getMediaLibraryInfo,
+  async openMediaLibrary() {
+    await shell.openPath(requireStorage().assetRoot);
+  },
   getLibraryLifecycle,
-  documentLibraryState,
-  async moveDocumentToPresentationsFolder(input: string) {
-    const id = idSchema.parse(input);
-    if (collaboration.isGuest(id))
-      throw new Error("The host owns presentation files");
-    const storage = requireStorage();
-    const file = await chooseSavePath(storage.summary(id).name);
-    if (!file) return null;
-    if (!isInsideLibrary(presentationsFolder, file) || !file.endsWith(".sme"))
-      throw new Error("Choose a location inside the presentations folder");
-    const original = await storage.assertNativeFileUnchanged(id);
-    const summary = await storage.saveDocument(id, file);
-    await rememberDocument(summary);
-    activateDocument(summary);
-    if (path.resolve(original.file) !== path.resolve(file)) {
-      if (
-        digest(await fs.readFile(original.file, "utf8")) !== original.revision
-      )
-        throw new Error(
-          "Saved the presentations folder copy, but the original changed during the move and was kept.",
-        );
-      await shell.trashItem(original.file);
-    }
-    return summary;
-  },
-  async saveDocumentAsPortable(input: string) {
-    const id = idSchema.parse(input);
-    if (collaboration.isGuest(id))
-      throw new Error("The host owns presentation files");
-    const storage = requireStorage();
-    const file = await choosePackagePath(storage.summary(id).name);
-    if (!file) return null;
-    const summary = await storage.savePackageAs(id, file, false);
-    await rememberDocument(summary);
-    activateDocument(summary);
-    return summary;
-  },
   async setLibraryLifecycleMode(input: unknown) {
     const next = z.enum(["managed", "keep-all", "portable"]).parse(input);
     await refreshLifecycleSettings();
     if (next === "managed" && lifecycleMode !== "managed") {
-      configureLifecycle();
+      lifecycle = createLibraryLifecycle();
       await lifecycle!.init();
       const analysis = await lifecycle!.scan(false, false, false);
       if (!analysis.complete) throw new Error(analysis.errors.join("\n"));
@@ -1510,7 +2372,7 @@ const operations: Record<string, (...args: any[]) => any> = {
         type: "question",
         title: "Enable Managed Library",
         message: "Enable automatic unused asset cleanup?",
-        detail: `${(analysis.unusedBytes / 1_000_000).toFixed(1)} MB is currently unreferenced. Unused assets will move to Library Trash, then system trash after 10 days. All .sme files in the presentations folder and its subfolders are scanned.`,
+        detail: `${(analysis.unusedBytes / 1_000_000).toFixed(1)} MB is currently unreferenced. Unused assets will move to Library Trash, then system trash after 10 days. All .sme files below the ShowMe root are scanned recursively.`,
         buttons: ["Enable and clean up", "Cancel"],
         defaultId: 1,
         cancelId: 1,
@@ -1524,7 +2386,7 @@ const operations: Record<string, (...args: any[]) => any> = {
     await writeSettings(app.getPath("userData"), settings);
     await refreshLifecycleSettings();
     if (next !== "portable") {
-      configureLifecycle();
+      lifecycle = createLibraryLifecycle();
       await lifecycle!.init();
     }
     if (next === "managed") await runLibraryScan(true, true);
@@ -1544,58 +2406,54 @@ const operations: Record<string, (...args: any[]) => any> = {
   async reviewLibraryTrash() {
     await shell.openPath(path.join(requireStorage().assetRoot, "Trash"));
   },
-  async choosePresentationsFolder() {
+  async chooseShowMeRoot() {
+    assertShowMeRootChangeAllowed(collaboration.status());
     const result = await dialog.showOpenDialog(editor!, {
-      title: "Select Presentations Folder",
-      defaultPath: presentationsFolder,
+      title: "Select ShowMe Root",
+      defaultPath: showMeRoot,
       properties: ["openDirectory", "createDirectory"],
     });
     if (result.canceled || !result.filePaths[0]) return null;
-    await setPresentationsFolder(path.resolve(result.filePaths[0]));
-    return getLibraryLifecycle();
-  },
-  async resetPresentationsFolder() {
-    const folder = defaultPresentationsFolderPath(app.getPath("userData"));
-    await fs.mkdir(folder, { recursive: true });
-    await setPresentationsFolder(null);
-    return getLibraryLifecycle();
-  },
-  async chooseMediaLibrary() {
-    const result = await dialog.showOpenDialog(editor!, {
-      title: "Select Media Library Directory",
-      properties: ["openDirectory", "createDirectory"],
+    const selected = await validateShowMeRoot(path.resolve(result.filePaths[0]), {
+      createLibrary: true,
     });
-    if (result.canceled || !result.filePaths[0]) return null;
-    const selected = path.resolve(result.filePaths[0]);
+    const library = showMeLibraryPath(selected);
+    await assertLocalCacheFolder(imageCacheFolder, library);
     const settings = await readSettings(app.getPath("userData"), {
       requireExisting: true,
     });
-    await fs.mkdir(selected, { recursive: true });
-    await assertLocalCacheFolder(imageCacheFolder, selected);
-    if (lifecycleMode === "portable")
-      throw new Error("Enable a central Library first");
-    settings.mediaLibraryPath = selected;
-    await requireStorage().setAssetRoot(selected);
-    await writeSettings(app.getPath("userData"), settings);
-    configureLifecycle();
-    await lifecycle!.init();
+    const storage = requireStorage();
+    const blockingDocument = storage
+      .openDocuments()
+      .map((document) => storage.summary(document.documentId))
+      .find(
+        (summary) =>
+          Boolean(summary.location) &&
+          path.extname(summary.location).toLowerCase() ===
+            SHOWME_DOCUMENT_EXTENSION &&
+          !isInsideRoot(selected, summary.location),
+      );
+    if (blockingDocument)
+      throw new Error(
+        `Close “${blockingDocument.name}” or save it as a portable .smp before changing the ShowMe root.`,
+      );
+    // Validate/create every managed directory before changing storage, watchers,
+    // protection leases or persisted settings. The candidate stays local until
+    // the switch commits; its init does not read documents or run cleanup.
+    await createLibraryLifecycle(selected).init();
+    const previousLibrary = storage.assetRoot;
+    await storage.setAssetRoot(library);
+    settings.showMeRootPath = selected;
+    try {
+      await writeSettings(app.getPath("userData"), settings);
+    } catch (error) {
+      await storage.setAssetRoot(previousLibrary);
+      throw error;
+    }
+    showMeRoot = selected;
+    lifecycle = createLibraryLifecycle();
     imagePreparation.invalidate();
-    return getMediaLibraryInfo();
-  },
-  async resetMediaLibrary() {
-    const settings = await readSettings(app.getPath("userData"), {
-      requireExisting: true,
-    });
-    const def = defaultMediaLibraryPath(app.getPath("userData"));
-    await fs.mkdir(def, { recursive: true });
-    await assertLocalCacheFolder(imageCacheFolder, def);
-    settings.mediaLibraryPath = null;
-    await requireStorage().setAssetRoot(def);
-    await writeSettings(app.getPath("userData"), settings);
-    configureLifecycle();
-    await lifecycle!.init();
-    imagePreparation.invalidate();
-    return getMediaLibraryInfo();
+    return getLibraryLifecycle();
   },
   async createDocument(name: string) {
     const document = await requireStorage().createDocument(
@@ -1643,12 +2501,31 @@ const operations: Record<string, (...args: any[]) => any> = {
     if (!result.canceled && result.filePath)
       await requireStorage().saveMediaAs(documentId, assetId, result.filePath);
   },
+  async confirmDocumentReplacement(documentId: string) {
+    const id = idSchema.parse(documentId);
+    if (collaboration.isGuest(id)) return true;
+    const summary = requireStorage().summary(id);
+    if (!summary.dirty) return true;
+    const result = await dialog.showMessageBox(editor!, {
+      type: "question",
+      buttons: ["Save", "Don't Save", "Cancel"],
+      defaultId: 0,
+      cancelId: 2,
+      title: "Unsaved changes",
+      message: `Do you want to save changes to ${summary.name}?`,
+    });
+    if (result.response === 2) return false;
+    if (result.response === 0) return !!(await saveDocument(id));
+    // Keep recovery until the replacement has opened successfully.
+    return true;
+  },
   async requestClose(documentId: string) {
     const id = idSchema.parse(documentId);
     if (collaboration.isGuest(id)) {
       collaboration.leave();
       return "closed";
     }
+    const closed = await documentClosing.run(id, async () => {
     const summary = requireStorage().summary(id);
     let response = summary.dirty ? 2 : 0;
     if (summary.dirty && !process.env.SHOWME_DOCUMENT_DIR) {
@@ -1666,17 +2543,17 @@ const operations: Record<string, (...args: any[]) => any> = {
     }
     if (response === 2) {
       closeRequestPending = false;
-      return "canceled";
+      return false;
     }
     if (response === 0 && summary.dirty) {
       const saved = await saveDocument(id);
       if (!saved) {
         closeRequestPending = false;
-        return "canceled";
+        return false;
       }
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
-      requireStorage().closeDocument(id);
+      await requireStorage().closeDocument(id);
     } else if (response === 1 && summary.dirty) {
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
@@ -1685,9 +2562,13 @@ const operations: Record<string, (...args: any[]) => any> = {
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
       if (summary.untitled) await requireStorage().discardDocumentChanges(id);
-      else requireStorage().closeDocument(id);
+      else await requireStorage().closeDocument(id);
     }
+    return true;
+    }).finally(() => { closeRequestPending = false; });
+    if (!closed) return "canceled";
     allowEditorClose = true;
+    agentContext.invalidate();
     closeRequestPending = false;
     editor?.close();
     return "closed";
@@ -1706,6 +2587,39 @@ const operations: Record<string, (...args: any[]) => any> = {
           `Slide transfer asset failed hash verification: ${assetId}`,
         );
     }),
+  async libraryBrowser(raw: unknown) {
+    await refreshLifecycleSettings();
+    if (lifecycleMode === "portable")
+      throw new Error("Native Library folders are unavailable in Portable mode");
+    const request = libraryBrowserRequestSchema.parse(raw);
+    const storage = requireStorage();
+    const browser = activeNativeLibraryBrowser();
+    if (request.type === "import-files") {
+      const selected = await dialog.showOpenDialog(editor!, {
+        properties: ["openFile", "multiSelections"],
+      });
+      try {
+        if (!selected.canceled)
+          for (const source of selected.filePaths) {
+            if (mediaFolder(source) !== request.category)
+              throw new Error("Select files belonging to the current category");
+            await importManagedFile(
+              storage.assetRoot,
+              path.basename(source),
+              source,
+              (hash) => storage.openProtection.protect([hash]),
+              request.folder,
+            );
+          }
+      } catch (error) {
+        await browser.reconcileAfterMutation();
+        throw error;
+      }
+      const reconciliationError = await browser.reconcileAfterMutation();
+      return { entries: [], total: 0, folders: [], reconciliationError };
+    }
+    return browser.run(request);
+  },
   listAssets: (query, offset, limit) =>
     requireStorage().listAssets(
       String(query),
@@ -1844,92 +2758,82 @@ const operations: Record<string, (...args: any[]) => any> = {
   updateAsset: (asset) => requireStorage().updateAsset(asset),
   storePreview: (id, data) =>
     requireStorage().storePreview(id, new Uint8Array(data)),
+  async effectThumbnail(raw: unknown) {
+    const owner = editor;
+    if (!previewOwnerAlive(owner)) return null;
+    const definition = effectDefinitionSchema.parse(raw);
+    const key = createHash("sha256")
+      .update(JSON.stringify([3, definition, 280, 280, 1, 0.5, 42]))
+      .digest("hex");
+    const file = path.join(
+      requireStorage().cacheRoot,
+      "effect-thumbnails",
+      key + ".png",
+    );
+    try {
+      const data = await fs.readFile(file);
+      return previewOwnerAlive(owner) ? `data:image/png;base64,${data.toString("base64")}` : null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    const existing = effectThumbnailJobs.get(key);
+    if (existing) return existing;
+
+    const job = (async () => {
+      await acquireEffectPreviewSlot();
+      try {
+        if (!previewOwnerAlive(owner)) return null;
+        const task = effectPreviewQueue.then(async () => {
+          // Effect Library thumbnails yield to presentation/slide preview work.
+          // They use a separate compositor window, so queued effects can never
+          // sit ahead of slide captures on the presentation preview queue.
+          await waitForSlidePreviewIdle();
+          if (!previewOwnerAlive(owner)) return null;
+          const window = await effectCompositionWindow(280, 280, owner);
+          if (!window) return null;
+          try {
+            const ready = await window.webContents.executeJavaScript(
+              "window.composeEffectThumbnail(" +
+                JSON.stringify(definition) +
+                ")",
+            );
+            if (!ready || !previewOwnerAlive(owner) || window.isDestroyed()) return null;
+            const image = await window.webContents.capturePage(undefined, {
+              stayHidden: true,
+            });
+            const data = image
+              .resize({ width: 280, height: 280, quality: "best" })
+              .toPNG();
+            await atomicWrite(file, data);
+            return `data:image/png;base64,${data.toString("base64")}`;
+          } finally {
+            if (!window.isDestroyed()) await window.webContents
+              .executeJavaScript("window.clearSlidePreview()")
+              .catch(() => {});
+          }
+        });
+        effectPreviewQueue = task.then(
+          () => undefined,
+          () => undefined,
+        );
+        return await task;
+      } catch (error) {
+        if (!previewOwnerAlive(owner)) return null;
+        throw error;
+      } finally {
+        releaseEffectPreviewSlot();
+      }
+    })().finally(() => effectThumbnailJobs.delete(key));
+    effectThumbnailJobs.set(key, job);
+    return job;
+  },
   capturePreview(
     projection: import("../src/core/documentProjection").DocumentProjection,
     width: unknown,
     height: unknown,
   ) {
-    // Capture an isolated canonical surface, never editor UI overlays.
-    const requestedWidth = z.number().int().positive().max(2048).parse(width);
-    const requestedHeight = z.number().int().positive().max(2048).parse(height);
-    const documentId = idSchema.parse(projection.documentId),
-      slideId = idSchema.parse(projection.slide.id);
-    if (pendingPreviews >= 8) return Promise.resolve(null);
-    pendingPreviews++;
-    const task = previewQueue.then(async () => {
-      const current = await operations.renderProjection(documentId, slideId);
-      if (
-        current.epoch !== projection.epoch ||
-        current.revision !== projection.revision
-      )
-        return null;
-      previewDocumentId = documentId;
-      if (!previewWindow || previewWindow.isDestroyed()) {
-        previewWindow = new BrowserWindow({
-          ...windowOptions(),
-          show: false,
-          frame: false,
-          useContentSize: true,
-          minWidth: 1,
-          minHeight: 1,
-          width: requestedWidth,
-          height: requestedHeight,
-          // Keep a normal GPU compositor surface hidden. Offscreen copy requests
-          // can fail with UnknownVizError even after renderer readiness.
-          webPreferences: {
-            ...windowOptions().webPreferences,
-            backgroundThrottling: false,
-          },
-        });
-        secure(previewWindow);
-        const devUrl = process.env.SHOWME_DEV_URL;
-        if (devUrl && !app.isPackaged)
-          await previewWindow.loadURL(devUrl + "?slidePreview=1");
-        else
-          await previewWindow.loadFile(
-            path.join(__dirname, "../dist/index.html"),
-            { query: { slidePreview: "1" } },
-          );
-      }
-      const window = previewWindow;
-      window.setContentSize(requestedWidth, requestedHeight);
-      try {
-        const ready = await window.webContents.executeJavaScript(
-          "window.composeSlidePreview(" +
-            JSON.stringify(current) +
-            "," +
-            requestedWidth +
-            "," +
-            requestedHeight +
-            ")",
-        );
-        if (!ready) return null;
-        const image = await window.webContents.capturePage(undefined, {
-          stayHidden: true,
-        });
-        return image
-          .resize({
-            width: requestedWidth,
-            height: requestedHeight,
-            quality: "best",
-          })
-          .toDataURL();
-      } finally {
-        await window.webContents
-          .executeJavaScript("window.clearSlidePreview()")
-          .catch(() => {});
-      }
-    });
-    previewQueue = task.then(
-      () => undefined,
-      () => undefined,
-    );
-    void task
-      .finally(() => {
-        pendingPreviews--;
-      })
-      .catch(() => {});
-    return task;
+    return captureSlidePreview(projection, width, height).then((result) => result?.pngDataUrl ?? null);
   },
   async thumbnail(documentId, slideId) {
     try {
@@ -1945,6 +2849,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       : requireStorage().storeThumbnail(documentId, slideId, data),
   displays: () => requirePresentation().displays(),
   async present(input: PresenterState) {
+    measuredAudienceProfile = null;
     await requirePresentation().present(input);
     const state = requirePresentation().state;
     if (state?.index !== null && state?.index !== undefined) {
@@ -1996,6 +2901,7 @@ registerIpcRouter({
   getEditor: () => editor,
   getExportWindow: () => exportWindow,
   getPreviewWindow: () => previewWindow,
+  getAgentRuntimeWindow: () => agentRuntimeWindow,
   getPreviewDocumentId: () => previewDocumentId,
   getAudienceWindow: () => presentation?.audienceWindow ?? null,
   getPresenterConsole: () => presentation?.presenterConsoleWindow ?? null,
@@ -2033,6 +2939,68 @@ async function openFromMenu() {
   openInNewEditorWindow(file);
 }
 
+async function requireConfiguredShowMeRoot(
+  settings: Awaited<ReturnType<typeof readSettings>>,
+): Promise<string | null> {
+  const scriptedRoot =
+    process.env.SHOWME_TESTING === "1"
+      ? process.env.SHOWME_TEST_ROOT_SELECTION
+      : undefined;
+  if (settings.showMeRootPath) {
+    try {
+      return await validateShowMeRoot(settings.showMeRootPath);
+    } catch (error) {
+      dialog.showErrorBox(
+        "ShowMe root unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  } else if (scriptedRoot === "__blocked__") {
+    return null;
+  } else if (!scriptedRoot) {
+    const intro = await dialog.showMessageBox({
+      type: "info",
+      title: "Choose ShowMe Root",
+      message:
+        "ShowMe now uses one root folder for presentations and the Media Library.",
+      detail:
+        "Choose the folder that contains, or should contain, your Library and all presentations that use it. Existing files will not be moved.",
+      buttons: ["Choose ShowMe Root…", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (intro.response !== 0) {
+      app.quit();
+      return null;
+    }
+  }
+  while (true) {
+    const result = scriptedRoot
+      ? { canceled: false, filePaths: [scriptedRoot] }
+      : await dialog.showOpenDialog({
+          title: "Choose ShowMe Root",
+          properties: ["openDirectory", "createDirectory"],
+        });
+    if (result.canceled || !result.filePaths[0]) {
+      app.quit();
+      return null;
+    }
+    try {
+      const root = await validateShowMeRoot(path.resolve(result.filePaths[0]), {
+        createLibrary: true,
+      });
+      settings.showMeRootPath = root;
+      await writeSettings(app.getPath("userData"), settings);
+      return root;
+    } catch (error) {
+      dialog.showErrorBox(
+        "Invalid ShowMe root",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+}
+
 void app.whenReady().then(async () => {
   let settings: Awaited<ReturnType<typeof readSettings>>;
   try {
@@ -2046,21 +3014,20 @@ void app.whenReady().then(async () => {
     return;
   }
   lifecycleMode = settings.libraryLifecycleMode ?? "managed";
+  agentContext.setEnabled(settings.mcpEnabled === true);
+  mcpEditingEnabled = settings.mcpEditingEnabled === true;
   imageCachingEnabled = settings.imageCachingEnabled !== false;
+  imageCacheFormat = settings.imageCacheFormat ?? "png";
   deleteImageCacheOnClose = settings.deleteImageCacheOnClose !== false;
   imageCacheFolder =
     settings.imageCachePath && path.isAbsolute(settings.imageCachePath)
       ? settings.imageCachePath
       : defaultImageCachePath(app.getPath("userData"));
   if (!imageCachingEnabled) imagePreparation.suspend();
-  const assetRoot =
-    settings.mediaLibraryPath && path.isAbsolute(settings.mediaLibraryPath)
-      ? settings.mediaLibraryPath
-      : defaultMediaLibraryPath(app.getPath("userData"));
-  presentationsFolder = await initializePresentationsFolder(
-    app.getPath("userData"),
-    settings,
-  );
+  const configuredShowMeRoot = await requireConfiguredShowMeRoot(settings);
+  if (!configuredShowMeRoot) return;
+  showMeRoot = configuredShowMeRoot;
+  const assetRoot = showMeLibraryPath(showMeRoot);
   storage = new DocumentStorage(
     assetRoot,
     path.join(app.getPath("userData"), "cache"),
@@ -2084,8 +3051,13 @@ void app.whenReady().then(async () => {
         for (const documentId of ids)
           window.webContents.send("document-invalidated", { documentId });
   };
+  storage.onMediaInventoryChanged = () => {
+    if (editor && !editor.isDestroyed())
+      editor.webContents.send("media-inventory-changed");
+  };
   await storage.init();
-  configureLifecycle();
+  await agentBridge.setEnabled(agentContext.isEnabled);
+  lifecycle = createLibraryLifecycle();
   if (lifecycleMode !== "portable") await lifecycle!.init();
 
   await assertLocalCacheFolder(imageCacheFolder, storage.assetRoot);
@@ -2118,6 +3090,7 @@ void app.whenReady().then(async () => {
     try {
       launchDocument = await openDocumentPath(file);
     } catch (error) {
+      console.error("Could not open startup presentation", file, error);
       dialog.showErrorBox(
         "Could not open presentation",
         error instanceof Error ? error.message : String(error),
@@ -2176,6 +3149,10 @@ void app.whenReady().then(async () => {
                 label: "PowerPoint...",
                 click: () => sendFileCommand("export-pptx"),
               },
+              {
+                label: "Export HTML...",
+                click: () => sendFileCommand("export-html"),
+              },
             ],
           },
           { type: "separator" },
@@ -2198,10 +3175,11 @@ void app.whenReady().then(async () => {
       let base: string;
       let contentType: string;
       if (url.hostname === "presentation-image" && parts.length === 1) {
-        const hash = hashSchema.parse(parts[0].replace(/\.png$/, ""));
+        const match = /^([a-f0-9]{64})\.(png|jpg)$/.exec(parts[0]);
+        if (!match) throw new Error("Invalid prepared image URL");
         base = imageCache.root;
-        file = path.join(base, hash + ".png");
-        contentType = "image/png";
+        file = path.join(base, match[1] + "." + match[2]);
+        contentType = match[2] === "jpg" ? "image/jpeg" : "image/png";
       } else if (url.hostname === "asset" && parts.length === 2) {
         if (parts[1] === "preview") {
           file = currentStorage.previewPath(parts[0]);
@@ -2251,6 +3229,10 @@ void app.whenReady().then(async () => {
   });
 
   editor = new BrowserWindow(windowOptions());
+  editor.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+    if (mainFrame && !inPlace) agentContext.invalidate();
+  });
+  editor.webContents.on("render-process-gone", () => agentContext.invalidate());
   presentation.setEditor(editor);
   editor.setMenuBarVisibility(false);
   secure(editor);
@@ -2264,9 +3246,8 @@ void app.whenReady().then(async () => {
     editor?.webContents.send("file-command", "prepare-close");
   });
   editor.on("closed", () => {
-    previewWindow?.destroy();
-    previewWindow = null;
-    previewDocumentId = null;
+    agentContext.invalidate();
+    tearDownPreviewWindows();
     editor = null;
     activeDocumentId = null;
     presentation?.setEditor(null);
@@ -2278,13 +3259,16 @@ app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => collaboration.close());
 // All window close/save prompts have completed before will-quit fires.
 app.on("will-quit", (event) => {
-  if (!storage || cacheCleanupFinished) return;
+  tearDownPreviewWindows();
+  if (cacheCleanupFinished) return;
   event.preventDefault();
   if (cacheCleanupPending) return;
   cacheCleanupPending = true;
   imagePreparation.suspend();
-  void imageCache
-    .releaseOnQuit(deleteImageCacheOnClose)
+  void Promise.all([
+    agentBridge.setEnabled(false),
+    storage ? imageCache.releaseOnQuit(deleteImageCacheOnClose) : Promise.resolve(),
+  ])
     .catch((error) => {
       console.error("Could not delete image cache on close:", error);
     })

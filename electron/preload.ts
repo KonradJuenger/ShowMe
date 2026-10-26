@@ -1,13 +1,19 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const methods = [
+  "getMcpEnabled",
+  "getMcpConnection",
+  "setMcpEnabled",
+  "getMcpEditingEnabled",
+  "setMcpEditingEnabled",
+  "agentHistory",
+  "agentUndo",
+  "editorAgentContext",
+  "agentContext",
+  "agentPreview",
   "effectLibrary",
   "getLibraryLifecycle",
-  "choosePresentationsFolder",
-  "resetPresentationsFolder",
-  "documentLibraryState",
-  "moveDocumentToPresentationsFolder",
-  "saveDocumentAsPortable",
+  "chooseShowMeRoot",
   "setLibraryLifecycleMode",
   "scanLibrary",
   "emptyOldLibraryTrash",
@@ -15,12 +21,21 @@ const methods = [
   "presentationImageDiagnostics",
   "imageReadiness",
   "preparedImage",
+  "preparedSlideImages",
+  "prepareAudience",
+  "audienceImageProfile",
   "preparedAssetImage",
   "getImageCacheFolder",
   "chooseImageCacheFolder",
   "resetImageCacheFolder",
   "clearPresentationImages",
   "getImageCachingEnabled",
+  "getExportFontEmbedding",
+  "setExportFontEmbedding",
+  "getHtmlExportJpegQuality",
+  "setHtmlExportJpegQuality",
+  "getImageCacheFormat",
+  "setImageCacheFormat",
   "getDeleteImageCacheOnClose",
   "setDeleteImageCacheOnClose",
   "setImageCachingEnabled",
@@ -55,8 +70,7 @@ const methods = [
   "collaborationLeave",
   "collaborationStop",
   "getMediaLibrary",
-  "chooseMediaLibrary",
-  "resetMediaLibrary",
+  "openMediaLibrary",
   "managedFonts",
   "showContextMenu",
   "closeContextMenu",
@@ -73,7 +87,10 @@ const methods = [
   "exportReady",
   "packageMediaState",
   "saveMediaAs",
+  "confirmDocumentReplacement",
   "requestClose",
+  "libraryBrowser",
+  "effectThumbnail",
   "listAssets",
   "getAsset",
   "importAssets",
@@ -98,7 +115,17 @@ const methods = [
 ];
 
 contextBridge.exposeInMainWorld("desktop", {
+  onAgentHistoryChanged: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on("agent-history-changed", listener);
+    return () => ipcRenderer.removeListener("agent-history-changed", listener);
+  },
   isTest: Boolean(process.env.SHOWME_DOCUMENT_DIR),
+  onMcpEnabledChanged: (cb: (enabled: boolean) => void) => {
+    const listener = (_: unknown, enabled: boolean) => cb(enabled);
+    ipcRenderer.on("mcp-enabled-changed", listener);
+    return () => ipcRenderer.removeListener("mcp-enabled-changed", listener);
+  },
   ...Object.fromEntries(
     methods.map((method) => [
       method,
@@ -139,10 +166,21 @@ contextBridge.exposeInMainWorld("desktop", {
     return true;
   },
   releaseUrl: () => {},
+  onMediaInventoryChanged: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on("media-inventory-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("media-inventory-changed", listener);
+  },
   onFontInventoryChanged: (cb: () => void) => {
     const listener = () => cb();
     ipcRenderer.on("font-inventory-changed", listener);
     return () => ipcRenderer.removeListener("font-inventory-changed", listener);
+  },
+  onHtmlExportProgress: (cb: (status: unknown) => void) => {
+    const listener = (_: unknown, status: unknown) => cb(status);
+    ipcRenderer.on("html-export-progress", listener);
+    return () => ipcRenderer.removeListener("html-export-progress", listener);
   },
   onImageReadiness: (cb: (status: unknown) => void) => {
     const listener = (_: unknown, status: unknown) => cb(status);

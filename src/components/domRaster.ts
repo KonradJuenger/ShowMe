@@ -12,7 +12,7 @@ export function setDomRasterReadBatchingForTests(
 ) {
   refreshMode = mode;
 }
-const metrics = { captures: 0, clones: 0, styleReads: 0 };
+const metrics = { captures: 0, clones: 0, styleReads: 0, activeSources: 0 };
 export function domRasterDiagnostics() {
   return { ...metrics };
 }
@@ -27,6 +27,7 @@ export function createDomRasterSource(
   dependencies: () => Promise<void>,
   sourceTransform: () => DOMMatrix = () => new DOMMatrix(),
   refined = false,
+  stableStyles?: () => unknown,
 ) {
   const canvas = document.createElement("canvas") as PaintCanvas;
   const context = canvas.getContext("2d") as PaintContext | null;
@@ -53,6 +54,17 @@ export function createDomRasterSource(
     revision: string;
     children: number[];
     bitmap?: HTMLCanvasElement;
+    paint?: {
+      value: string;
+      media: {
+        width: string;
+        height: string;
+        objectFit: string;
+        objectPosition: string;
+      };
+      pseudos: string[];
+      transport: Record<string, string>;
+    };
   }> = [];
   let dirty = true,
     structureDirty = true,
@@ -70,6 +82,10 @@ export function createDomRasterSource(
   let wasDynamic = false;
   let bitmapWritten = false;
   let structureRevision = 0;
+  let styleEpoch = 0;
+  let frozenKey: unknown;
+  let frozenEpoch = -1;
+  let frozenInline = "";
   const included = (node: HTMLElement) => {
     for (
       let ancestor: HTMLElement | null = node;
@@ -81,7 +97,9 @@ export function createDomRasterSource(
     }
     return false;
   };
+  const semanticStyles = () => stableStyles?.() != null;
   const hasRunningAnimations = () =>
+    !semanticStyles() &&
     originalRoot.getAnimations({ subtree: true }).some((animation) => {
       if (animation.playState !== "running") return false;
       if (!refined || !(animation.effect instanceof KeyframeEffect))
@@ -89,14 +107,17 @@ export function createDomRasterSource(
       const target = animation.effect.target;
       return target instanceof HTMLElement && included(target);
     });
+  // Stable declarations do not imply stable decoded media pixels.
+  const hasPlayingVideo = () =>
+    Array.from(originalRoot.querySelectorAll("video")).some(
+      (video) => (!refined || included(video)) && !video.paused && !video.ended,
+    );
   // Polling preserves decoder throughput in the native capture route.
   const pollAnimations = () => {
     animationFrame = 0;
     if (disposed) return;
     const animated = hasRunningAnimations();
-    const playing = Array.from(originalRoot.querySelectorAll("video")).some(
-      (video) => (!refined || included(video)) && !video.paused,
-    );
+    const playing = hasPlayingVideo();
     if (animated || playing || wasDynamic) {
       dirty = true;
       invalidate();
@@ -108,8 +129,7 @@ export function createDomRasterSource(
     if (disposed) return;
     dirty = true;
     invalidate();
-    if (!animationFrame && !disposed)
-      animationFrame = requestAnimationFrame(pollAnimations);
+    if (!animationFrame) animationFrame = requestAnimationFrame(pollAnimations);
   };
   const observer = new MutationObserver((records) => {
     const relevant = records.filter((record) => {
@@ -120,12 +140,21 @@ export function createDomRasterSource(
       return (
         target &&
         (target.closest("head,style") ||
+          target.contains(source()) ||
           ((refined ? included(target) : include(target)) &&
             target.tagName !== "CANVAS" &&
             !record.attributeName?.startsWith("data-effect")))
       );
     });
     if (!relevant.length) return;
+    if (
+      relevant.some(
+        ({ target }) =>
+          target instanceof HTMLElement &&
+          (!!target.closest("head,style") || !source().contains(target)),
+      )
+    )
+      styleEpoch++;
     if (
       relevant.some((record) => {
         if (record.type !== "childList") return false;
@@ -163,6 +192,16 @@ export function createDomRasterSource(
       characterData: true,
       attributes: true,
     });
+    if (!semanticStyles())
+      for (
+        let ancestor = source().parentElement;
+        ancestor;
+        ancestor = ancestor.parentElement
+      )
+        observer.observe(ancestor, {
+          attributes: true,
+          attributeFilter: ["class", "style"],
+        });
     source()
       .closest(".slide-renderer")
       ?.querySelectorAll("style")
@@ -183,6 +222,13 @@ export function createDomRasterSource(
   document.fonts.addEventListener("loadingdone", fontChanged);
   const loaded = () => markDirty();
   source().addEventListener("load", loaded, true);
+  const mediaEvents = ["playing", "pause", "ended", "loadeddata", "seeked"];
+  const mediaChanged = (event: Event) => {
+    if (event.target instanceof HTMLVideoElement && included(event.target))
+      markDirty();
+  };
+  for (const event of mediaEvents)
+    source().addEventListener(event, mediaChanged, true);
   const originalRoot = source();
   animationFrame = requestAnimationFrame(pollAnimations);
   // Freeze pseudo-elements without copying global page styles into the mirror.
@@ -266,19 +312,60 @@ export function createDomRasterSource(
   };
   const refresh = () => {
     bitmapWritten = false;
-    if (refined) {
-      const structural = Array.from(
-        originalRoot.querySelectorAll<HTMLElement>("[data-effect-source]"),
-      ).map((node) => [node.parentElement?.dataset.effectId, include(node)]);
-      const key = JSON.stringify(structural);
-      if (key !== structureKey) {
-        structureKey = key;
-        structureDirty = true;
-      }
-    }
     if (structureDirty || !root) build();
+    // This opt-in is used only for a scene of constant scoped CSS declarations.
+    // Motion still supplies live computed transforms/alpha/visibility. Other
+    // authoring, stylesheet, font and topology changes invalidate the cache.
+    const transport = new Set([
+      "transform",
+      "transform-origin",
+      "opacity",
+      "visibility",
+      "content-visibility",
+      "pointer-events",
+      "will-change",
+      "display",
+    ]);
+    const key = stableStyles?.();
+    const frozen = key !== undefined && key !== null;
+    if (frozen) {
+      const inline = pairs
+        .map(({ original }) =>
+          [
+            original.className,
+            ...Array.from(original.style)
+              .filter(
+                (property) =>
+                  !property.startsWith("--") && !transport.has(property),
+              )
+              .map(
+                (property) =>
+                  `${property}:${original.style.getPropertyValue(property)}`,
+              ),
+          ].join(";"),
+        )
+        .join("\n");
+      if (
+        key !== frozenKey ||
+        frozenEpoch !== styleEpoch ||
+        inline !== frozenInline
+      )
+        pairs.forEach((pair) => {
+          pair.paint = undefined;
+        });
+      frozenKey = key;
+      frozenEpoch = styleEpoch;
+      frozenInline = inline;
+    } else
+      pairs.forEach((pair) => {
+        pair.paint = undefined;
+      });
     const pseudoRules: string[] = [];
     const read = (pair: (typeof pairs)[number]) => {
+      if (frozen && pair.paint) {
+        pseudoRules.push(...pair.paint.pseudos);
+        return pair.paint;
+      }
       const { original, clone } = pair;
       const computed = getComputedStyle(original);
       metrics.styleReads++;
@@ -291,14 +378,25 @@ export function createDomRasterSource(
         objectPosition: computed.objectPosition,
       };
       const key = clone.dataset.domRasterNode!;
+      const pseudos: string[] = [];
       for (const pseudo of ["::before", "::after"]) {
         const style = getComputedStyle(original, pseudo);
+        metrics.styleReads++;
         if (style.content !== "none" && style.content !== "normal")
-          pseudoRules.push(
+          pseudos.push(
             `[data-dom-raster-node="${key}"]${pseudo}{${declarations(style)}animation:none!important;transition:none!important;}`,
           );
       }
-      return { value, media };
+      pseudoRules.push(...pseudos);
+      const transportValues = Object.fromEntries(
+        [...transport].map((property) => [
+          property,
+          computed.getPropertyValue(property),
+        ]),
+      );
+      const paint = { value, media, pseudos, transport: transportValues };
+      if (frozen) pair.paint = paint;
+      return paint;
     };
     const reads = batchReads ? pairs.map(read) : null;
     for (const [index, pair] of pairs.entries()) {
@@ -309,6 +407,16 @@ export function createDomRasterSource(
         clone.style.setProperty("animation", "none", "important");
         clone.style.setProperty("transition", "none", "important");
         pair.style = value;
+      }
+      if (frozen) {
+        for (const property of transport) {
+          const inline = original.style.getPropertyValue(property);
+          clone.style.setProperty(
+            property,
+            inline || pair.paint!.transport[property] || "",
+            "important",
+          );
+        }
       }
       normalize(original, clone);
       const texts = Array.from(original.childNodes).filter(
@@ -342,7 +450,7 @@ export function createDomRasterSource(
       ) {
         const next =
           original instanceof HTMLCanvasElement
-            ? `${original.closest<HTMLElement>("[data-effect-id]")?.dataset.effectRevision}:${original.width}:${original.height}`
+            ? `${original.dataset.rasterRevision ?? original.closest<HTMLElement>("[data-effect-id]")?.dataset.effectRevision}:${original.width}:${original.height}`
             : `${original.currentTime}:${original.videoWidth}:${original.videoHeight}`;
         if (next !== pair.revision) {
           const output = pair.bitmap!;
@@ -398,7 +506,7 @@ export function createDomRasterSource(
     root!.style.setProperty("left", "0px", "important");
     root!.style.setProperty("top", "0px", "important");
   };
-  let structureKey = "";
+  metrics.activeSources++;
   return {
     canvas,
     backend,
@@ -419,9 +527,7 @@ export function createDomRasterSource(
       if (inFlight) return inFlight;
       const requestedTransform = sourceTransform().toString();
       const animated = hasRunningAnimations();
-      const video = Array.from(originalRoot.querySelectorAll("video")).some(
-        (node) => (!refined || included(node)) && !node.paused,
-      );
+      const video = hasPlayingVideo();
       if (
         !dirty &&
         canvas.width === width &&
@@ -559,12 +665,16 @@ export function createDomRasterSource(
       return inFlight;
     },
     dispose() {
+      if (disposed) return;
       disposed = true;
+      metrics.activeSources--;
       cancelPaint?.();
       cancelAnimationFrame(animationFrame);
       observer.disconnect();
       document.fonts.removeEventListener("loadingdone", fontChanged);
       originalRoot.removeEventListener("load", loaded, true);
+      for (const event of mediaEvents)
+        originalRoot.removeEventListener(event, mediaChanged, true);
       canvas.remove();
       canvas.width = canvas.height = 1;
       pairs = [];

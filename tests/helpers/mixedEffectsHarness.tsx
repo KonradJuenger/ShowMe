@@ -6,6 +6,7 @@ import {
   flushEffectSurfaces,
 } from "../../src/components/effectRuntime";
 import { domRasterDiagnostics } from "../../src/components/domRaster";
+import { readWebGlPixels } from "./webglPixels";
 import {
   newPresentationDocument,
   type PresentationDocument,
@@ -14,6 +15,7 @@ import { createBasicShape } from "../../src/core/elementFactory";
 import { createTextElement } from "../../src/core/text";
 import { blankEffect } from "../../src/core/effectAuthoring";
 import { newEffectInstance } from "../../src/core/effects";
+import type { MotionPreviewState } from "../../src/core/motionPlayback";
 
 export async function mountMixedEffectsHarness(
   input?: PresentationDocument,
@@ -87,10 +89,13 @@ export async function mountMixedEffectsHarness(
   document.body.append(host);
   const root = createRoot(host);
   let zoom = 1;
+  let visualPlayback: "live" | "static" = "live";
+  let motionState: MotionPreviewState | null = null;
   const render = () =>
     flushSync(() =>
       root.render(
         <SlideRenderer
+          visualPlayback={visualPlayback}
           deck={model.deck}
           slide={slide}
           staticVideo={!options.liveMedia}
@@ -109,11 +114,22 @@ export async function mountMixedEffectsHarness(
               : undefined
           }
           renderScale={zoom}
-          effectClock={{
-            presentationStartedAt: 1000,
-            slideStartedAt: 1000,
-            pausedAt: 2000,
-          }}
+          motionState={motionState}
+          effectClock={
+            motionState
+              ? {
+                  presentationStartedAt: 1000,
+                  slideStartedAt: 1000,
+                  stepStartedAt: 1000,
+                  pausedAt: 1000 + motionState.time,
+                  stepIndex: motionState.stageIndex,
+                }
+              : {
+                  presentationStartedAt: 1000,
+                  slideStartedAt: 1000,
+                  pausedAt: 2000,
+                }
+          }
         />,
       ),
     );
@@ -147,13 +163,14 @@ export async function mountMixedEffectsHarness(
       host.querySelectorAll<HTMLElement>("[data-effect-text-output]"),
     ).map((node) => node.textContent),
     surfaces: Array.from(host.querySelectorAll<HTMLElement>("[data-effect-id]"))
-      .filter((node) => node.querySelector(":scope > canvas"))
+      .filter((node) =>
+        node.querySelector(':scope > canvas[data-shader-stage="terminal"]'),
+      )
       .map((node) => {
-        const canvas =
-          node.querySelector<HTMLCanvasElement>(":scope > canvas")!;
-        const pixels = canvas
-          .getContext("2d")!
-          .getImageData(0, 0, canvas.width, canvas.height).data;
+        const canvas = node.querySelector<HTMLCanvasElement>(
+          ':scope > canvas[data-shader-stage="terminal"]',
+        )!;
+        const pixels = readWebGlPixels(canvas);
         let red = 0,
           green = 0,
           blue = 0,
@@ -198,12 +215,24 @@ export async function mountMixedEffectsHarness(
   await new Promise<void>((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
   );
-  await stage(0);
+  await advance(0);
   return {
+    model,
+    slide,
     stage,
     advance,
     inspect,
     host,
+    async setMotion(value: MotionPreviewState | null) {
+      motionState = value;
+      render();
+      await flushEffectSurfaces(host);
+    },
+    async setVisualPlayback(value: "live" | "static") {
+      visualPlayback = value;
+      render();
+      await flushEffectSurfaces(host);
+    },
     async setZoom(value: number) {
       zoom = value;
       host.style.transform = `scale(${value})`;

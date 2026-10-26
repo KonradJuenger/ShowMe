@@ -59,6 +59,7 @@ function Preview({
           }}
         >
           <SlideRenderer
+            visualPlayback="static"
             slide={slide}
             deck={deck}
             preparedImages

@@ -340,6 +340,40 @@ export async function resolveSystemFontUsages(usages: FontUsage[]) {
   return { resolved, missing };
 }
 
+/** Enumerate real faces instead of guessing a CSS family's weight/style. */
+export async function resolveFontFamilyVariants(
+  assetRoot: string,
+  families: string[],
+) {
+  const wanted = new Set(families.map(normalizeFamily));
+  const resolved: ResolvedFontFace[] = [];
+  for (const face of await readLibraryFontFaces(assetRoot)) {
+    if (!wanted.has(normalizeFamily(face.family))) continue;
+    const filePath = managedFontPath(assetRoot, face);
+    try {
+      if (digest(await readFontBytes(filePath)) !== face.id) continue;
+      resolved.push({
+        family: face.family,
+        weight: face.weight,
+        italic: face.italic,
+        filePath,
+      });
+    } catch {
+      /* An unavailable managed face may still be supplied by the system. */
+    }
+  }
+  for (const face of await nativeFontFiles()) {
+    if (wanted.has(normalizeFamily(face.family)))
+      resolved.push({
+        family: face.family,
+        weight: face.weight,
+        italic: face.italic,
+        filePath: face.filePath,
+      });
+  }
+  return resolved;
+}
+
 function fontRoot(assetRoot: string) {
   return path.join(assetRoot, FONT_FOLDER);
 }
@@ -460,7 +494,9 @@ export async function resolveFontUsages(
       unresolved.push(usage);
     }
   }
-  const native = await resolveSystemFontUsages(unresolved);
+  const native = unresolved.length
+    ? await resolveSystemFontUsages(unresolved)
+    : { resolved: [], missing: [] };
   return {
     resolved: [...resolved, ...native.resolved],
     missing: native.missing,
