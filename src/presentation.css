@@ -412,6 +412,8 @@
 }
 .presenter-console .presenter-advance {
   --advance-arrow-width: clamp(56px, 14.2857%, 96px);
+  /* Preserve the grid and a usable button width as the proportional gaps grow. */
+  margin-inline: clamp(0px, max(96px, 15%), calc((100% - 200px) / 2));
   position: relative;
   overflow: hidden;
   border: 0;
