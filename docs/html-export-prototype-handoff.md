@@ -298,3 +298,26 @@ npm run test:audit
 ~~~
 
 PASS: 20 unit declarations, 2 HTML browser declarations, typecheck and registry audit. Test composition is unchanged by this fix. No main integration, full suite or packaged build was performed for this localized serialization change.
+
+## Shared HTML/SMP font exports (2026-10-26)
+
+Settings → Export fonts now controls both HTML and Export ShowMe Package (.smp), with None, SVG (the existing default), and Font file. The immediately preceding HTML-only preference is renamed to the shared preference when read and written; an explicit shared preference takes priority.
+
+Font file includes complete used font faces and keeps authored text, text Effects and generated characters live. Each export shows a license reminder with export/cancel actions. ShowMe does not inspect licensing or embedding permission flags. Ordinary technical integrity, format and size validation remains in place. A regression embeds bytes with restrictive/no-subsetting flags unchanged. Document-owned package fonts are preferred during font resolution, with managed/system files used where necessary. HTML collects visible text and static CSS font references.
+
+Both formats share the existing SVG preparation and native preview measurement path. SMP conversion occurs on an export-owned canonical document copy, including its templates, through the existing authority-exclusive package writer and archive validation. Generated SVG media never enters the user's Library. Source text, notes, revision and font ownership remain unchanged. None excludes font binaries even when the source was opened from a font-bearing SMP. Ordinary package saves retain their existing font resources; the shared setting controls exports, without changing the editor's saved document model. SVG's existing unsupported-text warnings remain; live text Effects are not flattened.
+
+Validation:
+
+~~~powershell
+$env:SHOWME_TEST_FILES='["tests/feature/persistence/export-fonts.test.ts","tests/feature/persistence/package-fonts.test.ts","tests/feature/persistence/package-options.test.ts","tests/feature/persistence/text-style-storage.test.ts","tests/feature/persistence/package-conflict.test.ts","tests/feature/editor/agentDelivery.test.ts","tests/feature/html-export/html-export.test.ts","tests/feature/html-export/text-outlines.test.ts"]'
+npx vitest run
+Remove-Item Env:SHOWME_TEST_FILES
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/font-files-native.spec.ts","tests/feature/html-export/font-svg-native.spec.ts","tests/feature/html-export/html-export.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-export-fonts-final
+Remove-Item Env:SHOWME_TEST_FILES
+~~~
+
+PASS: 27 unit and 4 native/browser declarations. Coverage includes full font bytes, license reminder cancellation for HTML and SMP, offline generated text using characters absent from authored text, shared settings, package reopening, None stripping owned fonts, SVG assets in slides/templates, source preservation with removed notes, and hidden font exclusion. Initial native fixture attempts needed separate structure/slide leases and the returned test-mode SMP path; the final tests use those production contracts.
+
+`npm run typecheck`, `npm run build`, `npm run verify:build`, focused ESLint over all changed source/test files, `npm run test:stats` and `npm run test:audit` passed. The registry contains 705 active declarations in 107 groups on the updated main baseline. The settings and offline generated-text screenshots were visually inspected; the Impeccable detector returned no findings. No new dependency, document/package format, reader or renderer was introduced. Full/release suites, packaged executables, macOS and other browsers were not rerun for this change.

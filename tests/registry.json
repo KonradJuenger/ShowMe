@@ -1087,7 +1087,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-24",
-    "lastReviewed": "2026-10-25",
+    "lastReviewed": "2026-10-26",
     "reason": "Single-file assembly escaping; final HTML excludes hidden slides/layer content, notes, hidden layer metadata and unreachable effect source; removed-element Motion is pruned while visible effects/track groups and source document are preserved; external CSS/SVG and font diagnostics, composition-exact capture eligibility, lazy URLs and isolated posters"
   },
   {
@@ -1142,7 +1142,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-25",
-    "lastReviewed": "2026-10-25",
+    "lastReviewed": "2026-10-26",
     "reason": "Native default SVG and none setting persistence, portable managed-font outlines, canonical text/source preservation, offline playback without fonts, progress popup and completion/cancel/write-failure cleanup"
   },
   {
@@ -1153,7 +1153,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-25",
-    "lastReviewed": "2026-10-25",
+    "lastReviewed": "2026-10-26",
     "reason": "Export snapshot SVG conversion preserves frame/Motion/Text Styles and sources; Effects/ancestor/CSS and missing-font fallback are explicit; progress counts track converted text and embedding"
   },
   {
@@ -1166,5 +1166,27 @@
     "created": "2026-10-25",
     "lastReviewed": "2026-10-25",
     "reason": "Untouched deck replacement without prompts; PowerPoint import save, cancellation and save-failure safety"
+  },
+  {
+    "id": "persistence-export-fonts",
+    "path": "tests/feature/persistence/export-fonts.test.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-10-26",
+    "lastReviewed": "2026-10-26",
+    "reason": "Shared export font modes: full binary fonts without license flag checks, none strips document-owned fonts, SVG packages use the canonical writer and preserve source/templates/notes, current HTML preference migrates to shared settings"
+  },
+  {
+    "id": "export-font-files-native",
+    "path": "tests/feature/html-export/font-files-native.spec.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "electron",
+    "created": "2026-10-26",
+    "lastReviewed": "2026-10-26",
+    "reason": "Shared None/SVG/Font file settings drive both HTML and SMP, native license reminder/cancel, live generated text offline with full font bytes, SMP binary fonts and SVG fallback, source revision preservation and temporary cleanup"
   }
 ]

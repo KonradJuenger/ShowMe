@@ -1,4 +1,7 @@
 import type { AcceptedTransaction } from "../src/core/documentTransactions";
+import { resolveExportFontUsages } from "./fontIntegration";
+import type { FontEmbedding } from "../src/export/fontEmbedding";
+import type { FontUsage } from "../src/core/fonts";
 import { acceptedImpact } from "../src/core/documentImpact";
 import type {
   PackageFontResources,
@@ -99,6 +102,12 @@ function adjacentRecoveryPath(file: string) {
   return file.slice(0, -SHOWME_DOCUMENT_EXTENSION.length) + ".recovery.sme";
 }
 
+export interface PackageExportAsset { asset: Asset; file: string }
+export interface PackageExportOptions {
+  fontEmbedding: FontEmbedding;
+  prepareDocument?(document: PresentationDocument): Promise<ReadonlyMap<string, PackageExportAsset>>;
+}
+
 export class DocumentStorage {
   private readonly documents = new Map<string, StoredDocument>();
   private readonly recovery = new RecoveryJournal();
@@ -135,6 +144,9 @@ export class DocumentStorage {
       ? this.entry(documentId).packageFonts
       : undefined;
     return this.fonts?.managed(this, resources) ?? [];
+  }
+  exportFontFaces(id: string, usages: FontUsage[]) {
+    return resolveExportFontUsages(this.assetRoot, usages, this.entry(id).packageFonts);
   }
   private importDocumentId: string | null = null;
   private readonly retainedDocumentAssets = new Map<string, Set<string>>();
@@ -843,6 +855,7 @@ export class DocumentStorage {
     lockMediaFiles: boolean,
     document: PresentationDocument,
     expectedFingerprint?: string,
+    exportOptions?: { fontEmbedding: FontEmbedding; assets?: ReadonlyMap<string, PackageExportAsset> },
   ) {
     const entry = this.entry(id);
     if (document.documentId !== entry.runtime.authority.document.documentId)
@@ -851,8 +864,9 @@ export class DocumentStorage {
     const assets: ShowMePackageManifest["assets"] = [];
     const entries: ZipEntryInput[] = [];
     for (const assetId of assetIds) {
-      let asset = await this.assetForDocument(id, assetId);
-      const source = this.assetPathForDocument(id, assetId);
+      const prepared = exportOptions?.assets?.get(assetId);
+      let asset = prepared?.asset ?? await this.assetForDocument(id, assetId);
+      const source = prepared?.file ?? this.assetPathForDocument(id, assetId);
       const sourceName = path.basename(source);
       const physicalManagedName =
         assetIdFromFilename(sourceName) === assetId ? sourceName : null;
@@ -888,11 +902,12 @@ export class DocumentStorage {
       });
       entries.push({ name: originalPath, file: source });
     }
-    const packagedFonts = await this.fonts?.package(
+    const packagedFonts = !exportOptions || exportOptions.fontEmbedding === "file" ? await this.fonts?.package(
       this,
       document,
       entry.packageFonts,
-    );
+      exportOptions?.fontEmbedding === "file",
+    ) : undefined;
     entries.push(...(packagedFonts?.entries ?? []));
     const manifest = {
       ...packageManifestSchema.parse({
@@ -960,19 +975,24 @@ export class DocumentStorage {
     lockMediaFiles?: boolean,
     removeSpeakerNotes = false,
     beforePersist?: (destination: string) => void,
+    options?: PackageExportOptions,
   ) {
     const entry = this.entry(id);
     return entry.runtime.authority.runExclusive(
       async (snapshot) => {
         beforePersist?.(file);
+        const copy = options?.prepareDocument ? structuredClone(snapshot.document) : snapshot.document;
+        const document = removeSpeakerNotes ? withoutSpeakerNotes(copy) : copy;
+        const assets = await options?.prepareDocument?.(document);
+        if (options?.prepareDocument) beforePersist?.(file);
         return (
           await this.writePackage(
             id,
             file,
             lockMediaFiles ?? entry.packageLocked ?? false,
-            removeSpeakerNotes
-              ? withoutSpeakerNotes(snapshot.document)
-              : snapshot.document,
+            document,
+            undefined,
+            options ? { fontEmbedding: options.fontEmbedding, assets } : undefined,
           )
         ).path;
       },

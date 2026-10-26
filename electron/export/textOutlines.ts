@@ -3,7 +3,8 @@ import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { create, type Font } from "fontkit";
-import { resolveFontUsages } from "../fontLibrary";
+import type { ResolvedFontFace } from "../fontLibrary";
+import type { FontUsage } from "../../src/core/fonts";
 import { resolveTextTypography } from "../../src/core/textTypography";
 import type { TextElement } from "../../src/core/text";
 import type {
@@ -11,7 +12,7 @@ import type {
   OutlineLayoutRequest,
 } from "../../src/export/html/textOutlines";
 
-export class HtmlTextOutlines {
+export class ExportTextOutlines {
   private directory: string | undefined;
   private readonly fonts = new Map<
     string,
@@ -20,7 +21,9 @@ export class HtmlTextOutlines {
   private readonly sent = new Set<string>();
 
   constructor(
-    private readonly library: string,
+    private readonly resolveFont: (
+      usage: FontUsage,
+    ) => Promise<ResolvedFontFace | null>,
     private readonly layout: (
       request: OutlineLayoutRequest,
     ) => Promise<OutlineLayout>,
@@ -41,12 +44,13 @@ export class HtmlTextOutlines {
     let loaded = this.fonts.get(key);
     if (!loaded) {
       loaded = (async () => {
-        const { resolved } = await resolveFontUsages(this.library, [
-          { family: type.fontFamily, weight, italic: type.italic },
-        ]);
-        if (!resolved[0])
-          throw Error(`Font file unavailable: ${type.fontFamily}`);
-        const file = resolved[0].filePath;
+        const resolved = await this.resolveFont({
+          family: type.fontFamily,
+          weight,
+          italic: type.italic,
+        });
+        if (!resolved) throw Error(`Font file unavailable: ${type.fontFamily}`);
+        const file = resolved.filePath;
         if ((await fs.stat(file)).size > 32 * 1024 ** 2)
           throw Error("Font exceeds size limit");
         const bytes = await fs.readFile(file);
