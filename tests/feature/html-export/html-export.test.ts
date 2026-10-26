@@ -2,7 +2,10 @@ import { it, expect, vi, beforeAll, afterAll } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createHtmlExport, htmlFontUsages } from "../../../electron/export/html";
+import {
+  createHtmlExport,
+  htmlFontUsages,
+} from "../../../electron/export/html";
 import { EmbeddedRenderResources } from "../../../src/export/html/embeddedResources";
 import {
   htmlExportFixture,
@@ -241,7 +244,8 @@ it("omits hidden slides, layer content, notes and unreachable effects from the d
   hiddenText.id = "private-hidden-text";
   if (hiddenText.content?.type !== "text") throw Error("text fixture");
   hiddenText.content.text = "PRIVATE_HIDDEN_TEXT";
-  if (hiddenText.content.format.kind !== "local") throw Error("local text fixture");
+  if (hiddenText.content.format.kind !== "local")
+    throw Error("local text fixture");
   hiddenText.content.format.typography.fontFamily = "PRIVATE_HIDDEN_FONT";
   const privateEffect = {
     ...blankEffect("css-js"),
@@ -306,7 +310,11 @@ it("omits hidden slides, layer content, notes and unreachable effects from the d
     },
   ];
   const before = structuredClone(document);
-  expect(htmlFontUsages(document).some(usage => usage.family === "PRIVATE_HIDDEN_FONT")).toBe(false);
+  expect(
+    htmlFontUsages(document).some(
+      (usage) => usage.family === "PRIVATE_HIDDEN_FONT",
+    ),
+  ).toBe(false);
   const resolveAsset = vi.fn(async () => null);
   const { html, warnings } = await createHtmlExport({
     document,
@@ -356,7 +364,10 @@ it("embeds visible CSS font variants and identifies blocked external CSS and SVG
   const document = htmlExportFixture();
   document.deck.stylesheet =
     '.title { font-family: "CSS Fixture"; background: url("./sibling.png"); }';
-  expect(htmlFontUsages(document)).toContainEqual({ family: "CSS Fixture", weight: 400, italic: false });
+  expect(htmlFontUsages(document)).toContainEqual({
+    family: "CSS Fixture",
+    allVariants: true,
+  });
   document.slides[0].effectResources!.css.source =
     ':scope { background: url("https://example.test/effect.png"); }';
   const file = path.join(runtimeDirectory, "external.svg");

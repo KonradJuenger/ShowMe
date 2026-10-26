@@ -1,7 +1,7 @@
 import type { AcceptedTransaction } from "../src/core/documentTransactions";
 import { resolveExportFontUsages } from "./fontIntegration";
 import type { FontEmbedding } from "../src/export/fontEmbedding";
-import type { FontUsage } from "../src/core/fonts";
+import type { ExportFontRequest } from "../src/export/fontUsage";
 import { acceptedImpact } from "../src/core/documentImpact";
 import type {
   PackageFontResources,
@@ -145,7 +145,7 @@ export class DocumentStorage {
       : undefined;
     return this.fonts?.managed(this, resources) ?? [];
   }
-  exportFontFaces(id: string, usages: FontUsage[]) {
+  exportFontFaces(id: string, usages: ExportFontRequest[]) {
     return resolveExportFontUsages(this.assetRoot, usages, this.entry(id).packageFonts);
   }
   private importDocumentId: string | null = null;

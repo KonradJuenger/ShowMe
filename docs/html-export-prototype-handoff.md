@@ -321,3 +321,22 @@ Remove-Item Env:SHOWME_TEST_FILES
 PASS: 27 unit and 4 native/browser declarations. Coverage includes full font bytes, license reminder cancellation for HTML and SMP, offline generated text using characters absent from authored text, shared settings, package reopening, None stripping owned fonts, SVG assets in slides/templates, source preservation with removed notes, and hidden font exclusion. Initial native fixture attempts needed separate structure/slide leases and the returned test-mode SMP path; the final tests use those production contracts.
 
 `npm run typecheck`, `npm run build`, `npm run verify:build`, focused ESLint over all changed source/test files, `npm run test:stats` and `npm run test:audit` passed. The registry contains 705 active declarations in 107 groups on the updated main baseline. The settings and offline generated-text screenshots were visually inspected; the Impeccable detector returned no findings. No new dependency, document/package format, reader or renderer was introduced. Full/release suites, packaged executables, macOS and other browsers were not rerun for this change.
+
+## CSS font-family variants and default None (2026-10-26)
+
+Both exports now share one collector for authored typography, named font-family declarations in deck stylesheets, referenced Effect CSS and text-JS styleSource. HTML supplies only visible slides/layers; SMP supplies its editable slides and templates. CSS references request a family's available faces instead of inventing a 400/normal usage. This includes CSS references to the same family as authored text, where selectors or keyframes can choose a different variant. The resolver combines document-owned, managed and system faces, deduplicating by family/weight/style and preferring document-owned files. CSS can therefore select a 700/italic face even when authored text uses another font or a regular face. Font-file exports can be larger because all available faces of CSS-named families are included.
+
+Fresh export settings now default to None. Explicit saved preferences, including migrated HTML-only preferences, are preserved. The license reminder and absence of embedding-permission checks are unchanged. Repackaging also retains an already managed font filename rather than appending another content hash, preventing repeated package round trips from exceeding Windows filename limits.
+
+Tests use distinct, unmodified OFL Asap Condensed 400/normal and 700/italic font files. The integration exercises CSS references → htmlFontUsages → storage.exportFontFaces → fontFamiliesFromFaces → HTML selection, without injecting preassembled font families. SMP cases cover CSS-only deck references with no text elements, template Effect CSS, text-JS styles, and reopening/repackaging with document-owned font faces. The native export test checks embedded 700/italic bytes, actual offline computed CSS typography and the corresponding SMP font bytes. Its Effect CSS uses the supported :scope rule; a deck stylesheet supplies the descendant override. The fresh-profile native settings test verifies default None and explicit selection of SVG.
+
+~~~powershell
+$env:SHOWME_TEST_FILES='["tests/feature/persistence/css-export-fonts.test.ts","tests/feature/persistence/export-fonts.test.ts","tests/feature/persistence/package-fonts.test.ts","tests/feature/persistence/package-options.test.ts","tests/feature/persistence/text-style-storage.test.ts","tests/feature/persistence/package-conflict.test.ts","tests/feature/editor/agentDelivery.test.ts","tests/feature/html-export/html-export.test.ts","tests/feature/html-export/text-outlines.test.ts"]'
+npx vitest run
+Remove-Item Env:SHOWME_TEST_FILES
+$env:SHOWME_TEST_FILES='["tests/feature/html-export/font-files-native.spec.ts","tests/feature/html-export/font-svg-native.spec.ts"]'
+npx playwright test --config playwright.config.ts --output test-results-css-fonts-final
+Remove-Item Env:SHOWME_TEST_FILES
+~~~
+
+PASS: 29 unit and 2 native declarations. The two CSS integration declarations were also repeated after adapting their host-font-enumeration timeout to the explicit-declaration registry contract. Typecheck, build/build verification, focused ESLint, test statistics and registry audit passed (707 active declarations in 108 groups). Full/release suites, packaged executables and other platforms/browsers were not repeated. Work continues on a new follow-up branch based on main after PR #25 was merged; main was not modified.

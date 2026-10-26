@@ -33,6 +33,25 @@ test("shared font-file export keeps animated HTML text and packages complete fon
   const fontBytes = await readFile("tests/fixtures/fonts/Abel-Regular.ttf");
   const hash = createHash("sha256").update(fontBytes).digest("hex");
   await writeFile(path.join(fonts, `Abel-400__${hash}.ttf`), fontBytes);
+  const cssFontBytes = await readFile(
+    "tests/fixtures/fonts/AsapCondensed-BoldItalic.ttf",
+  );
+  for (const [file, weight, italic] of [
+    ["Regular", 400, false],
+    ["BoldItalic", 700, true],
+  ] as const) {
+    const bytes = await readFile(
+      `tests/fixtures/fonts/AsapCondensed-${file}.ttf`,
+    );
+    const id = createHash("sha256").update(bytes).digest("hex");
+    await writeFile(
+      path.join(
+        fonts,
+        `Asap Condensed-${weight}${italic ? "-italic" : ""}__${id}.ttf`,
+      ),
+      bytes,
+    );
+  }
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined,
@@ -81,6 +100,8 @@ test("shared font-file export keeps animated HTML text and packages complete fon
       ...blankEffect("css-js"),
       kind: "text-js" as const,
       target: "text" as const,
+      styleSource:
+        ':scope { font-family: "Asap Condensed" !important; font-weight: 700 !important; font-style: italic !important; }',
       source:
         "function render({text,t}) { return text + (t > 0 ? ' XYZ 123' : ''); }",
     };
@@ -107,6 +128,7 @@ test("shared font-file export keeps animated HTML text and packages complete fon
         const before = await desktop.documentProjection!(id),
           parentId = before.slide.nodes[0].id;
         const lease = await desktop.documentAcquireLeases!(id, [
+          { kind: "deck" },
           { kind: "slide", slideId: before.slide.id },
           { kind: "structure", slideId: before.slide.id, parentId },
         ]);
@@ -120,6 +142,15 @@ test("shared font-file export keeps animated HTML text and packages complete fon
             baseRevision: before.revision,
             leaseTokens: tokens,
             operations: [
+              {
+                type: "deck.properties.set",
+                changes: {
+                  stylesheet: effect.styleSource.replace(
+                    ":scope",
+                    '[data-element-id="animated-text"] [data-text-content]',
+                  ),
+                },
+              },
               {
                 type: "slide.effects.set",
                 slideId: before.slide.id,
@@ -199,7 +230,26 @@ test("shared font-file export keeps animated HTML text and packages complete fon
         /<script id="showme-html-payload" type="application\/json">(.*?)<\/script>/s,
       )![1],
     ) as HtmlExportPayload;
-    expect(payload.fonts).toHaveLength(1);
+    expect(payload.fonts).toHaveLength(2);
+    const cssFamily = payload.fonts.find(
+      (family) => family.family === "Asap Condensed",
+    )!;
+    expect(
+      cssFamily.sources.map((source) => [source.weight, source.italic]),
+    ).toEqual(
+      expect.arrayContaining([
+        [400, false],
+        [700, true],
+      ]),
+    );
+    expect(
+      Buffer.from(
+        cssFamily.sources.find(
+          (source) => source.weight === 700 && source.italic,
+        )!.data,
+        "base64",
+      ),
+    ).toEqual(cssFontBytes);
     expect(Buffer.from(payload.fonts[0].sources[0].data, "base64")).toEqual(
       fontBytes,
     );
@@ -221,6 +271,20 @@ test("shared font-file export keeps animated HTML text and packages complete fon
     expect(await page.evaluate(() => document.fonts.check('40px "Abel"'))).toBe(
       true,
     );
+    expect(
+      await page
+        .locator('[data-element-id="animated-text"] [data-text-content]')
+        .first()
+        .evaluate((node) => {
+          const style = getComputedStyle(node);
+          return [style.fontFamily, style.fontWeight, style.fontStyle];
+        }),
+    ).toEqual(['"Asap Condensed"', "700", "italic"]);
+    expect(
+      await page.evaluate(() =>
+        document.fonts.check('italic 700 40px "Asap Condensed"'),
+      ),
+    ).toBe(true);
     await page.screenshot({ path: info.outputPath("animated-font-file.png") });
     const packageTarget = path.join(directory, "font-file.smp");
     await app.evaluate(({ dialog }, file) => {
@@ -253,7 +317,16 @@ test("shared font-file export keeps animated HTML text and packages complete fon
           await readArchiveEntry(archive.entries.get("manifest.json")!)
         ).toString(),
       );
-      expect(manifest.fonts).toHaveLength(1);
+      expect(manifest.fonts.length).toBeGreaterThanOrEqual(3);
+      const cssFace = manifest.fonts.find(
+        (face: { family: string; weight: number; italic: boolean }) =>
+          face.family === "Asap Condensed" &&
+          face.weight === 700 &&
+          face.italic,
+      );
+      expect(
+        await readArchiveEntry(archive.entries.get(cssFace.originalPath)!),
+      ).toEqual(cssFontBytes);
       expect(
         await readArchiveEntry(
           archive.entries.get(manifest.fonts[0].originalPath)!,
@@ -311,7 +384,8 @@ test("shared font-file export keeps animated HTML text and packages complete fon
         ).toString(),
       );
       expect(manifest.fonts).toEqual([]);
-      expect(manifest.assets).toHaveLength(1);
+      // Deck CSS deliberately leaves both objects live in SVG mode.
+      expect(manifest.assets).toHaveLength(0);
       const document = JSON.parse(
         (
           await readArchiveEntry(svgArchive.entries.get(manifest.documentPath)!)
@@ -324,7 +398,7 @@ test("shared font-file export keeps animated HTML text and packages complete fon
         >,
       )[0].nodes[0].children;
       expect(children[0].content?.type).toBe("text");
-      expect(children[1].content?.type).toBe("svg");
+      expect(children[1].content?.type).toBe("text");
     } finally {
       await svgArchive.dispose();
     }
