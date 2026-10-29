@@ -81,6 +81,7 @@ import { getPresentationSlideIds } from "../src/core/presentationSequence";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { DocumentStorage, atomicWrite } from "./storage";
+import { RunningInstances } from "./runningInstances";
 import { CollaborationService } from "./collaboration/session";
 import { lanInterfaces, selectedLanAddress } from "./collaboration/security";
 import { resolveOriginalAsset } from "./assetServing";
@@ -1913,6 +1914,7 @@ const agentWorkspace = new AgentWorkspaceService({
       // Defer window shutdown until the bridge has delivered the clean-close receipt.
       await documentClosing.run(request.documentId, async () => {
         await ensureIdle();
+        if (collaboration.isHosting(request.documentId)) collaboration.stop();
         documentNotifications.get(request.documentId)?.();
         documentNotifications.delete(request.documentId);
         await requireStorage().closeDocument(request.documentId);
@@ -2204,6 +2206,7 @@ const operations: Record<string, (...args: any[]) => any> = {
       return;
     }
     await documentClosing.run(parsed, async () => {
+    if (collaboration.isHosting(parsed)) collaboration.stop();
     documentNotifications.get(parsed)?.();
     documentNotifications.delete(parsed);
     imagePreparation.close(parsed);
@@ -2551,14 +2554,17 @@ const operations: Record<string, (...args: any[]) => any> = {
         closeRequestPending = false;
         return false;
       }
+      if (collaboration.isHosting(id)) collaboration.stop();
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
       await requireStorage().closeDocument(id);
     } else if (response === 1 && summary.dirty) {
+      if (collaboration.isHosting(id)) collaboration.stop();
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
       await requireStorage().discardDocumentChanges(id);
     } else {
+      if (collaboration.isHosting(id)) collaboration.stop();
       documentNotifications.get(id)?.();
       documentNotifications.delete(id);
       if (summary.untitled) await requireStorage().discardDocumentChanges(id);
@@ -3001,7 +3007,10 @@ async function requireConfiguredShowMeRoot(
   }
 }
 
+const runningInstances = new RunningInstances(app.getPath("userData"));
+
 void app.whenReady().then(async () => {
+  await runningInstances.register();
   let settings: Awaited<ReturnType<typeof readSettings>>;
   try {
     settings = await readSettings(app.getPath("userData"));
@@ -3098,7 +3107,7 @@ void app.whenReady().then(async () => {
     }
   }
 
-  if (!launchDocument && !pendingOpenPath) {
+  if (!launchDocument && !pendingOpenPath && !(await runningInstances.hasOther())) {
     try {
       launchDocument = await recoverUntitledAtLaunch();
     } catch (error) {
@@ -3268,9 +3277,10 @@ app.on("will-quit", (event) => {
   void Promise.all([
     agentBridge.setEnabled(false),
     storage ? imageCache.releaseOnQuit(deleteImageCacheOnClose) : Promise.resolve(),
+    runningInstances.dispose(),
   ])
     .catch((error) => {
-      console.error("Could not delete image cache on close:", error);
+      console.error("Could not complete shutdown cleanup:", error);
     })
     .finally(() => {
       cacheCleanupFinished = true;

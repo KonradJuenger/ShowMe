@@ -5,6 +5,20 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { setSlideNotes } from "../../../src/core/editorCommands";
 import { storedDocument, storageAt } from "../../helpers/storage";
 import { RecoveryJournal } from "../../../electron/storage/recoveryJournal";
+import { RunningInstances } from "../../../electron/runningInstances";
+
+it("defers launch recovery while another instance is running and resumes after it exits", async () => {
+  const { root } = await storedDocument();
+  const first = new RunningInstances(root);
+  const second = new RunningInstances(root);
+  await first.register();
+  expect(await first.hasOther()).toBe(false);
+  await second.register();
+  expect(await second.hasOther()).toBe(true);
+  await first.dispose();
+  expect(await second.hasOther()).toBe(false);
+  await second.dispose();
+});
 
 it("untitled and opened decks are clean until an accepted edit and become clean after saving", async () => {
   const { root, storage, session, id } = await storedDocument();
