@@ -436,8 +436,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-25",
-    "reason": "Durable append, interrupted recovery, compaction failure safety and acceptance during background checkpoint construction; clean new/opened decks and save revision tracking"
+    "lastReviewed": "2026-10-29",
+    "reason": "Durable append, interrupted recovery, concurrent startup recovery deferral, compaction failure safety and acceptance during background checkpoint construction; clean new/opened decks and save revision tracking"
   },
   {
     "id": "presenter-navigation",
@@ -876,8 +876,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
-    "reason": "Bounded per-peer backpressure, ordered stop, fragmented limits, duplicate acknowledgement, gaps and replay retention fallback"
+    "lastReviewed": "2026-10-29",
+    "reason": "Host shutdown releases guest sessions; bounded per-peer backpressure, ordered stop, fragmented limits, duplicate acknowledgement, gaps and replay retention fallback"
   },
   {
     "id": "media-resource-work",

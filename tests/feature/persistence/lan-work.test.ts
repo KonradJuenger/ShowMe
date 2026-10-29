@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import {
@@ -11,6 +11,8 @@ import {
 import { DocumentAuthority } from "../../../src/core/documentAuthority";
 import { newPresentationDocument } from "../../../src/core/document";
 import { ClientReplica } from "../../../src/core/collaboration/clientReplica";
+import { CollaborationService } from "../../../electron/collaboration/session";
+import { storedDocument } from "../../helpers/storage";
 import {
   COLLAB_DOCUMENT_VERSION,
   COLLAB_PROTOCOL_VERSION,
@@ -18,6 +20,39 @@ import {
   compatibleVersions,
   serverMessageSchema,
 } from "../../../src/core/collaboration/protocol";
+
+vi.mock("../../../electron/collaboration/discovery", () => ({
+  advertise: async () => () => {},
+  DiscoveryBrowser: class {},
+}));
+vi.mock("../../../electron/collaboration/security", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../electron/collaboration/security")>()),
+  privateInterfaces: () => ["127.0.0.1"],
+  selectedLanAddress: () => "127.0.0.1",
+}));
+
+it("a stopped host releases the guest session before the hosted document closes", async () => {
+  const { storage, id } = await storedDocument();
+  const host = new CollaborationService((documentId) => storage.documentRuntime(documentId));
+  const guest = new CollaborationService(() => { throw new Error("Guest has no local host runtime"); });
+  const unavailable: string[] = [];
+  guest.subscribe(() => {}, () => {}, undefined, undefined, undefined, (documentId) => unavailable.push(documentId));
+  try {
+    const record = await host.start(id);
+    await guest.join(record, "Guest");
+    await vi.waitFor(() => expect(host.status().pending).toHaveLength(1));
+    host.approve(host.status().pending[0].id);
+    await vi.waitFor(() => expect(guest.status().clientStatus).toBe("connected"));
+    host.stop();
+    await storage.closeDocument(id);
+    await vi.waitFor(() => expect(guest.status().clientStatus).toBe("idle"));
+    expect(guest.status().clientDocumentId).toBeNull();
+    expect(unavailable).toEqual([id]);
+  } finally {
+    guest.close();
+    host.close();
+  }
+});
 
 it("public protocol v1 handshake accepts current peers and rejects mismatched versions", () => {
   expect(COLLAB_PROTOCOL_VERSION).toBe(1);
