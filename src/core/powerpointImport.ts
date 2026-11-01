@@ -16,7 +16,8 @@ export interface ImportedPowerPointMedia {
   elementId: string;
   name: string;
   mimeType: string;
-  bytes: Uint8Array;
+  bytes?: Uint8Array;
+  archiveEntry?: string;
   crop: { left: number; top: number; right: number; bottom: number };
 }
 
@@ -84,7 +85,13 @@ interface Context {
   shiftY: number;
   defaults: Element | null;
   result: ImportedPowerPointSlide;
-  zip: JSZip;
+  archive: PowerPointArchive;
+}
+
+export interface PowerPointArchive {
+  has(name: string): boolean;
+  text(name: string): Promise<string | undefined>;
+  media(name: string): Promise<{ bytes?: Uint8Array; archiveEntry?: string }>;
 }
 
 function parseXml(value: string) {
@@ -619,7 +626,7 @@ async function addImage(
   const svg = first(fill, "svgBlip");
   const relationId = (svg ?? blip)?.getAttributeNS(REL_NS, "embed") ?? "";
   const rel = context.part.rels.get(relationId);
-  const image = rel && !rel.external ? context.zip.file(rel.target) : null;
+  const image = rel && !rel.external && context.archive.has(rel.target);
   if (!image) {
     warning(context, "Missing or linked images were skipped.");
     return false;
@@ -657,7 +664,7 @@ async function addImage(
       .at(-1)!
       .replace(/^pptx[-_ ]/i, ""),
     mimeType: mime,
-    bytes: await readPowerPointEntry(context.zip, image),
+    ...(await context.archive.media(rel!.target)),
     crop,
   });
   element.clipChildren = true;
@@ -678,7 +685,7 @@ async function addVideo(
   ];
   const relation = ids
     .map((id) => context.part.rels.get(id ?? ""))
-    .find((rel) => rel && !rel.external && context.zip.file(rel.target));
+    .find((rel) => rel && !rel.external && context.archive.has(rel.target));
   if (!relation) {
     warning(context, "Missing or linked videos were imported as cover images.");
     return false;
@@ -701,10 +708,7 @@ async function addVideo(
       .at(-1)!
       .replace(/^pptx[-_ ]/i, ""),
     mimeType,
-    bytes: await readPowerPointEntry(
-      context.zip,
-      context.zip.file(relation.target)!,
-    ),
+    ...(await context.archive.media(relation.target)),
     crop: { left: 0, top: 0, right: 0, bottom: 0 },
   });
   element.clipChildren = true;
@@ -800,20 +804,31 @@ async function importTree(
 
 export async function parsePowerPoint(
   file: File,
+  suppliedArchive?: PowerPointArchive,
 ): Promise<ImportedPowerPointSlide[]> {
-  if (file.size > POWERPOINT_LIMITS.archiveBytes)
-    throw new Error("PowerPoint archive exceeds size limit");
-  const bytes = await file.arrayBuffer();
-  assertPowerPointArchiveBounds(bytes);
-  const zip = await JSZip.loadAsync(bytes);
-  const text = async (path: string) => {
-    const entry = zip.file(path);
-    return entry
-      ? new TextDecoder().decode(
-          await readPowerPointEntry(zip, entry, POWERPOINT_LIMITS.xmlBytes),
-        )
-      : undefined;
-  };
+  let archive = suppliedArchive;
+  if (!archive) {
+    if (file.size > POWERPOINT_LIMITS.archiveBytes)
+      throw new Error("PowerPoint archive exceeds size limit");
+    const bytes = await file.arrayBuffer();
+    assertPowerPointArchiveBounds(bytes);
+    const zip = await JSZip.loadAsync(bytes);
+    archive = {
+      has: (name) => !!zip.file(name),
+      text: async (name) => {
+        const entry = zip.file(name);
+        return entry
+          ? new TextDecoder().decode(
+              await readPowerPointEntry(zip, entry, POWERPOINT_LIMITS.xmlBytes),
+            )
+          : undefined;
+      },
+      media: async (name) => ({
+        bytes: await readPowerPointEntry(zip, zip.file(name)!),
+      }),
+    };
+  }
+  const text = (name: string) => archive.text(name);
   const cache = new Map<string, Promise<Part>>();
   const load = (path: string): Promise<Part> => {
     let pending = cache.get(path);
@@ -845,7 +860,9 @@ export async function parsePowerPoint(
   if (!(cx > 0 && cy > 0))
     throw new Error("PowerPoint file has invalid slide dimensions");
   const { width, height, scale } = powerPointCanvasSize(cx, cy);
-  const slideIds = descendants(presentation.doc, "sldId");
+  const slideIds = Array.from(
+    child(presentation.doc.documentElement, "sldIdLst")?.children ?? [],
+  ).filter((element) => element.localName === "sldId");
   if (!slideIds.length)
     throw new Error("PowerPoint presentation has no slides");
   const output: ImportedPowerPointSlide[] = [];
@@ -913,7 +930,7 @@ export async function parsePowerPoint(
       shiftY: 0,
       defaults: first(presentation.doc, "defaultTextStyle"),
       result,
-      zip,
+      archive,
     };
     const backgroundPart = [part, layout, master].find((owner) =>
       first(owner?.doc, "bg"),

@@ -362,6 +362,15 @@ export interface Platform {
   getAsset(id: string): Promise<Asset>;
   importAssets(files?: File[]): Promise<Asset[]>;
   importDroppedFiles(files: File[]): Promise<Asset[]>;
+  stageDocumentFiles?(documentId: string, files: File[]): Promise<Asset[]>;
+  openPowerPointArchive?(file: File): Promise<{ id: string; names: string[] }>;
+  readPowerPointArchiveXml?(id: string, name: string): Promise<string>;
+  stagePowerPointArchiveMedia?(
+    id: string,
+    documentId: string,
+    name: string,
+  ): Promise<Asset>;
+  closePowerPointArchive?(id: string): Promise<void>;
   assetUrl(id: string, preview?: boolean): Promise<string | null>;
   releaseUrl(url: string): void;
   retainUrl?(url: string): void;

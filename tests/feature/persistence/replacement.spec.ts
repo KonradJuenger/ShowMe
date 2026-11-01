@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import pptxgen from "pptxgenjs";
+import JSZip from "jszip";
 import { readyEditor } from "../../helpers/startup";
 
 async function editNotes(page: Page) {
@@ -28,6 +29,33 @@ async function upload(page: Page, buffer: Buffer) {
     buffer,
   });
 }
+
+test("PowerPoint section metadata is ignored and imported media enters the library only on save", async ({ page }) => {
+  const pptx = new pptxgen();
+  pptx.addSlide().addImage({ data: "image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aX8AAAAASUVORK5CYII=", x: 1, y: 1, w: 1, h: 1 });
+  const zip = await JSZip.loadAsync(await pptx.write({ outputType: "uint8array" }) as Uint8Array);
+  const name = "ppt/presentation.xml";
+  const xml = await zip.file(name)!.async("string");
+  zip.file(name, xml.replace("</p:presentation>", '<p:extLst><p:ext uri="section-test"><p14:section xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"><p14:sldId id="256"/></p14:section></p:ext></p:extLst></p:presentation>'));
+  const input = Buffer.from(await zip.generateAsync({ type: "uint8array" }));
+  await page.goto("/");
+  await readyEditor(page);
+  const previous = await page.locator("[data-document-id]").getAttribute("data-document-id");
+  await upload(page, input);
+  await expect(page.locator("[data-document-id]")).not.toHaveAttribute("data-document-id", previous!);
+  const id = (await page.locator("[data-document-id]").getAttribute("data-document-id"))!;
+  const before = await page.evaluate(async () => {
+    const { platform } = await import(/* @vite-ignore */ String("/src/platform/index.ts"));
+    return (await platform.listAssets("", 0, 100)).total;
+  });
+  expect(before).toBe(0);
+  const after = await page.evaluate(async (documentId) => {
+    const { platform } = await import(/* @vite-ignore */ String("/src/platform/index.ts"));
+    await platform.saveDocument!(documentId);
+    return (await platform.listAssets("", 0, 100)).total;
+  }, id);
+  expect(after).toBe(1);
+});
 
 test("untouched new decks can be replaced without a save prompt", async ({ page }) => {
   await page.goto("/");

@@ -1,5 +1,6 @@
 import { ASSET_VERSION } from "../core/assets";
 import { acceptedImpact } from "../core/documentImpact";
+import { documentAssetIds } from "../core/documentAssets";
 import { editEffectLibrary, type EffectLibrary } from "../core/libraryEffects";
 import { resolveSlide } from "../core/templates";
 import { ImageWorkQueue } from "../core/imageWorkQueue";
@@ -130,6 +131,7 @@ async function mutateDocument<T>(
   id: string,
   mutate: (record: BrowserDocumentRecord) => T,
   expected?: Pick<BrowserDocumentRecord, "epoch" | "revision">,
+  stagedAssets: Asset[] = [],
 ) {
   const db = await dbPromise;
   return new Promise<T>((resolve, reject) => {
@@ -155,6 +157,10 @@ async function mutateDocument<T>(
           );
         result = mutate(record);
         store.put(record, "document/" + id);
+        for (const asset of stagedAssets) {
+          store.put(asset, "asset/" + asset.id);
+          store.delete(`staged-asset/${id}/${asset.id}`);
+        }
       } catch (error) {
         transaction.abort();
         reject(error);
@@ -167,7 +173,7 @@ async function mutateDocument<T>(
   });
 }
 
-async function importBrowserFiles(files: File[]) {
+async function importBrowserFiles(files: File[], documentId?: string) {
   const output: Asset[] = [];
   for (const file of files) {
     const type = mediaType(file.name);
@@ -176,7 +182,8 @@ async function importBrowserFiles(files: File[]) {
     const id = Array.from(new Uint8Array(hash), (byte) =>
       byte.toString(16).padStart(2, "0"),
     ).join("");
-    const old = await get<Asset>("asset/" + id);
+    const old = await get<Asset>("asset/" + id) ??
+      (documentId ? await get<Asset>(`staged-asset/${documentId}/${id}`) : undefined);
     const asset: Asset = old
       ? { ...old, names: [...new Set([...old.names, file.name])] }
       : {
@@ -190,10 +197,15 @@ async function importBrowserFiles(files: File[]) {
           createdAt: new Date().toISOString(),
         };
     if (!old) await put("blob/" + id, new Blob([bytes], { type: type.mime }));
-    await put("asset/" + id, asset);
+    await put(documentId ? `staged-asset/${documentId}/${id}` : "asset/" + id, asset);
     output.push(asset);
   }
   return output;
+}
+
+async function browserAsset(id: string) {
+  return await get<Asset>("asset/" + id) ??
+    (await entries<Asset>("staged-asset/")).find((asset) => asset.id === id);
 }
 
 let popup: Window | null = null;
@@ -689,7 +701,7 @@ export const browser: Platform = {
   },
   async preparedAssetImage(assetId, size) {
     if (!imageCachingEnabled) return null;
-    const asset = await get<Asset>("asset/" + assetId);
+    const asset = await browserAsset(assetId);
     if (!asset?.width || !asset.height) return null;
     const dimensions = imageDimensions(
       asset.width,
@@ -859,12 +871,16 @@ export const browser: Platform = {
     const runtime = await browserRuntime(documentId);
     requireBrowserWriter(documentId);
     return runtime.authority.runExclusive(async (snapshot) => {
+      const referenced = new Set(documentAssetIds(snapshot.document));
+      const staged = (await entries<Asset>(`staged-asset/${documentId}/`))
+        .filter((asset) => referenced.has(asset.id));
       await mutateDocument(
         documentId,
         (record) => {
           record.savedRevision = snapshot.revision;
         },
         { epoch: snapshot.epoch, revision: snapshot.revision },
+        staged,
       );
       runtime.authority.markSaved(snapshot.revision);
       return documentSummary(snapshot.document);
@@ -915,15 +931,16 @@ export const browser: Platform = {
     };
   },
   async getAsset(id) {
-    const value = await get<Asset>("asset/" + id);
+    const value = await browserAsset(id);
     if (!value) throw new Error("Asset is missing");
     return assetSchema.parse(value);
   },
   importAssets: (files = []) => importBrowserFiles(files),
   importDroppedFiles: (files) => importBrowserFiles(files),
+  stageDocumentFiles: (documentId, files) => importBrowserFiles(files, documentId),
   async assetUrl(id, preview) {
     const cached = preview ? await get<Blob>("preview/" + id) : undefined;
-    const metadata = preview ? await get<Asset>("asset/" + id) : undefined;
+    const metadata = preview ? await browserAsset(id) : undefined;
     const blob =
       cached ??
       (preview && metadata?.type === "video"
@@ -970,7 +987,23 @@ export const browser: Platform = {
     URL.revokeObjectURL(url);
   },
   async updateAsset(asset) {
-    await put("asset/" + asset.id, assetSchema.parse(asset));
+    const parsed = assetSchema.parse(asset);
+    if (await get<Asset>("asset/" + asset.id)) await put("asset/" + asset.id, parsed);
+    const db = await dbPromise;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction("files", "readwrite");
+      const store = transaction.objectStore("files");
+      const request = store.openCursor(IDBKeyRange.bound("staged-asset/", "staged-asset/\uffff"));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        if ((cursor.value as Asset).id === asset.id) cursor.update(parsed);
+        cursor.continue();
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
   },
   async storePreview(id, data) {
     await put(

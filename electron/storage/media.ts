@@ -195,6 +195,10 @@ export class StorageMedia {
     return this.importSource(path.basename(file), file, protect, folder);
   }
 
+  async importNamedFile(name: string, file: string) {
+    return this.importSource(name, file);
+  }
+
   async importBytes(
     name: string,
     bytes: Uint8Array,

@@ -155,6 +155,22 @@ contextBridge.exposeInMainWorld("desktop", {
     }
     return assets;
   },
+  openPowerPointArchive: (file: File) => {
+    const filePath = webUtils.getPathForFile(file);
+    if (!filePath) throw new Error("PowerPoint file path is unavailable");
+    return ipcRenderer.invoke("showme:openPowerPointArchive", filePath);
+  },
+  readPowerPointArchiveXml: (id: string, name: string) =>
+    ipcRenderer.invoke("showme:readPowerPointArchiveXml", id, name),
+  stagePowerPointArchiveMedia: (id: string, documentId: string, name: string) =>
+    ipcRenderer.invoke(
+      "showme:stagePowerPointArchiveMedia",
+      id,
+      documentId,
+      name,
+    ),
+  closePowerPointArchive: (id: string) =>
+    ipcRenderer.invoke("showme:closePowerPointArchive", id),
   readSlideTransfer: (files: File[]) => {
     const paths = files
       .map((file) => webUtils.getPathForFile(file))

@@ -10,6 +10,7 @@ import { AgentMutationError } from "../src/core/agentMutation";
 import {AgentWorkspaceService} from "./agentWorkspace";
 import { AgentDeliveryService } from "./agentDelivery";
 import { NativeLibraryBrowser } from "./libraryBrowser";
+import { openPowerPointArchive } from "./powerpointArchive";
 import { libraryBrowserRequestSchema } from "../src/core/libraryBrowser";
 import { importManagedFile, mediaFolder } from "./mediaLibrary";
 import { presentationMotionStages } from "../src/core/documentRuntime";
@@ -1962,7 +1963,51 @@ const agentBridge = new AgentBridge(app.getPath("userData"), async (request, sig
   if(request.command === "workspace")return agentWorkspace.run(request.params,signal);
   return agentPreview.preview(request.params, signal);
 });
+const powerpointArchives = new Map<
+  string,
+  Awaited<ReturnType<typeof openPowerPointArchive>>
+>();
 const operations: Record<string, (...args: any[]) => any> = {
+  async openPowerPointArchive(input: unknown) {
+    const file = z.string().min(1).parse(input);
+    if (!path.isAbsolute(file) || path.extname(file).toLowerCase() !== ".pptx")
+      throw new Error("Invalid PowerPoint file path");
+    const archive = await openPowerPointArchive(file);
+    const id = randomUUID();
+    powerpointArchives.set(id, archive);
+    return { id, names: archive.names };
+  },
+  async readPowerPointArchiveXml(id: string, name: string) {
+    const archive = powerpointArchives.get(z.string().uuid().parse(id));
+    if (!archive) throw new Error("PowerPoint archive is closed");
+    return archive.readXml(z.string().max(4096).parse(name));
+  },
+  async stagePowerPointArchiveMedia(
+    id: string,
+    documentId: string,
+    name: string,
+  ) {
+    const archive = powerpointArchives.get(z.string().uuid().parse(id));
+    if (!archive) throw new Error("PowerPoint archive is closed");
+    const entryName = z.string().max(4096).parse(name);
+    const filename = path.posix.basename(entryName).replace(/^pptx[-_ ]/i, "");
+    const file = await archive.extractMedia(entryName);
+    try {
+      return await requireStorage().stageDocumentMedia(
+        documentId,
+        filename,
+        file,
+      );
+    } finally {
+      await fs.rm(file, { force: true });
+    }
+  },
+  async closePowerPointArchive(id: string) {
+    const key = z.string().uuid().parse(id);
+    const archive = powerpointArchives.get(key);
+    powerpointArchives.delete(key);
+    await archive?.dispose();
+  },
   getMcpEditingEnabled: () => mcpEditingEnabled,
   async setMcpEditingEnabled(input: unknown) {
     const enabled = z.boolean().parse(input);

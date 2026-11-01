@@ -663,19 +663,6 @@ export class DocumentStorage {
         throw new Error(
           "Locked package media cannot be extracted into the shared Library",
         );
-      await this.fonts?.toLibrary(this, id, entry.packageFonts);
-      for (const assetId of documentAssetIds(snapshot.document)) {
-        if (!entry.packageAssets?.has(assetId) && !entry.localMedia) continue;
-        const asset = await this.assetForDocument(id, assetId);
-        const source = this.assetPathForDocument(id, assetId);
-        this.retainDocumentAssets(id, [assetId]);
-        const imported = await this.media.importBytes(
-          asset.names[0],
-          await fs.readFile(source),
-        );
-        if (imported.id !== assetId)
-          throw new Error("Presentation asset failed hash verification");
-      }
       const sameFile =
         handle.filePath && path.resolve(handle.filePath) === target;
       await this.withDocumentLock({ filePath: target }, async () => {
@@ -685,6 +672,16 @@ export class DocumentStorage {
             throw new Error(
               "This presentation changed on disk. Reopen it before saving to avoid overwriting external edits.",
             );
+        }
+        await this.fonts?.toLibrary(this, id, entry.packageFonts);
+        for (const assetId of documentAssetIds(snapshot.document)) {
+          if (!entry.packageAssets?.has(assetId) && !entry.localMedia) continue;
+          const asset = await this.assetForDocument(id, assetId);
+          const source = this.assetPathForDocument(id, assetId);
+          this.retainDocumentAssets(id, [assetId]);
+          const imported = await this.media.importNamedFile(asset.names[0], source);
+          if (imported.id !== assetId)
+            throw new Error("Presentation asset failed hash verification");
         }
         const text = this.serializeDocument(snapshot.document);
         await atomicWrite(target, text);
@@ -1195,6 +1192,18 @@ export class DocumentStorage {
 
   async importAssetData(name: string, bytes: Uint8Array) {
     return this.importSource(name, bytes);
+  }
+
+  async stageDocumentMedia(documentId: string, name: string, file: string) {
+    const entry = this.entry(idSchema.parse(documentId));
+    const local = await this.localMedia(entry);
+    const asset = await local.importNamedFile(name, file);
+    entry.packageAssets ??= new Map();
+    entry.packageAssets.set(asset.id, {
+      asset,
+      file: local.assetPath(asset.id),
+    });
+    return asset;
   }
 
   /** Inventory metadata only; insertion and byte consumers still verify assets. */

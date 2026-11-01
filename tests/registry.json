@@ -249,8 +249,8 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-25",
-    "reason": "Streaming large media archive cold extraction, bounded entry count, path validation and CRC corruption rejection"
+    "lastReviewed": "2026-11-01",
+    "reason": "Streaming package and PowerPoint archive integrity, and document-local media recovery and save promotion"
   },
   {
     "id": "persistence-browser-ownership",
@@ -1164,8 +1164,8 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-25",
-    "lastReviewed": "2026-10-25",
-    "reason": "Untouched deck replacement without prompts; PowerPoint import save, cancellation and save-failure safety"
+    "lastReviewed": "2026-11-01",
+    "reason": "Untouched deck replacement; PowerPoint import, section metadata, staged media, cancellation and save-failure safety"
   },
   {
     "id": "persistence-export-fonts",
