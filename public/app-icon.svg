@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="mdi-file-presentation-box" viewBox="0 0 24 24" fill="#000000"><path d="M19,16H5V8H19M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z" fill="#000000"/></svg>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:affinity="https://www.affinity.studio/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <path d="M19,8L19,16L5,16L5,8L19,8ZM19,3L5,3C3.89,3 3,3.89 3,5L3,19C3,20.097 3.903,21 5,21L19,21C20.097,21 21,20.097 21,19L21,5C21,3.89 20.1,3 19,3Z" style="fill-rule:nonzero;"/>
+    <path d="M19,1.6C20.87,1.6 22.4,3.113 22.4,5L22.4,19C22.4,20.865 20.865,22.4 19,22.4L5,22.4C3.135,22.4 1.6,20.865 1.6,19L1.6,5C1.6,3.113 3.113,1.6 5,1.6L19,1.6ZM19,3L5,3C3.89,3 3,3.89 3,5L3,19C3,20.097 3.903,21 5,21L19,21C20.097,21 21,20.097 21,19L21,5C21,3.89 20.1,3 19,3ZM19,8L19,16L5,16L5,8L19,8ZM17.6,9.4L6.4,9.4L6.4,14.6L17.6,14.6L17.6,9.4Z" style="fill:white;"/>
+    <g transform="matrix(1.038462,0,0,1.059659,-0.355237,-0.534229)">
+        <rect x="5.023" y="7.951" width="13.749" height="7.756" style="fill:white;"/>
+    </g>
+</svg>
