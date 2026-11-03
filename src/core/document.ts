@@ -16,8 +16,8 @@ import {
 } from "./slideTransitions";
 
 /** Canonical persisted document schema for the production editor. */
-export const DOCUMENT_VERSION = 1 as const;
-export const PRESENTATION_FILE_VERSION = 1 as const;
+export const DOCUMENT_VERSION = 2 as const;
+export const PRESENTATION_FILE_VERSION = 2 as const;
 export const canvasDimensionSchema = z.number().finite().positive();
 
 export const layerRootSchema = z

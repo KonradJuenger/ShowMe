@@ -68,12 +68,12 @@ it("same-document clipboard preserves references and overrides with a strict cur
     scopeId: snapshot.slide.nodes[0].id,
   })!;
   expect(payload.textStyles).toHaveLength(1);
-  expect(payload.version).toBe(1);
+  expect(payload.version).toBe(2);
   const serialized = serializeElementsClipboard(payload);
-  expect(serialized.startsWith("show-me-elements:v1:")).toBe(true);
+  expect(serialized.startsWith("show-me-elements:v2:")).toBe(true);
   expect(parseElementsClipboardText(serialized)).toEqual(payload);
   expect(
-    parseElementsClipboardText(serialized.replace("v1:", "v2:")),
+    parseElementsClipboardText(serialized.replace("v2:", "v3:")),
   ).toBeNull();
   const pasted = pasteElements(
     snapshot,
@@ -241,7 +241,7 @@ it("slide transfer includes referenced template styles and remaps visually diffe
       .sort((a, b) => a - b),
   ).toEqual([32, 80]);
   expect(prepared.slideMeta[prepared.slides[0].id].templateId).toBeNull();
-  expect(() => parseSlideTransferBundle({ ...bundle, version: 2 })).toThrow();
+  expect(() => parseSlideTransferBundle({ ...bundle, version: 3 })).toThrow();
 });
 
 it("clipboard and transfer reject dangling styles and duplicate style IDs instead of accepting unresolved text", () => {

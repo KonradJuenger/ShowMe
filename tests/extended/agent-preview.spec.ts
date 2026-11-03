@@ -121,7 +121,7 @@ async function launch(sampled = false) {
   text.frame.width = 400;
   text.frame.height = 90;
   if (text.content?.type === "text" && text.content.format.kind === "local") {
-    text.content.text = "Preview title";
+    text.content.runs = [{ text: "Preview title" }];
     text.content.format.typography.fontSize = 40;
     text.content.format.typography.color = "#ffffff";
     text.content.autoSize = "none";

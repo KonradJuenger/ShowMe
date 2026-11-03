@@ -29,7 +29,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-18",
-    "lastReviewed": "2026-10-25",
+    "lastReviewed": "2026-11-03",
     "reason": "Semantic element edits, native typography overrides, independent slide creation with stable replay IDs and undo, slide styling and deck naming stage through an actor-scoped EditorSession with exact in-queue admission, native resize/media preservation, capacity bounds, human/LAN leases and durable acceptance recovery; template editing/ownership, direct shared text styles, native slide recipes, named effect resources and explicit expanded batch admission; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; batched compact discovery preserves canonical schemas, selectors, relevant semantics and measured payload budget; compact advertised transport versus strict admission, sparse replay/resource receipts, measured partial/complete native operation overflow and deliberate splits"
   },
   {
@@ -40,7 +40,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-25",
+    "lastReviewed": "2026-11-03",
     "reason": "Real SDK stdio client covers Settings opt-in, context/inspection, deck creation, frame-based text editing, production PNG previews, creative authoring discovery, production GLSL/CSS/text-JS validation, deck CSS/classes, native Effect-parameter Motion, revocation, crash/restart, exact revision recovery and separate guarded user/agent history. Native workspace create/open/close/import, template rendering and scoped CSS supports.; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed; native Settings clipboard verifies Codex TOML, generic MCP JSON and VS Code JSON; held second native media decoder verifies revocation receipts and no third import; real SDK compact protocol/operation/Effect discovery, structured-text consistency and scoped source verified; compact advertised operation bodies retain nested fields and strict invalid-call diagnostics, protocol capabilities replace static context"
   },
   {
@@ -62,7 +62,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-17",
+    "lastReviewed": "2026-11-03",
     "reason": "Strict scoped accepted-document reads preserve projection privacy and exact identity, resolve selection at a UI epoch, and reject missing targets and freshness/access races"
   },
   {
@@ -84,7 +84,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-18",
+    "lastReviewed": "2026-11-03",
     "reason": "Context/inspection/native preview loop captures template/nested/text/image/alpha/GLSL/CSS pixels through an acknowledged bounded native surface, crops compositor acknowledgement and OS padding, preserves exact output size and editor state, reports missing-media/Effect diagnostics, waits for readiness and discards revoked or stale output; real HTTP disconnect and MCP opt-out destroy held capture surfaces and release the serialized queue"
   },
   {
@@ -117,7 +117,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-17",
-    "lastReviewed": "2026-10-18",
+    "lastReviewed": "2026-11-03",
     "reason": "Pure agent deck/visual-slide/scoped-element reads preserve template ownership, canonical order, production world geometry, hidden-content opt-in, bounded Unicode previews, style/media/effect/timeline metadata, explicit failures and detached results without source/path/note disclosure; structured SDK diagnostics, ownership/recipe metadata, resource cleanup receipts and explicit native package/media preparation boundaries reviewed"
   },
   {
@@ -161,7 +161,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-12",
-    "lastReviewed": "2026-10-24",
+    "lastReviewed": "2026-11-03",
     "reason": "Chromium SceneTexture content/backdrop pixel parity, CSS/JS/media/clock dependencies, fractional zoom and target geometry, static retention and font invalidation, unrelated-prefix isolation, dynamic capture settling and teardown, native static monitor animation suspension, direct media and shader handoff, bounded cohorts and context restoration. No primitive scene replay or GPU prefix reconstruction. Stable CSS declaration caching cannot suppress live video polling; pause/end/seek events wake and settle capture."
   },
   {
@@ -326,7 +326,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-11-03",
     "reason": "Canonical editor operations, authority acceptance, history, slide lifecycle, templates and sequence"
   },
   {
@@ -337,7 +337,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-09",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-11-03",
     "reason": "Current save, recovery and portable package boundaries"
   },
   {
@@ -645,7 +645,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-11-03",
     "reason": "Canonical text formats, unique names/defaults, collision rejection, natural auto-size defaults, manual resize fixes text frames, style workflows and effective typography"
   },
   {
@@ -667,7 +667,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-11-03",
     "reason": "Current-only clipboard/slide transfer, semantic style identity, deterministic naming, repeated import reuse and reference validation"
   },
   {
@@ -678,7 +678,7 @@
     "status": "active",
     "runtime": "browser",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-12",
+    "lastReviewed": "2026-11-03",
     "reason": "Always-visible inspector style actions, peer rerendering, large/portrait natural measurement, shared layout undo/redo and PDF DOM typography at readiness"
   },
   {
@@ -876,7 +876,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-11",
-    "lastReviewed": "2026-10-29",
+    "lastReviewed": "2026-11-03",
     "reason": "Host shutdown releases guest sessions; bounded per-peer backpressure, ordered stop, fragmented limits, duplicate acknowledgement, gaps and replay retention fallback"
   },
   {
@@ -999,7 +999,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-21",
-    "lastReviewed": "2026-10-23",
+    "lastReviewed": "2026-11-03",
     "reason": "Production Electron browser-native contracts: ordinary Motion bypasses compositor materialization, move/scale/rotate/fade preserve mounted DOM, Presence retains the CSS subtree, foreground/group alpha follow Chromium semantics, and generated shader layers remain operational. Obsolete tests of removed CSS restoration/materializer backends were deleted with their unused production modules; current SceneTexture pixel/capture tests remain in mixed-compositing and rendering-workloads."
   },
   {
@@ -1087,7 +1087,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-24",
-    "lastReviewed": "2026-10-26",
+    "lastReviewed": "2026-11-03",
     "reason": "Single-file assembly escaping; final HTML excludes hidden slides/layer content, notes, hidden layer metadata and unreachable effect source; removed-element Motion is pruned while visible effects/track groups and source document are preserved; external CSS/SVG and font diagnostics, composition-exact capture eligibility, lazy URLs and isolated posters"
   },
   {
@@ -1142,8 +1142,8 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-25",
-    "lastReviewed": "2026-10-26",
-    "reason": "Native default None and explicit SVG setting persistence, portable managed-font outlines, canonical text/source preservation, offline playback without fonts, progress popup and completion/cancel/write-failure cleanup"
+    "lastReviewed": "2026-11-03",
+    "reason": "Native default None and explicit SVG setting persistence, portable managed-font outlines, canonical text/source preservation, offline playback without fonts, progress popup and completion/cancel/write-failure cleanup; mixed regular/bold faces in one text flow retain native wrapping and verified outline shaping"
   },
   {
     "id": "html-export-text-outlines",
@@ -1175,7 +1175,7 @@
     "status": "active",
     "runtime": "unit",
     "created": "2026-10-26",
-    "lastReviewed": "2026-10-26",
+    "lastReviewed": "2026-11-03",
     "reason": "Shared export font modes: full binary fonts without license flag checks, none strips document-owned fonts, SVG packages use the canonical writer and preserve source/templates/notes, current HTML preference migrates to shared settings"
   },
   {
@@ -1186,7 +1186,7 @@
     "status": "active",
     "runtime": "electron",
     "created": "2026-10-26",
-    "lastReviewed": "2026-10-26",
+    "lastReviewed": "2026-11-03",
     "reason": "Shared None/SVG/Font file settings drive both HTML and SMP, native license reminder/cancel, live generated text offline with full font bytes, SMP binary fonts and SVG fallback, source revision preservation and temporary cleanup; CSS-only family regular/bold-italic files pass the actual HTML/SMP resolver and the 700 italic face renders offline"
   },
   {
@@ -1210,5 +1210,38 @@
     "created": "2026-10-13",
     "lastReviewed": "2026-10-26",
     "reason": "Presenter readiness, explicit Advance semantics, Motion stage boundaries, Previous eligibility, pause/black/preparing priority and no-visible-slide handling; static current-step endpoint snapshots complete delayed entrances, preserve future click gates and freeze Effect clocks without changing audience transport; elapsed minutes round to nearest quarter with whole-minute rollover"
+  },
+  {
+    "id": "editor-text-runs",
+    "path": "tests/feature/editor/text-runs.test.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-11-03",
+    "lastReviewed": "2026-11-03",
+    "reason": "Canonical run normalization, grapheme-safe edits, inherited font weights, authority history and supported v1 document upgrade"
+  },
+  {
+    "id": "editor-text-runs-browser",
+    "path": "tests/feature/editor/text-runs.spec.ts",
+    "area": "editor",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "browser",
+    "created": "2026-11-03",
+    "lastReviewed": "2026-11-03",
+    "reason": "Native selected-character formatting, caret typing, composition reconciliation, clipboard, history, durable browser recovery and DOM measurement parity"
+  },
+  {
+    "id": "persistence-text-runs",
+    "path": "tests/feature/persistence/text-runs.test.ts",
+    "area": "persistence",
+    "tier": "feature",
+    "status": "active",
+    "runtime": "unit",
+    "created": "2026-11-03",
+    "lastReviewed": "2026-11-03",
+    "reason": "Rich text save/package/recovery round trips, v1 clipboard and journal upgrade before current appends"
   }
 ]

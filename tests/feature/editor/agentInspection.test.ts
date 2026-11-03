@@ -10,7 +10,8 @@ function fixture() {
   const model = newPresentationDocument("Inspection"),
     slide = model.slides[model.deck.slideIds[0]];
   const title = createTextElement("title", { x: 20, y: 30 });
-  if (title.content?.type === "text") title.content.text = "Visible title";
+  if (title.content?.type === "text")
+    title.content.runs = [{ text: "Visible title" }];
   slide.nodes[0].children = [title];
   slide.notes = "PRIVATE_NOTES";
   const projection: DocumentProjection = {
@@ -187,7 +188,9 @@ it("lists bounded managed assets without paths bytes or private storage metadata
       },
     },
   });
-  expect(JSON.stringify(result)).not.toMatch(/private-photo|bytes|mime|createdAt/i);
+  expect(JSON.stringify(result)).not.toMatch(
+    /private-photo|bytes|mime|createdAt/i,
+  );
   expect(
     await f.service.inspect({
       ...f.request,
@@ -275,7 +278,9 @@ it("uses a presentation slide for deck metadata while the head projection is a t
   const f = fixture(),
     template = f.projection.templates![f.projection.deck.defaultTemplateId!];
   f.read(async (pageId) =>
-    pageId ? f.projection : { ...f.projection, slide: { ...template, notes: "" } },
+    pageId
+      ? f.projection
+      : { ...f.projection, slide: { ...template, notes: "" } },
   );
   expect(
     await f.service.inspect({ ...f.request, target: { type: "deck" } }),

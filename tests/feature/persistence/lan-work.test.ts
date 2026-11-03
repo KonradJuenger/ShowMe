@@ -54,9 +54,9 @@ it("a stopped host releases the guest session before the hosted document closes"
   }
 });
 
-it("public protocol v1 handshake accepts current peers and rejects mismatched versions", () => {
-  expect(COLLAB_PROTOCOL_VERSION).toBe(1);
-  expect(COLLAB_DOCUMENT_VERSION).toBe(1);
+it("current protocol handshake accepts current peers and rejects mismatched versions", () => {
+  expect(COLLAB_PROTOCOL_VERSION).toBe(2);
+  expect(COLLAB_DOCUMENT_VERSION).toBe(2);
   const versions = {
     appVersion: "0.1.0",
     protocolVersion: COLLAB_PROTOCOL_VERSION,
@@ -68,10 +68,10 @@ it("public protocol v1 handshake accepts current peers and rejects mismatched ve
   });
   expect(compatibleVersions(versions, versions)).toBe(true);
   expect(
-    compatibleVersions(versions, { ...versions, protocolVersion: 2 }),
+    compatibleVersions(versions, { ...versions, protocolVersion: 1 }),
   ).toBe(false);
   expect(
-    compatibleVersions(versions, { ...versions, documentVersion: 2 }),
+    compatibleVersions(versions, { ...versions, documentVersion: 1 }),
   ).toBe(false);
   const hello = { type: "hello", sessionId: "a".repeat(64), versions };
   expect(clientMessageSchema.parse(hello)).toEqual(hello);

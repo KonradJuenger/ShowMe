@@ -1,3 +1,4 @@
+import { plainText } from "../core/textRuns";
 import { EFFECT_SCHEDULE_VERSION } from "../core/motionModel";
 import { EffectTimeControls } from "./EffectTimeControls";
 import { assertEffectDefinitionValid } from "./effectValidation";
@@ -264,7 +265,7 @@ function EffectEditorDraft({
     await assertEffectDefinitionValid(parsed, {
       sampleText:
         element?.content?.type === "text"
-          ? element.content.text
+          ? plainText(element.content)
           : "SCRAMBLE REVEAL",
     });
   }

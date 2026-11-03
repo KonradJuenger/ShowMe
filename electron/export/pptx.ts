@@ -1,3 +1,5 @@
+import type { TextElement } from "../../src/core/text";
+import { runFontWeight } from "../../src/core/textRuns";
 import { resolveSlideTransition } from "../../src/core/slideTransitions";
 import { resolveTextTypography } from "../../src/core/textTypography";
 import PptxGenJS from "pptxgenjs";
@@ -404,8 +406,29 @@ export async function createPowerPoint(
 
       if (element.content?.type === "text") {
         slide.addText(
-          element.content.text,
-          textOptions(element, world, inheritedOpacity, unit, document.deck),
+          element.content.runs.map((run) => ({
+            text: run.text,
+            options: {
+              bold:
+                runFontWeight(
+                  run,
+                  resolveTextTypography(
+                    document.deck,
+                    element.content as TextElement["content"],
+                  ),
+                ) >= 600,
+            },
+          })),
+          {
+            ...textOptions(
+              element,
+              world,
+              inheritedOpacity,
+              unit,
+              document.deck,
+            ),
+            bold: false,
+          },
         );
       } else {
         const hasShape =

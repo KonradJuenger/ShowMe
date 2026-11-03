@@ -1,3 +1,4 @@
+import { upgradeV1TextPayload } from "./textV1Upgrade";
 import { textStyleSchema, type TextStyle } from "./textTypography";
 import {
   collectReferencedTextStyles,
@@ -17,7 +18,7 @@ import { walkElements } from "./element";
 import { cloneSubtree } from "./scene";
 
 export const SLIDE_TRANSFER_FORMAT = "showme-slide-transfer" as const;
-export const SLIDE_TRANSFER_VERSION = 1 as const;
+export const SLIDE_TRANSFER_VERSION = 2 as const;
 export const SLIDE_TRANSFER_MIME = "application/x-showme-slide-transfer";
 export const SLIDE_TRANSFER_FILE_EXTENSION = ".showme-slide-transfer";
 
@@ -151,7 +152,14 @@ export const slideTransferBundleSchema = currentSlideTransferBundleSchema;
 export type SlideTransferBundle = z.infer<typeof slideTransferBundleSchema>;
 
 export function parseSlideTransferBundle(input: unknown): SlideTransferBundle {
-  return slideTransferBundleSchema.parse(input);
+  return slideTransferBundleSchema.parse(
+    input &&
+      typeof input === "object" &&
+      "version" in input &&
+      input.version === 1
+      ? { ...(upgradeV1TextPayload(input) as object), version: 2 }
+      : input,
+  );
 }
 
 export interface PreparedSlideTransferImport {

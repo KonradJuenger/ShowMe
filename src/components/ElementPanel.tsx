@@ -1,3 +1,4 @@
+import type { TextEditingController } from "./editor/useTextEditing";
 import { TextStyleControl } from "./TextStyleControl";
 import {
   prepareTextStyleLayout,
@@ -369,6 +370,7 @@ export function PropertySection({
   );
 }
 export function ElementPanel({
+  textEditing,
   elements,
   snapshot,
   editing,
@@ -384,6 +386,7 @@ export function ElementPanel({
   onPreview,
   onError,
 }: {
+  textEditing?: TextEditingController;
   elements: readonly Element[];
   snapshot: EditorSnapshot;
   editing: Editing;
@@ -525,7 +528,22 @@ export function ElementPanel({
             <div className="element-wide element-text-style-row">
               {control("content.text.color", { kind: "color" })}
               <div className="element-toggle-cluster element-text-format">
-                {control("content.text.bold", { kind: "checkbox" })}
+                {textEditing?.editingId ? (
+                  <button
+                    type="button"
+                    className="element-format-toggle"
+                    data-property-id="content.text.bold"
+                    aria-label="Bold"
+                    title="Bold"
+                    aria-pressed={textEditing.boldState}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={textEditing.toggleBold}
+                  >
+                    <MaterialIcon name="format-bold" />
+                  </button>
+                ) : (
+                  control("content.text.bold", { kind: "checkbox" })
+                )}
                 {control("content.text.italic", { kind: "checkbox" })}
               </div>
             </div>

@@ -40,7 +40,7 @@ it("font-file packages retain live text and full font bytes regardless of embedd
   const text = createTextElement("live-text");
   if (text.content?.type !== "text" || text.content.format.kind !== "local")
     throw Error("Text required");
-  text.content.text = "Live text";
+  text.content.runs = [{ text: "Live text" }];
   text.content.format.typography.fontFamily = "Export Face";
   session.apply(
     insertElements(

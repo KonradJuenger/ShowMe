@@ -1,3 +1,4 @@
+import { boxFontWeight, normalizeTextRuns } from "./textRuns";
 import JSZip from "jszip";
 import { powerPointCanvasSize } from "./presentationDimensions";
 import {
@@ -471,6 +472,14 @@ function addText(
   if (pickAttr(bodies, "vert", "horz") !== "horz")
     warning(context, "Vertical text was imported horizontally.");
   const firstRun = list.flatMap((p) => p.runs).find((run) => run.text)!;
+  const nonWeightStyle = (style: StyledRun["style"]) =>
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(style).filter(
+          ([key]) => key !== "fontWeight" && key !== "bold",
+        ),
+      ),
+    );
   const same = list.every(
     (p) =>
       p.align === list[0].align &&
@@ -480,7 +489,7 @@ function addText(
       !p.indent &&
       p.runs.every((run) =>
         run.text
-          ? JSON.stringify(run.style) === JSON.stringify(firstRun.style)
+          ? nonWeightStyle(run.style) === nonWeightStyle(firstRun.style)
           : run.style.fontSize === firstRun.style.fontSize,
       ),
   );
@@ -492,7 +501,17 @@ function addText(
     text.frame.height = height;
     text.content = patchTextContent(text.content as TextContent, {
       ...firstRun.style,
-      text: list.map((p) => p.runs.map((r) => r.text).join("")).join("\n"),
+      runs: normalizeTextRuns(
+        list.flatMap((paragraph, index) => [
+          ...(index ? [{ text: "\n" }] : []),
+          ...paragraph.runs.map((run) => ({
+            text: run.text,
+            ...(boxFontWeight(run.style) === boxFontWeight(firstRun.style)
+              ? {}
+              : { fontWeight: boxFontWeight(run.style) }),
+          })),
+        ]),
+      ),
       align: list[0].align,
       lineHeight: list[0].lineHeight,
       verticalAlign,
@@ -500,8 +519,8 @@ function addText(
     element.children.push(text);
     return;
   }
-  // The current model has one style per text element. Lay out styled runs as
-  // ordinary editable text elements rather than adding a rich-text schema.
+  // Typography beyond supported inline weights retains the existing editable
+  // fragment import so font sizes, families and paragraph spacing remain intact.
   const canvas = document.createElement("canvas");
   const measure = canvas.getContext("2d");
   if (!measure) throw new Error("Could not measure imported PowerPoint text");

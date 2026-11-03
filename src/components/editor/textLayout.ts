@@ -1,3 +1,5 @@
+import { writeTextRunDom } from "./textRunDom";
+import { runFontWeight } from "../../core/textRuns";
 import { resolveTextTypography } from "../../core/textTypography";
 import type { CSSProperties } from "react";
 import type { EditorSnapshot } from "../../core/editorCommands";
@@ -12,6 +14,22 @@ import {
 } from "../../core/text";
 
 let textMeasurementProbe: HTMLDivElement | null = null;
+
+export async function prepareTextFonts(
+  element: Element & { content: TextContent },
+  source?: import("../../core/textTypography").TextStyleSource,
+) {
+  const type = resolveTextTypography(source, element.content);
+  await Promise.all(
+    (element.content.runs.length ? element.content.runs : [{ text: " " }]).map(
+      (run) =>
+        document.fonts.load(
+          `${type.italic ? "italic " : ""}${runFontWeight(run, type)} ${type.fontSize}px ${type.fontFamily}`,
+          run.text || " ",
+        ),
+    ),
+  );
+}
 
 export function textMeasurementStyle(
   element: Element & { content: TextContent },
@@ -78,7 +96,7 @@ export function measureText(
   probe.style.maxWidth =
     content.autoSize === "both" ? `${TEXT_MEASUREMENT_LIMIT}px` : "none";
   probe.style.maxHeight = `${TEXT_MEASUREMENT_LIMIT}px`;
-  probe.textContent = content.text || " ";
+  writeTextRunDom(probe, content.runs.length ? content.runs : [{ text: " " }]);
   const rect = probe.getBoundingClientRect();
   return { width: rect.width, height: rect.height };
 }

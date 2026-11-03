@@ -238,7 +238,7 @@ async function nativeWorkload(measure: Measure) {
         });
         Object.assign(text.frame, { width: 135, height: 44 });
         if (text.content?.type === "text")
-          text.content.text = `Native ${index}`;
+          text.content.runs = [{ text: `Native ${index}` }];
         return text;
       });
       const glass = createBasicShape("glass", "rectangle", { x: 280, y: 32 });
@@ -502,7 +502,9 @@ async function sceneTextureWorkload(measure: Measure) {
       const text = createTextElement("scene-text", { x: 40, y: 40 });
       Object.assign(text.frame, { width: 500, height: 220 });
       if (text.content?.type === "text")
-        text.content.text = "Explicit flattened SceneTexture benchmark";
+        text.content.runs = [
+          { text: "Explicit flattened SceneTexture benchmark" },
+        ];
       text.effects = [newEffectInstance("scene", shader, "content")];
       slide.effectResources = { scene: shader };
       slide.nodes[0].children = [text];

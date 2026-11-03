@@ -45,7 +45,7 @@ async function fixture() {
     slide = model.slides[model.deck.slideIds[0]];
   const title = createTextElement("title");
   if (title.content?.type === "text")
-    title.content.text = "Read-only MCP title";
+    title.content.runs = [{ text: "Read-only MCP title" }];
   slide.nodes[0].children = [title];
   slide.notes = "PRIVATE_NOTES";
   await writeFile(file, JSON.stringify(model));
@@ -1164,7 +1164,7 @@ test("local opt-in enables atomic MCP editing with production text sizing explic
     });
     expect(inspected.isError).toBe(false);
     const detail = (inspected.structuredContent as any).data.elements;
-    expect(detail.find((value: any) => value.id === "title").content.text).toBe(
+    expect(detail.find((value: any) => value.id === "title").content.runs.map((run: { text: string }) => run.text).join("")).toBe(
       request.operations[0].text,
     );
     expect(

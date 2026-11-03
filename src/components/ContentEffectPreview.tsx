@@ -72,7 +72,7 @@ export function ContentEffectPreview({
       label.appearance.fill = null;
       label.content = {
         type: "text",
-        text: "ShowMe\nPixels",
+        runs: [{ text: "ShowMe\nPixels" }],
         placeholder: false,
         format: {
           kind: "local",

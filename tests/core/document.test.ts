@@ -24,19 +24,19 @@ import { editing, insertShape } from "../helpers/document";
 
 it("creates a valid canonical document with an editable slide", () => {
   const document = newPresentationDocument("New deck");
-  expect(document.version).toBe(1);
-  expect(document.deck.version).toBe(1);
+  expect(document.version).toBe(2);
+  expect(document.deck.version).toBe(2);
   expect(
-    Object.values(document.slides).every((slide) => slide.version === 1),
+    Object.values(document.slides).every((slide) => slide.version === 2),
   ).toBe(true);
   expect(
     Object.values(document.templates).every(
-      (template) => template.version === 1,
+      (template) => template.version === 2,
     ),
   ).toBe(true);
   expect(presentationDocumentSchema.parse(document)).toEqual(document);
   expect(() =>
-    parseRuntimeDocument(JSON.stringify({ ...document, version: 2 })),
+    parseRuntimeDocument(JSON.stringify({ ...document, version: 3 })),
   ).toThrow("Unsupported");
   expect(document.documentId).toBe(document.deck.id);
   expect(document.slides[document.deck.slideIds[0]].nodes[0].id).toBe(

@@ -1,3 +1,4 @@
+import { upgradeV1TextPayload } from "./textV1Upgrade";
 import { stageDuration } from "./motionModel";
 import { editablePage } from "./templates";
 import {
@@ -11,18 +12,23 @@ import {
   PRESENTATION_FILE_VERSION,
   type PresentationDocument,
 } from "./document";
-import { documentHasSpeakerNotes, type DocumentProjection } from "./documentProjection";
+import {
+  documentHasSpeakerNotes,
+  type DocumentProjection,
+} from "./documentProjection";
 import type {
   DocumentTransaction,
   AcceptedTransaction,
 } from "./documentTransactions";
 import type { EditorTransport } from "./editorSession";
 
-/** Current-format boundary. Only the current private format is accepted. */
+/** Persistent boundary: current format and the supported public v1 upgrade. */
 export function parseRuntimeDocument(input: unknown): PresentationDocument {
   const value: unknown = typeof input === "string" ? JSON.parse(input) : input;
   if (typeof value !== "object" || value === null || !("version" in value))
     throw new Error("Invalid ShowMe document envelope");
+  if (value.version === 1)
+    return presentationDocumentSchema.parse(upgradeV1TextPayload(value));
   if (value.version !== PRESENTATION_FILE_VERSION)
     throw new Error(
       `Unsupported ShowMe document version: ${String(value.version)}.`,

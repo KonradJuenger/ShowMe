@@ -7,8 +7,10 @@ the complete license and reserved font name are in OFL-Abel.txt.
 The native HTML export test places this font in its isolated managed library so
 SVG conversion can be verified without installing fonts on the host computer.
 
-AsapCondensed-Regular.ttf and AsapCondensed-BoldItalic.ttf are unmodified fonts
+AsapCondensed-Regular.ttf, AsapCondensed-Bold.ttf and AsapCondensed-BoldItalic.ttf are unmodified fonts
 from https://github.com/google/fonts/tree/main/ofl/asapcondensed.
 Their SIL Open Font License and copyright notices are in OFL-AsapCondensed.txt.
 CSS export tests use the distinct 400/normal and 700/italic font files to verify
 the real family-resolution pipeline, without installing either face on the host.
+Mixed-weight SVG export uses the 400/normal and 700/normal files to verify
+native Chromium layout against outline shaping for both faces in one text box.

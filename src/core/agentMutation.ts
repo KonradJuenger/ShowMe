@@ -1,3 +1,4 @@
+import { plainText } from "./textRuns";
 import { z } from "zod/v4";
 import { createBasicShape, createEmptyFrame } from "./elementFactory";
 import type { Asset } from "./assets";
@@ -1178,7 +1179,7 @@ export async function assembleAgentMutation(
   ): Promise<TextMeasurement | null> => {
     const key = JSON.stringify({
       width: element.frame.width,
-      text: element.content.text,
+      runs: element.content.runs,
       autoSize: element.content.autoSize,
       format: element.content.format,
     });
@@ -1632,7 +1633,7 @@ export async function assembleAgentMutation(
             "Slide ID already exists.",
           );
         const createdSlide = {
-          version: 1 as const,
+          version: 2 as const,
           id: slideId,
           background: op.background ?? "#ffffff",
           notes: "",
@@ -2220,7 +2221,9 @@ export async function assembleAgentMutation(
             },
             existing?.definition,
           ),
-          target.content?.type === "text" ? target.content.text : undefined,
+          target.content?.type === "text"
+            ? plainText(target.content)
+            : undefined,
         );
         const before = new Set((target.effects ?? []).map(({ id }) => id));
         next = setElementEffectDefinition(

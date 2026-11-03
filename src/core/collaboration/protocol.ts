@@ -9,8 +9,8 @@ import {
 } from "../documentTransactions";
 import { frameSchema } from "../element";
 
-export const COLLAB_PROTOCOL_VERSION = 1 as const;
-export const COLLAB_DOCUMENT_VERSION = 1 as const;
+export const COLLAB_PROTOCOL_VERSION = 2 as const;
+export const COLLAB_DOCUMENT_VERSION = 2 as const;
 export const MAX_COLLAB_MESSAGE_BYTES = 32 * 1024 * 1024;
 export const MAX_COLLAB_CONTROL_BYTES = 32 * 1024;
 export const MAX_COLLAB_OPERATION_BYTES = 512 * 1024;

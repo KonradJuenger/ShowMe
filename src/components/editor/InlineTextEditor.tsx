@@ -1,3 +1,10 @@
+import { useRef } from "react";
+import {
+  readTextRunDom,
+  readTextDomSelection,
+  writeTextDomSelection,
+  writeTextRunDom,
+} from "./textRunDom";
 import { resolveTextTypography } from "../../core/textTypography";
 import { useLayoutEffect, type CSSProperties, type KeyboardEvent } from "react";
 import type { Matrix } from "../../core/element";
@@ -26,6 +33,20 @@ export function InlineTextEditor({
         ? "flex-end"
         : "flex-start";
 
+  const composing = useRef(false);
+  useLayoutEffect(() => {
+    const area = controller.inputRef.current;
+    if (!area || composing.current) return;
+    if (
+      JSON.stringify(readTextRunDom(area)) !==
+      JSON.stringify(controller.draftRuns)
+    ) {
+      const selection = readTextDomSelection(area);
+      writeTextRunDom(area, controller.draftRuns, true);
+      if (selection) writeTextDomSelection(area, selection);
+    }
+  }, [controller.draftRuns, controller.inputRef]);
+
   useLayoutEffect(() => {
     const area = controller.inputRef.current;
     if (!area) return;
@@ -44,10 +65,50 @@ export function InlineTextEditor({
     content.letterSpacing,
     content.autoSize,
     controller.draftText,
+    controller.draftRuns,
     controller.inputRef,
     element.frame.height,
     element.frame.width,
   ]);
+
+  useLayoutEffect(() => {
+    const area = controller.inputRef.current;
+    if (!area) return;
+    const beforeInput = (input: InputEvent) => {
+      if (composing.current || input.isComposing || !input.cancelable) return;
+      if (input.inputType === "insertText" && input.data !== null) {
+        input.preventDefault();
+        controller.insertText(input.data);
+      } else if (
+        input.inputType === "insertParagraph" ||
+        input.inputType === "insertLineBreak"
+      ) {
+        input.preventDefault();
+        controller.insertText("\n");
+      } else if (input.inputType === "formatBold") {
+        input.preventDefault();
+        controller.toggleBold();
+      } else if (input.inputType.startsWith("format")) {
+        input.preventDefault();
+      } else if (
+        input.inputType === "historyUndo" ||
+        input.inputType === "historyRedo"
+      ) {
+        input.preventDefault();
+        void controller.history(input.inputType === "historyRedo");
+      }
+    };
+    area.addEventListener("beforeinput", beforeInput);
+    document.addEventListener("selectionchange", controller.refreshSelection);
+    controller.refreshSelection();
+    return () => {
+      area.removeEventListener("beforeinput", beforeInput);
+      document.removeEventListener(
+        "selectionchange",
+        controller.refreshSelection,
+      );
+    };
+  }, [controller]);
 
   const style: CSSProperties = {
     width: "100%",
@@ -74,8 +135,22 @@ export function InlineTextEditor({
     overflowWrap: content.autoSize === "both" ? "normal" : "anywhere",
   };
 
-  const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Escape") return;
+  const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !composing.current
+    ) {
+      const key = event.key.toLowerCase();
+      if (key === "b" || key === "z" || key === "y") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (key === "b") controller.toggleBold();
+        else void controller.history(key === "y" || event.shiftKey);
+        return;
+      }
+    }
+    if (event.key !== "Escape" || composing.current) return;
     event.preventDefault();
     event.stopPropagation();
     void controller.exit();
@@ -100,25 +175,67 @@ export function InlineTextEditor({
         pointerEvents: "none",
       }}
     >
-      <textarea
+      <div
         ref={controller.inputRef}
         className="inline-text"
         data-text-editor="true"
         data-context-target="text-edit"
-        autoFocus
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
         aria-label="Edit text on slide"
-        wrap={content.autoSize === "both" ? "off" : "soft"}
-        value={controller.draftText}
         style={{ ...style, pointerEvents: "auto" }}
         onFocus={controller.onFocus}
         onPointerDown={(event) => event.stopPropagation()}
         onDoubleClick={(event) => {
           event.stopPropagation();
-          event.currentTarget.select();
+          writeTextDomSelection(event.currentTarget, {
+            start: 0,
+            end: controller.draftText.length,
+          });
+          controller.refreshSelection();
         }}
-        onCompositionStart={controller.onCompositionStart}
-        onCompositionEnd={controller.onCompositionEnd}
-        onChange={(event) => controller.onChange(event.target.value)}
+        onCompositionStart={() => {
+          composing.current = true;
+          controller.onCompositionStart();
+        }}
+        onCompositionEnd={(event) => {
+          composing.current = false;
+          controller.onChange(readTextRunDom(event.currentTarget));
+          controller.onCompositionEnd();
+        }}
+        onInput={(event) =>
+          controller.onChange(readTextRunDom(event.currentTarget))
+        }
+        onCopy={(event) => {
+          const selected = readTextDomSelection(event.currentTarget);
+          if (!selected) return;
+          event.preventDefault();
+          event.clipboardData.setData(
+            "text/plain",
+            controller.draftText.slice(selected.start, selected.end),
+          );
+        }}
+        onCut={(event) => {
+          const selected = readTextDomSelection(event.currentTarget);
+          if (!selected || composing.current) return;
+          event.preventDefault();
+          event.clipboardData.setData(
+            "text/plain",
+            controller.draftText.slice(selected.start, selected.end),
+          );
+          controller.insertText("");
+        }}
+        onPaste={(event) => {
+          event.preventDefault();
+          controller.insertText(
+            event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n"),
+          );
+        }}
+        onDrop={(event) => event.preventDefault()}
+        onKeyUp={controller.refreshSelection}
+        onPointerUp={controller.refreshSelection}
         onKeyDown={keyDown}
         onBlur={controller.onBlur}
       />

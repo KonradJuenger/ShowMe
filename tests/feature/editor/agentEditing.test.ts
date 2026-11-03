@@ -330,7 +330,9 @@ it("native assembly overflow reports measured costs and accepts a smaller transa
   expect(result.error.details.nativeOperations).toBeGreaterThan(256);
   expect(f.runtime.currentRevision(f.model.documentId)).toBe(0);
   expect(findElement((await f.projection()).slide, "cost-0")).toBeNull();
-  expect(await f.service.apply(f.request(operations.slice(0, 2)))).toMatchObject({
+  expect(
+    await f.service.apply(f.request(operations.slice(0, 2))),
+  ).toMatchObject({
     ok: true,
     revision: 1,
   });
@@ -1048,7 +1050,7 @@ function fixture(
     slide = model.slides[model.deck.slideIds[0]];
   const title = createTextElement("title");
   if (title.content?.type === "text") {
-    title.content.text = "Original";
+    title.content.runs = [{ text: "Original" }];
     title.content.placeholder = false;
     title.content.autoSize = "none";
     if (styleTitle)
@@ -1084,7 +1086,10 @@ function fixture(
     element: Parameters<
       ConstructorParameters<typeof AgentEditingService>[0]["measure"]
     >[1],
-  ) => ({ width: element.content.text.length * 10, height: 30 });
+  ) => ({
+    width: element.content.runs.map((run) => run.text).join("").length * 10,
+    height: 30,
+  });
   let validateEffect = async (
     _documentId: string,
     definition: EffectDefinition,
@@ -1289,7 +1294,7 @@ it("slide creation can author a complete new slide atomically and invalid anchor
     frame: { x: 140, y: 210, width: 1400, height: 180 },
     content: {
       type: "text",
-      text: "A complete slide",
+      runs: [{ text: "A complete slide" }],
       format: { typography: { fontSize: 96, color: "#ffffff" } },
     },
   });
@@ -2372,7 +2377,7 @@ it("all seven operations use one native transaction and return generated measure
   });
   expect(findElement(p.slide, result.createdIds[0])).toMatchObject({
     name: "Agent label",
-    content: { text: "Label" },
+    content: { runs: [{ text: "Label" }] },
     frame: { height: expect.any(Number) },
   });
   expect(f.counts().writes).toBe(1);
@@ -2517,7 +2522,7 @@ it("exact expected revision rejects disjoint edits queued ahead of agent admissi
   });
   expect(
     findElement((await f.projection()).slide, "title")!.content,
-  ).toMatchObject({ text: "Original" });
+  ).toMatchObject({ runs: [{ text: "Original" }] });
   expect(f.counts().writes).toBe(1);
 });
 it("human ancestor and LAN leases deny agent writes while unrelated leases do not get replaced", async () => {
@@ -2688,7 +2693,7 @@ it("agent undo and redo preserve disjoint human history and replay never reappli
   ).toBe("#ff0000");
   expect(
     findElement((await f.projection()).slide, "title")!.content,
-  ).toMatchObject({ text: "Original" });
+  ).toMatchObject({ runs: [{ text: "Original" }] });
   f.access(3);
   expect(await f.service.apply(input)).toMatchObject({
     ok: true,
@@ -2697,7 +2702,7 @@ it("agent undo and redo preserve disjoint human history and replay never reappli
   });
   expect(
     findElement((await f.projection()).slide, "title")!.content,
-  ).toMatchObject({ text: "Original" });
+  ).toMatchObject({ runs: [{ text: "Original" }] });
   expect(
     await f.service.undo({ documentId: f.model.documentId, redo: true }),
   ).toMatchObject({ ok: true });
@@ -3007,12 +3012,12 @@ it("MCP direct text styles and native slide recipes retain shared references and
   expect(result).toMatchObject({ ok: true, createdSlideIds: ["recipe-copy"] });
   const p = await f.runtime.projection(f.model.documentId, "recipe-copy");
   expect(findElement(p.slide, result.idMap.title)?.content).toMatchObject({
-    text: "New narrative",
+    runs: [{ text: "New narrative" }],
     format: { kind: "style", styleId: "design-title" },
   });
   expect(
     (await f.projection()).slide.nodes[0].children[0].content,
-  ).toMatchObject({ text: "Original" });
+  ).toMatchObject({ runs: [{ text: "Original" }] });
   const revision = f.runtime.currentRevision(f.model.documentId);
   expect(
     await f.service.apply(

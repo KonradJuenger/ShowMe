@@ -1,3 +1,4 @@
+import { plainText } from "./textRuns";
 import type { DocumentProjection } from "./documentProjection";
 import type { Deck, Slide } from "./document";
 import type { Element, Matrix } from "./element";
@@ -350,7 +351,7 @@ function inspectSlide(
         let textLength = 0,
           textPreview = "";
         if (text)
-          for (const point of text.text) {
+          for (const point of plainText(text)) {
             if (textLength < AGENT_TEXT_PREVIEW_LENGTH) textPreview += point;
             textLength++;
           }

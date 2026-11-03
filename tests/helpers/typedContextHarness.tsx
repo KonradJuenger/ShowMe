@@ -31,7 +31,7 @@ export async function mountTypedContextHarness(
       styleSource: ":scope { color: #123456; }",
     };
   const text = createTextElement("text");
-  if (text.content?.type === "text") text.content.text = "Alpha";
+  if (text.content?.type === "text") text.content.runs = [{ text: "Alpha" }];
   const instance = {
     ...newEffectInstance("effect", definition, "content"),
     id: "effect",

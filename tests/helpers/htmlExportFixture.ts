@@ -12,7 +12,7 @@ export function htmlExportFixture(): ExportDocument {
   const first = model.slides[model.deck.slideIds[0]];
   const text = createTextElement("text", { x: 40, y: 30 });
   if (text.content?.type === "text") {
-    text.content.text = hostileText;
+    text.content.runs = [{ text: hostileText }];
     text.content.placeholder = false;
   }
   const css = {

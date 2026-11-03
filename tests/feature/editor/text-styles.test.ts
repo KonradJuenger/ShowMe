@@ -298,7 +298,7 @@ it("typography controls create only meaningful overrides while typing and auto-s
   const typed = updateText(edited, "a", { text: "typed", autoSize: "height" });
   expect(content(typed).format).toEqual(content(edited).format);
   expect(content(typed)).toMatchObject({
-    text: "typed",
+    runs: [{ text: "typed" }],
     placeholder: false,
     autoSize: "height",
   });

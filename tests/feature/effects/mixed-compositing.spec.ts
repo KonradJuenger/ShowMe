@@ -1310,7 +1310,7 @@ test("representative browser-native presentation crosses SceneTexture only for e
         const label = createTextElement("native-label", { x: 18, y: 38 });
         Object.assign(label.frame, { width: 205, height: 55 });
         if (label.content?.type === "text") {
-          label.content.text = "Chromium glass";
+          label.content.runs = [{ text: "Chromium glass" }];
           if (label.content.format.kind === "local")
             label.content.format.typography.fontSize = 24;
         }

@@ -110,7 +110,7 @@ test("shared font-file export keeps animated HTML text and packages complete fon
     for (const item of [text, plain]) {
       if (item.content?.type !== "text" || item.content.format.kind !== "local")
         throw Error("Text required");
-      item.content.text = item === text ? "Hi" : "Static";
+      item.content.runs = [{ text: item === text ? "Hi" : "Static" }];
       item.content.placeholder = false;
       Object.assign(item.content.format.typography, {
         fontFamily: "Abel",

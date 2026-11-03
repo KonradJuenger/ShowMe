@@ -32,9 +32,7 @@ test("Text Style inspector applies, overrides, creates, updates, detaches and de
   await size.fill("72");
   await size.blur();
   await expect(style.locator("option:checked")).toHaveText("Heading+");
-  await page
-    .getByRole("button", { name: "Reset style", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Reset style", exact: true }).click();
   await expect(size).toHaveValue("64");
   await expect(style.locator("option:checked")).toHaveText("Heading");
   await size.fill("72");
@@ -128,7 +126,7 @@ test("PowerPoint round trip exports effective styled typography and imports text
   const text = createTextElement("a");
   text.content = {
     ...(text.content as TextContent),
-    text: "Imported title",
+    runs: [{ text: "Imported" }, { text: " title", fontWeight: 400 }],
     placeholder: false,
     format: {
       kind: "style",
@@ -175,6 +173,11 @@ test("PowerPoint round trip exports effective styled typography and imports text
   }, bytes);
   expect(imported.defaults).toEqual(["Heading", "Text"]);
   expect(imported.contents.length).toBeGreaterThan(0);
+  expect(
+    imported.contents.some((content) =>
+      content.runs.some((run) => run.fontWeight === 400),
+    ),
+  ).toBe(true);
   for (const content of imported.contents) {
     expect(content.format.kind).toBe("local");
     if (content.format.kind !== "local")
@@ -254,7 +257,7 @@ test("natural text measurement and shared style layout agree on large and portra
           const e = createTextElement(id);
           e.content = {
             ...(e.content as TextContent),
-            text: "M".repeat(50),
+            runs: [{ text: "M".repeat(50) }],
             autoSize: "both",
             format: { kind: "style", styleId: heading.id, overrides: {} },
           };
@@ -357,7 +360,7 @@ test("PDF export resolves updated shared typography in the DOM before export rea
   const element = createTextElement("pdf-text");
   element.content = {
     ...(element.content as TextContent),
-    text: "Styled PDF",
+    runs: [{ text: "Styled PDF" }],
     format: { kind: "style", styleId: heading.id, overrides: {} },
   };
   slide.nodes[0].children = [element];

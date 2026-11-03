@@ -9,7 +9,7 @@ import { walkElements } from "../../core/element";
 import type { EditorSnapshot } from "../../core/editorCommands";
 import { editTextStyleDeck, editTextStylePage } from "../../core/textStyles";
 import { resolveTextAutoSizeFrame } from "../../core/text";
-import { measureText } from "./textLayout";
+import { measureText, prepareTextFonts } from "./textLayout";
 
 /** Measure once on the authoring client; accepted/recovered replicas use those exact frames. */
 export async function prepareTextStyleLayout(
@@ -69,6 +69,7 @@ export async function prepareTextStyleLayout(
           content.format.styleId !== edit.styleId
         )
           continue;
+        await prepareTextFonts({ ...e, content }, deck);
         const measured = measureText({ ...e, content }, deck);
         if (!measured) throw new Error("Text measurement is unavailable");
         const original = before.get(e.id)!;
