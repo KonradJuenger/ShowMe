@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import type { FontUsage } from "../src/core/fonts";
+import { fontWeightMatchScore, type FontUsage } from "../src/core/fonts";
 import type { SystemFontFamily } from "../src/platform/api";
 import {
   assetIdFromFilename,
@@ -314,10 +314,8 @@ function nativeFontFiles() {
 function faceScore(face: NativeFontFile, usage: FontUsage) {
   if (normalizeFamily(face.family) !== normalizeFamily(usage.family))
     return Infinity;
-  return (
-    Math.abs(face.weight - usage.weight) +
-    (face.italic === usage.italic ? 0 : 1000)
-  );
+  if (face.italic !== usage.italic) return Infinity;
+  return fontWeightMatchScore(usage.weight, face.weight);
 }
 
 export async function resolveSystemFontUsages(usages: FontUsage[]) {
@@ -334,7 +332,7 @@ export async function resolveSystemFontUsages(usages: FontUsage[]) {
         bestScore = score;
       }
     }
-    if (!best || bestScore >= 1000) missing.push(usage);
+    if (!best || !Number.isFinite(bestScore)) missing.push(usage);
     else resolved.push({ ...usage, filePath: best.filePath });
   }
   return { resolved, missing };

@@ -1,3 +1,4 @@
+import type { TextEditingController } from "./editor/useTextEditing";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   findElement,
@@ -73,6 +74,7 @@ function preferences(): {
   }
 }
 export interface RightSidebarProps {
+  textEditing?: TextEditingController;
   documentId: string;
   snapshot: EditorSnapshot;
   selection: CanvasSelection;
@@ -316,6 +318,7 @@ export function RightSidebar(props: RightSidebarProps) {
               className="sidebar-fieldset"
             >
               <ElementPanel
+                textEditing={props.textEditing}
                 snapshot={snapshot}
                 documentId={props.documentId}
                 elements={elements}

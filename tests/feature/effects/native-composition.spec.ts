@@ -244,7 +244,7 @@ async function mount(
             label.frame.width = 230;
             label.frame.height = 46;
             if (label.content?.type === "text") {
-              label.content.text = "Native CSS glass";
+              label.content.runs = [{ text: "Native CSS glass" }];
               if (label.content.format.kind === "local")
                 label.content.format.typography.fontSize = 24;
             }

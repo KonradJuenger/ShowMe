@@ -44,7 +44,9 @@ void main() {
   element.effects = [newEffectInstance("sample-effect", definition, "content")];
   const text = createTextElement("label", { x: 200, y: 100 });
   if (text.content?.type === "text") {
-    text.content.text = "Display size preserves text wrapping and proportions";
+    text.content.runs = [
+      { text: "Display size preserves text wrapping and proportions" },
+    ];
     if (text.content.format.kind === "local")
       text.content.format.typography.fontSize = 48;
   }

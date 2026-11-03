@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { upgradeV1TextPayload } from "../../src/core/textV1Upgrade";
 import { parseRuntimeDocument } from "../../src/core/documentRuntime";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -154,7 +155,7 @@ export class RecoveryJournal {
     accepted: AcceptedTransaction,
     base: PresentationDocument,
     candidate?: PresentationDocument,
-  ) {
+  ): Promise<void> {
     const journalPath = path.join(handle.recoveryPath, "transactions.jsonl");
     let state = this.writers.get(handle.recoveryPath);
     if (state?.poisoned)
@@ -182,6 +183,12 @@ export class RecoveryJournal {
         throw new Error(
           "Recovery revision differs from the accepted authority; reopen before continuing",
         );
+      if (recovered.upgraded) {
+        // Publish the fully replayed upgrade before appending current operations.
+        // Until this point the original v1 recovery remains untouched.
+        await this.writeCheckpoint(handle, recovered.document);
+        return this.appendRecord(handle, accepted, base, candidate);
+      }
       const journal = await fs.readFile(journalPath, "utf8");
       let prefix = journal;
       if (journal && !journal.endsWith("\n")) {
@@ -342,6 +349,7 @@ export class RecoveryJournal {
     const rawCheckpoint = JSON.parse(
       await fs.readFile(path.join(folder, "checkpoint.json"), "utf8"),
     );
+    const upgraded = rawCheckpoint.document?.version === 1;
     rawCheckpoint.document = parseRuntimeDocument(rawCheckpoint.document);
     const checkpoint = checkpointSchema.parse(rawCheckpoint);
     if (
@@ -384,7 +392,9 @@ export class RecoveryJournal {
           throw new Error("Recovery transaction mismatch");
         // A durable checkpoint owns earlier revisions, including interrupted compaction.
         if (raw.revision <= checkpoint.revision) continue;
-        accepted = acceptedTransactionSchema.parse(raw);
+        accepted = acceptedTransactionSchema.parse(
+          upgraded ? upgradeV1TextPayload(raw) : raw,
+        );
       }
       if (
         accepted.documentId !== handle.documentId ||
@@ -401,6 +411,7 @@ export class RecoveryJournal {
       revision = accepted.revision;
     }
     return {
+      upgraded,
       document: presentationDocumentSchema.parse(document),
       epoch: meta.epoch,
       revision,

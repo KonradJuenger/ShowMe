@@ -79,7 +79,8 @@ export async function mountNativeContinuity(
       card.clipChildren = true;
       card.effects = [newEffectInstance("glass", glass, "content")];
       const text = createTextElement("label", { x: 20, y: 100 });
-      if (text.content?.type === "text") text.content.text = "Native glass";
+      if (text.content?.type === "text")
+        text.content.runs = [{ text: "Native glass" }];
       card.children = [text];
       if (mixed) {
         const js = {

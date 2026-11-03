@@ -1,6 +1,6 @@
 # Current ShowMe MCP contract
 
-Server 1.10.0. Document, SME/SMP, effect API and native schedule formats remain public v1. Tool envelopes in tools/list and exact semantic schemas in showme.authoring describe the current API; full canonical runtime validators remain authoritative for admission.
+Server 1.10.0. Documents/SME write version 2 with a supported public v1 text upgrade; SMP retains its version 1 envelope and declares the contained document version. Effect API and native schedule formats remain public v1. Canonical text content uses normalized runs; plain-text authoring commands replace it with inheriting runs. Tool envelopes in tools/list and exact semantic schemas in showme.authoring describe the current API; full canonical runtime validators remain authoritative for admission.
 
 ## Discovery and context
 
@@ -111,7 +111,6 @@ A reusable slide recipe is an ordinary authored slide. `slide.duplicate` accepts
 `showme.workspace` requires current documentId/epoch/expectedRevision and editing opt-in. Actions: create(name), open(optional path), close, import-assets(optional paths). Save before create/open/close; it never discards dirty content. Supplied paths must resolve inside the user-selected root, including symlink resolution. Omitted paths invoke native pickers. Create/open notify the existing editor and require a fresh context; the first observation can be loading. Open reuses an already loaded runtime. Close drains the native authority and closes the editor after its receipt. Import uses native managed storage and prepares raster dimensions when Electron decodes the image; unsupported metadata still needs native preparation before insertion. Library imports do not add an authoring revision and are not an atomic document transaction.
 
 CSS effects support scoped `@supports`, including privately scoped keyframes, in addition to `:scope` and `@keyframes`. Global/descendant selectors and other at-rules remain unsupported. There is no reduced-motion cap; ShowMe supplies the full authored clocks.
-
 
 ## Diagnostics, receipts and native preparation (1.8)
 

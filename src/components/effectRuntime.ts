@@ -1,3 +1,5 @@
+import { effectTextRuns } from "../core/textRuns";
+import { readTextRunDom, writeTextRunDom } from "./editor/textRunDom";
 import { gpuGeneration as resourceGeneration } from "./gpuGeneration";
 import { createTextEffectRunner } from "./textEffectRunner";
 import { frame, cancelFrame } from "motion";
@@ -631,6 +633,7 @@ export function mountEffectSurface(
   let textInputHidden = false;
   let pending: Promise<void> = Promise.resolve();
   let lastTextInput = "";
+  let lastTextOutput = "";
   let lastShaderInput = "";
   let lastCssOutput = "";
   let inputPending = false;
@@ -946,9 +949,11 @@ export function mountEffectSurface(
           active: timing.active,
           parameters: params,
         };
-        const signature = JSON.stringify(
+        const inputRuns = readTextRunDom(original);
+        const signature = JSON.stringify([
           refined ? [input.text, input.parameters, clockKey(timing)] : input,
-        );
+          inputRuns,
+        ]);
         if (signature === lastTextInput) return pending;
         lastTextInput = signature;
         const revision = ++sequence;
@@ -967,10 +972,20 @@ export function mountEffectSurface(
               lastTextInput = "";
               return;
             }
-            const changed =
+            let changed =
               output.textContent !== text ||
               output.style.visibility !== "visible";
-            if (output.textContent !== text) output.textContent = text;
+            const runs = effectTextRuns(inputRuns, text);
+            const formatted = JSON.stringify(runs);
+            if (formatted !== lastTextOutput) {
+              changed = true;
+              const flow = document.createElement("div");
+              flow.style.width = "100%";
+              flow.style.flexShrink = "0";
+              writeTextRunDom(flow, runs);
+              output.replaceChildren(flow);
+              lastTextOutput = formatted;
+            }
             output.style.visibility = "visible";
             original.style.opacity = "0";
             textInputHidden = true;

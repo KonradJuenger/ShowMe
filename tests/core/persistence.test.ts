@@ -15,7 +15,7 @@ it("saves and reopens current .sme state in a fresh storage host", async () => {
   await session.flush();
   const file = path.join(root, "Saved.sme");
   await storage.saveDocument(id, file);
-  expect(JSON.parse(await readFile(file, "utf8")).version).toBe(1);
+  expect(JSON.parse(await readFile(file, "utf8")).version).toBe(2);
   const reader = await storageAt(root, "reader");
   const reopened = await reader.openDocument(file);
   expect(
@@ -62,7 +62,7 @@ it("portable .smp carries accepted dirty state to a separate host", async () => 
       ).toString(),
     );
     expect(manifest.packageVersion).toBe(1);
-    expect(manifest.documentVersion).toBe(1);
+    expect(manifest.documentVersion).toBe(2);
   } finally {
     await archive.dispose();
   }

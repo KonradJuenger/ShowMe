@@ -63,7 +63,7 @@ export async function checkEffectBypass() {
         };
         shape.content = {
           type: "text",
-          text: "Original",
+          runs: [{ text: "Original" }],
           placeholder: false,
           format: {
             kind: "local",
@@ -181,9 +181,7 @@ export async function checkEffectBypass() {
         await flushEffectSurfaces(host);
         const node = host.querySelector<HTMLElement>('[data-effect-id="b"]')!;
         const canvas = node.querySelector<HTMLCanvasElement>(":scope > canvas");
-        const pixel = canvas
-          ? readPresentedPixel(canvas, 0, 0)
-          : null;
+        const pixel = canvas ? readPresentedPixel(canvas, 0, 0) : null;
         const firstCanvas = host.querySelector<HTMLCanvasElement>(
           '[data-effect-id="a"] > canvas',
         );
@@ -211,9 +209,7 @@ export async function checkEffectBypass() {
           )?.style.visibility,
           t: node.style.getPropertyValue("--t"),
           p: node.style.getPropertyValue("--p"),
-          firstPixel: firstCanvas
-            ? readWebGlPixel(firstCanvas, 0, 0)
-            : null,
+          firstPixel: firstCanvas ? readWebGlPixel(firstCanvas, 0, 0) : null,
           error: node.dataset.effectError,
         };
       };

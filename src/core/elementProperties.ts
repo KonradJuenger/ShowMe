@@ -1,3 +1,4 @@
+import { plainText } from "./textRuns";
 import { patchTextContent } from "./text";
 import {
   resolveTextTypography,
@@ -33,24 +34,27 @@ export {
 } from "./elementPropertyDescriptors";
 type TextContent = Extract<NonNullable<Element["content"]>, { type: "text" }>;
 function text<
-  K extends keyof Omit<TextContent, "type" | "format"> | keyof TextTypography,
+  K extends
+    keyof Omit<TextContent, "type" | "format"> | "text" | keyof TextTypography,
 >(
   key: K,
   label: string,
   interpolation: "number" | "color" | "discrete" = "number",
 ) {
-  return property<(TextContent & TextTypography)[K]>(
+  return property<(TextContent & TextTypography & { text: string })[K]>(
     label,
     "content",
     (e, source) =>
       e.content?.type === "text"
-        ? ((key in e.content
-            ? e.content[key as keyof TextContent]
-            : resolveTextTypography(source, e.content)[
-                key as keyof TextTypography
-              ]) as (TextContent & TextTypography)[K])
+        ? ((key === "text"
+            ? plainText(e.content)
+            : key in e.content
+              ? e.content[key as keyof TextContent]
+              : resolveTextTypography(source, e.content)[
+                  key as keyof TextTypography
+                ]) as (TextContent & TextTypography & { text: string })[K])
         : unavailable,
-    (e, value: (TextContent & TextTypography)[K], source) =>
+    (e, value: (TextContent & TextTypography & { text: string })[K], source) =>
       e.content?.type === "text"
         ? {
             ...e,

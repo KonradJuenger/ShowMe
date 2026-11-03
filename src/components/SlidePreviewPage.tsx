@@ -1,3 +1,4 @@
+import { textRuns } from "../core/textRuns";
 import { videoPoster } from "../core/videoPoster";
 import { resolveVisualSlide } from "../core/templates";
 import { walkElements } from "../core/element";
@@ -13,7 +14,7 @@ import { SlideRenderer } from "./SlideRenderer";
 import { waitForSlideImages } from "./audienceImagePreparation";
 import { flushEffectSurfaces } from "./effectRuntime";
 import type { AgentPreviewWarning } from "../core/agentPreview";
-import { measureText } from "./editor/textLayout";
+import { measureText, prepareTextFonts } from "./editor/textLayout";
 import { layoutHtmlExportText } from "../export/html/textOutlines";
 import type { Element as SceneElement } from "../core/element";
 import {
@@ -171,10 +172,7 @@ export function installSlidePreviewPage() {
         ? element.content.format.typography
         : null;
     if (!typography) return null;
-    await document.fonts.load(
-      `${typography.italic ? "italic " : ""}${typography.fontWeight} ${typography.fontSize}px ${typography.fontFamily}`,
-      element.content.text || " ",
-    );
+    await prepareTextFonts(element);
     await document.fonts.ready;
     return measureText(element);
   };
@@ -187,7 +185,7 @@ export function installSlidePreviewPage() {
       element.frame = { ...element.frame, width: item.width };
       element.content = {
         ...element.content,
-        text: item.text,
+        runs: textRuns(item.text),
         placeholder: false,
         autoSize: "height",
         format: {
@@ -200,18 +198,7 @@ export function installSlidePreviewPage() {
       };
       return element;
     });
-    await Promise.all(
-      elements.map((element) => {
-        const typography =
-          element.content.format.kind === "local"
-            ? element.content.format.typography
-            : DEFAULT_TEXT_TYPOGRAPHY;
-        return document.fonts.load(
-          `${typography.italic ? "italic " : ""}${typography.fontWeight} ${typography.fontSize}px ${typography.fontFamily}`,
-          element.content.text || " ",
-        );
-      }),
-    );
+    await Promise.all(elements.map((element) => prepareTextFonts(element)));
     await document.fonts.ready;
     const measurements = elements.map((element) => measureText(element));
     if (

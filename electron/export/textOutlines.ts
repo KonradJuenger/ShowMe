@@ -1,3 +1,4 @@
+import { plainText, runFontWeight } from "../../src/core/textRuns";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -31,70 +32,87 @@ export class ExportTextOutlines {
 
   async prepare(element: TextElement) {
     const type = resolveTextTypography(undefined, element.content);
-    if (/[\u0590-\u08ff\t]/u.test(element.content.text))
+    if (/[\u0590-\u08ff\t]/u.test(plainText(element.content)))
       throw Error(
         "Bidirectional text and tab stops are not supported by the SVG prototype",
       );
-    const weight = type.bold ? Math.max(700, type.fontWeight) : type.fontWeight;
-    const key = JSON.stringify([
-      type.fontFamily.toLowerCase(),
-      weight,
-      type.italic,
-    ]);
-    let loaded = this.fonts.get(key);
-    if (!loaded) {
-      loaded = (async () => {
-        const resolved = await this.resolveFont({
-          family: type.fontFamily,
-          weight,
-          italic: type.italic,
-        });
-        if (!resolved) throw Error(`Font file unavailable: ${type.fontFamily}`);
-        const file = resolved.filePath;
-        if ((await fs.stat(file)).size > 32 * 1024 ** 2)
-          throw Error("Font exceeds size limit");
-        const bytes = await fs.readFile(file);
-        let font = create(bytes);
-        if (!("layout" in font))
-          throw Error(
-            "Font collections are not supported by the SVG prototype",
-          );
-        const actualWeight = (
-          font as Font & { "OS/2"?: { usWeightClass: number } }
-        )["OS/2"]?.usWeightClass;
-        if (
-          !font.variationAxes.wght &&
-          actualWeight &&
-          weight >= 600 !== actualWeight >= 600
-        )
-          throw Error("The requested font weight requires synthetic styling");
-        if (type.italic !== (font.italicAngle !== 0))
-          throw Error("The requested font style requires synthetic styling");
-        if (font.variationAxes.wght) font = font.getVariation({ wght: weight });
-        if (font.CPAL)
-          throw Error("Colour fonts are not supported by the SVG prototype");
-        return {
-          font,
-          bytes,
-          id: createHash("sha256").update(bytes).update(key).digest("hex"),
-        };
-      })();
-      this.fonts.set(key, loaded);
-    }
-    const { font, bytes, id } = await loaded;
+    const loadFont = async (weight: number) => {
+      const key = JSON.stringify([
+        type.fontFamily.toLowerCase(),
+        weight,
+        type.italic,
+      ]);
+      let loaded = this.fonts.get(key);
+      if (!loaded) {
+        loaded = (async () => {
+          const resolved = await this.resolveFont({
+            family: type.fontFamily,
+            weight,
+            italic: type.italic,
+          });
+          if (!resolved)
+            throw Error(`Font file unavailable: ${type.fontFamily}`);
+          const file = resolved.filePath;
+          if ((await fs.stat(file)).size > 32 * 1024 ** 2)
+            throw Error("Font exceeds size limit");
+          const bytes = await fs.readFile(file);
+          let font = create(bytes);
+          if (!("layout" in font))
+            throw Error(
+              "Font collections are not supported by the SVG prototype",
+            );
+          const actualWeight = (
+            font as Font & { "OS/2"?: { usWeightClass: number } }
+          )["OS/2"]?.usWeightClass;
+          if (
+            !font.variationAxes.wght &&
+            actualWeight &&
+            weight >= 600 !== actualWeight >= 600
+          )
+            throw Error("The requested font weight requires synthetic styling");
+          if (type.italic !== (font.italicAngle !== 0))
+            throw Error("The requested font style requires synthetic styling");
+          if (font.variationAxes.wght)
+            font = font.getVariation({ wght: weight });
+          if (font.CPAL)
+            throw Error("Colour fonts are not supported by the SVG prototype");
+          return {
+            font,
+            bytes,
+            id: createHash("sha256").update(bytes).update(key).digest("hex"),
+          };
+        })();
+        this.fonts.set(key, loaded);
+      }
+      return loaded;
+    };
+    const weights = [
+      ...new Set(element.content.runs.map((run) => runFontWeight(run, type))),
+    ];
+    const faces = await Promise.all(
+      weights.map(async (weight) => ({ weight, ...(await loadFont(weight)) })),
+    );
+    const byId = new Map(faces.map((face) => [face.id, face]));
     const layout = await this.layout({
       element,
-      fontId: id,
-      fontData: this.sent.has(id) ? "" : bytes.toString("base64"),
+      fonts: faces.map((face) => ({
+        fontId: face.id,
+        fontData: this.sent.has(face.id) ? "" : face.bytes.toString("base64"),
+        weight: face.weight,
+        italic: type.italic,
+      })),
     });
-    this.sent.add(id);
-    const scale = type.fontSize / font.unitsPerEm;
+    for (const face of faces) this.sent.add(face.id);
     let minX = 0,
       minY = 0,
       maxX = element.frame.width,
       maxY = element.frame.height;
     const paths: string[] = [];
     for (const line of layout.lines) {
+      const face = byId.get(line.fontId);
+      if (!face) throw Error("Unknown outline font");
+      const font = face.font,
+        scale = type.fontSize / font.unitsPerEm;
       const run = font.layout(
         line.text,
         type.letterSpacing === 0 ? undefined : { liga: false, clig: false },

@@ -15,7 +15,7 @@ import { createTextElement } from "../../../src/core/text";
 import type { HtmlExportPayload } from "../../../src/export/html/types";
 import { readyEditor } from "../../helpers/startup";
 
-test("native SVG font export preserves static text without font files and reports progress with none, cancel and failure paths", async ({
+test("native SVG font export preserves mixed-weight static text without font files and reports progress with none, cancel and failure paths", async ({
   page,
 }, info) => {
   const directory = await mkdtemp(
@@ -24,9 +24,22 @@ test("native SVG font export preserves static text without font files and report
   const root = path.join(directory, "root");
   const fonts = path.join(root, "ShowMe Library", "fonts");
   await mkdir(fonts, { recursive: true });
-  const fontBytes = await readFile("tests/fixtures/fonts/Abel-Regular.ttf");
+  const fontBytes = await readFile(
+    "tests/fixtures/fonts/AsapCondensed-Regular.ttf",
+  );
   const hash = createHash("sha256").update(fontBytes).digest("hex");
-  await writeFile(path.join(fonts, `Abel-400__${hash}.ttf`), fontBytes);
+  await writeFile(
+    path.join(fonts, `Asap Condensed-400__${hash}.ttf`),
+    fontBytes,
+  );
+  const boldBytes = await readFile(
+    "tests/fixtures/fonts/AsapCondensed-Bold.ttf",
+  );
+  const boldHash = createHash("sha256").update(boldBytes).digest("hex");
+  await writeFile(
+    path.join(fonts, "Asap Condensed-700__" + boldHash + ".ttf"),
+    boldBytes,
+  );
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key, value]) => key !== "ELECTRON_RUN_AS_NODE" && value !== undefined,
@@ -87,13 +100,16 @@ test("native SVG font export preserves static text without font files and report
     const text = createTextElement("outline-text");
     if (text.content?.type !== "text" || text.content.format.kind !== "local")
       throw Error("Text required");
-    text.content.text =
-      "office ffi Ág\nCustom fonts work, even on another computer.";
+    text.content.runs = [
+      { text: "office ffi Ág\nCustom " },
+      { text: "fonts work,", fontWeight: 700 },
+      { text: " even on another computer." },
+    ];
     text.content.placeholder = false;
     text.content.autoSize = "none";
     Object.assign(text.frame, { width: 420, height: 240 });
     Object.assign(text.content.format.typography, {
-      fontFamily: "Abel",
+      fontFamily: "Asap Condensed",
       fontSize: 40,
       align: "center",
       verticalAlign: "middle",
@@ -200,7 +216,9 @@ test("native SVG font export preserves static text without font files and report
     );
     expect(await page.evaluate(() => document.fonts.size)).toBe(0);
     await page.screenshot({ path: info.outputPath("offline-svg.png") });
-    await editor.evaluate(() => window.desktop!.setExportFontEmbedding!("none"));
+    await editor.evaluate(() =>
+      window.desktop!.setExportFontEmbedding!("none"),
+    );
     const none = path.join(directory, "none.html");
     await app.evaluate(({ dialog }, file) => {
       dialog.showSaveDialog = (async () => ({
@@ -265,9 +283,9 @@ test("native SVG font export preserves static text without font files and report
     expect((await temps()).filter((name) => !beforeTemps.has(name))).toEqual(
       [],
     );
-    expect(await readFile(path.join(fonts, `Abel-400__${hash}.ttf`))).toEqual(
-      fontBytes,
-    );
+    expect(
+      await readFile(path.join(fonts, `Asap Condensed-400__${hash}.ttf`)),
+    ).toEqual(fontBytes);
   } finally {
     await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await app.close().catch(() => {});

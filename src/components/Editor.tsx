@@ -1187,8 +1187,8 @@ export function Editor({
         onToggleNav={() => setNavOpen((value) => !value)}
         canUndo={controller.canUndo}
         canRedo={controller.canRedo}
-        onUndo={() => controller.undo(false)}
-        onRedo={() => controller.undo(true)}
+        onUndo={() => { void textEditing.exit().then(() => controller.undo(false)); }}
+        onRedo={() => { void textEditing.exit().then(() => controller.undo(true)); }}
         onInsert={(type) => {
           if (type === "text") {
             void textEditing.exit().then(() => textActions.insertText());
@@ -1748,6 +1748,7 @@ export function Editor({
       </section>
 
       <RightSidebar
+        textEditing={textEditing}
         settings={
           <EditorSettings
             onOpenAppSettings={() => setSettingsOpen(true)}

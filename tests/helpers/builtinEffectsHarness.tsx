@@ -33,7 +33,7 @@ export async function checkBuiltinEffects() {
         shape.children = [];
         shape.content = {
           type: "text",
-          text: "ShowMe text",
+          runs: [{ text: "ShowMe text" }],
           placeholder: false,
           format: {
             kind: "local",
@@ -96,9 +96,9 @@ export async function checkBuiltinEffects() {
       const restored =
         definition.kind === "text-js"
           ? shape.content?.type === "text" &&
-            end === shape.content.text &&
+            end === shape.content.runs.map((run) => run.text).join("") &&
             node.querySelector("[data-text-content]")!.textContent ===
-              shape.content.text
+              shape.content.runs.map((run) => run.text).join("")
           : definition.kind === "css"
             ? end === "1"
             : end !== start;

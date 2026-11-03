@@ -36,7 +36,10 @@ export const packageAssetSchema = z.object({
 const currentPackageManifestSchema = z.object({
   format: z.literal(SHOWME_PACKAGE_FORMAT),
   packageVersion: z.literal(SHOWME_PACKAGE_VERSION),
-  documentVersion: z.literal(PRESENTATION_FILE_VERSION),
+  documentVersion: z.union([
+    z.literal(1),
+    z.literal(PRESENTATION_FILE_VERSION),
+  ]),
   sourceDocumentId: idSchema,
   documentName: z.string().min(1).max(200),
   documentPath: z.literal(SHOWME_PACKAGE_DOCUMENT_PATH),

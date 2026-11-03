@@ -1,3 +1,4 @@
+import { plainText } from "../core/textRuns";
 import { EFFECT_SCHEDULE_VERSION } from "../core/motionModel";
 import { effectSlideSeed } from "../core/effectClocks";
 import { getPresentationSlideIds } from "../core/presentationSequence";
@@ -248,7 +249,7 @@ export function EffectEditorPreview({
               <span data-text-content="true">
                 {previewSource === "selection" &&
                 element?.content?.type === "text"
-                  ? element.content.text
+                  ? plainText(element.content)
                   : "SCRAMBLE REVEAL"}
               </span>
             </EffectSurface>

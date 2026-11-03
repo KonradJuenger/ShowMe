@@ -735,6 +735,8 @@ export class DocumentStorage {
       ) as {
         deck?: Record<string, unknown>;
       };
+      if (!("version" in rawDocument) || rawDocument.version !== manifest.documentVersion)
+        throw new Error("Package document version does not match its manifest");
       const document = parseRuntimeDocument({
         ...rawDocument,
         deck: { ...(rawDocument.deck ?? {}), name: manifest.documentName },

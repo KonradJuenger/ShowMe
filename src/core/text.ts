@@ -1,3 +1,4 @@
+import { textRuns, normalizeTextRuns } from "./textRuns";
 import {
   DEFAULT_TEXT_TYPOGRAPHY,
   patchTextFormat,
@@ -23,7 +24,7 @@ export type TextContent = Extract<
 >;
 export type TextElement = Element & { content: TextContent };
 export type TextPatch = Partial<Omit<TextContent, "type">> &
-  Partial<TextTypography>;
+  Partial<TextTypography> & { text?: string };
 export type TextMeasurement = { width: number; height: number };
 // Auto-size may grow beyond the canvas, up to the canonical frame resource limit.
 export const TEXT_AUTO_SIZE_PADDING = 4;
@@ -80,7 +81,7 @@ export function createTextElement(
     },
     content: {
       type: "text",
-      text: TEXT_PLACEHOLDER,
+      runs: textRuns(TEXT_PLACEHOLDER),
       placeholder: true,
       format: { kind: "local", typography: { ...DEFAULT_TEXT_TYPOGRAPHY } },
       autoSize: "both",
@@ -104,9 +105,15 @@ export function patchTextContent(
       ([key]) => !(key in textTypographySchema.shape),
     ),
   );
+  delete local.text;
   const next = {
     ...content,
     ...local,
+    runs: patch.runs
+      ? normalizeTextRuns(patch.runs)
+      : patch.text !== undefined
+        ? textRuns(patch.text)
+        : content.runs,
     format:
       patch.format ??
       (Object.keys(typography).length
@@ -115,7 +122,8 @@ export function patchTextContent(
     type: "text" as const,
   };
   if (
-    Object.prototype.hasOwnProperty.call(patch, "text") &&
+    (Object.prototype.hasOwnProperty.call(patch, "text") ||
+      Object.prototype.hasOwnProperty.call(patch, "runs")) &&
     !Object.prototype.hasOwnProperty.call(patch, "placeholder")
   )
     next.placeholder = false;
@@ -148,7 +156,7 @@ export function resolveTextAutoSizeFrame(
 
 function sameTextContent(left: TextContent, right: TextContent) {
   return (
-    left.text === right.text &&
+    JSON.stringify(left.runs) === JSON.stringify(right.runs) &&
     left.placeholder === right.placeholder &&
     JSON.stringify(left.format) === JSON.stringify(right.format) &&
     left.autoSize === right.autoSize

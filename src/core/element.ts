@@ -1,3 +1,4 @@
+import { textRunsSchema } from "./textRuns";
 import { textFormatSchema } from "./textTypography";
 import { z } from "zod";
 import { idSchema } from "./ids";
@@ -78,7 +79,7 @@ export const contentSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("text"),
-      text: z.string().max(100000),
+      runs: textRunsSchema,
       placeholder: z.boolean(),
       format: textFormatSchema,
       autoSize: z.enum(["none", "height", "both"]),

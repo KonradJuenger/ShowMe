@@ -23,7 +23,7 @@ function text(id: string, value: string): Element {
   element.name = id + " label";
   element.content = {
     type: "text",
-    text: value,
+    runs: [{ text: value }],
     placeholder: false,
     autoSize: "none",
     format: { kind: "local", typography: { ...DEFAULT_TEXT_TYPOGRAPHY } },
@@ -88,7 +88,7 @@ function fixture(
   title.content = {
     ...title.content!,
     type: "text",
-    text: titleText,
+    runs: [{ text: titleText }],
     placeholder: false,
     autoSize: "height",
     format: { kind: "style", styleId: "heading", overrides: { fontSize: 80 } },
@@ -129,10 +129,10 @@ function fixture(
   };
   const document = presentationDocumentSchema.parse({
     kind: "showme-presentation",
-    version: 1,
+    version: 2,
     documentId: "document",
     deck: {
-      version: 1,
+      version: 2,
       id: "document",
       name: "Quarterly results",
       width: 1920,
@@ -177,7 +177,7 @@ function fixture(
     },
     templates: {
       template: {
-        version: 1,
+        version: 2,
         id: "template",
         background: "#123456",
         nodes: layers.map(({ id }) => ({
@@ -189,14 +189,14 @@ function fixture(
     },
     slides: {
       other: {
-        version: 1,
+        version: 2,
         id: "other",
         background: "#ffffff",
         notes: "UNRELATED_NOTES",
         nodes: layers.map(({ id }) => ({ type: "layer", id, children: [] })),
       },
       slide: {
-        version: 1,
+        version: 2,
         id: "slide",
         background: "#abcdef",
         notes: "PRIVATE_SPEAKER_NOTES",
@@ -495,7 +495,7 @@ it("withholds hidden content by default while exposing structural state and lock
   });
   expect(explicit.elements[0]).toMatchObject({
     contentWithheld: false,
-    content: { text: "HIDDEN_CONTENT" },
+    content: { runs: [{ text: "HIDDEN_CONTENT" }] },
   });
   projection.deck.slideMeta.slide.hidden = true;
   const hiddenSlide = projectAgentElements(projection, ["title", "inherited"]);
@@ -526,7 +526,7 @@ it("bounds Unicode previews and resolves real style references and local typogra
   const content = projectAgentElements(projection, ["title"]).elements[0]
     .content;
   expect(content).toMatchObject({
-    text: value,
+    runs: [{ text: value }],
     format: { kind: "style", styleId: "heading" },
     typography: { fontSize: 80, fontWeight: 700 },
   });
@@ -699,7 +699,7 @@ it("summarizes native Motion Presence and Effect timing without code or keyframe
     effectCount: 1,
     motionStageIndices: [1],
     presenceStageIndices: [1],
-    content: { text: "Revenue grew 26%" },
+    content: { runs: [{ text: "Revenue grew 26%" }] },
     effects: [
       {
         id: "instance",
@@ -747,7 +747,7 @@ it("returns detached mutable details and never changes the accepted projection i
   detail.elements[0].effects![0].timing.defaults.start = "presentation";
   const content = detail.elements[0].content!;
   if (content.type === "text") {
-    content.text = "changed";
+    content.runs = [{ text: "changed" }];
     content.typography.fontSize = 999;
     if (content.format.kind === "style")
       content.format.overrides.fontSize = 999;

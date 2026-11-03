@@ -73,7 +73,11 @@ void main() {
     });
     Object.assign(text.frame, { width: 270, height: 72 });
     if (text.content?.type === "text") {
-      text.content.text = `Slide ${index + 1} · ${i + 1}\nTypography, wrapping & pixels`;
+      text.content.runs = [
+        {
+          text: `Slide ${index + 1} · ${i + 1}\nTypography, wrapping & pixels`,
+        },
+      ];
       if (text.content.format.kind === "local")
         text.content.format.typography.fontSize = 18 + (i % 3);
     }
@@ -97,10 +101,18 @@ void main() {
     });
     Object.assign(panel.frame, { width: 580, height: 280 });
     if (panel.content?.type === "text") {
-      panel.content.text = texts
-        .slice(12 + i * 4, 16 + i * 4)
-        .map((text) => (text.content?.type === "text" ? text.content.text : ""))
-        .join("\n\n");
+      panel.content.runs = [
+        {
+          text: texts
+            .slice(12 + i * 4, 16 + i * 4)
+            .map((text) =>
+              text.content?.type === "text"
+                ? text.content.runs.map((run) => run.text).join("")
+                : "",
+            )
+            .join("\n\n"),
+        },
+      ];
       if (panel.content.format.kind === "local")
         panel.content.format.typography.fontSize = 20;
     }

@@ -59,7 +59,11 @@ it("assembles one escaped offline document and reports missing media and font re
       /<script id="showme-html-payload" type="application\/json">(.*?)<\/script>/s,
     )![1];
     expect(
-      JSON.parse(json).document.slides[0].nodes[0].children[0].content.text,
+      JSON.parse(json)
+        .document.slides[0].nodes[0].children[0].content.runs.map(
+          (run: { text: string }) => run.text,
+        )
+        .join(""),
     ).toBe(hostileText);
     expect(json).not.toContain("<");
     expect(html.match(/<\/script>/g)).toHaveLength(2);
@@ -243,7 +247,7 @@ it("omits hidden slides, layer content, notes and unreachable effects from the d
   const hiddenText = structuredClone(first.nodes[0].children[0]);
   hiddenText.id = "private-hidden-text";
   if (hiddenText.content?.type !== "text") throw Error("text fixture");
-  hiddenText.content.text = "PRIVATE_HIDDEN_TEXT";
+  hiddenText.content.runs = [{ text: "PRIVATE_HIDDEN_TEXT" }];
   if (hiddenText.content.format.kind !== "local")
     throw Error("local text fixture");
   hiddenText.content.format.typography.fontFamily = "PRIVATE_HIDDEN_FONT";

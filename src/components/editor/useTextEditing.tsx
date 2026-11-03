@@ -1,4 +1,21 @@
 import {
+  plainText,
+  normalizeTextRuns,
+  replaceTextRuns,
+  formatTextRuns,
+  sliceTextRuns,
+  typingFontWeight,
+  runFontWeight,
+  textSelection,
+  type TextRun,
+} from "../../core/textRuns";
+import { resolveTextTypography } from "../../core/textTypography";
+import {
+  readTextDomSelection,
+  writeTextDomSelection,
+  writeTextRunDom,
+} from "./textRunDom";
+import {
   useCallback,
   useEffect,
   useRef,
@@ -10,11 +27,7 @@ import {
 } from "react";
 import type { EditorChange } from "../../core/editorChange";
 import type { EditorSnapshot } from "../../core/editorCommands";
-import {
-  findElement,
-  isEditableScope,
-  locateElement,
-} from "../../core/scene";
+import { findElement, isEditableScope, locateElement } from "../../core/scene";
 import { isTextContent } from "../../core/text";
 import { isContextMenuOpen } from "../../platform/contextMenu";
 import { platform } from "../../platform";
@@ -61,12 +74,11 @@ export interface TextCommandContext {
 }
 
 interface TextSessionController {
+  undo(redo?: boolean): void;
+  flush(): Promise<void>;
   snapshot?: EditorSnapshot | EditorChange | null;
   snapshotRef: RefObject<EditorSnapshot | EditorChange | null>;
-  apply(
-    value: EditorSnapshot | EditorChange,
-    commit?: boolean,
-  ): void;
+  apply(value: EditorSnapshot | EditorChange, commit?: boolean): void;
   commitPreview(): void;
   acquireElementScopes(
     slideId: string,
@@ -82,12 +94,18 @@ interface TextSessionController {
 export interface TextEditingController {
   editingId: string | null;
   draftText: string;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  draftRuns: TextRun[];
+  boldState: boolean | "mixed";
+  toggleBold(): void;
+  insertText(value: string): void;
+  refreshSelection(): void;
+  history(redo: boolean): Promise<void>;
+  inputRef: RefObject<HTMLDivElement | null>;
   selectionMode: RefObject<TextSelectionMode>;
   enter(elementId: string, selection?: TextSelectionMode): Promise<void>;
   exit(): Promise<void>;
-  onFocus(event: FocusEvent<HTMLTextAreaElement>): void;
-  onChange(value: string): void;
+  onFocus(event: FocusEvent<HTMLDivElement>): void;
+  onChange(value: TextRun[]): void;
   onCompositionStart(): void;
   onCompositionEnd(): void;
   onBlur(): void;
@@ -113,7 +131,12 @@ export function useTextEditing({
 }): TextEditingController {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [draftRuns, setDraftRuns] = useState<TextRun[]>([]);
+  const runsRef = useRef<TextRun[]>([]);
+  const lastSelection = useRef("");
+  const typingWeight = useRef<number | undefined>(undefined);
+  const [boldState, setBoldState] = useState<boolean | "mixed">(false);
+  const inputRef = useRef<HTMLDivElement | null>(null);
   const pendingCaretRef = useRef<{ start: number; end: number } | null>(null);
   const selectionMode = useRef<TextSelectionMode>("end");
   const editingIdRef = useRef<string | null>(null);
@@ -122,11 +145,18 @@ export function useTextEditing({
   const grantedRef = useRef(false);
   const historyOpenRef = useRef(false);
   const composingRef = useRef(false);
+  const compositionDraft = useRef<{
+    runs: TextRun[];
+    start: number;
+    end: number;
+    weight?: number;
+  } | null>(null);
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
   const exitingRef = useRef<Promise<void> | null>(null);
   const selectionRef = useRef(selection);
-  const { snapshotRef, apply, commitPreview, endHistoryGroup, releaseLeases } = controller;
+  const { snapshotRef, apply, commitPreview, endHistoryGroup, releaseLeases } =
+    controller;
   selectionRef.current = selection;
   editingIdRef.current = editingId;
   draftRef.current = draftText;
@@ -138,14 +168,22 @@ export function useTextEditing({
   }, []);
 
   const applyDraft = useCallback(
-    (value: string) => {
+    (_value: string) => {
       const id = editingIdRef.current;
       const snapshot = snapshotRef.current;
       if (!id || !snapshot || !grantedRef.current) return;
       const element = findElement(snapshot.slide, id);
       if (!element || !isTextContent(element.content)) return;
-      if (!element.content.placeholder && element.content.text === value) return;
-      const next = updateTextDraftWithLayout(snapshot, id, { text: value });
+      // Entering a placeholder is an interaction preview, not a document edit.
+      if (element.content.placeholder && !runsRef.current.length) return;
+      if (
+        !element.content.placeholder &&
+        JSON.stringify(element.content.runs) === JSON.stringify(runsRef.current)
+      )
+        return;
+      const next = updateTextDraftWithLayout(snapshot, id, {
+        runs: runsRef.current,
+      });
       if (next !== snapshot) apply(next, false);
     },
     [apply, snapshotRef],
@@ -155,8 +193,7 @@ export function useTextEditing({
     clearCommitTimer();
     commitTimer.current = setTimeout(() => {
       commitTimer.current = null;
-      if (grantedRef.current && !composingRef.current)
-        commitPreview();
+      if (grantedRef.current && !composingRef.current) commitPreview();
     }, 350);
   }, [clearCommitTimer, commitPreview]);
 
@@ -193,27 +230,38 @@ export function useTextEditing({
     });
     exitingRef.current = run;
     return run;
-  }, [applyDraft, clearCommitTimer, commitPreview, endHistoryGroup, onError, releaseLeases]);
+  }, [
+    applyDraft,
+    clearCommitTimer,
+    commitPreview,
+    endHistoryGroup,
+    onError,
+    releaseLeases,
+  ]);
 
   const enter = useCallback(
-    async (
-      elementId: string,
-      mode: TextSelectionMode = "end",
-    ) => {
+    async (elementId: string, mode: TextSelectionMode = "end") => {
       if (editingIdRef.current === elementId) {
         selectionMode.current = mode;
         requestAnimationFrame(() => {
           const area = inputRef.current;
           if (!area) return;
           area.focus();
-          if (mode === "all") area.select();
+          if (mode === "all")
+            writeTextDomSelection(area, {
+              start: 0,
+              end: draftRef.current.length,
+            });
         });
         return;
       }
       if (editingIdRef.current) await exit();
 
       const snapshot = controller.snapshotRef.current;
-      if (!snapshot || !isEditableScope(snapshot.slide, snapshot.deck, elementId))
+      if (
+        !snapshot ||
+        !isEditableScope(snapshot.slide, snapshot.deck, elementId)
+      )
         return;
       const location = locateElement(snapshot.slide, elementId);
       if (!location || !isTextContent(location.element.content)) return;
@@ -221,7 +269,13 @@ export function useTextEditing({
       const generation = ++generationRef.current;
       const initial = location.element.content.placeholder
         ? ""
-        : location.element.content.text;
+        : plainText(location.element.content);
+      runsRef.current = location.element.content.placeholder
+        ? []
+        : location.element.content.runs;
+      setDraftRuns(runsRef.current);
+      typingWeight.current = typingFontWeight(runsRef.current, initial.length);
+      lastSelection.current = "";
       selectionMode.current = mode;
       editingSlideRef.current = snapshot.slide.id;
       editingIdRef.current = elementId;
@@ -231,10 +285,9 @@ export function useTextEditing({
       setSelection({ elementIds: [elementId], scopeId: location.parentId });
       setFrameEditing(null);
 
-      const granted = await controller.acquireElementScopes(
-        snapshot.slide.id,
-        [elementId],
-      );
+      const granted = await controller.acquireElementScopes(snapshot.slide.id, [
+        elementId,
+      ]);
       if (
         generation !== generationRef.current ||
         editingIdRef.current !== elementId ||
@@ -261,23 +314,38 @@ export function useTextEditing({
         const area = inputRef.current;
         if (!area || editingIdRef.current !== elementId) return;
         area.focus();
-        if (selectionMode.current === "all") area.select();
-        else area.setSelectionRange(area.value.length, area.value.length);
+        if (selectionMode.current === "all")
+          writeTextDomSelection(area, {
+            start: 0,
+            end: draftRef.current.length,
+          });
+        else
+          writeTextDomSelection(area, {
+            start: initial.length,
+            end: initial.length,
+          });
       });
     },
     [applyDraft, controller, exit, onError, setFrameEditing, setSelection],
   );
 
-  const onFocus = useCallback((event: FocusEvent<HTMLTextAreaElement>) => {
+  const onFocus = useCallback((event: FocusEvent<HTMLDivElement>) => {
     const input = event.currentTarget;
     requestAnimationFrame(() => {
       if (!input.isConnected || document.activeElement !== input) return;
-      if (selectionMode.current === "all") input.select();
+      if (selectionMode.current === "all")
+        writeTextDomSelection(input, {
+          start: 0,
+          end: draftRef.current.length,
+        });
     });
   }, []);
 
   const onChange = useCallback(
-    (value: string) => {
+    (runs: TextRun[]) => {
+      runsRef.current = normalizeTextRuns(runs);
+      setDraftRuns(runsRef.current);
+      const value = plainText({ runs: runsRef.current });
       pendingCaretRef.current = null;
       draftRef.current = value;
       setDraftText(value);
@@ -290,15 +358,56 @@ export function useTextEditing({
 
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
+    const selected = inputRef.current
+      ? readTextDomSelection(inputRef.current)
+      : null;
+    compositionDraft.current = selected
+      ? { runs: runsRef.current, ...selected, weight: typingWeight.current }
+      : null;
     clearCommitTimer();
   }, [clearCommitTimer]);
 
   const onCompositionEnd = useCallback(() => {
+    const initial = compositionDraft.current;
+    compositionDraft.current = null;
+    if (initial) {
+      const oldText = plainText({ runs: initial.runs }),
+        nextText = draftRef.current;
+      const prefix = oldText.slice(0, initial.start),
+        suffix = oldText.slice(initial.end);
+      if (
+        nextText.startsWith(prefix) &&
+        nextText.endsWith(suffix) &&
+        nextText.length >= prefix.length + suffix.length
+      ) {
+        const insertion = nextText.slice(
+          prefix.length,
+          nextText.length - suffix.length,
+        );
+        onChange(
+          replaceTextRuns(
+            initial.runs,
+            initial.start,
+            initial.end,
+            insertion
+              ? [
+                  {
+                    text: insertion,
+                    ...(initial.weight === undefined
+                      ? {}
+                      : { fontWeight: initial.weight }),
+                  },
+                ]
+              : [],
+          ),
+        );
+      }
+    }
     composingRef.current = false;
     if (!grantedRef.current) return;
     applyDraft(draftRef.current);
     controller.commitPreview();
-  }, [applyDraft, controller]);
+  }, [applyDraft, controller, onChange]);
 
   const onBlur = useCallback(() => {
     if (!isContextMenuOpen()) void exit();
@@ -318,11 +427,8 @@ export function useTextEditing({
       slideId: snapshot.slide.id,
       elementId: id,
       scopeId: location.parentId,
-      text: area.value,
-      selection: pending ?? {
-        start: area.selectionStart ?? 0,
-        end: area.selectionEnd ?? 0,
-      },
+      text: plainText({ runs: runsRef.current }),
+      selection: pending ?? readTextDomSelection(area) ?? { start: 0, end: 0 },
     };
   }, [controller.snapshotRef]);
 
@@ -335,7 +441,8 @@ export function useTextEditing({
         !!snapshot &&
         editingIdRef.current === context.elementId &&
         snapshot.deck.id === context.documentId &&
-        snapshot.slide.id === context.slideId
+        snapshot.slide.id === context.slideId &&
+        context.text === draftRef.current
       );
     },
     [controller.snapshotRef],
@@ -347,7 +454,7 @@ export function useTextEditing({
       const area = inputRef.current;
       if (!area || !editingIdRef.current) return;
       area.focus();
-      area.setSelectionRange(start, end);
+      writeTextDomSelection(area, { start, end });
     });
   }, []);
 
@@ -360,7 +467,7 @@ export function useTextEditing({
       if (!area || editingIdRef.current !== context.elementId) return;
       if (command === "text.select-all") {
         area.focus();
-        area.setSelectionRange(0, draftRef.current.length);
+        writeTextDomSelection(area, { start: 0, end: draftRef.current.length });
         return;
       }
 
@@ -372,16 +479,30 @@ export function useTextEditing({
       }
 
       let insertion = "";
-      if (command === "text.paste")
-        insertion = await readTextClipboard();
+      if (command === "text.paste") insertion = await readTextClipboard();
       if (!commandContextIsCurrent(context)) return;
 
-      const currentText = area.value;
+      const currentText = plainText({ runs: runsRef.current });
       const next =
-        currentText.slice(0, start) +
-        insertion +
-        currentText.slice(end);
+        currentText.slice(0, start) + insertion + currentText.slice(end);
       const caret = start + insertion.length;
+      runsRef.current = replaceTextRuns(
+        runsRef.current,
+        start,
+        end,
+        insertion
+          ? [
+              {
+                text: insertion,
+                ...(typingWeight.current === undefined
+                  ? {}
+                  : { fontWeight: typingWeight.current }),
+              },
+            ]
+          : [],
+      );
+      setDraftRuns(runsRef.current);
+      writeTextRunDom(area, runsRef.current, true);
       draftRef.current = next;
       setDraftText(next);
       if (grantedRef.current) {
@@ -390,12 +511,138 @@ export function useTextEditing({
       }
       focusCaret(caret);
     },
-    [
-      applyDraft,
-      commandContextIsCurrent,
-      focusCaret,
-      scheduleCommit,
-    ],
+    [applyDraft, commandContextIsCurrent, focusCaret, scheduleCommit],
+  );
+
+  const refreshSelection = useCallback(() => {
+    const area = inputRef.current,
+      snapshot = snapshotRef.current,
+      id = editingIdRef.current;
+    if (!area || !snapshot || !id) return;
+    const selected = readTextDomSelection(area);
+    const element = findElement(snapshot.slide, id);
+    if (!selected || element?.content?.type !== "text") return;
+    const key = `${id}:${selected.start}:${selected.end}:${selected.backward}`;
+    if (key === lastSelection.current) return;
+    lastSelection.current = key;
+    typingWeight.current = typingFontWeight(runsRef.current, selected.start);
+    const type = resolveTextTypography(snapshot.deck, element.content);
+    const weights =
+      selected.start === selected.end
+        ? [runFontWeight({ text: "", fontWeight: typingWeight.current }, type)]
+        : sliceTextRuns(runsRef.current, selected.start, selected.end).map(
+            (run) => runFontWeight(run, type),
+          );
+    setBoldState(
+      weights.every((weight) => weight >= 600)
+        ? true
+        : weights.some((weight) => weight >= 600)
+          ? "mixed"
+          : false,
+    );
+  }, [snapshotRef]);
+
+  const insertText = useCallback(
+    (value: string) => {
+      const area = inputRef.current;
+      if (!area || !grantedRef.current) return;
+      const native = readTextDomSelection(area);
+      if (!native) return;
+      const selected = textSelection(runsRef.current, native.start, native.end);
+      const insertion = value
+        ? [
+            {
+              text: value,
+              ...(typingWeight.current === undefined
+                ? {}
+                : { fontWeight: typingWeight.current }),
+            },
+          ]
+        : [];
+      onChange(
+        replaceTextRuns(
+          runsRef.current,
+          selected.start,
+          selected.end,
+          insertion,
+        ),
+      );
+      writeTextRunDom(area, runsRef.current, true);
+      writeTextDomSelection(area, {
+        start: selected.start + value.length,
+        end: selected.start + value.length,
+      });
+    },
+    [onChange],
+  );
+
+  const toggleBold = useCallback(() => {
+    const area = inputRef.current,
+      snapshot = snapshotRef.current,
+      id = editingIdRef.current;
+    if (
+      !area ||
+      !snapshot ||
+      !id ||
+      !grantedRef.current ||
+      composingRef.current
+    )
+      return;
+    const selected = readTextDomSelection(area);
+    const element = findElement(snapshot.slide, id);
+    if (!selected || element?.content?.type !== "text") return;
+    const type = resolveTextTypography(snapshot.deck, element.content);
+    Object.assign(
+      selected,
+      textSelection(runsRef.current, selected.start, selected.end),
+    );
+    const chosen = sliceTextRuns(runsRef.current, selected.start, selected.end);
+    const allBold = chosen.length
+      ? chosen.every((run) => runFontWeight(run, type) >= 600)
+      : runFontWeight({ text: "", fontWeight: typingWeight.current }, type) >=
+        600;
+    const weight = allBold ? 400 : 700;
+    if (selected.start === selected.end) typingWeight.current = weight;
+    else {
+      onChange(
+        allBold
+          ? formatTextRuns(runsRef.current, selected.start, selected.end, 400)
+          : replaceTextRuns(
+              runsRef.current,
+              selected.start,
+              selected.end,
+              chosen.map((run) => ({
+                ...run,
+                fontWeight: Math.max(700, runFontWeight(run, type)),
+              })),
+            ),
+      );
+      writeTextRunDom(area, runsRef.current, true);
+      writeTextDomSelection(area, selected);
+      controller.commitPreview();
+    }
+    setBoldState(!allBold);
+  }, [controller, onChange, snapshotRef]);
+
+  const history = useCallback(
+    async (redo: boolean) => {
+      const id = editingIdRef.current;
+      await exit();
+      const generation = generationRef.current;
+      controller.undo(redo);
+      await controller.flush();
+      // Let the accepted projection reach React before constructing a new draft.
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      if (
+        id &&
+        generation === generationRef.current &&
+        selectionRef.current.elementIds.includes(id)
+      )
+        await enter(id);
+    },
+    [controller, enter, exit],
   );
 
   useEffect(() => {
@@ -430,16 +677,27 @@ export function useTextEditing({
         applyDraft(draftRef.current);
         commitPreview();
       }
-      if (historyOpenRef.current)
-        void endHistoryGroup().catch(() => undefined);
+      if (historyOpenRef.current) void endHistoryGroup().catch(() => undefined);
       else void releaseLeases().catch(() => undefined);
     },
-    [applyDraft, clearCommitTimer, commitPreview, endHistoryGroup, releaseLeases],
+    [
+      applyDraft,
+      clearCommitTimer,
+      commitPreview,
+      endHistoryGroup,
+      releaseLeases,
+    ],
   );
 
   return {
     editingId,
     draftText,
+    draftRuns,
+    boldState,
+    toggleBold,
+    insertText,
+    refreshSelection,
+    history,
     inputRef,
     selectionMode,
     enter,

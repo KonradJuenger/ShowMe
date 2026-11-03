@@ -1,3 +1,4 @@
+import { runFontWeight } from "./textRuns";
 import { resolveTextTypography } from "./textTypography";
 import type { Slide } from "./document";
 import { walkElements } from "./element";
@@ -6,6 +7,20 @@ export interface FontUsage {
   family: string;
   weight: number;
   italic: boolean;
+}
+
+/** CSS Fonts missing-weight search order, including the special 400–500 band. */
+export function fontWeightMatchScore(requested: number, actual: number) {
+  if (requested >= 400 && requested <= 500) {
+    if (actual >= requested && actual <= 500) return actual - requested;
+    if (actual < requested) return 10000 + requested - actual;
+    return 20000 + actual - 500;
+  }
+  if (requested < 400)
+    return actual <= requested
+      ? requested - actual
+      : 10000 + actual - requested;
+  return actual >= requested ? actual - requested : 10000 + requested - actual;
 }
 
 export function collectUsedFontUsages(
@@ -19,15 +34,17 @@ export function collectUsedFontUsages(
     )) {
       if (element.content?.type !== "text") continue;
       const content = resolveTextTypography(deck, element.content);
-      const usage: FontUsage = {
-        family: content.fontFamily.trim(),
-        weight: content.bold
-          ? Math.max(700, content.fontWeight)
-          : content.fontWeight,
-        italic: content.italic,
-      };
-      const key = `${usage.family.toLocaleLowerCase()}\u0000${usage.weight}\u0000${usage.italic ? 1 : 0}`;
-      if (!usages.has(key)) usages.set(key, usage);
+      for (const run of element.content.runs.length
+        ? element.content.runs
+        : [{ text: "" }]) {
+        const usage: FontUsage = {
+          family: content.fontFamily.trim(),
+          weight: runFontWeight(run, content),
+          italic: content.italic,
+        };
+        const key = `${usage.family.toLocaleLowerCase()}\u0000${usage.weight}\u0000${usage.italic ? 1 : 0}`;
+        if (!usages.has(key)) usages.set(key, usage);
+      }
     }
   }
   return Array.from(usages.values()).sort(

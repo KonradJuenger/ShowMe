@@ -1,3 +1,4 @@
+import { upgradeV1TextPayload } from "./textV1Upgrade";
 import { setTextStyle } from "./textStyleCommands";
 import { textStyleSchema } from "./textTypography";
 import {
@@ -35,7 +36,7 @@ import {
   getWorldMatrix,
   resolveEditableScope,
 } from "./scene";
-export const ELEMENTS_CLIPBOARD_VERSION = 1 as const;
+export const ELEMENTS_CLIPBOARD_VERSION = 2 as const;
 
 export interface ClipboardSelection {
   elementIds: readonly string[];
@@ -96,11 +97,22 @@ export function parseElementsClipboardText(
 ): ElementsClipboardPayload | null {
   const prefix = text.startsWith(ELEMENTS_CLIPBOARD_PREFIX)
     ? ELEMENTS_CLIPBOARD_PREFIX
-    : null;
+    : text.startsWith("show-me-elements:v1:")
+      ? "show-me-elements:v1:"
+      : null;
   if (!prefix) return null;
   try {
     const value = JSON.parse(text.slice(prefix.length));
-    const parsed = clipboardPayloadSchema.parse(value);
+    if (
+      value.version !==
+      (prefix === ELEMENTS_CLIPBOARD_PREFIX ? ELEMENTS_CLIPBOARD_VERSION : 1)
+    )
+      return null;
+    const parsed = clipboardPayloadSchema.parse(
+      prefix === "show-me-elements:v1:" && value.version === 1
+        ? { ...(upgradeV1TextPayload(value) as object), version: 2 }
+        : value,
+    );
     validateElementForest(parsed.roots.map(({ element }) => element));
     validateEffects(
       walkElements(parsed.roots.map((r) => r.element)),

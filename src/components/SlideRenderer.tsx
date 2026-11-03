@@ -766,7 +766,17 @@ function TextView({
         overflowWrap: content.autoSize === "both" ? "normal" : "anywhere",
       }}
     >
-      {content.text}
+      <div style={{ width: "100%", flexShrink: 0 }}>
+        {content.runs.map((run, index) =>
+          run.fontWeight === undefined ? (
+            run.text
+          ) : (
+            <span key={index} style={{ fontWeight: run.fontWeight }}>
+              {run.text}
+            </span>
+          ),
+        )}
+      </div>
     </div>
   );
 }

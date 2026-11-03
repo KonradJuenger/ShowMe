@@ -37,7 +37,7 @@ export async function mountMixedEffectsHarness(
     text.frame.width = 500;
     text.frame.height = 200;
     if (text.content?.type === "text") {
-      text.content.text = "Original";
+      text.content.runs = [{ text: "Original" }];
       if (text.content.format.kind === "local")
         text.content.format.typography.fontSize = 56;
     }
